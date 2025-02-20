@@ -263,110 +263,106 @@
 
   <script>
     /********************************************************
-     * 1) OUR BASE INVENTORY DATA (25× original), WIP, F.G.
+     * 1) 25× INVENTORY DATA FROM YOUR ORIGINAL
      ********************************************************/
     let inventoryData = [
       {
         commodity: "WASTE",
-        wip: 1174140,          // example ~ 1,174,140 lbs => 25× previous + random
+        wip: 29353500,       // 1,174,140 * 25
         finishedGoods: 0,
         avgCost: -0.0335,
-        value: -39333.69 // just an example
+        value: -983342.25    // -39333.69 * 25
       },
       {
         commodity: "ALUMINUM",
-        wip: 9463,
-        finishedGoods: 1937,
+        wip: 236575,         // 9,463 * 25
+        finishedGoods: 48425, // 1,937 * 25
         avgCost: 0.3886,
-        value: 4430.31
+        value: 110757.75     // 4430.31 * 25
       },
       {
         commodity: "Electric Motors",
-        wip: 4428,
+        wip: 110700,         // 4,428 * 25
         finishedGoods: 0,
         avgCost: 0.289,
-        value: 1283.02
+        value: 32075.5       // 1283.02 * 25
       },
       {
         commodity: "Insulated copper wire",
-        wip: 60843,
-        finishedGoods: 2742,
+        wip: 1521075,        // 60,843 * 25
+        finishedGoods: 68550, // 2,742 * 25
         avgCost: 1.1867,
-        value: 75456.3
+        value: 1886407.5     // 75456.30 * 25
       },
       {
         commodity: "LEAD",
-        wip: 2158,
-        finishedGoods: 1966,
+        wip: 53950,          // 2,158 * 25
+        finishedGoods: 49150, // 1,966 * 25
         avgCost: 0.1665,
-        value: 686.82
+        value: 17170.5       // 686.82 * 25
       },
       {
         commodity: "FERROUS",
-        wip: 409807,
+        wip: 10245175,       // 409,807 * 25
         finishedGoods: 0,
         avgCost: 0.0997,
-        value: 40873.76
+        value: 1021844       // 40873.76 * 25
       },
       {
         commodity: "RADIATOR PRODUCT",
-        wip: 1677,
+        wip: 41925,          // 1,677 * 25
         finishedGoods: 0,
         avgCost: 1.3891,
-        value: 2329.6
+        value: 58240         // 2329.60 * 25
       },
       {
         commodity: "COPPER PRODUCT",
-        wip: 18677,
-        finishedGoods: 3261,
+        wip: 466925,         // 18,677 * 25
+        finishedGoods: 81525, // 3,261 * 25
         avgCost: 2.7192,
-        value: 59653.6
+        value: 1491340       // 59653.6 * 25
       },
       {
         commodity: "BRASS PRODUCT",
-        wip: 1951,
+        wip: 48775,          // 1,951 * 25
         finishedGoods: 0,
         avgCost: 1.7965,
-        value: 3504.9
+        value: 87622.5       // 3504.9 * 25
       },
       {
         commodity: "MISC PRODUCT",
-        wip: 2724,
-        finishedGoods: 2404,
+        wip: 68100,          // 2,724 * 25
+        finishedGoods: 60100, // 2,404 * 25
         avgCost: 1.4482,
-        value: 7426.12
+        value: 185653        // 7426.12 * 25
       },
       {
         commodity: "STAINLESS STEEL PRODUCT",
-        wip: -10799,
-        finishedGoods: 1617,
+        wip: -269975,        // -10,799 * 25
+        finishedGoods: 40425, // 1,617 * 25
         avgCost: 0.3059,
-        value: -2808.43
+        value: -70210.75     // -2808.43 * 25
       },
       {
         commodity: "E-SCRAP",
-        wip: -137,
+        wip: -3425,          // -137 * 25
         finishedGoods: 0,
         avgCost: -0.1905,
-        value: 26.1
+        value: 652.5         // 26.1 * 25
       }
     ];
 
-    // In your original code, you wanted 25× expansions plus fluctuations.
-    // Let’s assume these numbers are already scaled up. We'll also add
-    // a random +/- 5% fluctuation every 5 minutes for demonstration.
-
     /********************************************************
-     * 2) FLUCTUATE DATA EVERY 5 MIN
+     * 2) FLUCTUATE DATA EVERY 5 MIN (±5% for WIP/FG/Value)
      ********************************************************/
     function fluctuateInventory() {
       inventoryData.forEach(item => {
         // WIP
-        let wipFluct = (Math.random() * 10 - 5) / 100; // +/- 5%
+        let wipFluct = (Math.random() * 10 - 5) / 100; // ±5%
         item.wip = Math.round(item.wip * (1 + wipFluct));
 
         // Finished Goods
-        let fgFluct = (Math.random() * 10 - 5) / 100; // +/- 5%
+        let fgFluct = (Math.random() * 10 - 5) / 100; // ±5%
         item.finishedGoods = Math.round(item.finishedGoods * (1 + fgFluct));
 
         // Avg Cost (±2%)
@@ -389,13 +385,13 @@
       inventoryData.forEach(item => {
         const wipLabel = item.wip.toLocaleString() + " lbs";
         const fgLabel = item.finishedGoods.toLocaleString() + " lbs";
-        const totalLabel = (item.wip + item.finishedGoods).toLocaleString() + " lbs";
+        const totalNum = item.wip + item.finishedGoods;
+        const totalLabel = totalNum.toLocaleString() + " lbs";
 
-        // Format avg cost as $0.0000/lb
-        let avgCostStr = "$" + item.avgCost.toFixed(4) + "/lb";
-
+        // Format avg cost as $X.XXXX/lb
+        const avgCostStr = `$${item.avgCost.toFixed(4)}/lb`;
         // Format value as $xx,xxx.xx
-        let valStr = "$" + item.value.toLocaleString();
+        const valStr = `$${item.value.toLocaleString()}`;
 
         const row = document.createElement("tr");
         row.innerHTML = `
