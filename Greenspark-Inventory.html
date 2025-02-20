@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Greenspark Inventory</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f8f9fa;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: auto;
+      background-color: #fff;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #002147;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #002147;
+      color: white;
+    }
+    button {
+      background-color: #90ee90;
+      color: #002147;
+      border: none;
+      padding: 10px 20px;
+      margin-top: 20px;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    button:hover {
+      background-color: #76c893;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Greenspark Inventory</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Material</th>
+          <th>Quantity (tons)</th>
+          <th>Price/ton</th>
+          <th>Value of Material</th>
+          <th>Date Created</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Copper</td>
+          <td>80</td>
+          <td>$9,500</td>
+          <td>$760,000</td>
+          <td>02/13/2025</td>
+          <td>Available</td>
+        </tr>
+        <tr>
+          <td>Brass</td>
+          <td>100</td>
+          <td>$7,500</td>
+          <td>$750,000</td>
+          <td>02/12/2025</td>
+          <td>Available</td>
+        </tr>
+        <tr>
+          <td>Steel</td>
+          <td>280</td>
+          <td>$500</td>
+          <td>$140,000</td>
+          <td>02/11/2025</td>
+          <td>Secured</td>
+        </tr>
+        <tr>
+          <td>Aluminum</td>
+          <td>100</td>
+          <td>$2,200</td>
+          <td>$220,000</td>
+          <td>02/10/2025</td>
+          <td>Available</td>
+        </tr>
+      </tbody>
+    </table>
+    <button onclick="updateDashboard()">Update Dashboard</button>
+  </div>
+
+  <script>
+    function updateDashboard() {
+      // Example function to update the main dashboard
+      // This would typically involve some form of inter-frame communication or an API call
+      alert('Dashboard updated with Greenspark inventory!');
+    }
+  </script>
+</body>
+</html>
