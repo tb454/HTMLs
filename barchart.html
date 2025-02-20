@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Barchart / Futures</title>
+
+  <!-- Bootstrap (optional) -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      margin: 20px;
+      font-family: Arial, sans-serif;
+    }
+    .title {
+      color: #2c3e50;
+      margin-bottom: 1rem;
+    }
+    #chartContainer {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <h1 class="title">Barchart Futures Data (Simulated)</h1>
+  <p>
+    This page updates commodity futures prices every 5 minutes with a small random fluctuation.
+  </p>
+
+  <div id="chartContainer">
+    <canvas id="futuresChart"></canvas>
+  </div>
+
+  <!-- Hidden JSON for the combined layout to fetch -->
+  <script id="futures-data" type="application/json">
+    {}
+  </script>
+
+  <script>
+    /******************************************************
+     * 1) FUTURES DATA (Same commodities as GreenSpark)
+     ******************************************************/
+    let futuresData = [
+      {
+        material: "Copper",
+        contract: "MAR-25",
+        lastPrice: 9550,
+        change: "+0.03",
+        changePct: "+0.75%",
+        expiration: "03/25/2025"
+      },
+      {
+        material: "Copper",
+        contract: "MAY-25",
+        lastPrice: 9950,
+        change: "-0.01",
+        changePct: "-0.24%",
+        expiration: "05/25/2025"
+      },
+      {
+        material: "Brass",
+        contract: "APR-25",
+        lastPrice: 7850,
+        change: "+0.02",
+        changePct: "+0.80%",
+        expiration: "04/25/2025"
+      },
+      {
+        material: "Steel",
+        contract: "JUN-25",
+        lastPrice: 500,
+        change: "+0.01",
+        changePct: "+0.64%",
+        expiration: "06/25/2025"
+      },
+      {
+        material: "Aluminum",
+        contract: "SEP-25",
+        lastPrice: 2500,
+        change: "+0.01",
+        changePct: "+0.80%",
+        expiration: "09/25/2025"
+      }
+    ];
+
+    /******************************************************
+     * 2) APPLY RANDOM PRICE CHANGES
+     ******************************************************/
+    function fluctuatePrices() {
+      futuresData.forEach(item => {
+        // e.g. up/down by up to 3%
+        const fluctuationPct = (Math.random() * 6 - 3) / 100; // -0.03 to +0.03
+        const oldPrice = item.lastPrice;
+        const newPrice = Math.round(oldPrice * (1 + fluctuationPct));
+        item.lastPrice = newPrice;
+
+        // Also compute new +/- change for display
+        const diff = newPrice - oldPrice;
+        const sign = diff >= 0 ? "+" : "";
+        item.change = `${sign}${(diff).toFixed(2)}`;
+        const pct = (diff / oldPrice) * 100;
+        item.changePct = `${sign}${pct.toFixed(2)}%`;
+      });
+    }
+
+    /******************************************************
+     * 3) RENDER CHART & UPDATE HIDDEN JSON
+     ******************************************************/
+    let chart;
+
+    function renderChart() {
+      const ctx = document.getElementById("futuresChart").getContext("2d");
+      if (chart) {
+        chart.destroy(); // re-draw each time
+      }
+
+      // Chart labels = material + contract for clarity
+      const labels = futuresData.map(item => `${item.material} (${item.contract})`);
+      const prices = futuresData.map(item => item.lastPrice);
+
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Last Price",
+              data: prices,
+              backgroundColor: "rgba(54, 162, 235, 0.7)"
+            }
+          ]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: false }
+          }
+        }
+      });
+
+      // Also update the hidden JSON
+      const dataScript = document.getElementById("futures-data");
+      dataScript.textContent = JSON.stringify({ futures: futuresData });
+    }
+
+    /******************************************************
+     * 4) INIT & AUTO-UPDATE EVERY 5 MIN
+     ******************************************************/
+    function init() {
+      renderChart(); // initial
+      setInterval(() => {
+        fluctuatePrices();
+        renderChart();
+      }, 5 * 60 * 1000); // 5 min
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
