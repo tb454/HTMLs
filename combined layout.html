@@ -1,79 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>BRidge Dashboard (Expanded)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!-- Bootstrap CSS (via CDN) -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  >
-
-  <!-- Chart.js (via CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BRidge Dashboard</title>
+  
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
   <style>
-    /* Override or add custom styling here */
+    /* Basic reset and styling */
     body {
       font-family: Arial, sans-serif;
-      background-color: #f8f9fa; /* Lighter grey background */
+      background-color: #f5f5f5;
       margin: 0;
-      padding: 0;
-    }
-
-    /* Top spacing for the main container (below navbar) */
-    .main-container {
       padding: 20px;
     }
-
-    /* Accent color for section titles */
-    .section-title {
-      color: #90ee90; /* light green accent color */
-      margin-bottom: 10px;
-      font-weight: bold;
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
     }
-
-    /* Overview cards styling tweak */
-    .overview-cards .card {
-      transition: transform 0.2s ease;
+    .header, .section {
+      background-color: #fff;
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .user-info {
+      font-size: 14px;
+    }
+    .user-info button {
+      margin: 0 10px;
+      padding: 5px 10px;
       cursor: pointer;
     }
-    .overview-cards .card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    .section-title {
+      font-weight: bold;
+      margin-bottom: 10px;
+      /* Default color, will be overridden by accent below */
+      color: #000;
     }
-
-    /* Table row hover effect for entire row */
-    table tr:hover {
+    /* Overview Cards */
+    .overview-cards {
+      display: flex;
+      gap: 10px;
+    }
+    .card {
+      flex: 1;
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    .card:hover {
+      background-color: #e9ecef;
+    }
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    th {
+      background-color: #eee;
+    }
+    tr:hover {
       background-color: #f1f1f1;
       cursor: pointer;
     }
-
-    /* Action buttons */
+    /* Buttons */
     .action-btn {
       padding: 5px 10px;
-      background-color: #0d6efd;
+      background-color: #007BFF;
       border: none;
       color: #fff;
       cursor: pointer;
-      border-radius: 5px;
     }
     .action-btn:hover {
-      background-color: #0b5ed7;
+      background-color: #0056b3;
     }
     .secondary-btn {
       padding: 3px 8px;
-      background-color: #198754;
+      background-color: #28a745;
       border: none;
       color: #fff;
       cursor: pointer;
       margin-right: 5px;
-      border-radius: 5px;
     }
     .secondary-btn:hover {
-      background-color: #157347;
+      background-color: #218838;
     }
     .danger-btn {
       padding: 3px 8px;
@@ -81,333 +111,496 @@
       border: none;
       color: #fff;
       cursor: pointer;
-      border-radius: 5px;
     }
     .danger-btn:hover {
       background-color: #c82333;
     }
+    /* Form Inputs */
+    select, input[type="number"], input[type="date"] {
+      margin-right: 8px;
+      padding: 5px;
+      font-size: 14px;
+    }
   </style>
 </head>
-
 <body>
-  <!-- Bootstrap Navbar -->
-  <nav class="navbar navbar-dark bg-dark">
-    <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">BRidge Dashboard</span>
-      <div class="d-flex align-items-center">
-        <span class="text-white me-3">User: John Doe</span>
-        <button class="btn btn-outline-light me-3" onclick="logout()">Logout</button>
-        <span id="header-date" class="text-white">02/14/2025</span>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>BRidge Dashboard</h1>
+      <div class="user-info">
+        <span>User: John Doe</span>
+        <button onclick="logout()">Logout</button>
+        <span id="header-date">02/14/2025</span>
       </div>
     </div>
-  </nav>
-
-  <div class="container-fluid main-container">
+    
     <!-- Overview Cards -->
-    <div class="mb-4">
-      <h4 class="section-title">OVERVIEW CARDS</h4>
-      <div class="row overview-cards g-3">
-        <div class="col-md-4">
-          <div class="card h-100" onclick="cardClicked('Finished Goods')">
-            <div class="card-body">
-              <h5 class="card-title">Finished Goods</h5>
-              <p class="card-text">24 Contracts Available</p>
-              <p class="card-text">~560.0 total tons</p>
-            </div>
-          </div>
+    <div class="section">
+      <div class="section-title">OVERVIEW CARDS</div>
+      <div class="overview-cards">
+        <div class="card" onclick="cardClicked('Finished Goods')">
+          <div>Finished Goods:</div>
+          <div>24 Contracts Available</div>
+          <div>~560.0 total tons</div>
         </div>
-        <div class="col-md-4">
-          <div class="card h-100" onclick="cardClicked('Active Contracts')">
-            <div class="card-body">
-              <h5 class="card-title">Active Contracts</h5>
-              <p class="card-text">8 Secured</p>
-              <p class="card-text">Margin: $12,000</p>
-            </div>
-          </div>
+        <div class="card" onclick="cardClicked('Active Contracts')">
+          <div>Active Contracts:</div>
+          <div>8 Secured</div>
+          <div>Margin: $12,000</div>
         </div>
-        <div class="col-md-4">
-          <div class="card h-100" onclick="cardClicked('Market Snapshot')">
-            <div class="card-body">
-              <h5 class="card-title">Market Snapshot</h5>
-              <p class="card-text">Copper: $9,500</p>
-              <p class="card-text">Steel: $500</p>
-              <p class="card-text">Brass: $7,500</p>
-              <p class="card-text">Aluminum: $2,200</p>
-            </div>
-          </div>
+        <div class="card" onclick="cardClicked('Market Snapshot')">
+          <div>Market Snapshot:</div>
+          <div>Copper: $9,500</div>
+          <div>Steel: $500</div>
+          <div>Brass: $7,500</div>
+          <div>Aluminum: $2,200</div>
         </div>
       </div>
     </div>
-
+    
     <!-- Finished Goods Inventory (Static Data) -->
-    <div class="mb-4">
-      <h4 class="section-title">Finished Goods Inventory (Greenspark)</h4>
-      <div class="table-responsive">
-        <table class="table table-bordered table-hover">
-          <thead class="table-light">
-            <tr>
-              <th>Material</th>
-              <th>Quantity (tons)</th>
-              <th>Price/ton</th>
-              <th>Value of Material</th>
-              <th>Date Created</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr onclick="rowClicked('Copper #1')">
-              <td>Copper</td>
-              <td>80</td>
-              <td>$9,500</td>
-              <td>$760,000</td>
-              <td>02/13/2025</td>
-              <td>Available</td>
-            </tr>
-            <tr onclick="rowClicked('Brass #2')">
-              <td>Brass</td>
-              <td>100</td>
-              <td>$7,500</td>
-              <td>$750,000</td>
-              <td>02/12/2025</td>
-              <td>Available</td>
-            </tr>
-            <tr onclick="rowClicked('Steel #5')">
-              <td>Steel</td>
-              <td>280</td>
-              <td>$500</td>
-              <td>$140,000</td>
-              <td>02/11/2025</td>
-              <td>Secured</td>
-            </tr>
-            <tr onclick="rowClicked('Aluminum #3')">
-              <td>Aluminum</td>
-              <td>100</td>
-              <td>$2,200</td>
-              <td>$220,000</td>
-              <td>02/10/2025</td>
-              <td>Available</td>
-            </tr>
-          </tbody>
-        </table>
+    <div class="section">
+      <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Value of Material</th>
+            <th>Date Created</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr onclick="rowClicked('Copper #1')">
+            <td>Copper</td>
+            <td>80</td>
+            <td>$9,500</td>
+            <td>$760,000</td>
+            <td>02/13/2025</td>
+            <td>Available</td>
+          </tr>
+          <tr onclick="rowClicked('Brass #2')">
+            <td>Brass</td>
+            <td>100</td>
+            <td>$7,500</td>
+            <td>$750,000</td>
+            <td>02/12/2025</td>
+            <td>Available</td>
+          </tr>
+          <tr onclick="rowClicked('Steel #5')">
+            <td>Steel</td>
+            <td>280</td>
+            <td>$500</td>
+            <td>$140,000</td>
+            <td>02/11/2025</td>
+            <td>Secured</td>
+          </tr>
+          <tr onclick="rowClicked('Aluminum #3')">
+            <td>Aluminum</td>
+            <td>100</td>
+            <td>$2,200</td>
+            <td>$220,000</td>
+            <td>02/10/2025</td>
+            <td>Available</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Trading Graph Section (Added) -->
+    <div class="section">
+      <div class="section-title">Trading Graphs</div>
+      <div class="card" style="padding: 20px;">
+        <canvas id="tradingChart" width="400" height="200"></canvas>
       </div>
     </div>
+    
+    <!-- Contract Creation Section repurposed as Simulated Trade -->
+    <div class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div>
+        <!-- Material dropdown -->
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <option value="Copper">Copper</option>
+          <option value="Brass">Brass</option>
+          <option value="Steel">Steel</option>
+          <option value="Aluminum">Aluminum</option>
+        </select>
 
-    <!-- Trading Graph Section -->
-    <div class="mb-4">
-      <h4 class="section-title">Trading Graphs</h4>
-      <div class="card">
-        <div class="card-body">
-          <canvas id="tradingChart" width="400" height="150"></canvas>
-        </div>
-      </div>
-    </div>
+        <!-- Creatable Contracts dropdown (based on quantity/10) -->
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts">
+          <!-- Options updated by JS -->
+        </select>
 
-    <!-- Simulated Trade Section -->
-    <div class="mb-4">
-      <h4 class="section-title">Simulated Trade (10-ton loads)</h4>
-      <div class="card p-3">
-        <div class="row g-3 align-items-center">
-          <div class="col-auto">
-            <label for="create-material" class="col-form-label">Material:</label>
-          </div>
-          <div class="col-auto">
-            <select id="create-material" class="form-select" onchange="updateTradeOptions()">
-              <option value="Copper">Copper</option>
-              <option value="Brass">Brass</option>
-              <option value="Steel">Steel</option>
-              <option value="Aluminum">Aluminum</option>
-            </select>
-          </div>
+        <!-- Price/ton dropdown (6 options: 3 below, 3 above base) -->
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price">
+          <!-- Options updated by JS -->
+        </select>
 
-          <div class="col-auto">
-            <label for="create-contracts" class="col-form-label">Creatable Contracts:</label>
-          </div>
-          <div class="col-auto">
-            <select id="create-contracts" class="form-select"></select>
-          </div>
+        <!-- Cost to Create dropdown (0.1% of base price) -->
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost">
+          <!-- Option updated by JS -->
+        </select>
 
-          <div class="col-auto">
-            <label for="create-price" class="col-form-label">Price/ton:</label>
-          </div>
-          <div class="col-auto">
-            <select id="create-price" class="form-select"></select>
-          </div>
+        <!-- Expiration Date dropdown (5 future dates, 1 month increments) -->
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration">
+          <!-- Options updated by JS -->
+        </select>
 
-          <div class="col-auto">
-            <label for="create-cost" class="col-form-label">Cost to Create:</label>
-          </div>
-          <div class="col-auto">
-            <select id="create-cost" class="form-select"></select>
-          </div>
-
-          <div class="col-auto">
-            <label for="create-expiration" class="col-form-label">Expiration Date:</label>
-          </div>
-          <div class="col-auto">
-            <select id="create-expiration" class="form-select"></select>
-          </div>
-
-          <div class="col-auto">
-            <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-          </div>
-        </div>
+        <!-- Button changed to Execute Trade -->
+        <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
       </div>
     </div>
 
     <!-- Trade Log Section -->
-    <div class="mb-4">
-      <h4 class="section-title">Trade Log</h4>
-      <div class="table-responsive">
-        <table class="table table-bordered table-hover" id="trade-log-table">
-          <thead class="table-light">
-            <tr>
-              <th>Time</th>
-              <th>Material</th>
-              <th>Quantity (tons)</th>
-              <th>Price/ton</th>
-              <th>Total Cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- Trade entries will be appended here by JS -->
-          </tbody>
-        </table>
-      </div>
+    <div class="section">
+      <div class="section-title">Trade Log</div>
+      <table id="trade-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Trade entries will be appended here -->
+        </tbody>
+      </table>
     </div>
 
     <!-- Active Contracts Section -->
-    <div class="mb-4">
-      <h4 class="section-title">Active Contracts</h4>
-      <div class="table-responsive">
-        <table class="table table-bordered table-hover">
-          <thead class="table-light">
-            <tr>
-              <th>Material</th>
-              <th>Last Price</th>
-              <th>Change</th>
-              <th>Change %</th>
-              <th>Expiration</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="active-contracts-body">
-            <!-- Active Contracts populated by JavaScript -->
-          </tbody>
-        </table>
-      </div>
+    <div class="section">
+      <div class="section-title">Active Contracts</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Last Price</th>
+            <th>Change</th>
+            <th>Change %</th>
+            <th>Expiration</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="active-contracts-body">
+          <!-- Active Contracts populated by JavaScript -->
+        </tbody>
+      </table>
     </div>
-
-    <!-- Futures / Market Data (Static CME Simulation) -->
-    <div class="mb-4">
-      <h4 class="section-title">Futures / Market Data (CME)</h4>
-      <div class="table-responsive">
-        <table class="table table-bordered table-hover">
-          <thead class="table-light">
-            <tr>
-              <th>Material</th>
-              <th>Contract</th>
-              <th>Last Price</th>
-              <th>Change</th>
-              <th>Change %</th>
-              <th>Expiration</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Copper</td>
-              <td>MAR-25</td>
-              <td>9,550</td>
-              <td>+0.03</td>
-              <td>+0.75%</td>
-              <td>03/25/2025</td>
-              <td>
-                <button
-                  class="action-btn"
-                  onclick="createFuturesContract('Copper', 'MAR-25'); event.stopPropagation();"
-                >
-                  Create Contract
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>Copper</td>
-              <td>MAY-25</td>
-              <td>9,950</td>
-              <td>-0.01</td>
-              <td>-0.24%</td>
-              <td>05/25/2025</td>
-              <td>
-                <button
-                  class="action-btn"
-                  onclick="createFuturesContract('Copper', 'MAY-25'); event.stopPropagation();"
-                >
-                  Create Contract
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>Brass</td>
-              <td>APR-25</td>
-              <td>7,850</td>
-              <td>+0.02</td>
-              <td>+0.80%</td>
-              <td>04/25/2025</td>
-              <td>
-                <button
-                  class="action-btn"
-                  onclick="createFuturesContract('Brass', 'APR-25'); event.stopPropagation();"
-                >
-                  Create Contract
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>Steel</td>
-              <td>JUN-25</td>
-              <td>500</td>
-              <td>+0.01</td>
-              <td>+0.64%</td>
-              <td>06/25/2025</td>
-              <td>
-                <button
-                  class="action-btn"
-                  onclick="createFuturesContract('Steel', 'JUN-25'); event.stopPropagation();"
-                >
-                  Create Contract
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td>Aluminum</td>
-              <td>SEP-25</td>
-              <td>2,500</td>
-              <td>+0.01</td>
-              <td>+0.80%</td>
-              <td>09/25/2025</td>
-              <td>
-                <button
-                  class="action-btn"
-                  onclick="createFuturesContract('Aluminum', 'SEP-25'); event.stopPropagation();"
-                >
-                  Create Contract
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    
+    <!-- Futures / Market Data Section -->
+    <div class="section">
+      <div class="section-title">Futures / Market Data (CME)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Contract</th>
+            <th>Last Price</th>
+            <th>Change</th>
+            <th>Change %</th>
+            <th>Expiration</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Copper</td>
+            <td>MAR-25</td>
+            <td>9,550</td>
+            <td>+0.03</td>
+            <td>+0.75%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="action-btn" onclick="createFuturesContract('Copper', 'MAR-25'); event.stopPropagation();">
+                Create Contract 
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td>Copper</td>
+            <td>MAY-25</td>
+            <td>9,950</td>
+            <td>-0.01</td>
+            <td>-0.24%</td>
+            <td>05/25/2025</td>
+            <td>
+              <button class="action-btn" onclick="createFuturesContract('Copper', 'MAY-25'); event.stopPropagation();">
+                Create Contract
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td>Brass</td>
+            <td>APR-25</td>
+            <td>7,850</td>
+            <td>+0.02</td>
+            <td>+0.80%</td>
+            <td>04/25/2025</td>
+            <td>
+              <button class="action-btn" onclick="createFuturesContract('Brass', 'APR-25'); event.stopPropagation();">
+                Create Contract 
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td>Steel</td>
+            <td>JUN-25</td>
+            <td>500</td>
+            <td>+0.01</td>
+            <td>+0.64%</td>
+            <td>06/25/2025</td>
+            <td>
+              <button class="action-btn" onclick="createFuturesContract('Steel', 'JUN-25'); event.stopPropagation();">
+                Create Contract 
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td>Aluminum</td>
+            <td>SEP-25</td>
+            <td>2,500</td>
+            <td>+0.01</td>
+            <td>+0.80%</td>
+            <td>09/25/2025</td>
+            <td>
+              <button class="action-btn" onclick="createFuturesContract('Aluminum', 'SEP-25'); event.stopPropagation();">
+                Create Contract 
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+  </div>
 
-  </div> <!-- End main-container -->
-
-  <!-- Bootstrap Bundle (JS) -->
+  <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
-    /******************************************************
-     * 1) BASIC EVENT HANDLERS
-     ******************************************************/
+    // Set our accent color (light green) and update section titles
+    const accentColor = '#90ee90';
+    document.querySelectorAll('.section-title').forEach(el => {
+      el.style.color = accentColor;
+    });
+
+    // Initialize Trading Graph using Chart.js
+    const ctx = document.getElementById('tradingChart').getContext('2d');
+    const tradingChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
+        datasets: [{
+          label: 'Trading Data',
+          data: [100, 150, 130, 170, 160, 180],
+          borderColor: accentColor,
+          backgroundColor: 'rgba(144,238,144,0.2)',
+          fill: true,
+          tension: 0.1
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
+    /***************************************
+     * Data for Finished Goods Inventory
+     ***************************************/
+    const finishedGoodsData = {
+      Copper: { quantity: 80, price: 9500 },
+      Brass: { quantity: 100, price: 7500 },
+      Steel: { quantity: 280, price: 500 },
+      Aluminum: { quantity: 100, price: 2200 }
+    };
+
+    /***************************************
+     * Active Contracts Data (Empty array to start)
+     ***************************************/
+    let activeContracts = [];
+
+    /***************************************
+     * Fetch and Update Active Contracts
+     ***************************************/
+    function fetchActiveContracts() {
+      fetch('/api/active-contracts')
+        .then(response => response.json())
+        .then(data => {
+          activeContracts = data;
+          renderActiveContracts();
+        })
+        .catch(err => console.error('Error fetching active contracts:', err));
+    }
+
+    /***************************************
+     * Render Active Contracts Table
+     ***************************************/
+    function renderActiveContracts() {
+      const tableBody = document.getElementById('active-contracts-body');
+      tableBody.innerHTML = '';
+      activeContracts.forEach((contract, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = 
+          <td>${contract.material}</td>
+          <td>$${Number(contract.lastPrice).toLocaleString()}</td>
+          <td>${contract.change}</td>
+          <td>${contract.changePercent}</td>
+          <td>${contract.expiration}</td>
+          <td>
+            <button class="secondary-btn" onclick="rollContract(${index}); event.stopPropagation();">Roll</button>
+            <button class="danger-btn" onclick="closeContract(${index}); event.stopPropagation();">Close</button>
+          </td>
+        ;
+        tableBody.appendChild(row);
+      });
+    }
+
+    /***************************************
+     * Append Trade Log Entry
+     ***************************************/
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tradeTime = new Date().toLocaleTimeString();
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = 
+        <td>${tradeTime}</td>
+        <td>${material}</td>
+        <td>${quantity}</td>
+        <td>$${Number(price).toLocaleString()}</td>
+        <td>$${Number(totalCost).toLocaleString()}</td>
+      ;
+      tableBody.appendChild(newRow);
+    }
+
+    /***************************************
+     * Update Trade Options
+     ***************************************/
+    function updateTradeOptions() {
+      const material = document.getElementById('create-material').value;
+      const data = finishedGoodsData[material];
+      
+      // Update "Creatable Contracts" dropdown: based on floor(quantity/10)
+      const contractsSelect = document.getElementById('create-contracts');
+      contractsSelect.innerHTML = '';
+      const maxContracts = Math.floor(data.quantity / 10);
+      for (let i = 1; i <= maxContracts; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i;
+        contractsSelect.appendChild(option);
+      }
+      
+      // Update "Price/ton" dropdown: 3 options below and 3 options above base price (in 10% increments)
+      const priceSelect = document.getElementById('create-price');
+      priceSelect.innerHTML = '';
+      const basePrice = data.price;
+      [0.7, 0.8, 0.9].forEach(mult => {
+        const option = document.createElement('option');
+        option.value = (basePrice * mult).toFixed(2);
+        option.textContent = '$' + Number(basePrice * mult).toLocaleString();
+        priceSelect.appendChild(option);
+      });
+      [1.1, 1.2, 1.3].forEach(mult => {
+        const option = document.createElement('option');
+        option.value = (basePrice * mult).toFixed(2);
+        option.textContent = '$' + Number(basePrice * mult).toLocaleString();
+        priceSelect.appendChild(option);
+      });
+      
+      // Update "Cost to Create" dropdown: single option = 0.1% of base price
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const cost = basePrice * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = cost.toFixed(2);
+      costOption.textContent = '$' + Number(cost).toLocaleString();
+      costSelect.appendChild(costOption);
+      
+      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const headerDateStr = document.getElementById('header-date').textContent;
+      const parts = headerDateStr.split('/');
+      const headerDate = new Date(parts[2], parts[0]-1, parts[1]);
+      for (let i = 1; i <= 5; i++) {
+        const expDate = new Date(headerDate.getFullYear(), headerDate.getMonth() + i, headerDate.getDate());
+        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = expDate.getDate().toString().padStart(2, '0');
+        const year = expDate.getFullYear();
+        const dateStr = month + '/' + day + '/' + year;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+
+    /***************************************
+     * Simulate Trade
+     ***************************************/
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      for (let i = 0; i < numTrades; i++) {
+        const totalCost = 10 * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
+      }
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+
+    /***************************************
+     * Add Contracts
+     ***************************************/
+    function addContracts() {
+      const material = document.getElementById('create-material').value;
+      const numContracts = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      for (let i = 0; i < numContracts; i++) {
+        const randomChange = (Math.random() * 10 - 5).toFixed(2);
+        const randomChangePercent = (Math.random() * 2 - 1).toFixed(2) + '%';
+        activeContracts.push({
+          material: material + ' (10-ton load #' + (i + 1) + ')',
+          lastPrice: chosenPrice,
+          change: (randomChange > 0 ? '+' : '') + randomChange,
+          changePercent: randomChangePercent,
+          expiration: expiration
+        });
+        const totalCost = 10 * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
+      }
+      renderActiveContracts();
+      alert(numContracts + ' contract(s) for ' + material + ' added to Active Contracts.');
+    }
+
+    /***************************************
+     * Futures / Market Data Action
+     ***************************************/
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+
+    /***************************************
+     * Basic Click Handlers & Initialization
+     ***************************************/
     function logout() {
       alert('Logging out...');
     }
@@ -425,192 +618,7 @@
       activeContracts.splice(index, 1);
       renderActiveContracts();
     }
-    function createFuturesContract(material, contractName) {
-      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
 
-    /******************************************************
-     * 2) TRADING CHART (Chart.js)
-     ******************************************************/
-    const accentColor = '#90ee90'; // light green
-    const ctx = document.getElementById('tradingChart').getContext('2d');
-    const tradingChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-        datasets: [{
-          label: 'Trading Data',
-          data: [100, 150, 130, 170, 160, 180],
-          borderColor: accentColor,
-          backgroundColor: 'rgba(144,238,144,0.2)',
-          fill: true,
-          tension: 0.1
-        }]
-      },
-      options: {
-        scales: {
-          y: { beginAtZero: true }
-        }
-      }
-    });
-
-    /******************************************************
-     * 3) FINISHED GOODS DATA (Static)
-     ******************************************************/
-    const finishedGoodsData = {
-      Copper:   { quantity: 80,  price: 9500 },
-      Brass:    { quantity: 100, price: 7500 },
-      Steel:    { quantity: 280, price: 500 },
-      Aluminum: { quantity: 100, price: 2200 }
-    };
-
-    /******************************************************
-     * 4) ACTIVE CONTRACTS (Mock data vs. fetch)
-     ******************************************************/
-    let activeContracts = [
-      /* Example (if you want any by default):
-      {
-        material: 'Copper (10-ton load #1)',
-        lastPrice: 9500,
-        change: '+2.00',
-        changePercent: '+0.21%',
-        expiration: '03/25/2025'
-      }
-      */
-    ];
-
-    function renderActiveContracts() {
-      const tableBody = document.getElementById('active-contracts-body');
-      tableBody.innerHTML = '';
-      activeContracts.forEach((contract, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${contract.material}</td>
-          <td>$${Number(contract.lastPrice).toLocaleString()}</td>
-          <td>${contract.change}</td>
-          <td>${contract.changePercent}</td>
-          <td>${contract.expiration}</td>
-          <td>
-            <button class="secondary-btn" onclick="rollContract(${index}); event.stopPropagation();">Roll</button>
-            <button class="danger-btn" onclick="closeContract(${index}); event.stopPropagation();">Close</button>
-          </td>
-        `;
-        tableBody.appendChild(row);
-      });
-    }
-
-    /******************************************************
-     * 5) TRADE LOG
-     ******************************************************/
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document
-        .getElementById('trade-log-table')
-        .getElementsByTagName('tbody')[0];
-      const tradeTime = new Date().toLocaleTimeString();
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = `
-        <td>${tradeTime}</td>
-        <td>${material}</td>
-        <td>${quantity}</td>
-        <td>$${Number(price).toLocaleString()}</td>
-        <td>$${Number(totalCost).toLocaleString()}</td>
-      `;
-      tableBody.appendChild(newRow);
-    }
-
-    /******************************************************
-     * 6) SIMULATED TRADE / CONTRACT CREATION
-     ******************************************************/
-    function updateTradeOptions() {
-      const material = document.getElementById('create-material').value;
-      const data = finishedGoodsData[material];
-
-      // "Creatable Contracts": floor(quantity / 10)
-      const contractsSelect = document.getElementById('create-contracts');
-      contractsSelect.innerHTML = '';
-      const maxContracts = Math.floor(data.quantity / 10);
-      for (let i = 1; i <= maxContracts; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = i;
-        contractsSelect.appendChild(option);
-      }
-
-      // "Price/ton": 3 below & 3 above base in 10% increments
-      const priceSelect = document.getElementById('create-price');
-      priceSelect.innerHTML = '';
-      const basePrice = data.price;
-      [0.7, 0.8, 0.9].forEach(mult => {
-        const opt = document.createElement('option');
-        opt.value = (basePrice * mult).toFixed(2);
-        opt.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(opt);
-      });
-      [1.1, 1.2, 1.3].forEach(mult => {
-        const opt = document.createElement('option');
-        opt.value = (basePrice * mult).toFixed(2);
-        opt.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(opt);
-      });
-
-      // "Cost to Create": single option = 0.1% of base price
-      const costSelect = document.getElementById('create-cost');
-      costSelect.innerHTML = '';
-      const cost = basePrice * 0.001; // 0.1%
-      const costOption = document.createElement('option');
-      costOption.value = cost.toFixed(2);
-      costOption.textContent = '$' + Number(cost).toLocaleString();
-      costSelect.appendChild(costOption);
-
-      // "Expiration Date": 5 future dates in 1-month increments from header date
-      const expirationSelect = document.getElementById('create-expiration');
-      expirationSelect.innerHTML = '';
-      const headerDateStr = document.getElementById('header-date').textContent;
-      const parts = headerDateStr.split('/');
-      // parts: [MM, DD, YYYY]
-      const headerDate = new Date(parts[2], parts[0] - 1, parts[1]);
-      for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(
-          headerDate.getFullYear(),
-          headerDate.getMonth() + i,
-          headerDate.getDate()
-        );
-        const month = String(expDate.getMonth() + 1).padStart(2, '0');
-        const day = String(expDate.getDate()).padStart(2, '0');
-        const year = expDate.getFullYear();
-        const dateStr = `${month}/${day}/${year}`;
-        const option = document.createElement('option');
-        option.value = dateStr;
-        option.textContent = dateStr;
-        expirationSelect.appendChild(option);
-      }
-    }
-
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const chosenPrice = parseFloat(document.getElementById('create-price').value);
-      const chosenCost = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-
-      for (let i = 0; i < numTrades; i++) {
-        const totalCost = 10 * chosenPrice;
-        appendTradeLogEntry(
-          `${material} (Trade #${i + 1})`,
-          10,
-          chosenPrice,
-          totalCost
-        );
-      }
-      alert(
-        `${numTrades} simulated trade(s) for ${material} executed.\n` +
-        `Cost to create each position: $${chosenCost.toFixed(2)}`
-      );
-    }
-
-    /******************************************************
-     * PAGE LOAD INIT
-     ******************************************************/
     window.onload = function() {
       updateTradeOptions();
       renderActiveContracts();
