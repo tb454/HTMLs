@@ -3,268 +3,321 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BRidge Merged Styles</title>
-
+  <title>BRidge Dashboard</title>
+  
   <!-- Bootstrap CSS -->
-  <link 
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" 
-    rel="stylesheet"
-  />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
 
-  <!-- Optional Font Awesome (for icons) -->
-  <link 
-    rel="stylesheet" 
-    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
-  />
+  <!-- Optional Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
 
   <style>
-    /* -- Color References -- */
-    /* Green/Gray scheme for Inventory side */
+    /* General Colors & Variables */
     :root {
-      --sidebar-bg: #f0f2f1;       /* Light gray/green background */
-      --sidebar-link-hover: #c8ccc9; /* Slightly darker hover color */
-      --inventory-accent: #90ee90;  /* Light green accent for headings */
+      --header-bg: #003366;           /* Dark blue for header */
+      --header-text: #ffffff;
+      --overview-bg: #f8f9fa;           /* Light background for cards */
+      --overview-border: #ccc;
+      --greenspark-accent: #90ee90;     /* Light green accent for Greenspark inventory */
+      --trader-table-head: #dce4ef;      /* Pale blue/gray for futures tables */
     }
-
-    /* Blue/white scheme reminiscent of Barchart */
-    :root {
-      --header-bg: #003366;   /* Dark blue for header bar */
-      --header-text: #ffffff; /* White text in header */
-      --table-head-bg: #dce4ef; /* Light blue/gray table header */
-      --table-head-text: #000;  /* Dark text in table header */
-    }
-
+    
     body {
+      font-family: Arial, sans-serif;
       margin: 0;
       padding: 0;
-      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
     }
-
-    /* -- Sidebar -- */
-    .sidebar {
-      width: 220px;
-      background-color: var(--sidebar-bg);
-      min-height: 100vh;
-      border-right: 1px solid #ccc;
-    }
-    .sidebar .nav-link {
-      color: #333;
-      padding: 15px;
-      border-bottom: 1px solid #ddd;
-      transition: background-color 0.2s;
-    }
-    .sidebar .nav-link:hover {
-      background-color: var(--sidebar-link-hover);
-      color: #007BFF; /* Bootstrap primary link color */
-      text-decoration: none;
-    }
-    .sidebar .nav-link.active {
-      background-color: var(--sidebar-link-hover);
-      color: #007BFF;
-    }
-
-    /* -- Header (Blue/White scheme) -- */
+    
+    /* Header */
     .navbar {
       background-color: var(--header-bg);
     }
     .navbar-brand, .navbar-text {
       color: var(--header-text) !important;
     }
-
-    /* -- Tabbed content area -- */
-    .tab-content {
-      padding: 1rem;
+    
+    /* Overview Cards */
+    .overview-card {
+      background-color: var(--overview-bg);
+      border: 1px solid var(--overview-border);
+      border-radius: 4px;
+      padding: 15px;
+      text-align: center;
+      transition: box-shadow 0.3s;
     }
-
-    /* -- Inventory Table (green accent for headings) -- */
-    .inventory-table thead th {
-      background-color: var(--inventory-accent) !important;
-      color: #002147 !important; /* Darker text on green */
+    .overview-card:hover {
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
     }
-
-    /* -- Futures Table (blue/white style) -- */
+    
+    /* Greenspark Inventory Table */
+    .greenspark-table thead th {
+      background-color: var(--greenspark-accent) !important;
+      color: #002147 !important;
+    }
+    
+    /* Trader-style Tables for Trade Log & Active Contracts */
+    .trader-table thead th {
+      background-color: var(--trader-table-head) !important;
+      color: #000;
+    }
+    
+    /* Futures Market Data Table (at the bottom) */
     .futures-table thead th {
-      background-color: var(--table-head-bg) !important;
-      color: var(--table-head-text) !important;
+      background-color: var(--trader-table-head) !important;
+      color: #000;
+    }
+    
+    /* Section Titles */
+    .section-title {
+      margin: 30px 0 15px;
+      font-size: 1.25rem;
+      font-weight: bold;
+      color: #002147;
     }
   </style>
 </head>
-<body class="d-flex">
-
-  <!-- Sidebar (Green/Gray style) -->
-  <div class="sidebar d-flex flex-column">
-    <a href="#" class="nav-link active">
-      <i class="fas fa-boxes me-2"></i> Inventory
-    </a>
-    <a href="#" class="nav-link">
-      <i class="fas fa-chart-line me-2"></i> Markets
-    </a>
-    <a href="#" class="nav-link">
-      <i class="fas fa-shopping-cart me-2"></i> Orders
-    </a>
-    <a href="#" class="nav-link">
-      <i class="fas fa-warehouse me-2"></i> WMS
-    </a>
-    <a href="#" class="nav-link">
-      <i class="fas fa-cog me-2"></i> Settings
-    </a>
-  </div>
-
-  <!-- Main Content -->
-  <div class="flex-fill">
-    <!-- Top Navbar (Dark Blue/White) -->
-    <nav class="navbar navbar-expand-lg">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="#">BRidge</a>
-        <div class="d-flex">
-          <span class="navbar-text me-3">User: John Doe</span>
-          <button class="btn btn-outline-light btn-sm">
-            <i class="fas fa-sign-out-alt"></i> Logout
-          </button>
-        </div>
-      </div>
-    </nav>
-
-    <!-- Tabs (Inventory vs. Futures) -->
-    <ul class="nav nav-tabs mt-2" id="bridgeTabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button 
-          class="nav-link active" 
-          id="inventory-tab" 
-          data-bs-toggle="tab" 
-          data-bs-target="#inventory" 
-          type="button" 
-          role="tab" 
-          aria-controls="inventory" 
-          aria-selected="true"
-        >
-          Inventory
+<body>
+  <!-- Top Navbar -->
+  <nav class="navbar navbar-expand-lg">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">BRidge</a>
+      <div class="d-flex">
+        <span class="navbar-text me-3">
+          <i class="fas fa-user"></i> John Doe
+        </span>
+        <button class="btn btn-outline-light btn-sm">
+          <i class="fas fa-sign-out-alt"></i> Logout
         </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button 
-          class="nav-link" 
-          id="futures-tab" 
-          data-bs-toggle="tab" 
-          data-bs-target="#futures" 
-          type="button" 
-          role="tab" 
-          aria-controls="futures" 
-          aria-selected="false"
-        >
-          Futures Market
-        </button>
-      </li>
-    </ul>
-
-    <!-- Tab Content -->
-    <div class="tab-content" id="bridgeTabsContent">
-      <!-- Inventory Tab -->
-      <div 
-        class="tab-pane fade show active" 
-        id="inventory" 
-        role="tabpanel" 
-        aria-labelledby="inventory-tab"
-      >
-        <h4 class="mt-3">Inventory Management</h4>
-        <div class="table-responsive">
-          <table class="table table-striped inventory-table">
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Description</th>
-                <th>Vendor</th>
-                <th>On Hand</th>
-                <th>Committed</th>
-                <th>Available</th>
-                <th>On Order</th>
-                <th>Cost</th>
-                <th>Retail</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Sample Rows -->
-              <tr>
-                <td>SKU-001</td>
-                <td>Copper Wire #14</td>
-                <td>ABC Metals</td>
-                <td>200</td>
-                <td>50</td>
-                <td>150</td>
-                <td>100</td>
-                <td>$9,500</td>
-                <td>$10,500</td>
-              </tr>
-              <tr>
-                <td>SKU-002</td>
-                <td>Steel Rod 1/2"</td>
-                <td>XYZ Steelworks</td>
-                <td>120</td>
-                <td>30</td>
-                <td>90</td>
-                <td>50</td>
-                <td>$500</td>
-                <td>$600</td>
-              </tr>
-            </tbody>
-          </table>
+      </div>
+    </div>
+  </nav>
+  
+  <div class="container-fluid">
+    <!-- Overview Cards -->
+    <div class="section-title">Overview</div>
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="overview-card">
+          <i class="fas fa-warehouse fa-2x"></i>
+          <h6 class="mt-2">Finished Goods</h6>
+          <p>24 Contracts<br>~560.0 Tons</p>
         </div>
       </div>
-
-      <!-- Futures Market Tab -->
-      <div 
-        class="tab-pane fade" 
-        id="futures" 
-        role="tabpanel" 
-        aria-labelledby="futures-tab"
-      >
-        <h4 class="mt-3">Futures Market Data</h4>
-        <div class="table-responsive">
-          <table class="table table-striped futures-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Last</th>
-                <th>Chg</th>
-                <th>Chg%</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Volume</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Sample Rows -->
-              <tr>
-                <td>HGZ25 (Copper)</td>
-                <td>9,550</td>
-                <td>+0.03</td>
-                <td>+0.75%</td>
-                <td>9,600</td>
-                <td>9,500</td>
-                <td>2,300</td>
-                <td>10:15 AM</td>
-              </tr>
-              <tr>
-                <td>CLF26 (Crude Oil)</td>
-                <td>75.20</td>
-                <td>-0.50</td>
-                <td>-0.66%</td>
-                <td>76.00</td>
-                <td>74.50</td>
-                <td>1,800</td>
-                <td>10:30 AM</td>
-              </tr>
-            </tbody>
-          </table>
+      <div class="col-md-3">
+        <div class="overview-card">
+          <i class="fas fa-file-contract fa-2x"></i>
+          <h6 class="mt-2">Active Contracts</h6>
+          <p>8 Secured<br>Margin: $12,000</p>
         </div>
       </div>
-    </div> <!-- /tab-content -->
-  </div> <!-- /flex-fill -->
-
+      <div class="col-md-3">
+        <div class="overview-card">
+          <i class="fas fa-chart-line fa-2x"></i>
+          <h6 class="mt-2">Market Snapshot</h6>
+          <p>Copper: $9,500<br>Steel: $500</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="overview-card">
+          <i class="fas fa-info-circle fa-2x"></i>
+          <h6 class="mt-2">Additional Info</h6>
+          <p>Data</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Greenspark Finished Goods Inventory -->
+    <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+    <div class="table-responsive">
+      <table class="table table-striped greenspark-table">
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Value</th>
+            <th>Date Created</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Copper</td>
+            <td>80</td>
+            <td>$9,500</td>
+            <td>$760,000</td>
+            <td>02/13/2025</td>
+            <td>Available</td>
+          </tr>
+          <tr>
+            <td>Brass</td>
+            <td>100</td>
+            <td>$7,500</td>
+            <td>$750,000</td>
+            <td>02/12/2025</td>
+            <td>Available</td>
+          </tr>
+          <tr>
+            <td>Steel</td>
+            <td>280</td>
+            <td>$500</td>
+            <td>$140,000</td>
+            <td>02/11/2025</td>
+            <td>Secured</td>
+          </tr>
+          <tr>
+            <td>Aluminum</td>
+            <td>100</td>
+            <td>$2,200</td>
+            <td>$220,000</td>
+            <td>02/10/2025</td>
+            <td>Available</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Simulated Trade Section -->
+    <div class="section-title">Simulated Trade Execution</div>
+    <div class="card p-3">
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <label for="trade-material" class="form-label">Material</label>
+          <select id="trade-material" class="form-select">
+            <option value="Copper">Copper</option>
+            <option value="Brass">Brass</option>
+            <option value="Steel">Steel</option>
+            <option value="Aluminum">Aluminum</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="trade-contracts" class="form-label">Contracts</label>
+          <select id="trade-contracts" class="form-select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="trade-price" class="form-label">Price/ton</label>
+          <select id="trade-price" class="form-select">
+            <option value="9500">$9,500</option>
+            <option value="9700">$9,700</option>
+            <option value="9900">$9,900</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="trade-expiration" class="form-label">Expiration</label>
+          <select id="trade-expiration" class="form-select">
+            <option>03/25/2025</option>
+            <option>05/25/2025</option>
+            <option>07/25/2025</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="executeTrade()">Execute Trade</button>
+    </div>
+    
+    <!-- Trade Log -->
+    <div class="section-title">Trade Log</div>
+    <div class="table-responsive">
+      <table class="table table-striped trader-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Cost</th>
+          </tr>
+        </thead>
+        <tbody id="trade-log">
+          <!-- Trade log entries will be appended here -->
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Active Contracts -->
+    <div class="section-title">Active Contracts</div>
+    <div class="table-responsive">
+      <table class="table table-striped trader-table">
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Last Price</th>
+            <th>Change</th>
+            <th>Change %</th>
+            <th>Expiration</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="active-contracts">
+          <!-- Example active contract -->
+          <tr>
+            <td>Copper</td>
+            <td>$9,500</td>
+            <td>+0.03</td>
+            <td>+0.75%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="btn btn-sm btn-secondary">Roll</button>
+              <button class="btn btn-sm btn-danger">Close</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- Trading Graph (Moved to Bottom) -->
+    <div class="section-title">Trading Graph</div>
+    <div class="card p-3">
+      <!-- You can integrate Chart.js or another charting library here -->
+      <canvas id="tradingChart" width="400" height="200"></canvas>
+    </div>
+    
+    <!-- Futures Market Data -->
+    <div class="section-title">Futures Market Data</div>
+    <div class="table-responsive">
+      <table class="table table-striped futures-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Last</th>
+            <th>Chg</th>
+            <th>Chg%</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>HGZ25 (Copper)</td>
+            <td>9,550</td>
+            <td>+0.03</td>
+            <td>+0.75%</td>
+            <td>9,600</td>
+            <td>9,500</td>
+            <td>2,300</td>
+            <td>10:15 AM</td>
+          </tr>
+          <tr>
+            <td>CLF26 (Crude Oil)</td>
+            <td>75.20</td>
+            <td>-0.50</td>
+            <td>-0.66%</td>
+            <td>76.00</td>
+            <td>74.50</td>
+            <td>1,800</td>
+            <td>10:30 AM</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+  </div> <!-- End Main Content Container -->
+  
   <!-- Bootstrap Bundle JS -->
-  <script 
-    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js">
-  </script>
-</body>
-</html>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js
