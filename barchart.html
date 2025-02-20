@@ -5,7 +5,7 @@
   <title>Barchart-Style Futures</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Optional: Bootstrap for quicker styling -->
+  <!-- (Optional) Bootstrap for quick styling -->
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
     rel="stylesheet"
@@ -64,15 +64,13 @@
       cursor: pointer;
       color: #007bff;
     }
-
-    /* Footer table for “Futures Trading Guide” */
+    /* Footer table (“Futures Trading Guide”) style */
     .footer-table th {
       background-color: #eaeaea;
     }
     .footer-table td {
       vertical-align: middle;
     }
-
     .btn-view-trade {
       background-color: #007bff;
       color: #fff;
@@ -85,8 +83,7 @@
     .btn-view-trade:hover {
       background-color: #0056b3;
     }
-
-    /* Hidden JSON script styling is irrelevant—just ensuring we have it. */
+    /* Hidden JSON script is just to store data for external fetch. */
   </style>
 </head>
 
@@ -120,32 +117,25 @@
       </table>
     </div>
 
-    <!-- “Futures Trading Guide: New Trade Alert” -->
-    <h3 class="section-title">Futures Trading Guide: New Trade Alert</h3>
+    <!-- “Futures Trading Guide” (Expanded) -->
+    <h3 class="section-title">Futures Trading Guide: New Trade Alerts</h3>
     <div class="table-responsive">
-      <table class="table footer-table">
+      <table class="table footer-table" id="futuresGuideTable">
         <thead>
           <tr>
             <th>Contract</th>
-            <th>SIGNAL</th>
-            <th>ENTRY DATE</th>
-            <th>ENTRY PRICE</th>
-            <th>STRENGTH</th>
+            <th>Signal</th>
+            <th>Entry Date</th>
+            <th>Entry Price</th>
+            <th>Stop Loss</th>
+            <th>Take Profit</th>
+            <th>Time Horizon</th>
+            <th>Strength</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody>
-          <!-- A single row as an example. You can add more if desired. -->
-          <tr>
-            <td id="alert-contract"></td>
-            <td style="color:red;">SELL</td>
-            <td>02/20/25</td>
-            <td id="alert-entry-price">N/A</td>
-            <td style="color:orange;">Weak</td>
-            <td>
-              <button class="btn-view-trade">View Complete Trade</button>
-            </td>
-          </tr>
+          <!-- Populated by JS -->
         </tbody>
       </table>
     </div>
@@ -156,13 +146,13 @@
     {}
   </script>
 
-  <!-- Optional: Bootstrap JS Bundle -->
+  <!-- (Optional) Bootstrap JS Bundle -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    /*******************************************************************
-     * 1) FUTURES DATA (matching GreenSpark’s 12 commodities)
-     *******************************************************************/
+    /************************************************************************
+     * 1) FUTURES DATA (Same as before, matching your GreenSpark Commodities)
+     ************************************************************************/
     let futuresData = [
       {
         contractName: "WASTE (Mar '25)",
@@ -176,7 +166,7 @@
       {
         contractName: "ALUMINUM (May '25)",
         last: 220.0,
-        change: +1.25,
+        change: 1.25,
         high: 222.0,
         low: 217.5,
         volume: 75200,
@@ -185,7 +175,7 @@
       {
         contractName: "Electric Motors (Feb '25)",
         last: 89.0,
-        change: +0.75,
+        change: 0.75,
         high: 90.0,
         low: 88.0,
         volume: 19845,
@@ -194,7 +184,7 @@
       {
         contractName: "Insulated copper wire (Mar '25)",
         last: 310.0,
-        change: +2.0,
+        change: 2.0,
         high: 315.0,
         low: 305.0,
         volume: 42312,
@@ -212,7 +202,7 @@
       {
         contractName: "FERROUS (Jun '25)",
         last: 502.0,
-        change: +1.5,
+        change: 1.5,
         high: 505.0,
         low: 498.0,
         volume: 28176,
@@ -221,7 +211,7 @@
       {
         contractName: "RADIATOR PRODUCT (Apr '25)",
         last: 128.0,
-        change: +0.75,
+        change: 0.75,
         high: 129.5,
         low: 126.0,
         volume: 8625,
@@ -230,7 +220,7 @@
       {
         contractName: "COPPER PRODUCT (Mar '25)",
         last: 955.0,
-        change: +3.5,
+        change: 3.5,
         high: 960.0,
         low: 940.0,
         volume: 15500,
@@ -248,7 +238,7 @@
       {
         contractName: "MISC PRODUCT (Sep '25)",
         last: 410.0,
-        change: +1.0,
+        change: 1.0,
         high: 415.0,
         low: 405.0,
         volume: 12990,
@@ -257,7 +247,7 @@
       {
         contractName: "STAINLESS STEEL PRODUCT (Aug '25)",
         last: 215.0,
-        change: +0.50,
+        change: 0.50,
         high: 217.0,
         low: 211.0,
         volume: 8450,
@@ -274,22 +264,81 @@
       }
     ];
 
-    /*******************************************************************
-     * 2) RANDOM FLUCTUATIONS every 5 minutes
+    /************************************************************************
+     * 2) “FUTURES TRADING GUIDE” DATA
+     *    We'll create one row per item in `futuresData`, but with expanded info:
+     *      - random signal: BUY or SELL
+     *      - random entry price ~ last ± 1-2%
+     *      - random stop loss & take profit around entry
+     *      - random time horizon
+     *      - random strength (Weak, Moderate, Strong)
+     ************************************************************************/
+    let futuresGuide = [];
+
+    function generateTradingGuide() {
+      const signals = ["BUY", "SELL"];
+      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
+      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
+
+      futuresGuide = futuresData.map(item => {
+        // random signal
+        let sig = signals[Math.floor(Math.random() * signals.length)];
+
+        // entry price ~ last ±1-2%
+        let entryPct = (Math.random() * 2 + 1) / 100; // 1-3%
+        // if SELL, maybe entry is slightly below last
+        if (sig === "SELL") entryPct *= -1;
+        let entryPrice = item.last * (1 + entryPct);
+
+        // random stop/take profit
+        // if BUY, stop < entry, takeProfit > entry
+        // if SELL, stop > entry, takeProfit < entry
+        let stopDiff = Math.abs(entryPrice * 0.05);      // ~5% away
+        let profitDiff = Math.abs(entryPrice * 0.1);     // ~10% away
+        let stop, takeProfit;
+        if (sig === "BUY") {
+          stop = entryPrice - stopDiff;
+          takeProfit = entryPrice + profitDiff;
+        } else {
+          stop = entryPrice + stopDiff;
+          takeProfit = entryPrice - profitDiff;
+        }
+
+        // random strength & horizon
+        let strength = strengths[Math.floor(Math.random() * strengths.length)];
+        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
+
+        return {
+          contractName: item.contractName,
+          signal: sig,
+          entryDate: "02/20/25",
+          entryPrice: parseFloat(entryPrice.toFixed(2)),
+          stopLoss: parseFloat(stop.toFixed(2)),
+          takeProfit: parseFloat(takeProfit.toFixed(2)),
+          timeHorizon: horizon,
+          strength: strength
+        };
+      });
+    }
+
+    /************************************************************************
+     * 3) RANDOM FLUCTUATIONS every 5 minutes
      *    ~±2-3% for last, high, low; ±10% for volume
-     *******************************************************************/
+     *    Then re-generate trading guide as well.
+     ************************************************************************/
     function fluctuateData() {
       futuresData.forEach(item => {
-        // For 'last' 
-        let pct = (Math.random() * 5 - 2.5) / 100; // roughly ±2.5%
+        // for last
+        let pct = (Math.random() * 5 - 2.5) / 100; // ~±2.5%
         let oldLast = item.last;
         let newLast = oldLast * (1 + pct);
         item.last = parseFloat(newLast.toFixed(2));
-        // For 'change'
+
+        // change
         let diff = item.last - oldLast;
         item.change = parseFloat(diff.toFixed(2));
 
-        // High/Low can fluctuate around newLast
+        // high/low around newLast
         let highPct = (Math.random() * 3) / 100; // up to +3%
         let lowPct = (Math.random() * 3) / 100;  // up to +3%
         item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
@@ -299,19 +348,22 @@
         let volPct = (Math.random() * 20 - 10) / 100;
         item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
       });
+
+      // Also re-generate the trading guide with new data
+      generateTradingGuide();
     }
 
-    /*******************************************************************
-     * 3) RENDER TABLE
-     *******************************************************************/
+    /************************************************************************
+     * 4) RENDER TABLES
+     ************************************************************************/
     function renderFuturesTable() {
       const tbody = document.getElementById("futuresTable").querySelector("tbody");
       tbody.innerHTML = "";
 
       futuresData.forEach(item => {
-        // Determine change class (green if positive, red if negative)
+        // color for change
         const chgClass = item.change >= 0 ? "change-positive" : "change-negative";
-        // Format change with sign
+        // sign
         let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
 
         const row = document.createElement("tr");
@@ -327,25 +379,60 @@
         `;
         tbody.appendChild(row);
       });
-
-      // Update the "Futures Trading Guide" row with the first contract
-      const firstContract = futuresData[0];
-      document.getElementById("alert-contract").textContent = firstContract.contractName;
-      document.getElementById("alert-entry-price").textContent = firstContract.last.toFixed(2);
-
-      // Also update hidden JSON
-      const dataScript = document.getElementById("futures-data");
-      dataScript.textContent = JSON.stringify({ futures: futuresData });
     }
 
-    /*******************************************************************
-     * 4) INIT + AUTO-UPDATE EVERY 5 MIN
-     *******************************************************************/
+    function renderFuturesGuideTable() {
+      const guideTbody = document.getElementById("futuresGuideTable").querySelector("tbody");
+      guideTbody.innerHTML = "";
+
+      futuresGuide.forEach(trade => {
+        const row = document.createElement("tr");
+        // color code the signal
+        const sigColor = trade.signal === "BUY" ? "green" : "red";
+        row.innerHTML = `
+          <td>${trade.contractName}</td>
+          <td style="color:${sigColor}; font-weight:bold;">${trade.signal}</td>
+          <td>${trade.entryDate}</td>
+          <td>${trade.entryPrice.toFixed(2)}</td>
+          <td>${trade.stopLoss.toFixed(2)}</td>
+          <td>${trade.takeProfit.toFixed(2)}</td>
+          <td>${trade.timeHorizon}</td>
+          <td>${trade.strength}</td>
+          <td><button class="btn-view-trade">View Complete Trade</button></td>
+        `;
+        guideTbody.appendChild(row);
+      });
+    }
+
+    /************************************************************************
+     * 5) UPDATE HIDDEN JSON
+     ************************************************************************/
+    function updateHiddenJSON() {
+      const dataScript = document.getElementById("futures-data");
+      // Combine both tables into a single object
+      const dataObj = {
+        futures: futuresData,
+        tradingGuide: futuresGuide
+      };
+      dataScript.textContent = JSON.stringify(dataObj);
+    }
+
+    /************************************************************************
+     * 6) INIT + AUTO-UPDATE EVERY 5 MIN
+     ************************************************************************/
     function init() {
+      // Generate guide for the first time
+      generateTradingGuide();
       renderFuturesTable();
+      renderFuturesGuideTable();
+      updateHiddenJSON();
+
+      // Then every 5 minutes
       setInterval(() => {
         fluctuateData();
         renderFuturesTable();
+        renderFuturesGuideTable();
+        updateHiddenJSON();
       }, 5 * 60 * 1000);
     }
 
@@ -353,3 +440,4 @@
   </script>
 </body>
 </html>
+
