@@ -1,12 +1,13 @@
-html
-Copy
-Edit
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Dashboard</title>
+  
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
   <style>
     /* Basic reset and styling */
     body {
@@ -45,6 +46,8 @@ Edit
     .section-title {
       font-weight: bold;
       margin-bottom: 10px;
+      /* Default color, will be overridden by accent below */
+      color: #000;
     }
     /* Overview Cards */
     .overview-cards {
@@ -206,7 +209,15 @@ Edit
         </tbody>
       </table>
     </div>
-
+    
+    <!-- Trading Graph Section (Added) -->
+    <div class="section">
+      <div class="section-title">Trading Graphs</div>
+      <div class="card" style="padding: 20px;">
+        <canvas id="tradingChart" width="400" height="200"></canvas>
+      </div>
+    </div>
+    
     <!-- Contract Creation Section repurposed as Simulated Trade -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
@@ -374,10 +385,39 @@ Edit
     </div>
   </div>
 
+  <!-- Bootstrap Bundle JS and Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <script>
+    // Set our accent color (light green) and update section titles
+    const accentColor = '#90ee90';
+    document.querySelectorAll('.section-title').forEach(el => {
+      el.style.color = accentColor;
+    });
+
+    // Initialize Trading Graph using Chart.js
+    const ctx = document.getElementById('tradingChart').getContext('2d');
+    const tradingChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
+        datasets: [{
+          label: 'Trading Data',
+          data: [100, 150, 130, 170, 160, 180],
+          borderColor: accentColor,
+          backgroundColor: 'rgba(144,238,144,0.2)',
+          fill: true,
+          tension: 0.1
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
     /***************************************
      * Data for Finished Goods Inventory
-     * (Based on static table above)
      ***************************************/
     const finishedGoodsData = {
       Copper: { quantity: 80, price: 9500 },
@@ -387,29 +427,32 @@ Edit
     };
 
     /***************************************
- * Fetch and Update Active Contracts
- ***************************************/
-function fetchActiveContracts() {
-  fetch('/api/active-contracts')
-    .then(response => response.json())
-    .then(data => {
-      // Update the global activeContracts variable and re-render the table
-      activeContracts = data;
-      renderActiveContracts();
-    })
-    .catch(err => console.error('Error fetching active contracts:', err));
-}
-
+     * Active Contracts Data (Empty array to start)
+     ***************************************/
+    let activeContracts = [];
 
     /***************************************
-     * Helper: Render Active Contracts Table
+     * Fetch and Update Active Contracts
+     ***************************************/
+    function fetchActiveContracts() {
+      fetch('/api/active-contracts')
+        .then(response => response.json())
+        .then(data => {
+          activeContracts = data;
+          renderActiveContracts();
+        })
+        .catch(err => console.error('Error fetching active contracts:', err));
+    }
+
+    /***************************************
+     * Render Active Contracts Table
      ***************************************/
     function renderActiveContracts() {
       const tableBody = document.getElementById('active-contracts-body');
       tableBody.innerHTML = '';
       activeContracts.forEach((contract, index) => {
         const row = document.createElement('tr');
-        row.innerHTML = 
+        row.innerHTML = `
           <td>${contract.material}</td>
           <td>$${Number(contract.lastPrice).toLocaleString()}</td>
           <td>${contract.change}</td>
@@ -419,30 +462,30 @@ function fetchActiveContracts() {
             <button class="secondary-btn" onclick="rollContract(${index}); event.stopPropagation();">Roll</button>
             <button class="danger-btn" onclick="closeContract(${index}); event.stopPropagation();">Close</button>
           </td>
-        ;
+        `;
         tableBody.appendChild(row);
       });
     }
 
     /***************************************
-     * Append Trade Log Entry (for Simulated Trade actions)
+     * Append Trade Log Entry
      ***************************************/
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
       const tradeTime = new Date().toLocaleTimeString();
       const newRow = document.createElement('tr');
-      newRow.innerHTML = 
+      newRow.innerHTML = `
         <td>${tradeTime}</td>
         <td>${material}</td>
         <td>${quantity}</td>
         <td>$${Number(price).toLocaleString()}</td>
         <td>$${Number(totalCost).toLocaleString()}</td>
-      ;
+      `;
       tableBody.appendChild(newRow);
     }
 
     /***************************************
-     * Update Contract Creation (Trade) Options
+     * Update Trade Options
      ***************************************/
     function updateTradeOptions() {
       const material = document.getElementById('create-material').value;
@@ -493,18 +536,19 @@ function fetchActiveContracts() {
       const headerDate = new Date(parts[2], parts[0]-1, parts[1]);
       for (let i = 1; i <= 5; i++) {
         const expDate = new Date(headerDate.getFullYear(), headerDate.getMonth() + i, headerDate.getDate());
-        const option = document.createElement('option');
         const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
         const day = expDate.getDate().toString().padStart(2, '0');
         const year = expDate.getFullYear();
-        option.value = ${month}/${day}/${year};
-        option.textContent = ${month}/${day}/${year};
+        const dateStr = month + '/' + day + '/' + year;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
         expirationSelect.appendChild(option);
       }
     }
 
     /***************************************
-     * Simulate Trade (Using Contract Creation inputs)
+     * Simulate Trade
      ***************************************/
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
@@ -513,17 +557,16 @@ function fetchActiveContracts() {
       const chosenCost = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      // For each 10-ton load (trade), calculate total cost and log the trade.
       for (let i = 0; i < numTrades; i++) {
-        const totalCost = 10 * chosenPrice;  // each trade represents 10 tons
-        appendTradeLogEntry(material +  (Trade #${i + 1}), 10, chosenPrice, totalCost);
+        const totalCost = 10 * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
       }
       
-      alert(${numTrades} simulated trade(s) for ${material} executed.\nCost to create each position: $${chosenCost.toFixed(2)});
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
 
     /***************************************
-     * Add Contracts (each representing a 10-ton load)
+     * Add Contracts
      ***************************************/
     function addContracts() {
       const material = document.getElementById('create-material').value;
@@ -531,22 +574,21 @@ function fetchActiveContracts() {
       const chosenPrice = parseFloat(document.getElementById('create-price').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      // For each 10-ton load, add a contract entry to activeContracts and log it as a trade.
       for (let i = 0; i < numContracts; i++) {
         const randomChange = (Math.random() * 10 - 5).toFixed(2);
         const randomChangePercent = (Math.random() * 2 - 1).toFixed(2) + '%';
         activeContracts.push({
-          material: material +  (10-ton load #${i + 1}),
+          material: material + ' (10-ton load #' + (i + 1) + ')',
           lastPrice: chosenPrice,
           change: (randomChange > 0 ? '+' : '') + randomChange,
           changePercent: randomChangePercent,
           expiration: expiration
         });
         const totalCost = 10 * chosenPrice;
-        appendTradeLogEntry(material +  (Trade #${i + 1}), 10, chosenPrice, totalCost);
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
       }
       renderActiveContracts();
-      alert(${numContracts} contract(s) for ${material} added to Active Contracts.);
+      alert(numContracts + ' contract(s) for ' + material + ' added to Active Contracts.');
     }
 
     /***************************************
@@ -567,6 +609,14 @@ function fetchActiveContracts() {
     }
     function rowClicked(itemName) {
       alert('Row for ' + itemName + ' clicked!');
+    }
+    function rollContract(index) {
+      alert('Rolling contract: ' + activeContracts[index].material);
+    }
+    function closeContract(index) {
+      alert('Closing contract: ' + activeContracts[index].material);
+      activeContracts.splice(index, 1);
+      renderActiveContracts();
     }
 
     window.onload = function() {
