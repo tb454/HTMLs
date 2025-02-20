@@ -1,9 +1,9 @@
 // server.js
 const express = require('express');
 const app = express();
-const port = 4000; // Using 4000 since 3000 is in use
+const port = 4000; // Use port 4000 since 3000 might be in use
 
-// Simulated market data (you can update these values as needed)
+// Simulated market data
 const marketData = {
   Copper: { price: 9500, lastUpdated: new Date() },
   Brass: { price: 7500, lastUpdated: new Date() },
@@ -19,7 +19,7 @@ let activeContracts = [
   { material: 'Aluminum #3', lastPrice: 2200, change: '-0.01', changePercent: '-0.45%', expiration: '09/25/2025' }
 ];
 
-// Serve static files (your wireframe) from the public folder
+// Serve static files from the "public" folder
 app.use(express.static('public'));
 
 // API endpoint to fetch market data
