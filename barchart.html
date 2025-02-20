@@ -1,162 +1,352 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Barchart / Futures</title>
+  <meta charset="UTF-8">
+  <title>Barchart-Style Futures</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Bootstrap (optional) -->
+  <!-- Optional: Bootstrap for quicker styling -->
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
     rel="stylesheet"
   />
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
     body {
-      margin: 20px;
       font-family: Arial, sans-serif;
+      background-color: #f9f9f9;
+      margin: 20px;
     }
-    .title {
-      color: #2c3e50;
+    .futures-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 1rem;
     }
-    #chartContainer {
-      max-width: 600px;
-      margin: 0 auto;
+    .futures-header h2 {
+      margin: 0;
+      font-size: 1.25rem;
     }
+    .futures-header .date {
+      font-size: 0.95rem;
+      color: #666;
+    }
+    .section-title {
+      margin-bottom: 1rem;
+      font-weight: bold;
+      color: #333;
+      font-size: 1.15rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+      white-space: nowrap;
+    }
+    thead th {
+      background-color: #f3f3f3;
+    }
+    tr:hover {
+      background-color: #f7f7f7;
+    }
+    .change-positive {
+      color: green;
+    }
+    .change-negative {
+      color: red;
+    }
+    /* “Links” column: show an ellipsis or small “More” link */
+    .dots-menu {
+      cursor: pointer;
+      color: #007bff;
+    }
+
+    /* Footer table for “Futures Trading Guide” */
+    .footer-table th {
+      background-color: #eaeaea;
+    }
+    .footer-table td {
+      vertical-align: middle;
+    }
+
+    .btn-view-trade {
+      background-color: #007bff;
+      color: #fff;
+      border: none;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-view-trade:hover {
+      background-color: #0056b3;
+    }
+
+    /* Hidden JSON script styling is irrelevant—just ensuring we have it. */
   </style>
 </head>
-<body>
-  <h1 class="title">Barchart Futures Data (Simulated)</h1>
-  <p>
-    This page updates commodity futures prices every 5 minutes with a small random fluctuation.
-  </p>
 
-  <div id="chartContainer">
-    <canvas id="futuresChart"></canvas>
+<body>
+  <div class="container">
+    <!-- Top Header -->
+    <div class="futures-header">
+      <h2>Futures Market Overview</h2>
+      <div class="date">Thu, Feb 20th, 2025</div>
+    </div>
+
+    <!-- Major Markets Overview -->
+    <h3 class="section-title">Major Markets Overview</h3>
+    <div class="table-responsive mb-3">
+      <table id="futuresTable" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+            <th>Links</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Rows populated by JS -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- “Futures Trading Guide: New Trade Alert” -->
+    <h3 class="section-title">Futures Trading Guide: New Trade Alert</h3>
+    <div class="table-responsive">
+      <table class="table footer-table">
+        <thead>
+          <tr>
+            <th>Contract</th>
+            <th>SIGNAL</th>
+            <th>ENTRY DATE</th>
+            <th>ENTRY PRICE</th>
+            <th>STRENGTH</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- A single row as an example. You can add more if desired. -->
+          <tr>
+            <td id="alert-contract"></td>
+            <td style="color:red;">SELL</td>
+            <td>02/20/25</td>
+            <td id="alert-entry-price">N/A</td>
+            <td style="color:orange;">Weak</td>
+            <td>
+              <button class="btn-view-trade">View Complete Trade</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
-  <!-- Hidden JSON for the combined layout to fetch -->
+  <!-- Hidden JSON for external fetch -->
   <script id="futures-data" type="application/json">
     {}
   </script>
 
+  <!-- Optional: Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
   <script>
-    /******************************************************
-     * 1) FUTURES DATA (Same commodities as GreenSpark)
-     ******************************************************/
+    /*******************************************************************
+     * 1) FUTURES DATA (matching GreenSpark’s 12 commodities)
+     *******************************************************************/
     let futuresData = [
       {
-        material: "Copper",
-        contract: "MAR-25",
-        lastPrice: 9550,
-        change: "+0.03",
-        changePct: "+0.75%",
-        expiration: "03/25/2025"
+        contractName: "WASTE (Mar '25)",
+        last: 100.0,
+        change: -0.50,
+        high: 102.0,
+        low: 99.5,
+        volume: 50123,
+        time: "14:47 CT"
       },
       {
-        material: "Copper",
-        contract: "MAY-25",
-        lastPrice: 9950,
-        change: "-0.01",
-        changePct: "-0.24%",
-        expiration: "05/25/2025"
+        contractName: "ALUMINUM (May '25)",
+        last: 220.0,
+        change: +1.25,
+        high: 222.0,
+        low: 217.5,
+        volume: 75200,
+        time: "14:47 CT"
       },
       {
-        material: "Brass",
-        contract: "APR-25",
-        lastPrice: 7850,
-        change: "+0.02",
-        changePct: "+0.80%",
-        expiration: "04/25/2025"
+        contractName: "Electric Motors (Feb '25)",
+        last: 89.0,
+        change: +0.75,
+        high: 90.0,
+        low: 88.0,
+        volume: 19845,
+        time: "14:47 CT"
       },
       {
-        material: "Steel",
-        contract: "JUN-25",
-        lastPrice: 500,
-        change: "+0.01",
-        changePct: "+0.64%",
-        expiration: "06/25/2025"
+        contractName: "Insulated copper wire (Mar '25)",
+        last: 310.0,
+        change: +2.0,
+        high: 315.0,
+        low: 305.0,
+        volume: 42312,
+        time: "14:47 CT"
       },
       {
-        material: "Aluminum",
-        contract: "SEP-25",
-        lastPrice: 2500,
-        change: "+0.01",
-        changePct: "+0.80%",
-        expiration: "09/25/2025"
+        contractName: "LEAD (Jul '25)",
+        last: 45.2,
+        change: -0.2,
+        high: 46.0,
+        low: 44.8,
+        volume: 13890,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "FERROUS (Jun '25)",
+        last: 502.0,
+        change: +1.5,
+        high: 505.0,
+        low: 498.0,
+        volume: 28176,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "RADIATOR PRODUCT (Apr '25)",
+        last: 128.0,
+        change: +0.75,
+        high: 129.5,
+        low: 126.0,
+        volume: 8625,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "COPPER PRODUCT (Mar '25)",
+        last: 955.0,
+        change: +3.5,
+        high: 960.0,
+        low: 940.0,
+        volume: 15500,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "BRASS PRODUCT (May '25)",
+        last: 780.0,
+        change: -2.0,
+        high: 785.0,
+        low: 775.0,
+        volume: 11240,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "MISC PRODUCT (Sep '25)",
+        last: 410.0,
+        change: +1.0,
+        high: 415.0,
+        low: 405.0,
+        volume: 12990,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "STAINLESS STEEL PRODUCT (Aug '25)",
+        last: 215.0,
+        change: +0.50,
+        high: 217.0,
+        low: 211.0,
+        volume: 8450,
+        time: "14:47 CT"
+      },
+      {
+        contractName: "E-SCRAP (Nov '25)",
+        last: 32.0,
+        change: -0.25,
+        high: 32.5,
+        low: 31.5,
+        volume: 3210,
+        time: "14:47 CT"
       }
     ];
 
-    /******************************************************
-     * 2) APPLY RANDOM PRICE CHANGES
-     ******************************************************/
-    function fluctuatePrices() {
+    /*******************************************************************
+     * 2) RANDOM FLUCTUATIONS every 5 minutes
+     *    ~±2-3% for last, high, low; ±10% for volume
+     *******************************************************************/
+    function fluctuateData() {
       futuresData.forEach(item => {
-        // e.g. up/down by up to 3%
-        const fluctuationPct = (Math.random() * 6 - 3) / 100; // -0.03 to +0.03
-        const oldPrice = item.lastPrice;
-        const newPrice = Math.round(oldPrice * (1 + fluctuationPct));
-        item.lastPrice = newPrice;
+        // For 'last' 
+        let pct = (Math.random() * 5 - 2.5) / 100; // roughly ±2.5%
+        let oldLast = item.last;
+        let newLast = oldLast * (1 + pct);
+        item.last = parseFloat(newLast.toFixed(2));
+        // For 'change'
+        let diff = item.last - oldLast;
+        item.change = parseFloat(diff.toFixed(2));
 
-        // Also compute new +/- change for display
-        const diff = newPrice - oldPrice;
-        const sign = diff >= 0 ? "+" : "";
-        item.change = `${sign}${(diff).toFixed(2)}`;
-        const pct = (diff / oldPrice) * 100;
-        item.changePct = `${sign}${pct.toFixed(2)}%`;
+        // High/Low can fluctuate around newLast
+        let highPct = (Math.random() * 3) / 100; // up to +3%
+        let lowPct = (Math.random() * 3) / 100;  // up to +3%
+        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
+        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
+
+        // volume ±10%
+        let volPct = (Math.random() * 20 - 10) / 100;
+        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
       });
     }
 
-    /******************************************************
-     * 3) RENDER CHART & UPDATE HIDDEN JSON
-     ******************************************************/
-    let chart;
+    /*******************************************************************
+     * 3) RENDER TABLE
+     *******************************************************************/
+    function renderFuturesTable() {
+      const tbody = document.getElementById("futuresTable").querySelector("tbody");
+      tbody.innerHTML = "";
 
-    function renderChart() {
-      const ctx = document.getElementById("futuresChart").getContext("2d");
-      if (chart) {
-        chart.destroy(); // re-draw each time
-      }
+      futuresData.forEach(item => {
+        // Determine change class (green if positive, red if negative)
+        const chgClass = item.change >= 0 ? "change-positive" : "change-negative";
+        // Format change with sign
+        let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
 
-      // Chart labels = material + contract for clarity
-      const labels = futuresData.map(item => `${item.material} (${item.contract})`);
-      const prices = futuresData.map(item => item.lastPrice);
-
-      chart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "Last Price",
-              data: prices,
-              backgroundColor: "rgba(54, 162, 235, 0.7)"
-            }
-          ]
-        },
-        options: {
-          scales: {
-            y: { beginAtZero: false }
-          }
-        }
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${item.contractName}</td>
+          <td>${item.last.toFixed(2)}</td>
+          <td class="${chgClass}">${dispChange}</td>
+          <td>${item.high.toFixed(2)}</td>
+          <td>${item.low.toFixed(2)}</td>
+          <td>${item.volume.toLocaleString()}</td>
+          <td>${item.time}</td>
+          <td><span class="dots-menu">&#8230;</span></td>
+        `;
+        tbody.appendChild(row);
       });
 
-      // Also update the hidden JSON
+      // Update the "Futures Trading Guide" row with the first contract
+      const firstContract = futuresData[0];
+      document.getElementById("alert-contract").textContent = firstContract.contractName;
+      document.getElementById("alert-entry-price").textContent = firstContract.last.toFixed(2);
+
+      // Also update hidden JSON
       const dataScript = document.getElementById("futures-data");
       dataScript.textContent = JSON.stringify({ futures: futuresData });
     }
 
-    /******************************************************
-     * 4) INIT & AUTO-UPDATE EVERY 5 MIN
-     ******************************************************/
+    /*******************************************************************
+     * 4) INIT + AUTO-UPDATE EVERY 5 MIN
+     *******************************************************************/
     function init() {
-      renderChart(); // initial
+      renderFuturesTable();
       setInterval(() => {
-        fluctuatePrices();
-        renderChart();
-      }, 5 * 60 * 1000); // 5 min
+        fluctuateData();
+        renderFuturesTable();
+      }, 5 * 60 * 1000);
     }
 
     window.addEventListener("DOMContentLoaded", init);
