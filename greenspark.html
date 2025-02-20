@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GreenSpark Inventory</title>
+
+  <!-- Bootstrap (optional, for simple styling) -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <style>
+    body {
+      margin: 20px;
+      font-family: Arial, sans-serif;
+    }
+    .title {
+      color: #2c3e50;
+      margin-bottom: 1rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    th {
+      background-color: #eee;
+    }
+    tr:hover {
+      background-color: #f1f1f1;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1 class="title">GreenSpark Inventory (Simulated)</h1>
+  <p>
+    This page simulates “live” inventory data every 5 minutes.  
+    <br>Quantities are 25× the original, plus a small random fluctuation on each update.
+  </p>
+
+  <!-- Inventory Table -->
+  <table id="inventoryTable">
+    <thead>
+      <tr>
+        <th>Material</th>
+        <th>Quantity (tons)</th>
+        <th>Price/ton</th>
+        <th>Value of Material</th>
+        <th>Date Created</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Populated by JS -->
+    </tbody>
+  </table>
+
+  <!-- Hidden JSON that can be fetched/parsed by combined layout -->
+  <script id="greenspark-data" type="application/json">
+    {}
+  </script>
+
+  <script>
+    /******************************************************
+     * 1) BASE INVENTORY (25x original)
+     ******************************************************/
+    let baseInventory = [
+      {
+        material: "Copper",
+        quantity: 80 * 25,        // = 2000
+        pricePerTon: 9500,
+        dateCreated: "02/13/2025",
+        status: "Available"
+      },
+      {
+        material: "Brass",
+        quantity: 100 * 25,      // = 2500
+        pricePerTon: 7500,
+        dateCreated: "02/12/2025",
+        status: "Available"
+      },
+      {
+        material: "Steel",
+        quantity: 280 * 25,      // = 7000
+        pricePerTon: 500,
+        dateCreated: "02/11/2025",
+        status: "Secured"
+      },
+      {
+        material: "Aluminum",
+        quantity: 100 * 25,      // = 2500
+        pricePerTon: 2200,
+        dateCreated: "02/10/2025",
+        status: "Available"
+      }
+    ];
+
+    /******************************************************
+     * 2) APPLY A SMALL RANDOM FLUCTUATION
+     ******************************************************/
+    function fluctuateInventory() {
+      baseInventory.forEach(item => {
+        // Up/down by up to 5%
+        const fluctuationPct = (Math.random() * 10 - 5) / 100; // e.g. -0.05 to +0.05
+        item.quantity = Math.round(item.quantity * (1 + fluctuationPct));
+      });
+    }
+
+    /******************************************************
+     * 3) UPDATE TABLE & JSON SCRIPT
+     ******************************************************/
+    function renderInventory() {
+      const tbody = document.getElementById("inventoryTable").querySelector("tbody");
+      tbody.innerHTML = "";
+
+      baseInventory.forEach(item => {
+        const totalValue = item.quantity * item.pricePerTon;
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${item.material}</td>
+          <td>${item.quantity.toLocaleString()}</td>
+          <td>$${item.pricePerTon.toLocaleString()}</td>
+          <td>$${totalValue.toLocaleString()}</td>
+          <td>${item.dateCreated}</td>
+          <td>${item.status}</td>
+        `;
+        tbody.appendChild(row);
+      });
+
+      // Also update the hidden JSON so external pages can fetch & parse it
+      const dataScript = document.getElementById("greenspark-data");
+      const dataObj = { inventory: baseInventory };
+      dataScript.textContent = JSON.stringify(dataObj);
+    }
+
+    /******************************************************
+     * 4) INITIALIZE & AUTO-UPDATE EVERY 5 MIN
+     ******************************************************/
+    function init() {
+      renderInventory(); // initial
+      setInterval(() => {
+        fluctuateInventory();
+        renderInventory();
+      }, 5 * 60 * 1000); // every 5 minutes
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
