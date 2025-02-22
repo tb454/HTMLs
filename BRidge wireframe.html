@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -383,6 +383,14 @@
         </tbody>
       </table>
     </div>
+    
+    <!-- Live Data Updates Section -->
+    <div class="section">
+      <div class="section-title">Live Data Updates</div>
+      <!-- These containers will be updated periodically via AJAX/Fetch -->
+      <div id="barchart-container"></div>
+      <div id="green-spark-container"></div>
+    </div>
   </div>
 
   <!-- Bootstrap Bundle JS and Chart.js -->
@@ -623,6 +631,32 @@
       updateTradeOptions();
       renderActiveContracts();
     };
+
+    /***************************************
+     * Live Data Update for Barchart & Green Spark
+     ***************************************/
+    function updateLiveData() {
+      // Fetch and update barchart content
+      fetch('barchart.html')
+        .then(response => response.text())
+        .then(html => {
+          document.getElementById('barchart-container').innerHTML = html;
+        })
+        .catch(err => console.error('Error loading barchart:', err));
+
+      // Fetch and update green-spark content
+      fetch('green-spark.html')
+        .then(response => response.text())
+        .then(html => {
+          document.getElementById('green-spark-container').innerHTML = html;
+        })
+        .catch(err => console.error('Error loading green-spark:', err));
+    }
+
+    // Call updateLiveData every 5000 milliseconds (5 seconds)
+    setInterval(updateLiveData, 5000);
+    // Initial call to populate the live data containers on page load
+    updateLiveData();
   </script>
 </body>
 </html>
