@@ -1,69 +1,103 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>  
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Dashboard</title>
   
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
   <style>
-    /* Basic reset and styling */
+    /* Base styling */
     body {
-      font-family: Arial, sans-serif;
-      background-color: #f5f5f5;
+      font-family: 'Roboto', sans-serif;
+      background-color: #f0f2f5;
       margin: 0;
       padding: 20px;
+      color: #333;
     }
     .container {
       max-width: 1200px;
-      margin: 0 auto;
+      margin: auto;
     }
-    .header, .section {
-      background-color: #fff;
-      border: 1px solid #ccc;
-      padding: 10px;
-      margin-bottom: 20px;
-    }
+    /* Header */
     .header {
+      background-color: #2c3e50;
+      color: #ecf0f1;
+      padding: 15px 20px;
+      margin-bottom: 20px;
+      border-radius: 5px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     .header h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: 24px;
     }
     .user-info {
       font-size: 14px;
     }
     .user-info button {
       margin: 0 10px;
-      padding: 5px 10px;
+      padding: 5px 12px;
+      border: none;
+      background-color: #e74c3c;
+      color: #fff;
+      border-radius: 3px;
       cursor: pointer;
     }
+    .user-info button:hover {
+      background-color: #c0392b;
+    }
+    /* Section styling */
+    .section {
+      background-color: #fff;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
     .section-title {
-      font-weight: bold;
-      margin-bottom: 10px;
-      /* Default color, will be overridden by accent below */
-      color: #000;
+      font-weight: 700;
+      margin-bottom: 15px;
+      font-size: 18px;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #3498db;
     }
     /* Overview Cards */
     .overview-cards {
       display: flex;
-      gap: 10px;
+      gap: 15px;
+      flex-wrap: wrap;
     }
-    .card {
+    .card-custom {
       flex: 1;
-      border: 1px solid #ccc;
-      padding: 10px;
+      min-width: 250px;
+      background-color: #fff;
+      border: 1px solid #e1e4e8;
+      border-radius: 5px;
+      padding: 20px;
       text-align: center;
       cursor: pointer;
-      transition: background-color 0.2s ease;
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
     }
-    .card:hover {
-      background-color: #e9ecef;
+    .card-custom:hover {
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      transform: translateY(-2px);
+    }
+    .card-custom div {
+      margin-bottom: 8px;
+      font-size: 16px;
     }
     /* Tables */
     table {
@@ -72,54 +106,71 @@
       margin-bottom: 10px;
     }
     th, td {
-      padding: 8px;
-      border: 1px solid #ccc;
+      padding: 12px 15px;
+      border-bottom: 1px solid #e1e4e8;
       text-align: left;
     }
     th {
-      background-color: #eee;
+      background-color: #f7f7f7;
+      font-weight: 500;
     }
     tr:hover {
-      background-color: #f1f1f1;
+      background-color: #f9f9f9;
       cursor: pointer;
     }
     /* Buttons */
     .action-btn {
-      padding: 5px 10px;
-      background-color: #007BFF;
+      padding: 8px 16px;
+      background-color: #3498db;
       border: none;
+      border-radius: 3px;
       color: #fff;
       cursor: pointer;
+      font-size: 14px;
     }
     .action-btn:hover {
-      background-color: #0056b3;
+      background-color: #2980b9;
     }
     .secondary-btn {
-      padding: 3px 8px;
-      background-color: #28a745;
+      padding: 5px 10px;
+      background-color: #27ae60;
       border: none;
+      border-radius: 3px;
       color: #fff;
       cursor: pointer;
+      font-size: 13px;
       margin-right: 5px;
     }
     .secondary-btn:hover {
-      background-color: #218838;
+      background-color: #1e8449;
     }
     .danger-btn {
-      padding: 3px 8px;
-      background-color: #dc3545;
+      padding: 5px 10px;
+      background-color: #e74c3c;
       border: none;
+      border-radius: 3px;
       color: #fff;
       cursor: pointer;
+      font-size: 13px;
     }
     .danger-btn:hover {
-      background-color: #c82333;
+      background-color: #c0392b;
     }
     /* Form Inputs */
     select, input[type="number"], input[type="date"] {
       margin-right: 8px;
-      padding: 5px;
+      padding: 8px;
       font-size: 14px;
+      border: 1px solid #ced4da;
+      border-radius: 3px;
+    }
+    /* Trading Chart Container */
+    .chart-container {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 5px;
+      border: 1px solid #e1e4e8;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
   </style>
 </head>
@@ -137,20 +188,20 @@
     
     <!-- Overview Cards -->
     <div class="section">
-      <div class="section-title">OVERVIEW CARDS</div>
+      <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <div class="card" onclick="cardClicked('Finished Goods')">
-          <div>Finished Goods:</div>
+        <div class="card-custom" onclick="cardClicked('Finished Goods')">
+          <div><strong>Finished Goods</strong></div>
           <div>24 Contracts Available</div>
-          <div>~560.0 total tons</div>
+          <div>~560.0 Total Tons</div>
         </div>
-        <div class="card" onclick="cardClicked('Active Contracts')">
-          <div>Active Contracts:</div>
+        <div class="card-custom" onclick="cardClicked('Active Contracts')">
+          <div><strong>Active Contracts</strong></div>
           <div>8 Secured</div>
           <div>Margin: $12,000</div>
         </div>
-        <div class="card" onclick="cardClicked('Market Snapshot')">
-          <div>Market Snapshot:</div>
+        <div class="card-custom" onclick="cardClicked('Market Snapshot')">
+          <div><strong>Market Snapshot</strong></div>
           <div>Copper: $9,500</div>
           <div>Steel: $500</div>
           <div>Brass: $7,500</div>
@@ -159,7 +210,7 @@
       </div>
     </div>
     
-    <!-- Finished Goods Inventory (Static Data) -->
+    <!-- Finished Goods Inventory -->
     <div class="section">
       <div class="section-title">Finished Goods Inventory (Greenspark)</div>
       <table>
@@ -168,7 +219,7 @@
             <th>Material</th>
             <th>Quantity (tons)</th>
             <th>Price/ton</th>
-            <th>Value of Material</th>
+            <th>Value</th>
             <th>Date Created</th>
             <th>Status</th>
           </tr>
@@ -210,19 +261,18 @@
       </table>
     </div>
     
-    <!-- Trading Graph Section (Added) -->
+    <!-- Trading Graph Section -->
     <div class="section">
       <div class="section-title">Trading Graphs</div>
-      <div class="card" style="padding: 20px;">
+      <div class="chart-container">
         <canvas id="tradingChart" width="400" height="200"></canvas>
       </div>
     </div>
     
-    <!-- Contract Creation Section repurposed as Simulated Trade -->
+    <!-- Simulated Trade Section -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div>
-        <!-- Material dropdown -->
+      <div class="mb-3">
         <label for="create-material">Material:</label>
         <select id="create-material" onchange="updateTradeOptions()">
           <option value="Copper">Copper</option>
@@ -230,36 +280,22 @@
           <option value="Steel">Steel</option>
           <option value="Aluminum">Aluminum</option>
         </select>
-
-        <!-- Creatable Contracts dropdown (based on quantity/10) -->
+        
         <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts">
-          <!-- Options updated by JS -->
-        </select>
-
-        <!-- Price/ton dropdown (6 options: 3 below, 3 above base) -->
+        <select id="create-contracts"></select>
+        
         <label for="create-price">Price/ton:</label>
-        <select id="create-price">
-          <!-- Options updated by JS -->
-        </select>
-
-        <!-- Cost to Create dropdown (0.1% of base price) -->
+        <select id="create-price"></select>
+        
         <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost">
-          <!-- Option updated by JS -->
-        </select>
-
-        <!-- Expiration Date dropdown (5 future dates, 1 month increments) -->
+        <select id="create-cost"></select>
+        
         <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration">
-          <!-- Options updated by JS -->
-        </select>
-
-        <!-- Button changed to Execute Trade -->
-        <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+        <select id="create-expiration"></select>
       </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </div>
-
+    
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
@@ -274,11 +310,11 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Trade entries will be appended here -->
+          <!-- Trade entries appended here -->
         </tbody>
       </table>
     </div>
-
+    
     <!-- Active Contracts Section -->
     <div class="section">
       <div class="section-title">Active Contracts</div>
@@ -387,7 +423,6 @@
     <!-- Live Data Updates Section -->
     <div class="section">
       <div class="section-title">Live Data Updates</div>
-      <!-- These containers will be updated periodically via AJAX/Fetch -->
       <div id="barchart-container"></div>
       <div id="green-spark-container"></div>
     </div>
@@ -398,9 +433,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
-    // Set our accent color (light green) and update section titles
-    const accentColor = '#90ee90';
+    // Accent color for charts and highlights
+    const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
+      el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
 
@@ -414,7 +450,7 @@
           label: 'Trading Data',
           data: [100, 150, 130, 170, 160, 180],
           borderColor: accentColor,
-          backgroundColor: 'rgba(144,238,144,0.2)',
+          backgroundColor: 'rgba(52,152,219,0.2)',
           fill: true,
           tension: 0.1
         }]
@@ -571,32 +607,6 @@
       }
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
-    }
-
-    /***************************************
-     * Add Contracts
-     ***************************************/
-    function addContracts() {
-      const material = document.getElementById('create-material').value;
-      const numContracts = parseInt(document.getElementById('create-contracts').value, 10);
-      const chosenPrice = parseFloat(document.getElementById('create-price').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
-      for (let i = 0; i < numContracts; i++) {
-        const randomChange = (Math.random() * 10 - 5).toFixed(2);
-        const randomChangePercent = (Math.random() * 2 - 1).toFixed(2) + '%';
-        activeContracts.push({
-          material: material + ' (10-ton load #' + (i + 1) + ')',
-          lastPrice: chosenPrice,
-          change: (randomChange > 0 ? '+' : '') + randomChange,
-          changePercent: randomChangePercent,
-          expiration: expiration
-        });
-        const totalCost = 10 * chosenPrice;
-        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
-      }
-      renderActiveContracts();
-      alert(numContracts + ' contract(s) for ' + material + ' added to Active Contracts.');
     }
 
     /***************************************
