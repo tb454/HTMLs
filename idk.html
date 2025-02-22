@@ -1,0 +1,162 @@
+<!-- FINISHED GOODS INVENTORY (Dynamic Calculation Example) -->
+<div class="section">
+    <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+    
+    <div class="table-responsive">
+      <table id="finished-goods-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Commodities</th>
+            <th>MP (lbs)</th>
+            <th>Finished Goods (lbs)</th>
+            <th>Total (lbs)</th>
+            <th>Avg Cost</th>
+            <th>Total Purchase Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>WASTE</td>
+            <!-- contenteditable + oninput so user can edit values -->
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">12740.40</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <!-- total-lbs gets auto-calculated -->
+            <td class="total-lbs"></td>
+            <!-- avg-cost is also editable -->
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <!-- purchase-value is auto-calculated -->
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>ALUMINUM</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">385422.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>Electric Motors</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">224500.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>Insulated copper wire</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">484240.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>LEAD</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">246200.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>FERRUG</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">492889.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>RADIATOR PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">136670.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>COPPER PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">215670.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>BRASS PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">145680.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>MISC PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">321250.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>STAINLESS STEEL PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">197500.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+          <tr>
+            <td>STEEL PRODUCT</td>
+            <td class="mp-lbs" contenteditable="true" oninput="updatePurchaseValue()">265700.00</td>
+            <td class="finished-lbs" contenteditable="true" oninput="updatePurchaseValue()">0</td>
+            <td class="total-lbs"></td>
+            <td class="avg-cost" contenteditable="true" oninput="updatePurchaseValue()">$0.10</td>
+            <td class="purchase-value"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <script>
+    // Called on page load and whenever a user edits one of the numeric cells
+    function updatePurchaseValue() {
+      const rows = document.querySelectorAll('#finished-goods-table tbody tr');
+      rows.forEach(row => {
+        // Parse MP (lbs)
+        const mpCell = row.querySelector('.mp-lbs');
+        const mp = parseFloat(mpCell.textContent.replace(/,/g, '')) || 0;
+  
+        // Parse Finished Goods (lbs)
+        const finishedCell = row.querySelector('.finished-lbs');
+        const finished = parseFloat(finishedCell.textContent.replace(/,/g, '')) || 0;
+  
+        // Sum for Total (lbs)
+        const total = mp + finished;
+        const totalCell = row.querySelector('.total-lbs');
+        totalCell.textContent = total.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+  
+        // Parse Avg Cost (strip out '$', etc.)
+        const costCell = row.querySelector('.avg-cost');
+        const costString = costCell.textContent.replace(/[^0-9.]/g, '');
+        const cost = parseFloat(costString) || 0;
+  
+        // Calculate Total Purchase Value
+        const purchaseValue = total * cost;
+        const purchaseValueCell = row.querySelector('.purchase-value');
+        purchaseValueCell.textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+      });
+    }
+  
+    // Run calculation on initial page load
+    document.addEventListener('DOMContentLoaded', updatePurchaseValue);
+  </script>
+  
