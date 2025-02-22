@@ -384,7 +384,7 @@
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
 
-  <!-- Simulated Trade Section -->
+ <!-- Simulated Trade Section -->
 <div class="section">
   <div class="section-title">Simulated Trade (10-ton loads)</div>
   <div class="mb-3">
@@ -412,25 +412,38 @@
 </div>
 
 <script>
-  // Helper: Look up commodity data from the Greenspark table.
-  // Assumes the Greenspark table row for each commodity has:
-  //   Column 0: Material name,
-  //   Column 2: Finished Goods (lbs),
-  //   Column 4: Avg Cost ($/lb)
+  // Prices from the Market Snapshot (assumed to be static as shown in your overview card)
+  const marketSnapshotPrices = {
+    Copper: 9500,
+    Brass: 7500,
+    Steel: 500,
+    Aluminum: 2200
+  };
+
+  // Mapping from dropdown material values to the names in the Greenspark table.
+  const commodityMapping = {
+    Copper: "COPPER PRODUCT",
+    Brass: "BRASS PRODUCT",
+    Steel: "STEEL PRODUCT",
+    Aluminum: "ALUMINUM"
+  };
+
+  // Look up commodity data from the Greenspark table.
+  // This function returns the Finished Goods (lbs) for the commodity.
   function getCommodityData(material) {
+    const target = commodityMapping[material];
     const table = document.getElementById('greenspark-table');
     const rows = table.querySelectorAll('tbody tr');
     for (let row of rows) {
-      const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
-      if (cellMaterial === material.toLowerCase()) {
+      const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
+      if (rowMaterial === target.toUpperCase()) {
+        // Finished Goods is in column index 2.
         const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
         const finishedGoods = parseFloat(finishedGoodsText) || 0;
-        const avgCostText = row.cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-        const avgCost = parseFloat(avgCostText) || 0;
-        return { finishedGoods, avgCost };
+        return { finishedGoods };
       }
     }
-    return { finishedGoods: 0, avgCost: 0 };
+    return { finishedGoods: 0 };
   }
 
   function updateTradeOptions() {
@@ -438,11 +451,12 @@
     const material = materialSelect.value; // e.g., "Aluminum"
     const data = getCommodityData(material);
     
+    // Calculate available contracts using Finished Goods from Greenspark.
     // Assume contract size is 10 tons = 20,000 lbs.
     const contractSize = 20000;
     const availableContracts = Math.floor(data.finishedGoods / contractSize);
     
-    // Update "Creatable Contracts" dropdown
+    // Update "Creatable Contracts" dropdown.
     const contractsSelect = document.getElementById('create-contracts');
     contractsSelect.innerHTML = '';
     if (availableContracts < 1) {
@@ -459,13 +473,13 @@
       }
     }
     
-    // Calculate base price per ton.
-    // Assuming avgCost is in $/lb, so:
-    const basePricePerTon = data.avgCost * 2000;
+    // For "Price/ton", use the market snapshot price.
+    const basePricePerTon = marketSnapshotPrices[material] || 0;
     
     // Update "Price/ton" dropdown: 6 options using multipliers.
     const priceSelect = document.getElementById('create-price');
     priceSelect.innerHTML = '';
+    // Using multipliers: 0.95, 0.975, 1, 1.025, 1.05, 1.075.
     const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
     multipliers.forEach(mult => {
       const option = document.createElement('option');
@@ -489,10 +503,10 @@
     expirationSelect.innerHTML = '';
     const today = new Date();
     for (let i = 1; i <= 5; i++) {
-      let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
-      let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
-      let day = expDate.getDate().toString().padStart(2, '0');
-      let year = expDate.getFullYear();
+      const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+      const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+      const day = expDate.getDate().toString().padStart(2, '0');
+      const year = expDate.getFullYear();
       const dateStr = month + '/' + day + '/' + year;
       const option = document.createElement('option');
       option.value = dateStr;
@@ -502,6 +516,23 @@
   }
   
   document.addEventListener('DOMContentLoaded', updateTradeOptions);
+  
+  function simulateTrade() {
+    const material = document.getElementById('create-material').value;
+    const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+    const chosenPrice = parseFloat(document.getElementById('create-price').value);
+    const chosenCost = parseFloat(document.getElementById('create-cost').value);
+    const expiration = document.getElementById('create-expiration').value;
+    
+    // For each trade, log an entry (this example uses a placeholder function appendTradeLogEntry).
+    for (let i = 0; i < numTrades; i++) {
+      // Assume each trade is for 10 tons.
+      const totalCost = 10 * chosenPrice;
+      appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
+    }
+    
+    alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+  }
 </script>
 
     <!-- Trade Log Section -->
