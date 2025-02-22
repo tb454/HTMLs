@@ -494,9 +494,9 @@
             <td>High Grade Copper (May '25)</td>
             <td>4.6155</td>
             <td>-0.0050</td>
-            <td>4,590.00</td>
-            <td>4,669.0</td>
-            <td>4,580.00</td>
+            <td>4.5900</td>
+            <td>4.6690</td>
+            <td>4.5800</td>
             <td>36,500</td>
             <td>02/21/25</td>
           </tr>
@@ -634,7 +634,7 @@
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
-    // Market Snapshot prices (assumed to be static as shown in Overview Card)
+    // Market Snapshot prices (assumed static as shown in Overview Card)
     const marketSnapshotPrices = {
       Copper: 9500,
       Brass: 7500,
@@ -790,8 +790,6 @@
       
       // Update Active Contracts table (for margin calculations and totals).
       updateActiveContractsTable();
-      // Also update the Finished Goods Inventory totals.
-      updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
@@ -830,8 +828,7 @@
       
       // Update the totals row.
       document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     
     document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
