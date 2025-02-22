@@ -210,113 +210,179 @@
       </div>
     </div>
     
-    <!-- Finished Goods Inventory (Greenspark) -->
-    <div class="section">
-      <div class="section-title">Finished Goods Inventory (Greenspark)</div>
-      <!-- Updated table with dynamic Total Purchase Value -->
-      <table id="greenspark-table">
-        <thead>
-          <tr>
-            <th>Commodities</th>
-            <th>WIP (lbs)</th>
-            <th>Finished Goods (lbs)</th>
-            <th>Total (lbs)</th>
-            <th>Avg Cost ($/lb)</th>
-            <th>Total Purchase Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr onclick="rowClicked('ALUMINUM')">
-            <td>ALUMINUM</td>
-            <td>12,105</td>
-            <td>44,351</td>
-            <td>56,456</td>
-            <td>$0.50</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Electric Motors')">
-            <td>Electric Motors</td>
-            <td>11,052</td>
-            <td>10,844</td>
-            <td>21,897</td>
-            <td>$0.30</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Insulated copper wire')">
-            <td>Insulated copper wire</td>
-            <td>11,649</td>
-            <td>50,673</td>
-            <td>62,322</td>
-            <td>$1.20</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('LEAD')">
-            <td>LEAD</td>
-            <td>5,802</td>
-            <td>640</td>
-            <td>6,443</td>
-            <td>$0.40</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('FERROUS')">
-            <td>FERROUS</td>
-            <td>24,380</td>
-            <td>190,048</td>
-            <td>214,429</td>
-            <td>$0.09</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('RADIATOR PRODUCT')">
-            <td>RADIATOR PRODUCT</td>
-            <td>15,677</td>
-            <td>324</td>
-            <td>16,001</td>
-            <td>$1.40</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('COPPER PRODUCT')">
-            <td>COPPER PRODUCT</td>
-            <td>12,373</td>
-            <td>73,560</td>
-            <td>85,934</td>
-            <td>$2.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('BRASS PRODUCT')">
-            <td>BRASS PRODUCT</td>
-            <td>5,633</td>
-            <td>10,246</td>
-            <td>15,879</td>
-            <td>$1.20</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Carbide PRODUCT')">
-            <td>Carbide PRODUCT</td>
-            <td>468</td>
-            <td>287</td>
-            <td>755</td>
-            <td>$8.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
-            <td>STAINLESS STEEL PRODUCT</td>
-            <td>3,482</td>
-            <td>15,671</td>
-            <td>19,153</td>
-            <td>$0.60</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STEEL PRODUCT')">
-            <td>STEEL PRODUCT</td>
-            <td>28,763</td>
-            <td>134,678</td>
-            <td>163,442</td>
-            <td>$0.14</td>
-            <td>$0.00</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+   <!-- Finished Goods Inventory (Greenspark) -->
+<div class="section">
+    <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+    <!-- Updated table with dynamic Total Purchase Value and totals row -->
+    <table id="greenspark-table">
+      <thead>
+        <tr>
+          <th>Commodities</th>
+          <th>WIP (lbs)</th>
+          <th>Finished Goods (lbs)</th>
+          <th>Total (lbs)</th>
+          <th>Avg Cost ($/lb)</th>
+          <th>Total Purchase Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr onclick="rowClicked('ALUMINUM')">
+          <td>ALUMINUM</td>
+          <td>12,105</td>
+          <td>44,351</td>
+          <td>56,456</td>
+          <td>$0.50</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('Electric Motors')">
+          <td>Electric Motors</td>
+          <td>11,052</td>
+          <td>10,844</td>
+          <td>21,897</td>
+          <td>$0.30</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('Insulated copper wire')">
+          <td>Insulated copper wire</td>
+          <td>11,649</td>
+          <td>50,673</td>
+          <td>62,322</td>
+          <td>$1.20</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('LEAD')">
+          <td>LEAD</td>
+          <td>5,802</td>
+          <td>640</td>
+          <td>6,443</td>
+          <td>$0.40</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('FERROUS')">
+          <td>FERROUS</td>
+          <td>24,380</td>
+          <td>190,048</td>
+          <td>214,429</td>
+          <td>$0.09</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('RADIATOR PRODUCT')">
+          <td>RADIATOR PRODUCT</td>
+          <td>15,677</td>
+          <td>324</td>
+          <td>16,001</td>
+          <td>$1.40</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('COPPER PRODUCT')">
+          <td>COPPER PRODUCT</td>
+          <td>12,373</td>
+          <td>73,560</td>
+          <td>85,934</td>
+          <td>$2.80</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('BRASS PRODUCT')">
+          <td>BRASS PRODUCT</td>
+          <td>5,633</td>
+          <td>10,246</td>
+          <td>15,879</td>
+          <td>$1.20</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('Carbide PRODUCT')">
+          <td>Carbide PRODUCT</td>
+          <td>468</td>
+          <td>287</td>
+          <td>755</td>
+          <td>$8.80</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
+          <td>STAINLESS STEEL PRODUCT</td>
+          <td>3,482</td>
+          <td>15,671</td>
+          <td>19,153</td>
+          <td>$0.60</td>
+          <td>$0.00</td>
+        </tr>
+        <tr onclick="rowClicked('STEEL PRODUCT')">
+          <td>STEEL PRODUCT</td>
+          <td>28,763</td>
+          <td>134,678</td>
+          <td>163,442</td>
+          <td>$0.14</td>
+          <td>$0.00</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>Totals:</strong></td>
+          <td id="total-wip">0</td>
+          <td id="total-finished">0</td>
+          <td id="total-total">0</td>
+          <td></td>
+          <td id="total-purchase">0</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  
+  <script>
+    function updatePurchaseValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
+      rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        // Columns:
+        // 1: WIP (lbs)
+        // 2: Finished Goods (lbs)
+        // 3: Total (lbs)
+        // 4: Avg Cost ($/lb)
+        // 5: Total Purchase Value
+        
+        // Parse the Total (lbs)
+        const totalText = cells[3].textContent.replace(/,/g, '').trim();
+        const totalLbs = parseFloat(totalText) || 0;
+        
+        // Parse Avg Cost (strip out '$' and any non-numeric characters)
+        const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+        const avgCost = parseFloat(avgCostText) || 0;
+        
+        // Calculate Total Purchase Value for this row
+        const purchaseValue = totalLbs * avgCost;
+        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+        
+        // Also sum the WIP and Finished Goods columns for totals
+        const wipText = cells[1].textContent.replace(/,/g, '').trim();
+        const finishedText = cells[2].textContent.replace(/,/g, '').trim();
+        const wip = parseFloat(wipText) || 0;
+        const finished = parseFloat(finishedText) || 0;
+        
+        sumWIP += wip;
+        sumFinished += finished;
+        sumTotal += totalLbs;
+        sumPurchase += purchaseValue;
+      });
+      
+      // Update totals in the <tfoot>
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      });
+    }
+    
+    // Run the calculation when the DOM is ready.
+    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+  </script>
     
     <!-- Trading Graph Section -->
     <div class="section">
