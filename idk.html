@@ -454,10 +454,140 @@
           </tr>
         </thead>
         <tbody id="active-contracts-body">
-          <!-- Active Contracts populated by JavaScript -->
+          <tr>
+            <td>Gold (Apr '25)</td>
+            <td>$2,953.25</td>
+            <td>-2.90</td>
+            <td>-0.10%</td>
+            <td>04/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Silver (Mar '25)</td>
+            <td>$23.95</td>
+            <td>+0.10</td>
+            <td>+0.42%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>High Grade Copper (May '25)</td>
+            <td>$4.6155</td>
+            <td>-0.0050</td>
+            <td>-0.11%</td>
+            <td>05/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Platinum (Apr '25)</td>
+            <td>$997.35</td>
+            <td>+7.50</td>
+            <td>+0.76%</td>
+            <td>04/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Palladium (Mar '25)</td>
+            <td>$1,483.00</td>
+            <td>-9.70</td>
+            <td>-0.65%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(4); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(4); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Aluminum (Mar '25)</td>
+            <td>$2,350.00</td>
+            <td>+15.00</td>
+            <td>+0.64%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(5); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(5); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>$975.50</td>
+            <td>-4.00</td>
+            <td>-0.41%</td>
+            <td>06/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(6); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(6); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Platinum (Jul '25)</td>
+            <td>$1,015.50</td>
+            <td>+5.10</td>
+            <td>+0.50%</td>
+            <td>07/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(7); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(7); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>London Rebar (May '25)</td>
+            <td>$565.00</td>
+            <td>-2.00</td>
+            <td>-0.35%</td>
+            <td>05/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(8); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(8); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Aluminum (Feb '25)</td>
+            <td>$2,325.00</td>
+            <td>+8.00</td>
+            <td>+0.34%</td>
+            <td>02/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(9); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(9); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Nickel (Mar '25)</td>
+            <td>$25,300</td>
+            <td>+55</td>
+            <td>+0.22%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(10); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(10); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Zinc (Jun '25)</td>
+            <td>$3,100</td>
+            <td>-10</td>
+            <td>-0.32%</td>
+            <td>06/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(11); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(11); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
         </tbody>
-      </table>
-    </div>
+         
     
   <!-- Futures / Market Data (CME) - Updated to resemble Metals table -->
 <div class="section">
@@ -565,17 +695,7 @@
         <td>8,230</td>
         <td>02/21/25</td>
       </tr>
-      <tr>
-        <td>LHX25</td>
-        <td>London Rebar (May '25)</td>
-        <td>565.00</td>
-        <td>-2.00</td>
-        <td>567.00</td>
-        <td>575.00</td>
-        <td>560.00</td>
-        <td>5,100</td>
-        <td>02/21/25</td>
-      </tr>
+     
       <tr>
         <td>LMG25</td>
         <td>Aluminum (Feb '25)</td>
