@@ -1,4 +1,4 @@
-<!DOCTYPE html>   
+<!DOCTYPE html>    
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -289,7 +289,7 @@
             <td>$1.20</td>
             <td>$0.00</td>
           </tr>
-          <tr onclick="rowClicked('Carbide PRODUCT')">
+          <tr onclick="rowClicked('Carbide')">
             <td>Carbide</td>
             <td>468</td>
             <td>287</td>
@@ -297,7 +297,7 @@
             <td>$8.80</td>
             <td>$0.00</td>
           </tr>
-          <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
+          <tr onclick="rowClicked('STAINLESS STEEL')">
             <td>STAINLESS STEEL</td>
             <td>13,482</td>
             <td>15,671</td>
@@ -305,7 +305,7 @@
             <td>$0.60</td>
             <td>$0.00</td>
           </tr>
-          <tr onclick="rowClicked('STEEL PRODUCT')">
+          <tr onclick="rowClicked('STEEL')">
             <td>STEEL</td>
             <td>128,763</td>
             <td>134,678</td>
@@ -673,18 +673,19 @@
     };
   
     // Mapping from dropdown material values to Greenspark table names.
+    // Updated to exactly match the table's commodity names.
     const commodityMapping = {
-      Copper: "COPPER PRODUCT",
-      Brass: "BRASS PRODUCT",
-      Steel: "STEEL PRODUCT",
+      Copper: "COPPER",
+      Brass: "BRASS",
+      Steel: "STEEL",
       Aluminum: "ALUMINUM",
       "Electric Motors": "ELECTRIC MOTORS",
       "Insulated Copper Wire": "INSULATED COPPER WIRE",
       Lead: "LEAD",
-      "Steel #2": "STEEL PRODUCT",
+      "Steel #2": "STEEL #2",
       "Radiator Product": "RADIATOR PRODUCT",
-      Carbide: "CARBIDE PRODUCT",
-      "Stainless Steel": "STAINLESS STEEL PRODUCT"
+      Carbide: "CARBIDE",
+      "Stainless Steel": "STAINLESS STEEL"
     };
   
     // Look up commodity data from the Greenspark table.
