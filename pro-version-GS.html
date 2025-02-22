@@ -227,49 +227,49 @@
         <tbody>
           <tr onclick="rowClicked('ALUMINUM')">
             <td>ALUMINUM</td>
-            <td>52,105</td>
-            <td>44,351</td>
+            <td>32,105</td>
+            <td>64,351</td>
             <td>96,456</td>
             <td>$0.50</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('Electric Motors')">
             <td>Electric Motors</td>
-            <td>21,052</td>
-            <td>10,844</td>
-            <td>31,897</td>
+            <td>11,052</td>
+            <td>30,844</td>
+            <td>41,897</td>
             <td>$0.30</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('Insulated copper wire')">
             <td>Insulated copper wire</td>
-            <td>41,649</td>
+            <td>71,649</td>
             <td>50,673</td>
-            <td>92,322</td>
+            <td>122,322</td>
             <td>$1.20</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('LEAD')">
             <td>LEAD</td>
             <td>5,802</td>
-            <td>7,640</td>
-            <td>6,443</td>
+            <td>1,640</td>
+            <td>7,443</td>
             <td>$0.40</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('FERROUS')">
-            <td>STEEL #2</td>
-            <td>24,380</td>
+            <td>Steel #2</td>
+            <td>124,380</td>
             <td>190,048</td>
-            <td>714,429</td>
+            <td>314,429</td>
             <td>$0.09</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('RADIATOR PRODUCT')">
-            <td>RADIATOR PRODUCT</td>
+            <td>RADIATOR Product</td>
             <td>15,677</td>
-            <td>10,324</td>
-            <td>26,001</td>
+            <td>324</td>
+            <td>16,001</td>
             <td>$1.40</td>
             <td>$0.00</td>
           </tr>
@@ -283,8 +283,8 @@
           </tr>
           <tr onclick="rowClicked('BRASS PRODUCT')">
             <td>BRASS</td>
-            <td>25,633</td>
-            <td>10,246</td>
+            <td>15,633</td>
+            <td>20,246</td>
             <td>35,879</td>
             <td>$1.20</td>
             <td>$0.00</td>
@@ -299,17 +299,17 @@
           </tr>
           <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
             <td>STAINLESS STEEL</td>
-            <td>23,482</td>
+            <td>13,482</td>
             <td>15,671</td>
-            <td>39,153</td>
+            <td>29,153</td>
             <td>$0.60</td>
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('STEEL PRODUCT')">
             <td>STEEL</td>
-            <td>528,763</td>
+            <td>128,763</td>
             <td>134,678</td>
-            <td>663,442</td>
+            <td>263,442</td>
             <td>$0.14</td>
             <td>$0.00</td>
           </tr>
@@ -324,57 +324,9 @@
             <td id="total-purchase">0</td>
           </tr>
         </tfoot>
-          
       </table>
     </div>
-    <script>
-      function updatePurchaseValues() {
-        const table = document.getElementById('greenspark-table');
-        const rows = table.querySelectorAll('tbody tr');
-        let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-        
-        rows.forEach(row => {
-          const cells = row.getElementsByTagName('td');
-          // Column indexes:
-          // 1: WIP (lbs)
-          // 2: Finished Goods (lbs)
-          // 3: Total (lbs)
-          // 4: Avg Cost ($/lb)
-          // 5: Total Purchase Value
-          
-          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
-          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-          const totalText = cells[3].textContent.replace(/,/g, '').trim();
-          const totalLbs = parseFloat(totalText) || 0;
-          const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-          const avgCost = parseFloat(avgCostText) || 0;
-          const purchaseValue = totalLbs * avgCost;
-          
-          sumWIP += wip;
-          sumFinished += finished;
-          sumTotal += totalLbs;
-          sumPurchase += purchaseValue;
-          
-          // Optionally, update the row's purchase value cell
-          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
-            minimumFractionDigits: 2, 
-            maximumFractionDigits: 2 
-          });
-        });
-        
-        // Update the totals row in the table footer.
-        document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-        document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-        document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-        document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
-      }
-      
-      document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-    </script>
-     
+    
     <!-- Simulated Trade Section -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
@@ -385,6 +337,13 @@
           <option value="Brass">Brass</option>
           <option value="Steel">Steel</option>
           <option value="Aluminum">Aluminum</option>
+          <option value="Electric Motors">Electric Motors</option>
+          <option value="Insulated Copper Wire">Insulated Copper Wire</option>
+          <option value="Lead">Lead</option>
+          <option value="Steel #2">Steel #2</option>
+          <option value="Radiator Product">Radiator Product</option>
+          <option value="Carbide">Carbide</option>
+          <option value="Stainless Steel">Stainless Steel</option>
         </select>
         
         <label for="create-contracts">Creatable Contracts:</label>
@@ -451,7 +410,7 @@
           </tr>
           <tr onclick="rowClicked('Brass')">
             <td>Brass (May '25)</td>
-            <td>3.7500</td>
+            <td>7.5000</td>
             <td>-0.05</td>
             <td>-0.67%</td>
             <td>05/25/2025</td>
@@ -475,7 +434,7 @@
           </tr>
           <tr onclick="rowClicked('Aluminum')">
             <td>Aluminum (Mar '25)</td>
-            <td>2,200</td>
+            <td>2.3500</td>
             <td>-0.10</td>
             <td>-0.42%</td>
             <td>03/25/2025</td>
@@ -542,9 +501,9 @@
             <td>High Grade Copper (May '25)</td>
             <td>4.6155</td>
             <td>-0.0050</td>
-            <td>4.5900</td>
-            <td>4.6690</td>
-            <td>4.5800</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
             <td>36,500</td>
             <td>02/21/25</td>
           </tr>
@@ -666,15 +625,38 @@
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
         // Columns: 0=Commodity, 1=WIP, 2=Finished, 3=Total, 4=Avg Cost, 5=Purchase Value
+        const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+        const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
         const totalText = cells[3].textContent.replace(/,/g, '').trim();
-        const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
         const totalLbs = parseFloat(totalText) || 0;
+        const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
         const avgCost = parseFloat(avgCostText) || 0;
         const purchaseValue = totalLbs * avgCost;
-        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        sumWIP += wip;
+        sumFinished += finished;
+        sumTotal += totalLbs;
+        sumPurchase += purchaseValue;
+        
+        // Update the row's purchase value cell.
+        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+      });
+      
+      // Update the totals row in the table footer.
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
       });
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
@@ -695,7 +677,14 @@
       Copper: "COPPER PRODUCT",
       Brass: "BRASS PRODUCT",
       Steel: "STEEL PRODUCT",
-      Aluminum: "ALUMINUM"
+      Aluminum: "ALUMINUM",
+      "Electric Motors": "ELECTRIC MOTORS",
+      "Insulated Copper Wire": "INSULATED COPPER WIRE",
+      Lead: "LEAD",
+      "Steel #2": "STEEL PRODUCT",
+      "Radiator Product": "RADIATOR PRODUCT",
+      Carbide: "CARBIDE PRODUCT",
+      "Stainless Steel": "STAINLESS STEEL PRODUCT"
     };
   
     // Look up commodity data from the Greenspark table.
@@ -838,6 +827,8 @@
       
       // Update Active Contracts table (for margin calculations and totals).
       updateActiveContractsTable();
+      // Also update the Finished Goods Inventory totals.
+      updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
@@ -876,7 +867,8 @@
       
       // Update the totals row.
       document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      document.getElementById('activeContractsMarginTotal').textContent =
+        '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     
     document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
