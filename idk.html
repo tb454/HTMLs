@@ -186,73 +186,19 @@
       </div>
     </div>
     
-     <!-- Overview Cards -->
-     <div class="section">
+    <!-- Overview Cards -->
+    <div class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
         <div class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
-          <div>26 Contracts Available</div>
+          <div>24 Contracts Available</div>
           <div>~560.0 Total Tons</div>
         </div>
-        <!-- Active Contracts Card -->
-<div class="card-custom" onclick="cardClicked('Active Contracts')">
-  <div><strong>Active Contracts</strong></div>
-  <!-- These elements will be updated dynamically -->
-  <div id="activeContractsCount">0 Secured</div>
-  <div id="activeContractsMargin">Margin: $0.00</div>
-</div>
-
-<!-- Simulated Trade Section -->
-<div class="section">
-  <div class="section-title">Simulated Trade (10-ton loads)</div>
-  <div class="mb-3">
-    <label for="create-material">Material:</label>
-    <select id="create-material" onchange="updateTradeOptions()">
-      <option value="Copper">Copper</option>
-      <option value="Brass">Brass</option>
-      <option value="Steel">Steel</option>
-      <option value="Aluminum">Aluminum</option>
-    </select>
-    
-    <label for="create-contracts">Creatable Contracts:</label>
-    <select id="create-contracts"></select>
-    
-    <label for="create-price">Price/ton:</label>
-    <select id="create-price"></select>
-    
-    <label for="create-cost">Cost to Create:</label>
-    <select id="create-cost"></select>
-    
-    <label for="create-expiration">Expiration Date:</label>
-    <select id="create-expiration"></select>
-  </div>
-  <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-</div>
-
-<script>
-  /***************************************
-   * Update Active Contracts Card
-   ***************************************/
-  function updateActiveContractsCard() {
-    // Assumes a global array activeContracts exists
-    let count = activeContracts.length;
-    let totalMargin = 0;
-    // For each active contract, calculate: 20000 lbs * lastPrice * 0.07
-    activeContracts.forEach(contract => {
-       let lastPrice = parseFloat(contract.lastPrice) || 0;
-       totalMargin += 20000 * lastPrice * 0.07;
-    });
-    document.getElementById('activeContractsCount').textContent = count + " Secured";
-    document.getElementById('activeContractsMargin').textContent = "Margin: $" + totalMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  // Call updateActiveContractsCard when activeContracts are updated.
-  // For example, if you update activeContracts dynamically, call this function after updating the array.
-  document.addEventListener('DOMContentLoaded', updateActiveContractsCard);
-
-
-
+        <div class="card-custom" onclick="cardClicked('Active Contracts')">
+          <div><strong>Active Contracts</strong></div>
+          <div>8 Secured</div>
+          <div>Margin: $12,000</div>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -264,7 +210,7 @@
       </div>
     </div>
     
-    <!-- Finished Goods Inventory (Greenspark) -->
+    <!-- Finished Goods Inventory  -->
 <div class="section">
   <div class="section-title">Finished Goods Inventory (Greenspark)</div>
   <!-- Updated table with dynamic Total Purchase Value and totals row -->
@@ -438,25 +384,42 @@
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
 
-/***************************************
-* Simulate Trade
-***************************************/
-function simulateTrade() {
- const material = document.getElementById('create-material').value;
- const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
- const chosenPrice = parseFloat(document.getElementById('create-price').value);
- const chosenCost = parseFloat(document.getElementById('create-cost').value);
- const expiration = document.getElementById('create-expiration').value;
- 
- for (let i = 0; i < numTrades; i++) {
-   const totalCost = 10 * chosenPrice;
-   appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
- }
- 
- alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
-}
-</script>
-
+    
+    <!-- Trading Graph Section -->
+    <div class="section">
+      <div class="section-title">Trading Graphs</div>
+      <div class="chart-container">
+        <canvas id="tradingChart" width="400" height="200"></canvas>
+      </div>
+    </div>
+    
+    <!-- Simulated Trade Section -->
+    <div class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <option value="Copper">Copper</option>
+          <option value="Brass">Brass</option>
+          <option value="Steel">Steel</option>
+          <option value="Aluminum">Aluminum</option>
+        </select>
+        
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
+      </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+    </div>
+    
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
@@ -611,7 +574,18 @@ function simulateTrade() {
               <button class="secondary-btn" onclick="rollContract(10); event.stopPropagation();">Roll</button>
               <button class="danger-btn" onclick="closeContract(10); event.stopPropagation();">Close</button>
             </td>
-          </tr>         
+          </tr>
+          <tr>
+            <td>Zinc (Jun '25)</td>
+            <td>$3,100</td>
+            <td>-10</td>
+            <td>-0.32%</td>
+            <td>06/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(11); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(11); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
         </tbody>
        </table>  
     </div>
