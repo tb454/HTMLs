@@ -384,33 +384,126 @@
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
 
-    <!-- Simulated Trade Section -->
-    <div class="section">
-      <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
-        </select>
-        
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
-      </div>
-      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-    </div>
+  <!-- Simulated Trade Section -->
+<div class="section">
+  <div class="section-title">Simulated Trade (10-ton loads)</div>
+  <div class="mb-3">
+    <label for="create-material">Material:</label>
+    <select id="create-material" onchange="updateTradeOptions()">
+      <option value="Copper">Copper</option>
+      <option value="Brass">Brass</option>
+      <option value="Steel">Steel</option>
+      <option value="Aluminum">Aluminum</option>
+    </select>
     
+    <label for="create-contracts">Creatable Contracts:</label>
+    <select id="create-contracts"></select>
+    
+    <label for="create-price">Price/ton:</label>
+    <select id="create-price"></select>
+    
+    <label for="create-cost">Cost to Create:</label>
+    <select id="create-cost"></select>
+    
+    <label for="create-expiration">Expiration Date:</label>
+    <select id="create-expiration"></select>
+  </div>
+  <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+</div>
+
+<script>
+  // Helper: Look up commodity data from the Greenspark table.
+  // Assumes the Greenspark table row for each commodity has:
+  //   Column 0: Material name,
+  //   Column 2: Finished Goods (lbs),
+  //   Column 4: Avg Cost ($/lb)
+  function getCommodityData(material) {
+    const table = document.getElementById('greenspark-table');
+    const rows = table.querySelectorAll('tbody tr');
+    for (let row of rows) {
+      const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+      if (cellMaterial === material.toLowerCase()) {
+        const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+        const finishedGoods = parseFloat(finishedGoodsText) || 0;
+        const avgCostText = row.cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+        const avgCost = parseFloat(avgCostText) || 0;
+        return { finishedGoods, avgCost };
+      }
+    }
+    return { finishedGoods: 0, avgCost: 0 };
+  }
+
+  function updateTradeOptions() {
+    const materialSelect = document.getElementById('create-material');
+    const material = materialSelect.value; // e.g., "Aluminum"
+    const data = getCommodityData(material);
+    
+    // Assume contract size is 10 tons = 20,000 lbs.
+    const contractSize = 20000;
+    const availableContracts = Math.floor(data.finishedGoods / contractSize);
+    
+    // Update "Creatable Contracts" dropdown
+    const contractsSelect = document.getElementById('create-contracts');
+    contractsSelect.innerHTML = '';
+    if (availableContracts < 1) {
+      const option = document.createElement('option');
+      option.value = 0;
+      option.textContent = "0";
+      contractsSelect.appendChild(option);
+    } else {
+      for (let i = 1; i <= availableContracts; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i;
+        contractsSelect.appendChild(option);
+      }
+    }
+    
+    // Calculate base price per ton.
+    // Assuming avgCost is in $/lb, so:
+    const basePricePerTon = data.avgCost * 2000;
+    
+    // Update "Price/ton" dropdown: 6 options using multipliers.
+    const priceSelect = document.getElementById('create-price');
+    priceSelect.innerHTML = '';
+    const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+    multipliers.forEach(mult => {
+      const option = document.createElement('option');
+      const price = basePricePerTon * mult;
+      option.value = price.toFixed(2);
+      option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      priceSelect.appendChild(option);
+    });
+    
+    // Update "Cost to Create" dropdown: single option = 0.1% of base price per ton.
+    const costSelect = document.getElementById('create-cost');
+    costSelect.innerHTML = '';
+    const costToCreate = basePricePerTon * 0.001;
+    const costOption = document.createElement('option');
+    costOption.value = costToCreate.toFixed(2);
+    costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    costSelect.appendChild(costOption);
+    
+    // Update "Expiration Date" dropdown: 5 future dates in 1-month increments.
+    const expirationSelect = document.getElementById('create-expiration');
+    expirationSelect.innerHTML = '';
+    const today = new Date();
+    for (let i = 1; i <= 5; i++) {
+      let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+      let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+      let day = expDate.getDate().toString().padStart(2, '0');
+      let year = expDate.getFullYear();
+      const dateStr = month + '/' + day + '/' + year;
+      const option = document.createElement('option');
+      option.value = dateStr;
+      option.textContent = dateStr;
+      expirationSelect.appendChild(option);
+    }
+  }
+  
+  document.addEventListener('DOMContentLoaded', updateTradeOptions);
+</script>
+
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
