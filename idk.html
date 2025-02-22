@@ -195,10 +195,64 @@
           <div>26 Contracts Available</div>
           <div>~560.0 Total Tons</div>
         </div>
-        <div class="card-custom" onclick="cardClicked('Active Contracts')">
-          <div><strong>Active Contracts</strong></div>
-          <div>8 Secured</div>
-          <div>Margin: $12,000</div>
+        <!-- Active Contracts Card -->
+<div class="card-custom" onclick="cardClicked('Active Contracts')">
+  <div><strong>Active Contracts</strong></div>
+  <!-- These elements will be updated dynamically -->
+  <div id="activeContractsCount">0 Secured</div>
+  <div id="activeContractsMargin">Margin: $0.00</div>
+</div>
+
+<!-- Simulated Trade Section -->
+<div class="section">
+  <div class="section-title">Simulated Trade (10-ton loads)</div>
+  <div class="mb-3">
+    <label for="create-material">Material:</label>
+    <select id="create-material" onchange="updateTradeOptions()">
+      <option value="Copper">Copper</option>
+      <option value="Brass">Brass</option>
+      <option value="Steel">Steel</option>
+      <option value="Aluminum">Aluminum</option>
+    </select>
+    
+    <label for="create-contracts">Creatable Contracts:</label>
+    <select id="create-contracts"></select>
+    
+    <label for="create-price">Price/ton:</label>
+    <select id="create-price"></select>
+    
+    <label for="create-cost">Cost to Create:</label>
+    <select id="create-cost"></select>
+    
+    <label for="create-expiration">Expiration Date:</label>
+    <select id="create-expiration"></select>
+  </div>
+  <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+</div>
+
+<script>
+  /***************************************
+   * Update Active Contracts Card
+   ***************************************/
+  function updateActiveContractsCard() {
+    // Assumes a global array activeContracts exists
+    let count = activeContracts.length;
+    let totalMargin = 0;
+    // For each active contract, calculate: 20000 lbs * lastPrice * 0.07
+    activeContracts.forEach(contract => {
+       let lastPrice = parseFloat(contract.lastPrice) || 0;
+       totalMargin += 20000 * lastPrice * 0.07;
+    });
+    document.getElementById('activeContractsCount').textContent = count + " Secured";
+    document.getElementById('activeContractsMargin').textContent = "Margin: $" + totalMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Call updateActiveContractsCard when activeContracts are updated.
+  // For example, if you update activeContracts dynamically, call this function after updating the array.
+  document.addEventListener('DOMContentLoaded', updateActiveContractsCard);
+
+
+
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -383,6 +437,7 @@
   // Run the calculation when the DOM is ready.
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
+
 /***************************************
 * Simulate Trade
 ***************************************/
@@ -400,6 +455,7 @@ function simulateTrade() {
  
  alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
 }
+</script>
 
     <!-- Trade Log Section -->
     <div class="section">
