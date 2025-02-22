@@ -186,19 +186,15 @@
       </div>
     </div>
     
-    <!-- Overview Cards -->
-<div class="section">
-  <div class="section-title">Overview Cards</div>
-  <div class="overview-cards">
-    <div class="card-custom" onclick="cardClicked('Finished Goods')">
-      <div><strong>Finished Goods</strong></div>
-      <!-- These spans will be updated dynamically -->
-      <div id="contractsAvailable">Calculating...</div>
-      <div id="totalTons">Calculating...</div>
-    </div
-  </div>
-</div>
-               </div>
+     <!-- Overview Cards -->
+     <div class="section">
+      <div class="section-title">Overview Cards</div>
+      <div class="overview-cards">
+        <div class="card-custom" onclick="cardClicked('Finished Goods')">
+          <div><strong>Finished Goods</strong></div>
+          <div>26 Contracts Available</div>
+          <div>~560.0 Total Tons</div>
+        </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
           <div>8 Secured</div>
@@ -387,7 +383,7 @@
   // Run the calculation when the DOM is ready.
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
-    
+
     <!-- Simulated Trade Section -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
