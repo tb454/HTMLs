@@ -430,7 +430,7 @@
       </table>
     </div>
     
- <!-- Active Contracts Section -->
+<!-- Active Contracts Section -->
 <div class="section">
   <div class="section-title">Active Contracts</div>
   <table id="active-contracts-table" class="table table-hover align-middle">
@@ -498,25 +498,13 @@
           <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
         </td>
       </tr>
-      <!-- Example row for Gold (margin not computed) -->
-      <tr onclick="rowClicked('Gold')">
-        <td>Gold (Apr '25)</td>
-        <td>2953.25</td>
-        <td>-2.90</td>
-        <td>-0.10%</td>
-        <td>04/25/2025</td>
-        <td class="margin-cell">N/A</td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(4); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(4); event.stopPropagation();">Close</button>
-        </td>
-      </tr>
-    </tbody>
+      </tbody>
     <tfoot>
       <tr>
-        <td><strong>Total</strong></td>
+        <!-- This totals row only shows the total contracts and total margin requirement -->
+        <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
         <td colspan="4"></td>
-        <td id="activeContractsMarginTotal">$0.00</td>
+        <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
         <td></td>
       </tr>
     </tfoot>
@@ -524,28 +512,26 @@
 </div>
 
 <script>
-  // This function calculates each row's margin requirement and sums them in the totals row.
   function updateActiveContractsTable() {
     const table = document.getElementById('active-contracts-table');
     const rows = table.querySelectorAll('tbody tr');
+    let totalContracts = rows.length;
     let totalMarginRequirement = 0;
     
-    rows.forEach((row) => {
-      // Get the material name (lowercase for matching)
+    rows.forEach(row => {
+      // Material is in cell 0.
       const material = row.cells[0].textContent.toLowerCase();
-      // Parse the last price from column 2 (index 1)
+      // Last Price is in cell 1.
       const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
-      let marginRequirement = 0;
+      let marginRequirement = NaN;
       
-      // For Copper and Brass, use contract size of 20,000 lbs and 7% margin.
+      // For Copper and Brass: use contract size of 20,000 lbs at 7% margin.
       if (material.includes("copper") || material.includes("brass")) {
         marginRequirement = 20000 * lastPrice * 0.07;
       }
-      // For Steel and Aluminum, use contract size of 10 tons (10,000 lbs) and 7% margin.
+      // For Steel and Aluminum: use contract size of 10 (i.e., 10 tons) at 7% margin.
       else if (material.includes("steel") || material.includes("aluminum")) {
-        marginRequirement = 10000 * lastPrice * 0.07;
-      } else {
-        marginRequirement = NaN;
+        marginRequirement = 10 * lastPrice * 0.07;
       }
       
       const marginCell = row.querySelector('.margin-cell');
@@ -560,7 +546,8 @@
       }
     });
     
-    // Update the total margin requirement in the footer.
+    // Update the totals row.
+    document.getElementById('activeContractsCount').textContent = totalContracts;
     document.getElementById('activeContractsMarginTotal').textContent =
       '$' + totalMarginRequirement.toLocaleString(undefined, {
         minimumFractionDigits: 2,
@@ -568,57 +555,8 @@
       });
   }
   
-  // Run the calculation when the DOM is ready.
   document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
 </script>
-
-
-
-<script>
-  // This function loops over each row in the Active Contracts table and calculates the margin requirement
-  function updateActiveContractsTable() {
-    const table = document.getElementById('active-contracts-table');
-    const rows = table.querySelectorAll('tbody tr');
-    let totalContracts = 0;
-    
-    rows.forEach((row, index) => {
-      totalContracts++;
-      // Get the material name (convert to lowercase for easier matching)
-      const material = row.cells[0].textContent.toLowerCase();
-      // Parse last price from column 2 (index 1)
-      const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
-      let marginRequirement = 0;
-      
-      // For Copper and Brass: use contract size of 20,000 lbs and 7% margin
-      if(material.includes("copper") || material.includes("brass")) {
-        marginRequirement = 20000 * lastPrice * 0.07;
-      }
-      // For Steel and Aluminum: use contract size of 10 tons (assume 10 tons per contract) and 7% margin
-      else if(material.includes("steel") || material.includes("aluminum")) {
-        marginRequirement = (10 * lastPrice) * 0.07;
-      } else {
-        marginRequirement = NaN;
-      }
-      
-      const marginCell = row.querySelector('.margin-cell');
-      if (!isNaN(marginRequirement)) {
-        marginCell.textContent = '$' + marginRequirement.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
-      } else {
-        marginCell.textContent = 'N/A';
-      }
-    });
-    
-    // Update the total contracts count in the table footer
-    document.getElementById('activeContractsTotal').textContent = totalContracts;
-  }
-  
-  // Run the function when the DOM is loaded
-  document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
-</script>
-
 
   <!-- Metals Market Overview Section -->
 <div class="section">
