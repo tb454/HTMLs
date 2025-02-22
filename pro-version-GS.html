@@ -210,179 +210,180 @@
       </div>
     </div>
     
-   <!-- Finished Goods Inventory (Greenspark) -->
+    <!-- Finished Goods Inventory (Greenspark) -->
 <div class="section">
-    <div class="section-title">Finished Goods Inventory (Greenspark)</div>
-    <!-- Updated table with dynamic Total Purchase Value and totals row -->
-    <table id="greenspark-table">
-      <thead>
-        <tr>
-          <th>Commodities</th>
-          <th>WIP (lbs)</th>
-          <th>Finished Goods (lbs)</th>
-          <th>Total (lbs)</th>
-          <th>Avg Cost ($/lb)</th>
-          <th>Total Purchase Value</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr onclick="rowClicked('ALUMINUM')">
-          <td>ALUMINUM</td>
-          <td>12,105</td>
-          <td>44,351</td>
-          <td>56,456</td>
-          <td>$0.50</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('Electric Motors')">
-          <td>Electric Motors</td>
-          <td>11,052</td>
-          <td>10,844</td>
-          <td>21,897</td>
-          <td>$0.30</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('Insulated copper wire')">
-          <td>Insulated copper wire</td>
-          <td>11,649</td>
-          <td>50,673</td>
-          <td>62,322</td>
-          <td>$1.20</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('LEAD')">
-          <td>LEAD</td>
-          <td>5,802</td>
-          <td>640</td>
-          <td>6,443</td>
-          <td>$0.40</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('FERROUS')">
-          <td>FERROUS</td>
-          <td>24,380</td>
-          <td>190,048</td>
-          <td>214,429</td>
-          <td>$0.09</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('RADIATOR PRODUCT')">
-          <td>RADIATOR PRODUCT</td>
-          <td>15,677</td>
-          <td>324</td>
-          <td>16,001</td>
-          <td>$1.40</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('COPPER PRODUCT')">
-          <td>COPPER PRODUCT</td>
-          <td>12,373</td>
-          <td>73,560</td>
-          <td>85,934</td>
-          <td>$2.80</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('BRASS PRODUCT')">
-          <td>BRASS PRODUCT</td>
-          <td>5,633</td>
-          <td>10,246</td>
-          <td>15,879</td>
-          <td>$1.20</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('Carbide PRODUCT')">
-          <td>Carbide PRODUCT</td>
-          <td>468</td>
-          <td>287</td>
-          <td>755</td>
-          <td>$8.80</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
-          <td>STAINLESS STEEL PRODUCT</td>
-          <td>3,482</td>
-          <td>15,671</td>
-          <td>19,153</td>
-          <td>$0.60</td>
-          <td>$0.00</td>
-        </tr>
-        <tr onclick="rowClicked('STEEL PRODUCT')">
-          <td>STEEL PRODUCT</td>
-          <td>28,763</td>
-          <td>134,678</td>
-          <td>163,442</td>
-          <td>$0.14</td>
-          <td>$0.00</td>
-        </tr>
-      </tbody>
-      <tfoot>
-        <tr>
-          <td><strong>Totals:</strong></td>
-          <td id="total-wip">0</td>
-          <td id="total-finished">0</td>
-          <td id="total-total">0</td>
-          <td></td>
-          <td id="total-purchase">0</td>
-        </tr>
-      </tfoot>
-    </table>
-  </div>
-  
-  <script>
-    function updatePurchaseValues() {
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+  <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+  <!-- Updated table with dynamic Total Purchase Value and totals row -->
+  <table id="greenspark-table">
+    <thead>
+      <tr>
+        <th>Commodities</th>
+        <th>WIP (lbs)</th>
+        <th>Finished Goods (lbs)</th>
+        <th>Total (lbs)</th>
+        <th>Avg Cost ($/lb)</th>
+        <th>Total Purchase Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr onclick="rowClicked('ALUMINUM')">
+        <td>ALUMINUM</td>
+        <td>12,105</td>
+        <td>44,351</td>
+        <td>56,456</td>
+        <td>$0.50</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('Electric Motors')">
+        <td>Electric Motors</td>
+        <td>11,052</td>
+        <td>10,844</td>
+        <td>21,897</td>
+        <td>$0.30</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('Insulated copper wire')">
+        <td>Insulated copper wire</td>
+        <td>11,649</td>
+        <td>50,673</td>
+        <td>62,322</td>
+        <td>$1.20</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('LEAD')">
+        <td>LEAD</td>
+        <td>5,802</td>
+        <td>640</td>
+        <td>6,443</td>
+        <td>$0.40</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('FERROUS')">
+        <td>FERROUS</td>
+        <td>24,380</td>
+        <td>190,048</td>
+        <td>214,429</td>
+        <td>$0.09</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('RADIATOR PRODUCT')">
+        <td>RADIATOR PRODUCT</td>
+        <td>15,677</td>
+        <td>324</td>
+        <td>16,001</td>
+        <td>$1.40</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('COPPER PRODUCT')">
+        <td>COPPER PRODUCT</td>
+        <td>12,373</td>
+        <td>73,560</td>
+        <td>85,934</td>
+        <td>$2.80</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('BRASS PRODUCT')">
+        <td>BRASS PRODUCT</td>
+        <td>5,633</td>
+        <td>10,246</td>
+        <td>15,879</td>
+        <td>$1.20</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('Carbide PRODUCT')">
+        <td>Carbide PRODUCT</td>
+        <td>468</td>
+        <td>287</td>
+        <td>755</td>
+        <td>$8.80</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
+        <td>STAINLESS STEEL PRODUCT</td>
+        <td>3,482</td>
+        <td>15,671</td>
+        <td>19,153</td>
+        <td>$0.60</td>
+        <td>$0.00</td>
+      </tr>
+      <tr onclick="rowClicked('STEEL PRODUCT')">
+        <td>STEEL PRODUCT</td>
+        <td>28,763</td>
+        <td>134,678</td>
+        <td>163,442</td>
+        <td>$0.14</td>
+        <td>$0.00</td>
+      </tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td><strong>Totals:</strong></td>
+        <td id="total-wip">0</td>
+        <td id="total-finished">0</td>
+        <td id="total-total">0</td>
+        <td></td>
+        <td id="total-purchase">0</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<script>
+  function updatePurchaseValues() {
+    const table = document.getElementById('greenspark-table');
+    const rows = table.querySelectorAll('tbody tr');
+    let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+    
+    rows.forEach(row => {
+      const cells = row.getElementsByTagName('td');
+      // Columns:
+      // 1: WIP (lbs)
+      // 2: Finished Goods (lbs)
+      // 3: Total (lbs)
+      // 4: Avg Cost ($/lb)
+      // 5: Total Purchase Value
       
-      rows.forEach(row => {
-        const cells = row.getElementsByTagName('td');
-        // Columns:
-        // 1: WIP (lbs)
-        // 2: Finished Goods (lbs)
-        // 3: Total (lbs)
-        // 4: Avg Cost ($/lb)
-        // 5: Total Purchase Value
-        
-        // Parse the Total (lbs)
-        const totalText = cells[3].textContent.replace(/,/g, '').trim();
-        const totalLbs = parseFloat(totalText) || 0;
-        
-        // Parse Avg Cost (strip out '$' and any non-numeric characters)
-        const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-        const avgCost = parseFloat(avgCostText) || 0;
-        
-        // Calculate Total Purchase Value for this row
-        const purchaseValue = totalLbs * avgCost;
-        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
-        
-        // Also sum the WIP and Finished Goods columns for totals
-        const wipText = cells[1].textContent.replace(/,/g, '').trim();
-        const finishedText = cells[2].textContent.replace(/,/g, '').trim();
-        const wip = parseFloat(wipText) || 0;
-        const finished = parseFloat(finishedText) || 0;
-        
-        sumWIP += wip;
-        sumFinished += finished;
-        sumTotal += totalLbs;
-        sumPurchase += purchaseValue;
-      });
+      // Parse the Total (lbs)
+      const totalText = cells[3].textContent.replace(/,/g, '').trim();
+      const totalLbs = parseFloat(totalText) || 0;
       
-      // Update totals in the <tfoot>
-      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+      // Parse Avg Cost (strip out '$' and any non-numeric characters)
+      const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+      const avgCost = parseFloat(avgCostText) || 0;
+      
+      // Calculate Total Purchase Value for this row
+      const purchaseValue = totalLbs * avgCost;
+      cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
       });
-    }
+      
+      // Also sum the WIP and Finished Goods columns for totals
+      const wipText = cells[1].textContent.replace(/,/g, '').trim();
+      const finishedText = cells[2].textContent.replace(/,/g, '').trim();
+      const wip = parseFloat(wipText) || 0;
+      const finished = parseFloat(finishedText) || 0;
+      
+      sumWIP += wip;
+      sumFinished += finished;
+      sumTotal += totalLbs;
+      sumPurchase += purchaseValue;
+    });
     
-    // Run the calculation when the DOM is ready.
-    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-  </script>
+    // Update totals in the <tfoot>
+    document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+    document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+    document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+    document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    });
+  }
+  
+  // Run the calculation when the DOM is ready.
+  document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+</script>
+
     
     <!-- Trading Graph Section -->
     <div class="section">
@@ -452,96 +453,265 @@
             <th>Action</th>
           </tr>
         </thead>
-        <tbody id="active-contracts-body">
-          <!-- Active Contracts populated by JavaScript -->
-        </tbody>
-      </table>
-    </div>
-    
-    <!-- Futures / Market Data Section -->
-    <div class="section">
-      <div class="section-title">Futures / Market Data (CME)</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Material</th>
-            <th>Contract</th>
-            <th>Last Price</th>
-            <th>Change</th>
-            <th>Change %</th>
-            <th>Expiration</th>
-            <th>Action</th>
-          </tr>
-        </thead>
         <tbody>
           <tr>
-            <td>Copper</td>
-            <td>MAR-25</td>
-            <td>9,550</td>
-            <td>+0.03</td>
-            <td>+0.75%</td>
-            <td>03/25/2025</td>
-            <td>
-              <button class="action-btn" onclick="createFuturesContract('Copper', 'MAR-25'); event.stopPropagation();">
-                Create Contract 
-              </button>
-            </td>
-          </tr>
-          <tr>
-            <td>Copper</td>
-            <td>MAY-25</td>
-            <td>9,950</td>
-            <td>-0.01</td>
-            <td>-0.24%</td>
-            <td>05/25/2025</td>
-            <td>
-              <button class="action-btn" onclick="createFuturesContract('Copper', 'MAY-25'); event.stopPropagation();">
-                Create Contract
-              </button>
-            </td>
-          </tr>
-          <tr>
-            <td>Brass</td>
-            <td>APR-25</td>
-            <td>7,850</td>
-            <td>+0.02</td>
-            <td>+0.80%</td>
+            <td>Gold (Apr '25)</td>
+            <td>$2,953.25</td>
+            <td>-2.90</td>
+            <td>-0.10%</td>
             <td>04/25/2025</td>
             <td>
-              <button class="action-btn" onclick="createFuturesContract('Brass', 'APR-25'); event.stopPropagation();">
-                Create Contract 
-              </button>
+              <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
             </td>
           </tr>
           <tr>
-            <td>Steel</td>
-            <td>JUN-25</td>
-            <td>500</td>
-            <td>+0.01</td>
+            <td>Silver (Mar '25)</td>
+            <td>$23.95</td>
+            <td>+0.10</td>
+            <td>+0.42%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>High Grade Copper (May '25)</td>
+            <td>$4.6155</td>
+            <td>-0.0050</td>
+            <td>-0.11%</td>
+            <td>05/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Platinum (Apr '25)</td>
+            <td>$997.35</td>
+            <td>+7.50</td>
+            <td>+0.76%</td>
+            <td>04/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Palladium (Mar '25)</td>
+            <td>$1,483.00</td>
+            <td>-9.70</td>
+            <td>-0.65%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(4); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(4); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Aluminum (Mar '25)</td>
+            <td>$2,350.00</td>
+            <td>+15.00</td>
             <td>+0.64%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(5); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(5); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>$975.50</td>
+            <td>-4.00</td>
+            <td>-0.41%</td>
             <td>06/25/2025</td>
             <td>
-              <button class="action-btn" onclick="createFuturesContract('Steel', 'JUN-25'); event.stopPropagation();">
-                Create Contract 
-              </button>
+              <button class="secondary-btn" onclick="rollContract(6); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(6); event.stopPropagation();">Close</button>
             </td>
           </tr>
           <tr>
-            <td>Aluminum</td>
-            <td>SEP-25</td>
-            <td>2,500</td>
-            <td>+0.01</td>
-            <td>+0.80%</td>
-            <td>09/25/2025</td>
+            <td>Platinum (Jul '25)</td>
+            <td>$1,015.50</td>
+            <td>+5.10</td>
+            <td>+0.50%</td>
+            <td>07/25/2025</td>
             <td>
-              <button class="action-btn" onclick="createFuturesContract('Aluminum', 'SEP-25'); event.stopPropagation();">
-                Create Contract 
-              </button>
+              <button class="secondary-btn" onclick="rollContract(7); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(7); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>London Rebar (May '25)</td>
+            <td>$565.00</td>
+            <td>-2.00</td>
+            <td>-0.35%</td>
+            <td>05/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(8); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(8); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Aluminum (Feb '25)</td>
+            <td>$2,325.00</td>
+            <td>+8.00</td>
+            <td>+0.34%</td>
+            <td>02/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(9); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(9); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Nickel (Mar '25)</td>
+            <td>$25,300</td>
+            <td>+55</td>
+            <td>+0.22%</td>
+            <td>03/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(10); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(10); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Zinc (Jun '25)</td>
+            <td>$3,100</td>
+            <td>-10</td>
+            <td>-0.32%</td>
+            <td>06/25/2025</td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(11); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(11); event.stopPropagation();">Close</button>
             </td>
           </tr>
         </tbody>
-      </table>
+       </table>  
     </div>
+
+  <!-- Metals Market Overview Section -->
+<div class="section">
+  <div class="section-title">Metals Market Overview</div>
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Contract Name</th>
+        <th>Last</th>
+        <th>Change</th>
+        <th>Open</th>
+        <th>High</th>
+        <th>Low</th>
+        <th>Volume</th>
+        <th>Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>GCJ25</td>
+        <td>Gold (Apr '25)</td>
+        <td>2,953.25</td>
+        <td>-2.9</td>
+        <td>2,957.50</td>
+        <td>2,964.70</td>
+        <td>2,920.00</td>
+        <td>155,552</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>SIH25</td>
+        <td>Silver (Mar '25)</td>
+        <td>23.95</td>
+        <td>+0.10</td>
+        <td>23.85</td>
+        <td>24.20</td>
+        <td>23.65</td>
+        <td>80,334</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>HGG25</td>
+        <td>High Grade Copper (May '25)</td>
+        <td>4.6155</td>
+        <td>-0.0050</td>
+        <td>4.5900</td>
+        <td>4.6690</td>
+        <td>4.5800</td>
+        <td>36,500</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>PLJ25</td>
+        <td>Platinum (Apr '25)</td>
+        <td>997.35</td>
+        <td>+7.50</td>
+        <td>990.00</td>
+        <td>1,003.80</td>
+        <td>988.00</td>
+        <td>25,650</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>PAH25</td>
+        <td>Palladium (Mar '25)</td>
+        <td>1,483.00</td>
+        <td>-9.70</td>
+        <td>1,490.00</td>
+        <td>1,508.00</td>
+        <td>1,478.00</td>
+        <td>11,000</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>ALX25</td>
+        <td>Aluminum (Mar '25)</td>
+        <td>2,350.00</td>
+        <td>+15.00</td>
+        <td>2,335.00</td>
+        <td>2,370.00</td>
+        <td>2,320.00</td>
+        <td>20,500</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>HMX25</td>
+        <td>US Midwest Steel (Jun '25)</td>
+        <td>975.50</td>
+        <td>-4.00</td>
+        <td>980.00</td>
+        <td>990.00</td>
+        <td>970.00</td>
+        <td>9,750</td>
+        <td>02/21/25</td>
+      </tr>
+      <tr>
+        <td>PLX25</td>
+        <td>Platinum (Jul '25)</td>
+        <td>1,015.50</td>
+        <td>+5.10</td>
+        <td>1,010.00</td>
+        <td>1,025.00</td>
+        <td>1,005.00</td>
+        <td>8,230</td>
+        <td>02/21/25</td>
+      </tr>
+     
+      <tr>
+        <td>LMG25</td>
+        <td>Aluminum (Feb '25)</td>
+        <td>2,325.00</td>
+        <td>+8.00</td>
+        <td>2,320.00</td>
+        <td>2,340.00</td>
+        <td>2,310.00</td>
+        <td>4,800</td>
+        <td>02/21/25</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
     
     <!-- Live Data Updates Section -->
     <div class="section">
