@@ -348,6 +348,67 @@
         
         <label for="create-contracts">Creatable Contracts:</label>
         <select id="create-contracts"></select>
+        // Updated mapping: keys as they appear in the simulated trade dropdown,
+// values must match the text in the Greenspark table's first column.
+const commodityMapping = {
+  Copper: "COPPER",
+  Brass: "BRASS",
+  Steel: "STEEL",
+  Aluminum: "ALUMINUM",
+  "Electric Motors": "Electric Motors",
+  "Insulated Copper Wire": "Insulated copper wire",
+  Lead: "LEAD",
+  "Steel #2": "Steel #2",
+  "Radiator Product": "RADIATOR Product",
+  Carbide: "Carbide",
+  "Stainless Steel": "STAINLESS STEEL"
+};
+
+function getCommodityData(material) {
+  const target = commodityMapping[material];
+  const table = document.getElementById('greenspark-table');
+  const rows = table.querySelectorAll('tbody tr');
+  for (let row of rows) {
+    const rowMaterial = row.cells[0].textContent.trim();
+    if (rowMaterial.toUpperCase() === target.toUpperCase()) {
+      // Finished Goods is in column index 2.
+      const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+      const finishedGoods = parseFloat(finishedGoodsText) || 0;
+      return { finishedGoods };
+    }
+  }
+  return { finishedGoods: 0 };
+}
+
+function updateTradeOptions() {
+  const materialSelect = document.getElementById('create-material');
+  const material = materialSelect.value;
+  const data = getCommodityData(material);
+  
+  // Assume contract size is 20,000 lbs.
+  const contractSize = 20000;
+  const availableContracts = Math.floor(data.finishedGoods / contractSize);
+  
+  // Update "Creatable Contracts" dropdown.
+  const contractsSelect = document.getElementById('create-contracts');
+  contractsSelect.innerHTML = '';
+  if (availableContracts < 1) {
+    const option = document.createElement('option');
+    option.value = 0;
+    option.textContent = "0";
+    contractsSelect.appendChild(option);
+  } else {
+    for (let i = 1; i <= availableContracts; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = i;
+      contractsSelect.appendChild(option);
+    }
+  }
+  
+  // (The rest of your updateTradeOptions code for Price/ton, Cost to Create, and Expiration Date remains here.)
+}
+
         
         <label for="create-price">Price/ton:</label>
         <select id="create-price"></select>
