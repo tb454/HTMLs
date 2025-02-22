@@ -514,38 +514,36 @@
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="4"><strong>Total Contracts:</strong></td>
-        <td id="activeContractsCount">0</td>
-        <td><strong>Total Margin:</strong></td>
+        <td><strong>Total</strong></td>
+        <td colspan="4"></td>
         <td id="activeContractsMarginTotal">$0.00</td>
+        <td></td>
       </tr>
     </tfoot>
   </table>
 </div>
 
 <script>
-  // This function updates each row's margin requirement and sums totals.
+  // This function calculates each row's margin requirement and sums them in the totals row.
   function updateActiveContractsTable() {
     const table = document.getElementById('active-contracts-table');
     const rows = table.querySelectorAll('tbody tr');
-    let totalContracts = 0;
     let totalMarginRequirement = 0;
     
     rows.forEach((row) => {
-      totalContracts++;
-      // Get material name (lowercase for comparison)
+      // Get the material name (lowercase for matching)
       const material = row.cells[0].textContent.toLowerCase();
-      // Parse the last price (column 2)
+      // Parse the last price from column 2 (index 1)
       const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
       let marginRequirement = 0;
       
-      // For Copper and Brass, assume contract size = 20,000 lbs at 7% margin
+      // For Copper and Brass, use contract size of 20,000 lbs and 7% margin.
       if (material.includes("copper") || material.includes("brass")) {
         marginRequirement = 20000 * lastPrice * 0.07;
       }
-      // For Steel and Aluminum, assume contract size = 10 tons (10,000 lbs) at 7% margin
+      // For Steel and Aluminum, use contract size of 10 tons (10,000 lbs) and 7% margin.
       else if (material.includes("steel") || material.includes("aluminum")) {
-        marginRequirement = (10000 * lastPrice) * 0.07;
+        marginRequirement = 10000 * lastPrice * 0.07;
       } else {
         marginRequirement = NaN;
       }
@@ -562,8 +560,7 @@
       }
     });
     
-    // Update totals in the footer
-    document.getElementById('activeContractsCount').textContent = totalContracts;
+    // Update the total margin requirement in the footer.
     document.getElementById('activeContractsMarginTotal').textContent =
       '$' + totalMarginRequirement.toLocaleString(undefined, {
         minimumFractionDigits: 2,
@@ -571,8 +568,10 @@
       });
   }
   
+  // Run the calculation when the DOM is ready.
   document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
 </script>
+
 
 
 <script>
