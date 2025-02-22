@@ -12,7 +12,7 @@
   
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  
+
   <style>
     /* Base styling */
     body {
@@ -327,33 +327,6 @@
       </table>
     </div>
     
-    <!-- Simulated Trade Section -->
-    <div class="section">
-      <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
-        </select>
-        
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
-      </div>
-      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-    </div>
-    
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
@@ -577,7 +550,7 @@
       <div id="green-spark-container"></div>
     </div>
   </div>
-  
+
   <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -589,7 +562,7 @@
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
-  
+
     // Initialize Trading Graph using Chart.js (if chart exists)
     const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
     if(ctx){
@@ -611,7 +584,7 @@
         }
       });
     }
-  
+
     /***************************************
      * Update Total Purchase Value for Finished Goods Inventory
      ***************************************/
@@ -620,7 +593,7 @@
       const rows = table.querySelectorAll('tbody tr');
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
-        // Columns: 0=Commodity, 1=WIP, 2=Finished, 3=Total, 4=Avg Cost, 5=Purchase Value
+        // Columns: 0 = Commodity, 1 = WIP, 2 = Finished, 3 = Total, 4 = Avg Cost, 5 = Purchase Value
         const totalText = cells[3].textContent.replace(/,/g, '').trim();
         const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
         const totalLbs = parseFloat(totalText) || 0;
@@ -630,18 +603,18 @@
       });
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-  
+
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
-    // Market Snapshot prices (assumed static as shown in Overview Card)
+    // Market Snapshot prices (from Overview Card)
     const marketSnapshotPrices = {
       Copper: 9500,
       Brass: 7500,
       Steel: 500,
       Aluminum: 2200
     };
-  
+
     // Mapping from dropdown material values to Greenspark table names.
     const commodityMapping = {
       Copper: "COPPER PRODUCT",
@@ -649,9 +622,8 @@
       Steel: "STEEL PRODUCT",
       Aluminum: "ALUMINUM"
     };
-  
+
     // Look up commodity data from the Greenspark table.
-    // Returns the Finished Goods (lbs) for the commodity.
     function getCommodityData(material) {
       const target = commodityMapping[material];
       const table = document.getElementById('greenspark-table');
@@ -667,7 +639,7 @@
       }
       return { finishedGoods: 0 };
     }
-  
+
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
@@ -723,10 +695,10 @@
       expirationSelect.innerHTML = '';
       const today = new Date();
       for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
-        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = expDate.getDate().toString().padStart(2, '0');
-        const year = expDate.getFullYear();
+        let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        let day = expDate.getDate().toString().padStart(2, '0');
+        let year = expDate.getFullYear();
         const dateStr = month + '/' + day + '/' + year;
         const option = document.createElement('option');
         option.value = dateStr;
@@ -771,7 +743,7 @@
       tableBody.appendChild(newRow);
     }
     
-    // simulateTrade() appends new rows to both the Trade Log and Active Contracts tables.
+    // simulateTrade() now appends new rows to both the Trade Log and Active Contracts tables.
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -788,7 +760,7 @@
         addActiveContract(material + ' (Trade #' + (i + 1) + ')', chosenPrice, expiration);
       }
       
-      // Update Active Contracts table (for margin calculations and totals).
+      // Update Active Contracts table (to recalc margin requirements and totals).
       updateActiveContractsTable();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
@@ -812,7 +784,7 @@
         if (material.includes("copper") || material.includes("brass")) {
           marginRequirement = 20000 * lastPrice * 0.07;
         }
-        // For Steel and Aluminum: contract size of 10 tons (10 units) at 7%.
+        // For Steel and Aluminum: contract size of 10 tons (assumed as 10 units) at 7%.
         else if (material.includes("steel") || material.includes("aluminum")) {
           marginRequirement = 10 * lastPrice * 0.07;
         }
@@ -826,7 +798,7 @@
         }
       });
       
-      // Update the totals row.
+      // Update totals in the Active Contracts table footer.
       document.getElementById('activeContractsCount').textContent = totalContracts;
       document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
