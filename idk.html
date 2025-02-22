@@ -384,251 +384,33 @@
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Active Contracts and Trade Log</title>
-  <style>
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-bottom: 20px;
-    }
-    th, td {
-      border: 1px solid #ddd;
-      padding: 8px;
-      text-align: left;
-    }
-    th {
-      background-color: #f2f2f2;
-    }
-  </style>
-</head>
-<body>
-  <!-- Active Contracts Table -->
-  <h2>Active Contracts</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Material</th>
-        <th>Last Price</th>
-        <th>Change</th>
-        <th>Change Percent</th>
-        <th>Expiration</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="active-contracts-body">
-      <!-- Active contract rows will be dynamically inserted here -->
-    </tbody>
-  </table>
-
-  <!-- Trade Log Table -->
-  <h2>Trade Log</h2>
-  <table id="trade-log-table">
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Material</th>
-        <th>Quantity</th>
-        <th>Price/ton</th>
-        <th>Total Cost</th>
-      </tr>
-    </thead>
-    <tbody>
-      <!-- Trade log entries will be appended here -->
-    </tbody>
-  </table>
-
-  <!-- Include any form elements you need for trading -->
-  <div class="section">
-    <div class="section-title">Simulated Trade (10-ton loads)</div>
-    <div class="mb-3">
-      <label for="create-material">Material:</label>
-      <select id="create-material" onchange="updateTradeOptions()">
-        <option value="Copper">Copper</option>
-        <option value="Brass">Brass</option>
-        <option value="Steel">Steel</option>
-        <option value="Aluminum">Aluminum</option>
-      </select>
-      
-      <label for="create-contracts">Creatable Contracts:</label>
-      <select id="create-contracts"></select>
-      
-      <label for="create-price">Price/ton:</label>
-      <select id="create-price"></select>
-      
-      <label for="create-cost">Cost to Create:</label>
-      <select id="create-cost"></select>
-      
-      <label for="create-expiration">Expiration Date:</label>
-      <select id="create-expiration"></select>
+    <!-- Simulated Trade Section -->
+    <div class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <option value="Copper">Copper</option>
+          <option value="Brass">Brass</option>
+          <option value="Steel">Steel</option>
+          <option value="Aluminum">Aluminum</option>
+        </select>
+        
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
+      </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </div>
-    <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-  </div>
-
-  <!-- A header-date element is needed for expiration calculations -->
-  <div id="header-date" style="display:none;">08/15/2025</div>
-
-  <!-- Your JavaScript code wrapped in a script tag -->
-  <script>
-    /***************************************
-     * Data for Finished Goods Inventory
-     ***************************************/
-    const finishedGoodsData = {
-      Copper: { quantity: 80, price: 9500 },
-      Brass: { quantity: 100, price: 7500 },
-      Steel: { quantity: 280, price: 500 },
-      Aluminum: { quantity: 100, price: 2200 }
-    };
-
-    /***************************************
-     * Active Contracts Data (Empty array to start)
-     ***************************************/
-    let activeContracts = [];
-
-    /***************************************
-     * Fetch and Update Active Contracts
-     ***************************************/
-    function fetchActiveContracts() {
-      fetch('/api/active-contracts')
-        .then(response => response.json())
-        .then(data => {
-          activeContracts = data;
-          renderActiveContracts();
-        })
-        .catch(err => console.error('Error fetching active contracts:', err));
-    }
-
-    /***************************************
-     * Render Active Contracts Table
-     ***************************************/
-    function renderActiveContracts() {
-      const tableBody = document.getElementById('active-contracts-body');
-      tableBody.innerHTML = '';
-      activeContracts.forEach((contract, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${contract.material}</td>
-          <td>$${Number(contract.lastPrice).toLocaleString()}</td>
-          <td>${contract.change}</td>
-          <td>${contract.changePercent}</td>
-          <td>${contract.expiration}</td>
-          <td>
-            <button class="secondary-btn" onclick="rollContract(${index}); event.stopPropagation();">Roll</button>
-            <button class="danger-btn" onclick="closeContract(${index}); event.stopPropagation();">Close</button>
-          </td>
-        `;
-        tableBody.appendChild(row);
-      });
-    }
-
-    /***************************************
-     * Append Trade Log Entry
-     ***************************************/
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
-      const tradeTime = new Date().toLocaleTimeString();
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = `
-        <td>${tradeTime}</td>
-        <td>${material}</td>
-        <td>${quantity}</td>
-        <td>$${Number(price).toLocaleString()}</td>
-        <td>$${Number(totalCost).toLocaleString()}</td>
-      `;
-      tableBody.appendChild(newRow);
-    }
-
-    /***************************************
-     * Update Trade Options
-     ***************************************/
-    function updateTradeOptions() {
-      const material = document.getElementById('create-material').value;
-      const data = finishedGoodsData[material];
-      
-      // Update "Creatable Contracts" dropdown: based on floor(quantity/10)
-      const contractsSelect = document.getElementById('create-contracts');
-      contractsSelect.innerHTML = '';
-      const maxContracts = Math.floor(data.quantity / 10);
-      for (let i = 1; i <= maxContracts; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = i;
-        contractsSelect.appendChild(option);
-      }
-      
-      // Update "Price/ton" dropdown: 3 options below and 3 options above base price (in 10% increments)
-      const priceSelect = document.getElementById('create-price');
-      priceSelect.innerHTML = '';
-      const basePrice = data.price;
-      [0.7, 0.8, 0.9].forEach(mult => {
-        const option = document.createElement('option');
-        option.value = (basePrice * mult).toFixed(2);
-        option.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(option);
-      });
-      [1.1, 1.2, 1.3].forEach(mult => {
-        const option = document.createElement('option');
-        option.value = (basePrice * mult).toFixed(2);
-        option.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(option);
-      });
-      
-      // Update "Cost to Create" dropdown: single option = 0.1% of base price
-      const costSelect = document.getElementById('create-cost');
-      costSelect.innerHTML = '';
-      const cost = basePrice * 0.001;
-      const costOption = document.createElement('option');
-      costOption.value = cost.toFixed(2);
-      costOption.textContent = '$' + Number(cost).toLocaleString();
-      costSelect.appendChild(costOption);
-      
-      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments
-      const expirationSelect = document.getElementById('create-expiration');
-      expirationSelect.innerHTML = '';
-      const headerDateStr = document.getElementById('header-date').textContent;
-      const parts = headerDateStr.split('/');
-      const headerDate = new Date(parts[2], parts[0]-1, parts[1]);
-      for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(headerDate.getFullYear(), headerDate.getMonth() + i, headerDate.getDate());
-        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = expDate.getDate().toString().padStart(2, '0');
-        const year = expDate.getFullYear();
-        const dateStr = month + '/' + day + '/' + year;
-        const option = document.createElement('option');
-        option.value = dateStr;
-        option.textContent = dateStr;
-        expirationSelect.appendChild(option);
-      }
-    }
-
-    /***************************************
-     * Simulate Trade
-     ***************************************/
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const chosenPrice = parseFloat(document.getElementById('create-price').value);
-      const chosenCost = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
-      for (let i = 0; i < numTrades; i++) {
-        const totalCost = 10 * chosenPrice;
-        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
-      }
-      
-      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
-    }
-
-    // Optionally, call updateTradeOptions() on page load to populate initial values
-    updateTradeOptions();
-  </script>
-</body>
-</html>
-
-
+    
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
