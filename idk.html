@@ -328,89 +328,47 @@
   </table>
 </div>
 
-<script>
-  function updatePurchaseValues() {
-    const table = document.getElementById('greenspark-table');
-    const rows = table.querySelectorAll('tbody tr');
-    let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-    
-    rows.forEach(row => {
-      const cells = row.getElementsByTagName('td');
-      // Columns:
-      // 1: WIP (lbs)
-      // 2: Finished Goods (lbs)
-      // 3: Total (lbs)
-      // 4: Avg Cost ($/lb)
-      // 5: Total Purchase Value
-      
-      // Parse the Total (lbs)
-      const totalText = cells[3].textContent.replace(/,/g, '').trim();
-      const totalLbs = parseFloat(totalText) || 0;
-      
-      // Parse Avg Cost (strip out '$' and any non-numeric characters)
-      const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-      const avgCost = parseFloat(avgCostText) || 0;
-      
-      // Calculate Total Purchase Value for this row
-      const purchaseValue = totalLbs * avgCost;
-      cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
-      });
-      
-      // Also sum the WIP and Finished Goods columns for totals
-      const wipText = cells[1].textContent.replace(/,/g, '').trim();
-      const finishedText = cells[2].textContent.replace(/,/g, '').trim();
-      const wip = parseFloat(wipText) || 0;
-      const finished = parseFloat(finishedText) || 0;
-      
-      sumWIP += wip;
-      sumFinished += finished;
-      sumTotal += totalLbs;
-      sumPurchase += purchaseValue;
-    });
-    
-    // Update totals in the <tfoot>
-    document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-    document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-    document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-    document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    });
-  }
-  
-  // Run the calculation when the DOM is ready.
-  document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-</script>
+   <!-- Contract Creation Section repurposed as Simulated Trade -->
+   <div class="section">
+    <div class="section-title">Simulated Trade (10-ton loads)</div>
+    <div>
+      <!-- Material dropdown -->
+      <label for="create-material">Material:</label>
+      <select id="create-material" onchange="updateTradeOptions()">
+        <option value="Copper">Copper</option>
+        <option value="Brass">Brass</option>
+        <option value="Steel">Steel</option>
+        <option value="Aluminum">Aluminum</option>
+      </select>
 
-    <!-- Simulated Trade Section -->
-    <div class="section">
-      <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
-        </select>
-        
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
-      </div>
+      <!-- Creatable Contracts dropdown (based on quantity/10) -->
+      <label for="create-contracts">Creatable Contracts:</label>
+      <select id="create-contracts">
+        <!-- Options updated by JS -->
+      </select>
+
+      <!-- Price/ton dropdown (6 options: 3 below, 3 above base) -->
+      <label for="create-price">Price/ton:</label>
+      <select id="create-price">
+        <!-- Options updated by JS -->
+      </select>
+
+      <!-- Cost to Create dropdown (0.1% of base price) -->
+      <label for="create-cost">Cost to Create:</label>
+      <select id="create-cost">
+        <!-- Option updated by JS -->
+      </select>
+
+      <!-- Expiration Date dropdown (5 future dates, 1 month increments) -->
+      <label for="create-expiration">Expiration Date:</label>
+      <select id="create-expiration">
+        <!-- Options updated by JS -->
+      </select>
+
+      <!-- Button changed to Execute Trade -->
       <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </div>
-    
+  </div>
     <!-- Trade Log Section -->
     <div class="section">
       <div class="section-title">Trade Log</div>
