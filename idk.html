@@ -431,78 +431,141 @@
     </div>
     
     <!-- Active Contracts Section -->
-    <div class="section">
-      <div class="section-title">Active Contracts</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Material</th>
-            <th>Last Price</th>
-            <th>Change</th>
-            <th>Change %</th>
-            <th>Expiration</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>High Grade Copper (May '25)</td>
-            <td>$4.6155</td>
-            <td>-0.0050</td>
-            <td>-0.11%</td>
-            <td>05/25/2025</td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr>
-            <td>Aluminum (Mar '25)</td>
-            <td>$2,350.00</td>
-            <td>+15.00</td>
-            <td>+0.64%</td>
-            <td>03/25/2025</td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(5); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(5); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr>
-            <td>US Midwest Steel (Jun '25)</td>
-            <td>$975.50</td>
-            <td>-4.00</td>
-            <td>-0.41%</td>
-            <td>06/25/2025</td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(6); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(6); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr>
-            <td>London Rebar (May '25)</td>
-            <td>$565.00</td>
-            <td>-2.00</td>
-            <td>-0.35%</td>
-            <td>05/25/2025</td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(8); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(8); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr>
-            <td>Aluminum (Feb '25)</td>
-            <td>$2,325.00</td>
-            <td>+8.00</td>
-            <td>+0.34%</td>
-            <td>02/25/2025</td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(9); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(9); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          </tbody>
-       </table>  
-    </div>
+<div class="section">
+  <div class="section-title">Active Contracts</div>
+  <table id="active-contracts-table" class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Material</th>
+        <th>Last Price</th>
+        <th>Change</th>
+        <th>Change %</th>
+        <th>Expiration</th>
+        <th>Margin Requirement</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Example row for Copper -->
+      <tr onclick="rowClicked('Copper')">
+        <td>Copper (May '25)</td>
+        <td>4.6155</td>
+        <td>+0.02</td>
+        <td>+0.43%</td>
+        <td>05/25/2025</td>
+        <td class="margin-cell"></td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
+        </td>
+      </tr>
+      <!-- Example row for Brass -->
+      <tr onclick="rowClicked('Brass')">
+        <td>Brass (May '25)</td>
+        <td>7.5000</td>
+        <td>-0.05</td>
+        <td>-0.67%</td>
+        <td>05/25/2025</td>
+        <td class="margin-cell"></td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
+        </td>
+      </tr>
+      <!-- Example row for Steel -->
+      <tr onclick="rowClicked('Steel')">
+        <td>Steel (Jun '25)</td>
+        <td>975.50</td>
+        <td>+1.00</td>
+        <td>+0.10%</td>
+        <td>06/25/2025</td>
+        <td class="margin-cell"></td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
+        </td>
+      </tr>
+      <!-- Example row for Aluminum -->
+      <tr onclick="rowClicked('Aluminum')">
+        <td>Aluminum (Mar '25)</td>
+        <td>2.3500</td>
+        <td>-0.10</td>
+        <td>-0.42%</td>
+        <td>03/25/2025</td>
+        <td class="margin-cell"></td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
+        </td>
+      </tr>
+      <!-- Example row for Gold (margin not computed here) -->
+      <tr onclick="rowClicked('Gold')">
+        <td>Gold (Apr '25)</td>
+        <td>2953.25</td>
+        <td>-2.90</td>
+        <td>-0.10%</td>
+        <td>04/25/2025</td>
+        <td class="margin-cell">N/A</td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(4); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(4); event.stopPropagation();">Close</button>
+        </td>
+      </tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6"><strong>Total Contracts:</strong></td>
+        <td id="activeContractsTotal">0</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<script>
+  // This function loops over each row in the Active Contracts table and calculates the margin requirement
+  function updateActiveContractsTable() {
+    const table = document.getElementById('active-contracts-table');
+    const rows = table.querySelectorAll('tbody tr');
+    let totalContracts = 0;
+    
+    rows.forEach((row, index) => {
+      totalContracts++;
+      // Get the material name (convert to lowercase for easier matching)
+      const material = row.cells[0].textContent.toLowerCase();
+      // Parse last price from column 2 (index 1)
+      const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
+      let marginRequirement = 0;
+      
+      // For Copper and Brass: use contract size of 20,000 lbs and 7% margin
+      if(material.includes("copper") || material.includes("brass")) {
+        marginRequirement = 20000 * lastPrice * 0.07;
+      }
+      // For Steel and Aluminum: use contract size of 10 tons (assume 10 tons per contract) and 7% margin
+      else if(material.includes("steel") || material.includes("aluminum")) {
+        marginRequirement = (10 * lastPrice) * 0.07;
+      } else {
+        marginRequirement = NaN;
+      }
+      
+      const marginCell = row.querySelector('.margin-cell');
+      if (!isNaN(marginRequirement)) {
+        marginCell.textContent = '$' + marginRequirement.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+      } else {
+        marginCell.textContent = 'N/A';
+      }
+    });
+    
+    // Update the total contracts count in the table footer
+    document.getElementById('activeContractsTotal').textContent = totalContracts;
+  }
+  
+  // Run the function when the DOM is loaded
+  document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+</script>
+
 
   <!-- Metals Market Overview Section -->
 <div class="section">
