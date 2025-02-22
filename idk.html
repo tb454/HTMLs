@@ -384,32 +384,83 @@
   document.addEventListener('DOMContentLoaded', updatePurchaseValues);
 </script>
 
-    <!-- Simulated Trade Section -->
-    <div class="section">
-      <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
-        </select>
-        
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
-      </div>
-      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simulated Trade</title>
+</head>
+<body>
+  <!-- Simulated Trade Section -->
+  <div class="section">
+    <div class="section-title">Simulated Trade (10-ton loads)</div>
+    <div class="mb-3">
+      <label for="create-material">Material:</label>
+      <select id="create-material" onchange="updateTradeOptions()">
+        <option value="Copper">Copper</option>
+        <option value="Brass">Brass</option>
+        <option value="Steel">Steel</option>
+        <option value="Aluminum">Aluminum</option>
+      </select>
+      
+      <label for="create-contracts">Creatable Contracts:</label>
+      <select id="create-contracts">
+        <!-- Options should be populated dynamically by updateTradeOptions() -->
+      </select>
+      
+      <label for="create-price">Price/ton:</label>
+      <select id="create-price">
+        <!-- Options here -->
+      </select>
+      
+      <label for="create-cost">Cost to Create:</label>
+      <select id="create-cost">
+        <!-- Options here -->
+      </select>
+      
+      <label for="create-expiration">Expiration Date:</label>
+      <select id="create-expiration">
+        <!-- Options here -->
+      </select>
     </div>
+    <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+  </div>
+
+  <script>
+    // Dummy functions to complete the example
+    function updateTradeOptions() {
+      // Here you would update the other select options based on the selected material.
+      // For example, dynamically populate 'create-contracts', 'create-price', etc.
+      console.log("Updating trade options based on selected material.");
+    }
+    
+    function appendTradeLogEntry(tradeName, load, price, totalCost) {
+      // This function would append a log entry to your UI.
+      // For demo purposes, we simply log to the console.
+      console.log(tradeName + ': ' + load + ' tons at $' + price + '/ton (Total: $' + totalCost + ')');
+    }
+    
+    /***************************************
+     * Simulate Trade
+     ***************************************/
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      for (let i = 0; i < numTrades; i++) {
+        const totalCost = 10 * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', 10, chosenPrice, totalCost);
+      }
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+  </script>
+</body>
+</html>
+
     
     <!-- Trade Log Section -->
     <div class="section">
