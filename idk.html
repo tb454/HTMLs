@@ -327,7 +327,54 @@
           
       </table>
     </div>
-    
+    <script>
+      function updatePurchaseValues() {
+        const table = document.getElementById('greenspark-table');
+        const rows = table.querySelectorAll('tbody tr');
+        let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+        
+        rows.forEach(row => {
+          const cells = row.getElementsByTagName('td');
+          // Column indexes:
+          // 1: WIP (lbs)
+          // 2: Finished Goods (lbs)
+          // 3: Total (lbs)
+          // 4: Avg Cost ($/lb)
+          // 5: Total Purchase Value
+          
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalText = cells[3].textContent.replace(/,/g, '').trim();
+          const totalLbs = parseFloat(totalText) || 0;
+          const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+          const avgCost = parseFloat(avgCostText) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          
+          sumWIP += wip;
+          sumFinished += finished;
+          sumTotal += totalLbs;
+          sumPurchase += purchaseValue;
+          
+          // Optionally, update the row's purchase value cell
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+          });
+        });
+        
+        // Update the totals row in the table footer.
+        document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+        document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+        document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+        document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+      }
+      
+      document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+    </script>
+     
     <!-- Simulated Trade Section -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
