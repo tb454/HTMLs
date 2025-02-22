@@ -12,7 +12,7 @@
   
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
+  
   <style>
     /* Base styling */
     body {
@@ -210,180 +210,171 @@
       </div>
     </div>
     
-    <!-- Finished Goods Inventory  -->
-<div class="section">
-  <div class="section-title">Finished Goods Inventory (Greenspark)</div>
-  <!-- Updated table with dynamic Total Purchase Value and totals row -->
-  <table id="greenspark-table">
-    <thead>
-      <tr>
-        <th>Commodities</th>
-        <th>WIP (lbs)</th>
-        <th>Finished Goods (lbs)</th>
-        <th>Total (lbs)</th>
-        <th>Avg Cost ($/lb)</th>
-        <th>Total Purchase Value</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr onclick="rowClicked('ALUMINUM')">
-        <td>ALUMINUM</td>
-        <td>12,105</td>
-        <td>44,351</td>
-        <td>56,456</td>
-        <td>$0.50</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('Electric Motors')">
-        <td>Electric Motors</td>
-        <td>11,052</td>
-        <td>10,844</td>
-        <td>21,897</td>
-        <td>$0.30</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('Insulated copper wire')">
-        <td>Insulated copper wire</td>
-        <td>11,649</td>
-        <td>50,673</td>
-        <td>62,322</td>
-        <td>$1.20</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('LEAD')">
-        <td>LEAD</td>
-        <td>5,802</td>
-        <td>640</td>
-        <td>6,443</td>
-        <td>$0.40</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('FERROUS')">
-        <td>FERROUS</td>
-        <td>24,380</td>
-        <td>190,048</td>
-        <td>214,429</td>
-        <td>$0.09</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('RADIATOR PRODUCT')">
-        <td>RADIATOR PRODUCT</td>
-        <td>15,677</td>
-        <td>324</td>
-        <td>16,001</td>
-        <td>$1.40</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('COPPER PRODUCT')">
-        <td>COPPER PRODUCT</td>
-        <td>12,373</td>
-        <td>73,560</td>
-        <td>85,934</td>
-        <td>$2.80</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('BRASS PRODUCT')">
-        <td>BRASS PRODUCT</td>
-        <td>5,633</td>
-        <td>10,246</td>
-        <td>15,879</td>
-        <td>$1.20</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('Carbide PRODUCT')">
-        <td>Carbide PRODUCT</td>
-        <td>468</td>
-        <td>287</td>
-        <td>755</td>
-        <td>$8.80</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
-        <td>STAINLESS STEEL PRODUCT</td>
-        <td>3,482</td>
-        <td>15,671</td>
-        <td>19,153</td>
-        <td>$0.60</td>
-        <td>$0.00</td>
-      </tr>
-      <tr onclick="rowClicked('STEEL PRODUCT')">
-        <td>STEEL PRODUCT</td>
-        <td>28,763</td>
-        <td>134,678</td>
-        <td>163,442</td>
-        <td>$0.14</td>
-        <td>$0.00</td>
-      </tr>
-    </tbody>
-    <tfoot>
-      <tr>
-        <td><strong>Totals:</strong></td>
-        <td id="total-wip">0</td>
-        <td id="total-finished">0</td>
-        <td id="total-total">0</td>
-        <td></td>
-        <td id="total-purchase">0</td>
-      </tr>
-    </tfoot>
-  </table>
-</div>
-
-<script>
-  function updatePurchaseValues() {
-    const table = document.getElementById('greenspark-table');
-    const rows = table.querySelectorAll('tbody tr');
-    let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-    
-    rows.forEach(row => {
-      const cells = row.getElementsByTagName('td');
-      // Columns:
-      // 1: WIP (lbs)
-      // 2: Finished Goods (lbs)
-      // 3: Total (lbs)
-      // 4: Avg Cost ($/lb)
-      // 5: Total Purchase Value
+    <!-- Finished Goods Inventory (Greenspark) -->
+    <div class="section">
+      <div class="section-title">Finished Goods Inventory (Greenspark)</div>
+      <table id="greenspark-table">
+        <thead>
+          <tr>
+            <th>Commodities</th>
+            <th>WIP (lbs)</th>
+            <th>Finished Goods (lbs)</th>
+            <th>Total (lbs)</th>
+            <th>Avg Cost ($/lb)</th>
+            <th>Total Purchase Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr onclick="rowClicked('ALUMINUM')">
+            <td>ALUMINUM</td>
+            <td>12,105</td>
+            <td>44,351</td>
+            <td>56,456</td>
+            <td>$0.50</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Electric Motors')">
+            <td>Electric Motors</td>
+            <td>11,052</td>
+            <td>10,844</td>
+            <td>21,897</td>
+            <td>$0.30</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Insulated copper wire')">
+            <td>Insulated copper wire</td>
+            <td>11,649</td>
+            <td>50,673</td>
+            <td>62,322</td>
+            <td>$1.20</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('LEAD')">
+            <td>LEAD</td>
+            <td>5,802</td>
+            <td>640</td>
+            <td>6,443</td>
+            <td>$0.40</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('FERROUS')">
+            <td>FERROUS</td>
+            <td>24,380</td>
+            <td>190,048</td>
+            <td>214,429</td>
+            <td>$0.09</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('RADIATOR PRODUCT')">
+            <td>RADIATOR PRODUCT</td>
+            <td>15,677</td>
+            <td>324</td>
+            <td>16,001</td>
+            <td>$1.40</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('COPPER PRODUCT')">
+            <td>COPPER PRODUCT</td>
+            <td>12,373</td>
+            <td>73,560</td>
+            <td>85,934</td>
+            <td>$2.80</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('BRASS PRODUCT')">
+            <td>BRASS PRODUCT</td>
+            <td>5,633</td>
+            <td>10,246</td>
+            <td>15,879</td>
+            <td>$1.20</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Carbide PRODUCT')">
+            <td>Carbide PRODUCT</td>
+            <td>468</td>
+            <td>287</td>
+            <td>755</td>
+            <td>$8.80</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('STAINLESS STEEL PRODUCT')">
+            <td>STAINLESS STEEL PRODUCT</td>
+            <td>3,482</td>
+            <td>15,671</td>
+            <td>19,153</td>
+            <td>$0.60</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('STEEL PRODUCT')">
+            <td>STEEL PRODUCT</td>
+            <td>28,763</td>
+            <td>134,678</td>
+            <td>163,442</td>
+            <td>$0.14</td>
+            <td>$0.00</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
+          
+      </table>
+    </div>
+    <script>
+      function updatePurchaseValues() {
+        const table = document.getElementById('greenspark-table');
+        const rows = table.querySelectorAll('tbody tr');
+        let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+        
+        rows.forEach(row => {
+          const cells = row.getElementsByTagName('td');
+          // Column indexes:
+          // 1: WIP (lbs)
+          // 2: Finished Goods (lbs)
+          // 3: Total (lbs)
+          // 4: Avg Cost ($/lb)
+          // 5: Total Purchase Value
+          
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalText = cells[3].textContent.replace(/,/g, '').trim();
+          const totalLbs = parseFloat(totalText) || 0;
+          const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+          const avgCost = parseFloat(avgCostText) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          
+          sumWIP += wip;
+          sumFinished += finished;
+          sumTotal += totalLbs;
+          sumPurchase += purchaseValue;
+          
+          // Optionally, update the row's purchase value cell
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+          });
+        });
+        
+        // Update the totals row in the table footer.
+        document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+        document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+        document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+        document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
+      }
       
-      // Parse the Total (lbs)
-      const totalText = cells[3].textContent.replace(/,/g, '').trim();
-      const totalLbs = parseFloat(totalText) || 0;
-      
-      // Parse Avg Cost (strip out '$' and any non-numeric characters)
-      const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-      const avgCost = parseFloat(avgCostText) || 0;
-      
-      // Calculate Total Purchase Value for this row
-      const purchaseValue = totalLbs * avgCost;
-      cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
-      });
-      
-      // Also sum the WIP and Finished Goods columns for totals
-      const wipText = cells[1].textContent.replace(/,/g, '').trim();
-      const finishedText = cells[2].textContent.replace(/,/g, '').trim();
-      const wip = parseFloat(wipText) || 0;
-      const finished = parseFloat(finishedText) || 0;
-      
-      sumWIP += wip;
-      sumFinished += finished;
-      sumTotal += totalLbs;
-      sumPurchase += purchaseValue;
-    });
-    
-    // Update totals in the <tfoot>
-    document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-    document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-    document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-    document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    });
-  }
-  
-  // Run the calculation when the DOM is ready.
-  document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-</script>
-
+      document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+    </script>
+     
     <!-- Simulated Trade Section -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
@@ -430,256 +421,202 @@
       </table>
     </div>
     
-<!-- Active Contracts Section -->
-<div class="section">
-  <div class="section-title">Active Contracts</div>
-  <table id="active-contracts-table" class="table table-hover align-middle">
-    <thead>
-      <tr>
-        <th>Material</th>
-        <th>Last Price</th>
-        <th>Change</th>
-        <th>Change %</th>
-        <th>Expiration</th>
-        <th>Margin Requirement</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody>
-      <!-- Example row for Copper -->
-      <tr onclick="rowClicked('Copper')">
-        <td>Copper (May '25)</td>
-        <td>4.6155</td>
-        <td>+0.02</td>
-        <td>+0.43%</td>
-        <td>05/25/2025</td>
-        <td class="margin-cell"></td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
-        </td>
-      </tr>
-      <!-- Example row for Brass -->
-      <tr onclick="rowClicked('Brass')">
-        <td>Brass (May '25)</td>
-        <td>7.5000</td>
-        <td>-0.05</td>
-        <td>-0.67%</td>
-        <td>05/25/2025</td>
-        <td class="margin-cell"></td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
-        </td>
-      </tr>
-      <!-- Example row for Steel -->
-      <tr onclick="rowClicked('Steel')">
-        <td>Steel (Jun '25)</td>
-        <td>975.50</td>
-        <td>+1.00</td>
-        <td>+0.10%</td>
-        <td>06/25/2025</td>
-        <td class="margin-cell"></td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
-        </td>
-      </tr>
-      <!-- Example row for Aluminum -->
-      <tr onclick="rowClicked('Aluminum')">
-        <td>Aluminum (Mar '25)</td>
-        <td>2.3500</td>
-        <td>-0.10</td>
-        <td>-0.42%</td>
-        <td>03/25/2025</td>
-        <td class="margin-cell"></td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
-        </td>
-      </tr>
-      </tbody>
-    <tfoot>
-      <tr>
-        <!-- This totals row only shows the total contracts and total margin requirement -->
-        <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-        <td colspan="4"></td>
-        <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
-        <td></td>
-      </tr>
-    </tfoot>
-  </table>
-</div>
-
-<script>
-  function updateActiveContractsTable() {
-    const table = document.getElementById('active-contracts-table');
-    const rows = table.querySelectorAll('tbody tr');
-    let totalContracts = rows.length;
-    let totalMarginRequirement = 0;
+    <!-- Active Contracts Section -->
+    <div class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th>Last Price</th>
+            <th>Change</th>
+            <th>Change %</th>
+            <th>Expiration</th>
+            <th>Margin Requirement</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr onclick="rowClicked('Copper')">
+            <td>Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>+0.02</td>
+            <td>+0.43%</td>
+            <td>05/25/2025</td>
+            <td class="margin-cell"></td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr onclick="rowClicked('Brass')">
+            <td>Brass (May '25)</td>
+            <td>3.7500</td>
+            <td>-0.05</td>
+            <td>-0.67%</td>
+            <td>05/25/2025</td>
+            <td class="margin-cell"></td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr onclick="rowClicked('Steel')">
+            <td>Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>+1.00</td>
+            <td>+0.10%</td>
+            <td>06/25/2025</td>
+            <td class="margin-cell"></td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+          <tr onclick="rowClicked('Aluminum')">
+            <td>Aluminum (Mar '25)</td>
+            <td>2.3500</td>
+            <td>-0.10</td>
+            <td>-0.42%</td>
+            <td>03/25/2025</td>
+            <td class="margin-cell"></td>
+            <td>
+              <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
+              <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td colspan="4"></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
     
-    rows.forEach(row => {
-      // Material is in cell 0.
-      const material = row.cells[0].textContent.toLowerCase();
-      // Last Price is in cell 1.
-      const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
-      let marginRequirement = NaN;
-      
-      // For Copper and Brass: use contract size of 20,000 lbs at 7% margin.
-      if (material.includes("copper") || material.includes("brass")) {
-        marginRequirement = 20000 * lastPrice * 0.07;
-      }
-      // For Steel and Aluminum: use contract size of 10 (i.e., 10 tons) at 7% margin.
-      else if (material.includes("steel") || material.includes("aluminum")) {
-        marginRequirement = 10 * lastPrice * 0.07;
-      }
-      
-      const marginCell = row.querySelector('.margin-cell');
-      if (!isNaN(marginRequirement)) {
-        marginCell.textContent = '$' + marginRequirement.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
-        totalMarginRequirement += marginRequirement;
-      } else {
-        marginCell.textContent = 'N/A';
-      }
-    });
-    
-    // Update the totals row.
-    document.getElementById('activeContractsCount').textContent = totalContracts;
-    document.getElementById('activeContractsMarginTotal').textContent =
-      '$' + totalMarginRequirement.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-  }
-  
-  document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
-</script>
-
-  <!-- Metals Market Overview Section -->
-<div class="section">
-  <div class="section-title">Metals Market Overview</div>
-  <table class="table table-hover align-middle">
-    <thead>
-      <tr>
-        <th>Symbol</th>
-        <th>Contract Name</th>
-        <th>Last</th>
-        <th>Change</th>
-        <th>Open</th>
-        <th>High</th>
-        <th>Low</th>
-        <th>Volume</th>
-        <th>Time</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>GCJ25</td>
-        <td>Gold (Apr '25)</td>
-        <td>2,953.25</td>
-        <td>-2.9</td>
-        <td>2,957.50</td>
-        <td>2,964.70</td>
-        <td>2,920.00</td>
-        <td>155,552</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>SIH25</td>
-        <td>Silver (Mar '25)</td>
-        <td>23.95</td>
-        <td>+0.10</td>
-        <td>23.85</td>
-        <td>24.20</td>
-        <td>23.65</td>
-        <td>80,334</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>HGG25</td>
-        <td>High Grade Copper (May '25)</td>
-        <td>4.6155</td>
-        <td>-0.0050</td>
-        <td>4.5900</td>
-        <td>4.6690</td>
-        <td>4.5800</td>
-        <td>36,500</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>PLJ25</td>
-        <td>Platinum (Apr '25)</td>
-        <td>997.35</td>
-        <td>+7.50</td>
-        <td>990.00</td>
-        <td>1,003.80</td>
-        <td>988.00</td>
-        <td>25,650</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>PAH25</td>
-        <td>Palladium (Mar '25)</td>
-        <td>1,483.00</td>
-        <td>-9.70</td>
-        <td>1,490.00</td>
-        <td>1,508.00</td>
-        <td>1,478.00</td>
-        <td>11,000</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>ALX25</td>
-        <td>Aluminum (Mar '25)</td>
-        <td>2,350.00</td>
-        <td>+15.00</td>
-        <td>2,335.00</td>
-        <td>2,370.00</td>
-        <td>2,320.00</td>
-        <td>20,500</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>HMX25</td>
-        <td>US Midwest Steel (Jun '25)</td>
-        <td>975.50</td>
-        <td>-4.00</td>
-        <td>980.00</td>
-        <td>990.00</td>
-        <td>970.00</td>
-        <td>9,750</td>
-        <td>02/21/25</td>
-      </tr>
-      <tr>
-        <td>PLX25</td>
-        <td>Platinum (Jul '25)</td>
-        <td>1,015.50</td>
-        <td>+5.10</td>
-        <td>1,010.00</td>
-        <td>1,025.00</td>
-        <td>1,005.00</td>
-        <td>8,230</td>
-        <td>02/21/25</td>
-      </tr>
-     
-      <tr>
-        <td>LMG25</td>
-        <td>Aluminum (Feb '25)</td>
-        <td>2,325.00</td>
-        <td>+8.00</td>
-        <td>2,320.00</td>
-        <td>2,340.00</td>
-        <td>2,310.00</td>
-        <td>4,800</td>
-        <td>02/21/25</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
+    <!-- Metals Market Overview Section -->
+    <div class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.9</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>SIH25</td>
+            <td>Silver (Mar '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4.5900</td>
+            <td>4.6690</td>
+            <td>4.5800</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLJ25</td>
+            <td>Platinum (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PAH25</td>
+            <td>Palladium (Mar '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     
     <!-- Live Data Updates Section -->
     <div class="section">
@@ -688,11 +625,11 @@
       <div id="green-spark-container"></div>
     </div>
   </div>
-
+  
   <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+  
   <script>
     // Accent color for charts and highlights
     const accentColor = '#3498db';
@@ -700,27 +637,29 @@
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
-
-    // Initialize Trading Graph using Chart.js
-    const ctx = document.getElementById('tradingChart').getContext('2d');
-    const tradingChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-        datasets: [{
-          label: 'Trading Data',
-          data: [100, 150, 130, 170, 160, 180],
-          borderColor: accentColor,
-          backgroundColor: 'rgba(52,152,219,0.2)',
-          fill: true,
-          tension: 0.1
-        }]
-      },
-      options: {
-        scales: { y: { beginAtZero: true } }
-      }
-    });
-
+  
+    // Initialize Trading Graph using Chart.js (if chart exists)
+    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
+    if(ctx){
+      const tradingChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
+          datasets: [{
+            label: 'Trading Data',
+            data: [100, 150, 130, 170, 160, 180],
+            borderColor: accentColor,
+            backgroundColor: 'rgba(52,152,219,0.2)',
+            fill: true,
+            tension: 0.1
+          }]
+        },
+        options: {
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+  
     /***************************************
      * Update Total Purchase Value for Finished Goods Inventory
      ***************************************/
@@ -729,7 +668,7 @@
       const rows = table.querySelectorAll('tbody tr');
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
-        // Column indexes: 0 = Commodity, 1 = WIP, 2 = Finished, 3 = Total, 4 = Avg Cost, 5 = Purchase Value
+        // Columns: 0=Commodity, 1=WIP, 2=Finished, 3=Total, 4=Avg Cost, 5=Purchase Value
         const totalText = cells[3].textContent.replace(/,/g, '').trim();
         const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
         const totalLbs = parseFloat(totalText) || 0;
@@ -739,11 +678,208 @@
       });
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-
+  
     /***************************************
-     * (Other existing scripts for Active Contracts, Trade Log, etc.)
+     * Simulated Trade Section and Functions
      ***************************************/
-    // ... existing code for active contracts, trade log, updateTradeOptions, simulateTrade, etc.
+    // Market Snapshot prices (assumed static as shown in Overview Card)
+    const marketSnapshotPrices = {
+      Copper: 9500,
+      Brass: 7500,
+      Steel: 500,
+      Aluminum: 2200
+    };
+  
+    // Mapping from dropdown material values to Greenspark table names.
+    const commodityMapping = {
+      Copper: "COPPER PRODUCT",
+      Brass: "BRASS PRODUCT",
+      Steel: "STEEL PRODUCT",
+      Aluminum: "ALUMINUM"
+    };
+  
+    // Look up commodity data from the Greenspark table.
+    // Returns the Finished Goods (lbs) for the commodity.
+    function getCommodityData(material) {
+      const target = commodityMapping[material];
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
+        if (rowMaterial === target.toUpperCase()) {
+          // Finished Goods is in column index 2.
+          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+          const finishedGoods = parseFloat(finishedGoodsText) || 0;
+          return { finishedGoods };
+        }
+      }
+      return { finishedGoods: 0 };
+    }
+  
+    function updateTradeOptions() {
+      const materialSelect = document.getElementById('create-material');
+      const material = materialSelect.value;
+      const data = getCommodityData(material);
+      
+      // Assume contract size is 10 tons = 20,000 lbs.
+      const contractSize = 20000;
+      const availableContracts = Math.floor(data.finishedGoods / contractSize);
+      
+      // Update "Creatable Contracts" dropdown.
+      const contractsSelect = document.getElementById('create-contracts');
+      contractsSelect.innerHTML = '';
+      if (availableContracts < 1) {
+        const option = document.createElement('option');
+        option.value = 0;
+        option.textContent = "0";
+        contractsSelect.appendChild(option);
+      } else {
+        for (let i = 1; i <= availableContracts; i++) {
+          const option = document.createElement('option');
+          option.value = i;
+          option.textContent = i;
+          contractsSelect.appendChild(option);
+        }
+      }
+      
+      // For "Price/ton", use the market snapshot price.
+      const basePricePerTon = marketSnapshotPrices[material] || 0;
+      
+      // Update "Price/ton" dropdown: 6 options using multipliers.
+      const priceSelect = document.getElementById('create-price');
+      priceSelect.innerHTML = '';
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
+      });
+      
+      // Update "Cost to Create" dropdown: single option = 0.1% of base price per ton.
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const costToCreate = basePricePerTon * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOption);
+      
+      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments.
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = expDate.getDate().toString().padStart(2, '0');
+        const year = expDate.getFullYear();
+        const dateStr = month + '/' + day + '/' + year;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    
+    // Append a new row to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tradeTime = new Date().toLocaleTimeString();
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = `
+        <td>${tradeTime}</td>
+        <td>${material}</td>
+        <td>${quantity}</td>
+        <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+        <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+      `;
+      tableBody.appendChild(newRow);
+    }
+    
+    // Append a new row to the Active Contracts table.
+    function addActiveContract(material, lastPrice, expiration) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = `
+        <td>${material}</td>
+        <td>${lastPrice}</td>
+        <td>0</td>
+        <td>0%</td>
+        <td>${expiration}</td>
+        <td class="margin-cell"></td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+        </td>
+      `;
+      tableBody.appendChild(newRow);
+    }
+    
+    // simulateTrade() appends new rows to both the Trade Log and Active Contracts tables.
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      for (let i = 0; i < numTrades; i++) {
+        const quantity = 10; // each trade for 10 tons.
+        const totalCost = quantity * chosenPrice;
+        // Append new trade entry.
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
+        // Append new active contract entry.
+        addActiveContract(material + ' (Trade #' + (i + 1) + ')', chosenPrice, expiration);
+      }
+      
+      // Update Active Contracts table (for margin calculations and totals).
+      updateActiveContractsTable();
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+    
+    /***************************************
+     * Update Active Contracts Table
+     ***************************************/
+    function updateActiveContractsTable() {
+      const table = document.getElementById('active-contracts-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let totalContracts = rows.length;
+      let totalMarginRequirement = 0;
+      
+      rows.forEach(row => {
+        const material = row.cells[0].textContent.toLowerCase();
+        const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
+        let marginRequirement = NaN;
+        
+        // For Copper and Brass: contract size of 20,000 lbs at 7%.
+        if (material.includes("copper") || material.includes("brass")) {
+          marginRequirement = 20000 * lastPrice * 0.07;
+        }
+        // For Steel and Aluminum: contract size of 10 tons (10 units) at 7%.
+        else if (material.includes("steel") || material.includes("aluminum")) {
+          marginRequirement = 10 * lastPrice * 0.07;
+        }
+        
+        const marginCell = row.querySelector('.margin-cell');
+        if (!isNaN(marginRequirement)) {
+          marginCell.textContent = '$' + marginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          totalMarginRequirement += marginRequirement;
+        } else {
+          marginCell.textContent = 'N/A';
+        }
+      });
+      
+      // Update the totals row.
+      document.getElementById('activeContractsCount').textContent = totalContracts;
+      document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
     
     function logout() {
       alert('Logging out...');
