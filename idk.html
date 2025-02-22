@@ -328,6 +328,62 @@
   </table>
 </div>
 
+<script>
+  function updatePurchaseValues() {
+    const table = document.getElementById('greenspark-table');
+    const rows = table.querySelectorAll('tbody tr');
+    let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+    
+    rows.forEach(row => {
+      const cells = row.getElementsByTagName('td');
+      // Columns:
+      // 1: WIP (lbs)
+      // 2: Finished Goods (lbs)
+      // 3: Total (lbs)
+      // 4: Avg Cost ($/lb)
+      // 5: Total Purchase Value
+      
+      // Parse the Total (lbs)
+      const totalText = cells[3].textContent.replace(/,/g, '').trim();
+      const totalLbs = parseFloat(totalText) || 0;
+      
+      // Parse Avg Cost (strip out '$' and any non-numeric characters)
+      const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+      const avgCost = parseFloat(avgCostText) || 0;
+      
+      // Calculate Total Purchase Value for this row
+      const purchaseValue = totalLbs * avgCost;
+      cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      });
+      
+      // Also sum the WIP and Finished Goods columns for totals
+      const wipText = cells[1].textContent.replace(/,/g, '').trim();
+      const finishedText = cells[2].textContent.replace(/,/g, '').trim();
+      const wip = parseFloat(wipText) || 0;
+      const finished = parseFloat(finishedText) || 0;
+      
+      sumWIP += wip;
+      sumFinished += finished;
+      sumTotal += totalLbs;
+      sumPurchase += purchaseValue;
+    });
+    
+    // Update totals in the <tfoot>
+    document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+    document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+    document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+    document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    });
+  }
+  
+  // Run the calculation when the DOM is ready.
+  document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+</script>
+
     
     <!-- Trading Graph Section -->
     <div class="section">
