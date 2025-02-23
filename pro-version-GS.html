@@ -1,4 +1,4 @@
-<!DOCTYPE html>    
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -197,15 +197,23 @@
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
-          <div>8 Secured</div>
-          <div>Margin: $12,000</div>
+          <!-- These IDs are used to update the card dynamically -->
+          <div id="active-contracts-secured">0 Secured</div>
+          <div id="active-contracts-margin">Margin: $0.00</div>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
           <div>Copper: $9,500</div>
-          <div>Steel: $500</div>
+          <div>Busheling Steel: $700</div>
           <div>Brass: $7,500</div>
           <div>Aluminum: $2,200</div>
+          <div>Electric Motors: $9,000</div>
+          <div>Insulated Copper Wire: $36,000</div>
+          <div>Lead: $15,000</div>
+          <div>HMS Steel #2: $500</div>
+          <div>Cu Radiator (50Cu/50Brass): $56,000</div>
+          <div>Carbide: $200,000</div>
+          <div>Stainless Steel: $16,000</div>
         </div>
       </div>
     </div>
@@ -258,7 +266,7 @@
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('FERROUS')">
-            <td>Steel #2</td>
+            <td>HMS Steel #2</td>
             <td>124,380</td>
             <td>190,048</td>
             <td>314,429</td>
@@ -266,7 +274,7 @@
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('RADIATOR PRODUCT')">
-            <td>RADIATOR Product</td>
+            <td>Cu Radiator (50Cu/50Brass)</td>
             <td>15,677</td>
             <td>324</td>
             <td>16,001</td>
@@ -306,7 +314,7 @@
             <td>$0.00</td>
           </tr>
           <tr onclick="rowClicked('STEEL')">
-            <td>STEEL</td>
+            <td>Busheling STEEL</td>
             <td>128,763</td>
             <td>134,678</td>
             <td>263,442</td>
@@ -866,10 +874,15 @@
         }
       });
       
-      // Update the totals row.
+      // Update the totals row in the table footer.
       document.getElementById('activeContractsCount').textContent = totalContracts;
       document.getElementById('activeContractsMarginTotal').textContent =
         '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      
+      // Also update the Active Contracts card values.
+      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" +
+        totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     
     document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
@@ -878,7 +891,13 @@
       alert('Logging out...');
     }
     function cardClicked(cardName) {
-      alert(cardName + ' card clicked!');
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
     }
     function rowClicked(itemName) {
       alert('Row for ' + itemName + ' clicked!');
