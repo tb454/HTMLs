@@ -858,7 +858,7 @@
         
         // For Copper and Brass: contract size of 20,000 lbs at 7%.
         if (material.includes("copper") || material.includes("brass")) {
-          marginRequirement = 10 * lastPrice * 0.07;
+          marginRequirement = 20000 * lastPrice * 0.07;
         }
         // For Steel and Aluminum: contract size of 10 tons (10 units) at 7%.
         else if (material.includes("steel") || material.includes("aluminum")) {
