@@ -668,11 +668,10 @@
         maximumFractionDigits: 2 
       });
       
-      // Update Finished Goods Card with values from totals line (using Finished Goods total)
+      // Update Finished Goods Card with values from totals line (using Total (lbs) divided by 20,000)
       if(document.getElementById('finished-goods-card')){
-        // Using a contract size of 20,000 lbs and assuming 1 ton = 2,000 lbs.
-        let contractsAvailable = Math.floor(sumFinished / 20000);
-        let totalTons = sumFinished / 2000;
+        let contractsAvailable = Math.floor(sumTotal / 20000);
+        let totalTons = sumTotal / 20000;
         let cardHTML = `<div><strong>Finished Goods</strong></div>
                         <div>${contractsAvailable} Contracts Available</div>
                         <div>~${totalTons.toFixed(1)} Total Tons</div>`;
