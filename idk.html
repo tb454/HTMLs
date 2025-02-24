@@ -1,4 +1,4 @@
-<!DOCTYPE html>    
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -90,6 +90,8 @@
       text-align: center;
       cursor: pointer;
       transition: box-shadow 0.2s ease, transform 0.2s ease;
+      display: flex;             /* Enable flex layout */
+      flex-direction: column;    /* Arrange children in a column */
     }
     .card-custom:hover {
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -98,6 +100,12 @@
     .card-custom div {
       margin-bottom: 8px;
       font-size: 16px;
+    }
+    /* New chart styling for card charts */
+    .card-chart {
+      margin-top: auto;  /* Pushes the chart to the bottom */
+      width: 100%;
+      height: 150px;     /* Adjust as needed */
     }
     /* Tables */
     table {
@@ -187,7 +195,7 @@
       padding-left: 100%;
       animation: ticker 90s linear infinite;
     }
-    /* New ticker item styles based on your provided HTML */
+    /* New ticker item styles */
     .ticker-item { 
       margin-right: 20px; 
       font-size: 0.95rem; 
@@ -236,16 +244,16 @@
         <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
           <div id="finishedGoodsInfo">Loading...</div>
-          <!-- New canvas element for the line graph -->
-          <canvas id="finishedGoodsChart" width="250" height="100"></canvas>
+          <!-- Updated canvas element without inline width/height -->
+          <canvas id="finishedGoodsChart" class="card-chart"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
-          <!-- New canvas element for the line graph -->
-          <canvas id="activeContractsChart" width="250" height="100"></canvas>
+          <!-- Updated canvas element without inline width/height -->
+          <canvas id="activeContractsChart" class="card-chart"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -672,6 +680,8 @@
             }]
           },
           options: {
+            responsive: true,
+            maintainAspectRatio: false,
             scales: {
               y: { beginAtZero: true }
             }
@@ -697,6 +707,8 @@
             }]
           },
           options: {
+            responsive: true,
+            maintainAspectRatio: false,
             scales: {
               y: { beginAtZero: true }
             }
@@ -736,8 +748,8 @@
       document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
       });
       
       // Update Finished Goods Card Info and Chart
@@ -968,7 +980,7 @@
         const marginRequirement = totalContractValue * 0.07;
         row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { 
           minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
+          maximumFractionDigits: 2
         });
         
         totalMarginRequirement += marginRequirement;
@@ -978,13 +990,13 @@
       document.getElementById('activeContractsMarginTotal').textContent =
         '$' + totalMarginRequirement.toLocaleString(undefined, { 
           minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
+          maximumFractionDigits: 2
         });
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
       document.getElementById('active-contracts-margin').textContent = "Margin: $" +
         totalMarginRequirement.toLocaleString(undefined, { 
           minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
+          maximumFractionDigits: 2
         });
       
       // Update the total change footer cell and overview card
@@ -1159,7 +1171,7 @@
   
           row.cells[2].textContent = newLast.toLocaleString(undefined, { 
             minimumFractionDigits: 2, 
-            maximumFractionDigits: 2 
+            maximumFractionDigits: 2
           });
   
           let change = newLast - openPrice;
@@ -1169,7 +1181,7 @@
           if (newLast > currentHigh) {
             row.cells[5].textContent = newLast.toLocaleString(undefined, { 
               minimumFractionDigits: 2, 
-              maximumFractionDigits: 2 
+              maximumFractionDigits: 2
             });
           }
   
@@ -1177,7 +1189,7 @@
           if (newLast < currentLow) {
             row.cells[6].textContent = newLast.toLocaleString(undefined, { 
               minimumFractionDigits: 2, 
-              maximumFractionDigits: 2 
+              maximumFractionDigits: 2
             });
           }
   
