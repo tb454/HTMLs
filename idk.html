@@ -172,50 +172,6 @@
       border: 1px solid #e1e4e8;
       box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    
-    /* Additional styling for Finished Goods Inventory (from snippet 1) */
-    .table-wrap {
-      background-color: #fff; 
-      border: 1px solid #ddd; 
-      border-radius: 4px; 
-      padding: 1rem; 
-      margin: 1rem 0;
-    }
-    .inventory-header {
-      background-color: #fff; 
-      border-bottom: 1px solid #ddd; 
-      padding: 1rem; 
-      text-align: center;
-    }
-    .inventory-header h1 {
-      font-size: 1.5rem;
-    }
-    .inventory-table th, .inventory-table td {
-      padding: 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-      white-space: nowrap;
-    }
-    .inventory-table thead th {
-      background-color: #f9f9f9;
-      font-weight: 500;
-    }
-    .inventory-table tr:hover {
-      background-color: #fefefe;
-    }
-    .btn-view {
-      background-color: #fff;
-      border: 1px solid #27ae60;
-      border-radius: 4px;
-      color: #27ae60;
-      padding: 5px 10px;
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    .btn-view:hover {
-      background-color: #27ae60;
-      color: #fff;
-    }
   </style>
 </head>
 <body>
@@ -263,7 +219,7 @@
       </div>
     </div>
     
-    <!-- Finished Goods Inventory (Greenspark) Section -->
+    <!-- Finished Goods Inventory (Greenspark) -->
     <div class="section">
       <div class="section-title">Finished Goods Inventory (Greenspark)</div>
       <table id="greenspark-table">
@@ -378,29 +334,6 @@
           </tr>
         </tfoot>
       </table>
-    </div>
-    
-    <!-- New: Finished Goods Inventory from Local Storage -->
-    <div class="section" id="local-inventory-section">
-      <div class="section-title">Finished Goods Inventory (Local Storage)</div>
-      <!-- Inventory Header -->
-      <div class="inventory-header">
-        <h1>Finished Goods Inventory</h1>
-      </div>
-      <!-- Inventory Table -->
-      <div class="table-wrap">
-        <table id="inventoryTable" class="inventory-table">
-          <thead>
-            <tr>
-              <th>Commodity</th>
-              <th>Finished Goods</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- This tbody will be updated via JavaScript -->
-          </tbody>
-        </table>
-      </div>
     </div>
     
     <!-- Simulated Trade Section (One Line) -->
@@ -657,7 +590,7 @@
     }
   
     /***************************************
-     * Update Total Purchase Value for Finished Goods Inventory (Greenspark)
+     * Update Total Purchase Value for Finished Goods Inventory
      ***************************************/
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
@@ -966,39 +899,6 @@
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
-    
-    /***************************************
-     * Finished Goods Inventory from Local Storage (Snippet 1)
-     ***************************************/
-    function renderTableFromStorage() {
-      const storedData = localStorage.getItem('greensparkData');
-      if (storedData) {
-        // Parse the stored JSON (assumed format: { inventory: [...] })
-        const parsedData = JSON.parse(storedData);
-        const inventory = parsedData.inventory;
-        const tbody = document.getElementById("inventoryTable").querySelector("tbody");
-        tbody.innerHTML = "";
-        inventory.forEach(item => {
-          const row = document.createElement("tr");
-          row.innerHTML = `
-            <td>${item.commodity}</td>
-            <td>${item.finishedGoods.toLocaleString()} lbs</td>
-          `;
-          tbody.appendChild(row);
-        });
-      }
-    }
-    
-    // Listen for changes in localStorage (from greenspark.html)
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'greensparkData') {
-        renderTableFromStorage();
-      }
-    });
-    
-    // Render the table on initial page load
-    window.addEventListener("DOMContentLoaded", renderTableFromStorage);
-    
   </script>
 </body>
 </html>
