@@ -225,4 +225,170 @@
 
     /************************************************************************
      * 2) FUTURES TRADING GUIDE DATA
-     
+     ************************************************************************/
+    let futuresGuide = [];
+
+    function generateTradingGuide() {
+      const signals = ["BUY", "SELL"];
+      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
+      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
+
+      futuresGuide = futuresData.map(item => {
+        let sig = signals[Math.floor(Math.random() * signals.length)];
+        let entryPct = (Math.random() * 2 + 1) / 100;
+        if (sig === "SELL") entryPct *= -1;
+        let entryPrice = item.last * (1 + entryPct);
+        let stopDiff = Math.abs(entryPrice * 0.05);
+        let profitDiff = Math.abs(entryPrice * 0.1);
+        let stop, takeProfit;
+        if (sig === "BUY") {
+          stop = entryPrice - stopDiff;
+          takeProfit = entryPrice + profitDiff;
+        } else {
+          stop = entryPrice + stopDiff;
+          takeProfit = entryPrice - profitDiff;
+        }
+        let strength = strengths[Math.floor(Math.random() * strengths.length)];
+        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
+
+        return {
+          contractName: item.contractName,
+          signal: sig,
+          entryDate: "02/20/25",
+          entryPrice: parseFloat(entryPrice.toFixed(2)),
+          stopLoss: parseFloat(stop.toFixed(2)),
+          takeProfit: parseFloat(takeProfit.toFixed(2)),
+          timeHorizon: horizon,
+          strength: strength
+        };
+      });
+    }
+
+    /************************************************************************
+     * 3) RANDOM FLUCTUATIONS every 5 minutes
+     ************************************************************************/
+    function fluctuateData() {
+      futuresData.forEach(item => {
+        let pct = (Math.random() * 5 - 2.5) / 100;
+        let oldLast = item.last;
+        let newLast = oldLast * (1 + pct);
+        item.last = parseFloat(newLast.toFixed(2));
+        let diff = item.last - oldLast;
+        item.change = parseFloat(diff.toFixed(2));
+        let highPct = (Math.random() * 3) / 100;
+        let lowPct = (Math.random() * 3) / 100;
+        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
+        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
+        let volPct = (Math.random() * 20 - 10) / 100;
+        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
+      });
+      generateTradingGuide();
+    }
+
+    /************************************************************************
+     * 4) RENDER TABLES
+     ************************************************************************/
+    function renderFuturesTable() {
+      const tbody = document.getElementById("futuresTable").querySelector("tbody");
+      tbody.innerHTML = "";
+      futuresData.forEach(item => {
+        const chgClass = item.change >= 0 ? "change-positive" : "change-negative";
+        let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
+        let trendArrow = "";
+        if (item.change > 0) {
+          trendArrow = '<span style="color: green;">&#9650;</span>';
+        } else if (item.change < 0) {
+          trendArrow = '<span style="color: red;">&#9660;</span>';
+        } else {
+          trendArrow = '<span>-</span>';
+        }
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${item.contractName}</td>
+          <td>${item.last.toFixed(2)}</td>
+          <td class="${chgClass}">${dispChange}</td>
+          <td>${item.high.toFixed(2)}</td>
+          <td>${item.low.toFixed(2)}</td>
+          <td>${item.volume.toLocaleString()}</td>
+          <td>${item.time}</td>
+          <td>${trendArrow}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function renderFuturesGuideTable() {
+      const guideTbody = document.getElementById("futuresGuideTable").querySelector("tbody");
+      guideTbody.innerHTML = "";
+      futuresGuide.forEach(trade => {
+        const sigColor = trade.signal === "BUY" ? "green" : "red";
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${trade.contractName}</td>
+          <td style="color:${sigColor}; font-weight:bold;">${trade.signal}</td>
+          <td>${trade.entryDate}</td>
+          <td>${trade.entryPrice.toFixed(2)}</td>
+          <td>${trade.stopLoss.toFixed(2)}</td>
+          <td>${trade.takeProfit.toFixed(2)}</td>
+          <td>${trade.timeHorizon}</td>
+          <td>${trade.strength}</td>
+          <td><button class="btn-view-trade">View Complete Trade</button></td>
+        `;
+        guideTbody.appendChild(row);
+      });
+    }
+
+    /************************************************************************
+     * 5) UPDATE HIDDEN JSON
+     ************************************************************************/
+    function updateHiddenJSON() {
+      const dataScript = document.getElementById("futures-data");
+      const dataObj = {
+        futures: futuresData,
+        tradingGuide: futuresGuide
+      };
+      dataScript.textContent = JSON.stringify(dataObj);
+    }
+
+    /************************************************************************
+     * 6) AUTO-SCROLL TABLES
+     ************************************************************************/
+    function autoScroll(container) {
+      const step = 1;
+      const intervalTime = 50;
+      setInterval(() => {
+        const maxScroll = container.scrollHeight - container.clientHeight;
+        if (container.scrollTop < maxScroll) {
+          container.scrollTop += step;
+        } else {
+          container.scrollTop = 0;
+        }
+      }, intervalTime);
+    }
+
+    function startAutoScroll() {
+      const scrollableContainers = document.querySelectorAll('.scrollable-table');
+      scrollableContainers.forEach(container => autoScroll(container));
+    }
+
+    /************************************************************************
+     * 7) INIT + AUTO-UPDATE EVERY 5 MIN
+     ************************************************************************/
+    function init() {
+      generateTradingGuide();
+      renderFuturesTable();
+      renderFuturesGuideTable();
+      updateHiddenJSON();
+      startAutoScroll();
+      setInterval(() => {
+        fluctuateData();
+        renderFuturesTable();
+        renderFuturesGuideTable();
+        updateHiddenJSON();
+      }, 5 * 60 * 1000);
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
