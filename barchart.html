@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <title>Barchart-Style Futures</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <!-- (Optional) Bootstrap for quick styling -->
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
@@ -37,66 +36,32 @@
       color: #333;
       font-size: 1.15rem;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th, td {
-      padding: 0.75rem;
-      text-align: left;
-      border-bottom: 1px solid #ddd;
-      white-space: nowrap;
-    }
-    thead th {
-      background-color: #f3f3f3;
-    }
-    tr:hover {
-      background-color: #f7f7f7;
-    }
-    .change-positive {
-      color: green;
-    }
-    .change-negative {
-      color: red;
-    }
-    .dots-menu {
-      cursor: pointer;
-      color: #007bff;
-    }
-    .footer-table th {
-      background-color: #eaeaea;
-    }
-    .footer-table td {
-      vertical-align: middle;
-    }
-    .btn-view-trade {
-      background-color: #007bff;
-      color: #fff;
-      border: none;
-      padding: 0.4rem 0.75rem;
-      font-size: 0.85rem;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .btn-view-trade:hover {
-      background-color: #0056b3;
-    }
-    /* --- Ticker container: fixed height and overflow hidden --- */
-    .scroll-container {
-      position: relative;
+    /* ------------------ Ticker Styles ------------------ */
+    .ticker-wrap {
       overflow: hidden;
-      height: 40px; /* adjust based on your row height */
-      margin-top: 5px;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      padding: 5px 0;
+      margin-bottom: 20px;
     }
-    /* --- The ticker line: animate from right to left --- */
-    .ticker-line {
+    .ticker {
       display: inline-block;
       white-space: nowrap;
-      animation: marquee 8s linear;
+      /* Start with an offset so the ticker content enters smoothly */
+      padding-left: 100%;
+      animation: ticker 90s linear infinite;
     }
-    @keyframes marquee {
-      from { transform: translateX(100%); }
-      to   { transform: translateX(-100%); }
+    .ticker-item {
+      margin-right: 20px;
+      font-size: 0.95rem;
+    }
+    .ticker-separator {
+      margin-right: 20px;
+      color: #666;
+    }
+    @keyframes ticker {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
     }
   </style>
 </head>
@@ -109,51 +74,16 @@
       <div class="date">Thu, Feb 20th, 2025</div>
     </div>
 
-    <!-- Major Markets Overview -->
+    <!-- Major Markets Overview Ticker -->
     <h3 class="section-title">Major Markets Overview</h3>
-    <div class="table-responsive mb-3">
-      <table id="futuresTable" class="table table-hover align-middle">
-        <thead>
-          <tr>
-            <th>Contract Name</th>
-            <th>Last</th>
-            <th>Change</th>
-            <th>High</th>
-            <th>Low</th>
-            <th>Volume</th>
-            <th>Time</th>
-            <th>Trend</th>
-          </tr>
-        </thead>
-      </table>
-      <!-- This ticker will display one scrolling row at a time -->
-      <div class="scroll-container">
-        <div id="ticker-futures"></div>
-      </div>
+    <div class="ticker-wrap" id="futuresTickerWrap">
+      <div class="ticker" id="futuresTicker"></div>
     </div>
 
-    <!-- “Futures Trading Guide” (Expanded) -->
+    <!-- Futures Trading Guide Ticker -->
     <h3 class="section-title">Futures Trading Guide: New Trade Alerts</h3>
-    <div class="table-responsive">
-      <table class="table footer-table" id="futuresGuideTable">
-        <thead>
-          <tr>
-            <th>Contract</th>
-            <th>Signal</th>
-            <th>Entry Date</th>
-            <th>Entry Price</th>
-            <th>Stop Loss</th>
-            <th>Take Profit</th>
-            <th>Time Horizon</th>
-            <th>Strength</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-      </table>
-      <!-- Ticker for trading guide rows -->
-      <div class="scroll-container">
-        <div id="ticker-guide"></div>
-      </div>
+    <div class="ticker-wrap" id="guideTickerWrap">
+      <div class="ticker" id="guideTicker"></div>
     </div>
   </div>
 
@@ -170,109 +100,21 @@
      * 1) FUTURES DATA
      ************************************************************************/
     let futuresData = [
-      {
-        contractName: "ALUM25",
-        last: 220.0,
-        change: 1.25,
-        high: 222.0,
-        low: 217.5,
-        volume: 75200,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "EMOT25",
-        last: 89.0,
-        change: 0.75,
-        high: 90.0,
-        low: 88.0,
-        volume: 19845,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "ICWR25",
-        last: 310.0,
-        change: 2.0,
-        high: 315.0,
-        low: 305.0,
-        volume: 42312,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "LEAD25",
-        last: 45.2,
-        change: -0.2,
-        high: 46.0,
-        low: 44.8,
-        volume: 13890,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "HMS225",
-        last: 502.0,
-        change: 1.5,
-        high: 505.0,
-        low: 498.0,
-        volume: 28176,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "CRAD25",
-        last: 128.0,
-        change: 0.75,
-        high: 129.5,
-        low: 126.0,
-        volume: 8625,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "COPR25",
-        last: 955.0,
-        change: 3.5,
-        high: 960.0,
-        low: 940.0,
-        volume: 15500,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "BRSS25",
-        last: 780.0,
-        change: -2.0,
-        high: 785.0,
-        low: 775.0,
-        volume: 11240,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "CARB25",
-        last: 410.0,
-        change: 1.0,
-        high: 415.0,
-        low: 405.0,
-        volume: 12990,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "STLS25",
-        last: 215.0,
-        change: 0.50,
-        high: 217.0,
-        low: 211.0,
-        volume: 8450,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "BSTE25",
-        last: 32.0,
-        change: -0.25,
-        high: 32.5,
-        low: 31.5,
-        volume: 3210,
-        time: "14:47 CT"
-      }
+      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
+      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
+      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
+      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
+      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
+      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
+      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
+      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
+      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
+      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
+      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
     ];
 
     /************************************************************************
-     * 2) “FUTURES TRADING GUIDE” DATA
+     * 2) FUTURES TRADING GUIDE DATA
      ************************************************************************/
     let futuresGuide = [];
 
@@ -313,7 +155,63 @@
     }
 
     /************************************************************************
-     * 3) UPDATE HIDDEN JSON
+     * 3) RANDOM FLUCTUATIONS every 5 minutes
+     ************************************************************************/
+    function fluctuateData() {
+      futuresData.forEach(item => {
+        let pct = (Math.random() * 5 - 2.5) / 100;
+        let oldLast = item.last;
+        let newLast = oldLast * (1 + pct);
+        item.last = parseFloat(newLast.toFixed(2));
+        let diff = item.last - oldLast;
+        item.change = parseFloat(diff.toFixed(2));
+        let highPct = (Math.random() * 3) / 100;
+        let lowPct = (Math.random() * 3) / 100;
+        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
+        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
+        let volPct = (Math.random() * 20 - 10) / 100;
+        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
+      });
+
+      generateTradingGuide();
+    }
+
+    /************************************************************************
+     * 4) RENDER TICKERS
+     ************************************************************************/
+    function renderFuturesTicker() {
+      const ticker = document.getElementById("futuresTicker");
+      let content = "";
+      futuresData.forEach(item => {
+        let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
+        let trendArrow = item.change > 0 ? "▲" : (item.change < 0 ? "▼" : "-");
+        content += `<span class="ticker-item">
+                      ${item.contractName} ${item.last.toFixed(2)} ${dispChange} 
+                      ${item.high.toFixed(2)} ${item.low.toFixed(2)} 
+                      ${item.volume.toLocaleString()} ${item.time} ${trendArrow}
+                    </span>`;
+        content += `<span class="ticker-separator"> ---- </span>`;
+      });
+      // Duplicate content for continuous scrolling
+      ticker.innerHTML = content + content;
+    }
+
+    function renderGuideTicker() {
+      const ticker = document.getElementById("guideTicker");
+      let content = "";
+      futuresGuide.forEach(trade => {
+        content += `<span class="ticker-item">
+                      ${trade.contractName} ${trade.signal} ${trade.entryDate} 
+                      ${trade.entryPrice.toFixed(2)} ${trade.stopLoss.toFixed(2)} 
+                      ${trade.takeProfit.toFixed(2)} ${trade.timeHorizon} ${trade.strength}
+                    </span>`;
+        content += `<span class="ticker-separator"> ---- </span>`;
+      });
+      ticker.innerHTML = content + content;
+    }
+
+    /************************************************************************
+     * 5) UPDATE HIDDEN JSON
      ************************************************************************/
     function updateHiddenJSON() {
       const dataScript = document.getElementById("futures-data");
@@ -325,91 +223,18 @@
     }
 
     /************************************************************************
-     * 4) TICKER FUNCTIONS
-     *
-     * These functions will update a dedicated ticker container with a single
-     * scrolling “line” (row) at a time.
-     ************************************************************************/
-    function startTicker(data, elementId, formatFunction, interval) {
-      let index = 0;
-      const tickerEl = document.getElementById(elementId);
-
-      function showNext() {
-        const item = data[index];
-        tickerEl.innerHTML =
-          '<div class="ticker-line">' + formatFunction(item) + '</div>';
-        // Force reflow (optional—helps restart the animation)
-        void tickerEl.offsetWidth;
-        index = (index + 1) % data.length;
-      }
-      showNext();
-      setInterval(showNext, interval);
-    }
-
-    // Format a row for the main futures table ticker.
-    function formatFuturesRow(item) {
-      // Add a plus sign if positive; use arrows for trend
-      const dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
-      const trendArrow =
-        item.change > 0 ? "▲" : item.change < 0 ? "▼" : "-";
-      return (
-        item.contractName +
-        " | " +
-        item.last.toFixed(2) +
-        " | " +
-        dispChange +
-        " | " +
-        item.high.toFixed(2) +
-        " | " +
-        item.low.toFixed(2) +
-        " | " +
-        item.volume.toLocaleString() +
-        " | " +
-        item.time +
-        " | " +
-        trendArrow
-      );
-    }
-
-    // Format a row for the trading guide ticker.
-    function formatGuideRow(item) {
-      return (
-        item.contractName +
-        " | " +
-        item.signal +
-        " | " +
-        item.entryDate +
-        " | " +
-        item.entryPrice.toFixed(2) +
-        " | " +
-        item.stopLoss.toFixed(2) +
-        " | " +
-        item.takeProfit.toFixed(2) +
-        " | " +
-        item.timeHorizon +
-        " | " +
-        item.strength
-      );
-    }
-
-    /************************************************************************
-     * 5) INIT + AUTO-UPDATE
+     * 6) INIT + AUTO-UPDATE EVERY 5 MIN
      ************************************************************************/
     function init() {
       generateTradingGuide();
+      renderFuturesTicker();
+      renderGuideTicker();
       updateHiddenJSON();
-      
-      // (Optional) If you still want to render the full tables elsewhere, you could call your existing render functions.
-      
-      // Start tickers – here each row will scroll from right to left.
-      // Adjust the interval (in milliseconds) as desired.
-      startTicker(futuresData, "ticker-futures", formatFuturesRow, 8000);
-      startTicker(futuresGuide, "ticker-guide", formatGuideRow, 8000);
-      
-      // (Optional) If you want to update data every 5 minutes as before:
+
       setInterval(() => {
-        // Update your data (e.g., fluctuateData) and then re-generate the guide
-        // For simplicity, this example omits the fluctuation animation in the ticker.
+        fluctuateData();
+        renderFuturesTicker();
+        renderGuideTicker();
         updateHiddenJSON();
       }, 5 * 60 * 1000);
     }
