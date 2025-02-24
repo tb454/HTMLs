@@ -190,7 +190,6 @@
     <div class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <!-- Finished Goods card now has an ID and will be updated dynamically -->
         <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
           <div>Loading...</div>
@@ -198,11 +197,9 @@
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
-          <!-- These IDs are used to update the card dynamically -->
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
         </div>
-        <!-- Updated Market Snapshot card with individual IDs for each commodity -->
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
           <div id="price-Copper">Copper: $9,500.00</div>
@@ -406,9 +403,8 @@
           <tr>
             <th>Ticker</th>
             <th>Material</th>
-            <th>Last Price</th>
+            <th>Sale Price</th>
             <th>Change</th>
-            <th>Change %</th>
             <th>Expiration</th>
             <th>Margin Requirement</th>
             <th>Action</th>
@@ -420,7 +416,7 @@
         <tfoot>
           <tr>
             <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-            <td colspan="5"></td>
+            <td colspan="4"></td>
             <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
           </tr>
@@ -431,7 +427,6 @@
     <!-- Metals Market Overview Section -->
     <div class="section">
       <div class="section-title">Metals Market Overview</div>
-      <!-- Added ID "metals-market-table" for dynamic updates -->
       <table id="metals-market-table" class="table table-hover align-middle">
         <thead>
           <tr>
@@ -602,7 +597,6 @@
       
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
-        // Columns: 0=Commodity, 1=WIP, 2=Finished, 3=Total, 4=Avg Cost, 5=Purchase Value
         const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
         const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
         const totalText = cells[3].textContent.replace(/,/g, '').trim();
@@ -616,14 +610,12 @@
         sumTotal += totalLbs;
         sumPurchase += purchaseValue;
         
-        // Update the row's purchase value cell.
         cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
           minimumFractionDigits: 2, 
           maximumFractionDigits: 2 
         });
       });
       
-      // Update the totals row in the table footer.
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
       document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
@@ -632,9 +624,6 @@
         maximumFractionDigits: 2 
       });
       
-      // Update Finished Goods Card:
-      // Contracts available are based on the Finished Goods (lbs) total divided by 20,000 (rounded down)
-      // Total Tons are based on the Total (lbs) sum divided by 20,000.
       if(document.getElementById('finished-goods-card')){
         let contractsAvailable = Math.floor(sumFinished / 20000);
         let totalTons = sumTotal / 20000;
@@ -649,8 +638,6 @@
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
-    // Updated Market Snapshot prices to match the overview card.
-    // Note: These prices will be dynamically updated below.
     const baseMarketSnapshotPrices = {
       "Copper": 9500,
       "Busheling Steel": 700,
@@ -665,16 +652,12 @@
       "Stainless Steel": 16000
     };
   
-    // Duplicate object to be updated every minute.
     let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
   
-    // Helper function to generate a valid element ID from commodity names.
     function getCommodityId(commodity) {
       return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
     }
   
-    // Look up commodity data from the Greenspark table.
-    // Returns the Finished Goods (lbs) for the commodity.
     const commodityMapping = {
       "Copper": "COPPER",
       "Busheling Steel": "BUSHELING STEEL",
@@ -689,7 +672,6 @@
       "Stainless Steel": "STAINLESS STEEL"
     };
 
-    // Ticker symbol mapping for active contracts
     const tickerMapping = {
       "Aluminum": "ALUM25",
       "Electric Motors": "EMOT25",
@@ -711,7 +693,6 @@
       for (let row of rows) {
         const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
         if (rowMaterial === target.toUpperCase()) {
-          // Finished Goods is in column index 2.
           const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
           const finishedGoods = parseFloat(finishedGoodsText) || 0;
           return { finishedGoods };
@@ -724,12 +705,9 @@
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
       const data = getCommodityData(material);
-      
-      // Assume contract size is 10 tons = 20,000 lbs.
       const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
-      // Update "Creatable Contracts" dropdown.
       const contractsSelect = document.getElementById('create-contracts');
       contractsSelect.innerHTML = '';
       if (availableContracts < 1) {
@@ -746,10 +724,8 @@
         }
       }
       
-      // For "Price/ton", use the market snapshot price.
       const basePricePerTon = marketSnapshotPrices[material] || 0;
       
-      // Update "Price/ton" dropdown: 6 options using multipliers.
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -761,7 +737,6 @@
         priceSelect.appendChild(option);
       });
       
-      // Update "Cost to Create" dropdown: single option = 0.1% of base price per ton.
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
       const costToCreate = basePricePerTon * 0.001;
@@ -770,7 +745,6 @@
       costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
       
-      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments.
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
@@ -789,7 +763,6 @@
     
     document.addEventListener('DOMContentLoaded', updateTradeOptions);
     
-    // Append a new row to the Trade Log table.
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
       const tradeTime = new Date().toLocaleTimeString();
@@ -803,35 +776,35 @@
       tableBody.appendChild(newRow);
     }
     
-    // Updated function to append a new active contract row.
-    function addActiveContract(commodity, expiration) {
+    // Append a new active contract row using the executed price as the Sale Price.
+    function addActiveContract(commodity, expiration, salePrice) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Retrieve current market price from the overview cards (market snapshot)
-      const marketPrice = marketSnapshotPrices[commodity] || 0;
-      const contractSize = 10; // contract size in tons
-      const totalContractValue = contractSize * marketPrice;
-      const marginRequirement = totalContractValue * 0.07; // 7% margin
+      const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+      const priceDifference = salePrice - snapshotPrice;
+      const contractSize = 10;
+      const totalContractValue = contractSize * snapshotPrice;
+      const marginRequirement = totalContractValue * 0.07;
       
-      // Format expiration as "Jun '25"
       const expDate = new Date(expiration);
       const expFormatted = expDate.toLocaleString('default', { month: 'short' }) +
                            " '" + expDate.getFullYear().toString().slice(-2);
       
-      // Get ticker symbol from tickerMapping
       const ticker = tickerMapping[commodity] || '';
       
       const newRow = document.createElement('tr');
-      // Store the commodity name for later updates
       newRow.dataset.commodity = commodity;
+      newRow.dataset.salePrice = salePrice;
       
       newRow.innerHTML = 
         `<td>${ticker}</td>
          <td>${commodity} (${expFormatted})</td>
-         <td>${marketPrice.toFixed(2)}</td>
-         <td>+0.00</td>
-         <td>+0.00%</td>
+         <td>${salePrice.toFixed(2)}</td>
+         <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
          <td>${expiration}</td>
-         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { 
+               minimumFractionDigits: 2, 
+               maximumFractionDigits: 2 
+             })}</td>
          <td>
            <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
            <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
@@ -839,7 +812,6 @@
       tableBody.appendChild(newRow);
     }
     
-    // Updated function to recalc and update all active contract rows.
     function updateActiveContractsTable() {
       const table = document.getElementById('active-contracts-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -848,51 +820,55 @@
       const contractSize = 10;
       
       rows.forEach(row => {
-        // Retrieve the commodity name from the data attribute
         const commodity = row.dataset.commodity;
-        // Use the latest market snapshot price for this commodity
-        const marketPrice = marketSnapshotPrices[commodity] || 0;
-        const totalContractValue = contractSize * marketPrice;
-        const marginRequirement = totalContractValue * 0.07;
+        const salePrice = parseFloat(row.dataset.salePrice);
+        const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+        const priceDifference = salePrice - snapshotPrice;
         
-        // Update the last price and margin cells
-        row.cells[2].textContent = marketPrice.toFixed(2);
-        row.cells[6].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
+        
+        const totalContractValue = contractSize * snapshotPrice;
+        const marginRequirement = totalContractValue * 0.07;
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
         
         totalMarginRequirement += marginRequirement;
       });
       
-      // Update the totals in the table footer and the Active Contracts overview card.
       document.getElementById('activeContractsCount').textContent = totalContracts;
       document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        '$' + totalMarginRequirement.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
       document.getElementById('active-contracts-margin').textContent = "Margin: $" +
-        totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        totalMarginRequirement.toLocaleString(undefined, { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        });
     }
     
-    // simulateTrade() now subtracts the secured tonnage from the Finished Goods inventory in the Greenspark table.
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const chosenPrice = parseFloat(document.getElementById('create-price').value);
       const chosenCost = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
-      const contractWeightLbs = 20000; // 10 tons per contract = 20,000 lbs
+      const contractWeightLbs = 20000;
       
-      // Loop through each trade: log trade and add active contract.
       for (let i = 0; i < numTrades; i++) {
-        const quantity = 10; // each trade is 10 tons.
+        const quantity = 10;
         const totalCost = quantity * chosenPrice;
         appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
-        addActiveContract(material, expiration);
+        addActiveContract(material, expiration, chosenPrice);
       }
       
-      // Subtract secured weight from the Finished Goods inventory in the Greenspark table.
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
-        // Compare the row's commodity with the mapping for the material.
         if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
           let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
           let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
@@ -904,7 +880,6 @@
         }
       }
       
-      // Refresh the active contracts table and the Finished Goods totals.
       updateActiveContractsTable();
       updatePurchaseValues();
       
@@ -938,23 +913,18 @@
     function updateMarketSnapshot() {
       for (let commodity in baseMarketSnapshotPrices) {
         const basePrice = baseMarketSnapshotPrices[commodity];
-        // Random factor between -0.1 and +0.1
         const randomFactor = (Math.random() * 0.2) - 0.1;
         const newPrice = basePrice * (1 + randomFactor);
         marketSnapshotPrices[commodity] = newPrice;
         
-        // Update the corresponding element in the Market Snapshot card.
         const priceElement = document.getElementById(getCommodityId(commodity));
         if (priceElement) {
           priceElement.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
       }
-      
-      // Refresh trade options so the Price/ton and Cost to Create update.
       updateTradeOptions();
     }
     
-    // Trigger updateMarketSnapshot() every 60 seconds (60000 ms)
     setInterval(updateMarketSnapshot, 60000);
     
     /***************************************
@@ -965,29 +935,24 @@
       const rows = table.querySelectorAll('tbody tr');
   
       rows.forEach(row => {
-        // Get current values from WIP (cell index 1), Finished Goods (cell index 2), and Total (cell index 3)
         let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
         let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
         let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
   
-        // Increase each by 10%
         wip *= 1.1;
         finished *= 1.1;
         total *= 1.1;
   
-        // Update the cells (using Math.round for simplicity)
         row.cells[1].textContent = Math.round(wip).toLocaleString();
         row.cells[2].textContent = Math.round(finished).toLocaleString();
         row.cells[3].textContent = Math.round(total).toLocaleString();
       });
   
-      // Update totals row
       updatePurchaseValues();
     }
   
-    // Call increaseTableValues() every 5 minutes (300000 ms)
     setInterval(increaseTableValues, 300000);
-
+  
     /***************************************
      * Update Metals Market Overview Every Minute
      ***************************************/
@@ -997,45 +962,34 @@
       const rows = table.querySelectorAll('tbody tr');
       
       rows.forEach(row => {
-        // Columns: 0=Symbol, 1=Contract Name, 2=Last, 3=Change, 4=Open, 5=High, 6=Low, 7=Volume, 8=Time
         let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
-        if (openPrice <= 0) return; // safeguard
+        if (openPrice <= 0) return;
         
-        // Generate a new "Last" price within ±10% of the open price
         let randomFactor = (Math.random() * 0.2) - 0.1;
         let newLast = openPrice * (1 + randomFactor);
         newLast = parseFloat(newLast.toFixed(2));
         
-        // Update the "Last" column (cell index 2)
         row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
-        // Calculate the change and update the "Change" column (cell index 3)
         let change = newLast - openPrice;
         let changeFormatted = (change >= 0 ? '+' : '') + change.toFixed(2);
         row.cells[3].textContent = changeFormatted;
         
-        // Update the "High" column (cell index 5) if the new last price exceeds it
         let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
         if (newLast > currentHigh) {
           row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         
-        // Update the "Low" column (cell index 6) if the new last price is lower than it
         let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
         if (newLast < currentLow) {
           row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         
-        // Increase the "Volume" (cell index 7) by 0.0001% and round up to the nearest whole number.
         let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
         let newVolume = Math.ceil(currentVolume * 1.001);
         row.cells[7].textContent = newVolume.toLocaleString();
-        
-        // Optionally, update the Time column (cell index 8) with the current time
-        // row.cells[8].textContent = new Date().toLocaleTimeString();
       });
     }
-    // Trigger updateMetalsMarketOverview() every minute (7000 ms)
     setInterval(updateMetalsMarketOverview, 7000);
   
   </script>
