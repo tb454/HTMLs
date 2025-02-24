@@ -1,4 +1,4 @@
-<!DOCTYPE html>   
+<!DOCTYPE html>    
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -430,7 +430,8 @@
     <!-- Metals Market Overview Section -->
     <div class="section">
       <div class="section-title">Metals Market Overview</div>
-      <table class="table table-hover align-middle">
+      <!-- Added ID "metals-market-table" for dynamic updates -->
+      <table id="metals-market-table" class="table table-hover align-middle">
         <thead>
           <tr>
             <th>Symbol</th>
@@ -449,7 +450,7 @@
             <td>GCJ25</td>
             <td>Gold (Apr '25)</td>
             <td>2,953.25</td>
-            <td>-2.9</td>
+            <td>-2.90</td>
             <td>2,957.50</td>
             <td>2,964.70</td>
             <td>2,920.00</td>
@@ -777,13 +778,12 @@
       const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
       const tradeTime = new Date().toLocaleTimeString();
       const newRow = document.createElement('tr');
-      newRow.innerHTML = `
-        <td>${tradeTime}</td>
-        <td>${material}</td>
-        <td>${quantity}</td>
-        <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-        <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-      `;
+      newRow.innerHTML = 
+        `<td>${tradeTime}</td>
+         <td>${material}</td>
+         <td>${quantity}</td>
+         <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+         <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
       tableBody.appendChild(newRow);
     }
     
@@ -805,18 +805,17 @@
       // Store the commodity name for later updates
       newRow.dataset.commodity = commodity;
       
-      newRow.innerHTML = `
-        <td>${commodity} (${expFormatted})</td>
-        <td>${marketPrice.toFixed(2)}</td>
-        <td>+0.00</td>
-        <td>+0.00%</td>
-        <td>${expiration}</td>
-        <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
-        </td>
-      `;
+      newRow.innerHTML = 
+        `<td>${commodity} (${expFormatted})</td>
+         <td>${marketPrice.toFixed(2)}</td>
+         <td>+0.00</td>
+         <td>+0.00%</td>
+         <td>${expiration}</td>
+         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+         <td>
+           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+         </td>`;
       tableBody.appendChild(newRow);
     }
     
@@ -968,6 +967,52 @@
   
     // Call increaseTableValues() every 5 minutes (300000 ms)
     setInterval(increaseTableValues, 300000);
+
+    /***************************************
+     * Update Metals Market Overview Every Minute
+     ***************************************/
+    function updateMetalsMarketOverview() {
+      const table = document.getElementById('metals-market-table');
+      if (!table) return;
+      const rows = table.querySelectorAll('tbody tr');
+      
+      rows.forEach(row => {
+        // Columns: 0=Symbol, 1=Contract Name, 2=Last, 3=Change, 4=Open, 5=High, 6=Low, 7=Volume, 8=Time
+        let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
+        if (openPrice <= 0) return; // safeguard
+        
+        // Generate a new "Last" price within ±10% of the open price
+        let randomFactor = (Math.random() * 0.2) - 0.1; // between -0.1 and +0.1
+        let newLast = openPrice * (1 + randomFactor);
+        newLast = parseFloat(newLast.toFixed(2));
+        
+        // Update the "Last" column (cell index 2)
+        row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Calculate the change and update the "Change" column (cell index 3)
+        let change = newLast - openPrice;
+        let changeFormatted = (change >= 0 ? '+' : '') + change.toFixed(2);
+        row.cells[3].textContent = changeFormatted;
+        
+        // Update the "High" column (cell index 5) if the new last price exceeds it
+        let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
+        if (newLast > currentHigh) {
+          row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        
+        // Update the "Low" column (cell index 6) if the new last price is lower than it
+        let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
+        if (newLast < currentLow) {
+          row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        
+        // Optionally, update the Time column (cell index 8) to the current time
+        // row.cells[8].textContent = new Date().toLocaleTimeString();
+      });
+    }
+    // Trigger updateMetalsMarketOverview() every minute (7000 ms)
+    setInterval(updateMetalsMarketOverview, 7000);
+  
   </script>
 </body>
 </html>
