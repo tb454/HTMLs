@@ -1,4 +1,4 @@
-<!DOCTYPE html>    
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -14,10 +14,10 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   
   <style>
-    /* Base styling */
+    /* Base Styling */
     body {
       font-family: 'Roboto', sans-serif;
-      background-color: #f0f2f5;
+      background-color: #f4f6f8;
       margin: 0;
       padding: 20px;
       color: #333;
@@ -27,51 +27,52 @@
       margin: auto;
     }
     /* Header */
-    .header {
-      background-color: #2c3e50;
-      color: #ecf0f1;
+    header.header {
+      background: linear-gradient(90deg, #2c3e50, #34495e);
+      color: #fff;
       padding: 15px 20px;
-      margin-bottom: 20px;
-      border-radius: 5px;
+      border-radius: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 20px;
     }
-    .header h1 {
+    header.header h1 {
+      font-size: 28px;
       margin: 0;
-      font-size: 24px;
     }
     .user-info {
       font-size: 14px;
     }
     .user-info button {
       margin: 0 10px;
-      padding: 5px 12px;
+      padding: 6px 14px;
       border: none;
       background-color: #e74c3c;
       color: #fff;
-      border-radius: 3px;
+      border-radius: 4px;
       cursor: pointer;
+      transition: background-color 0.3s;
     }
     .user-info button:hover {
       background-color: #c0392b;
     }
-    /* Section styling */
-    .section {
+    /* Section Styling */
+    section.section {
       background-color: #fff;
       padding: 20px;
       margin-bottom: 20px;
-      border-radius: 5px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
     }
     .section-title {
       font-weight: 700;
       margin-bottom: 15px;
-      font-size: 18px;
-      border-bottom: 2px solid #3498db;
+      font-size: 20px;
+      border-bottom: 3px solid #3498db;
       padding-bottom: 5px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 1px;
       color: #3498db;
     }
     /* Overview Cards */
@@ -85,23 +86,22 @@
       min-width: 250px;
       background-color: #fff;
       border: 1px solid #e1e4e8;
-      border-radius: 5px;
+      border-radius: 8px;
       padding: 20px;
       text-align: center;
       cursor: pointer;
-      transition: box-shadow 0.2s ease, transform 0.2s ease;
-      display: flex;         /* Added for alignment */
-      flex-direction: column;/* Added for alignment */
+      transition: transform 0.3s, box-shadow 0.3s;
+      display: flex;
+      flex-direction: column;
     }
     .card-custom:hover {
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      transform: translateY(-2px);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
     }
     .card-custom div {
       margin-bottom: 8px;
       font-size: 16px;
     }
-    /* Align canvas at the bottom */
     .card-custom canvas {
       margin-top: auto;
     }
@@ -126,38 +126,37 @@
     }
     /* Buttons */
     .action-btn {
-      padding: 8px 16px;
+      padding: 10px 20px;
       background-color: #3498db;
       border: none;
-      border-radius: 3px;
+      border-radius: 4px;
       color: #fff;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 15px;
+      transition: background-color 0.3s;
     }
     .action-btn:hover {
       background-color: #2980b9;
     }
-    .secondary-btn {
-      padding: 5px 10px;
-      background-color: #27ae60;
+    .secondary-btn,
+    .danger-btn {
+      padding: 6px 12px;
       border: none;
-      border-radius: 3px;
+      border-radius: 4px;
       color: #fff;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 14px;
+      transition: background-color 0.3s;
       margin-right: 5px;
+    }
+    .secondary-btn {
+      background-color: #27ae60;
     }
     .secondary-btn:hover {
       background-color: #1e8449;
     }
     .danger-btn {
-      padding: 5px 10px;
       background-color: #e74c3c;
-      border: none;
-      border-radius: 3px;
-      color: #fff;
-      cursor: pointer;
-      font-size: 13px;
     }
     .danger-btn:hover {
       background-color: #c0392b;
@@ -168,23 +167,23 @@
       padding: 8px;
       font-size: 14px;
       border: 1px solid #ced4da;
-      border-radius: 3px;
+      border-radius: 4px;
     }
-    /* Trading Chart Container */
+    /* Chart Container */
     .chart-container {
       background-color: #fff;
       padding: 20px;
-      border-radius: 5px;
+      border-radius: 8px;
       border: 1px solid #e1e4e8;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
     }
     /* Ticker Styles */
     .ticker-wrapper {
       overflow: hidden;
       background-color: #fff;
       border: 1px solid #ddd;
-      padding: 5px 0;
-      border-radius: 5px;
+      padding: 8px 0;
+      border-radius: 8px;
       margin-bottom: 20px;
     }
     .ticker {
@@ -193,7 +192,6 @@
       padding-left: 100%;
       animation: ticker 90s linear infinite;
     }
-    /* New ticker item styles based on your provided HTML */
     .ticker-item { 
       margin-right: 20px; 
       font-size: 0.95rem; 
@@ -225,24 +223,22 @@
 <body>
   <div class="container">
     <!-- Header -->
-    <div class="header">
+    <header class="header">
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span>User: John Doe</span>
         <button onclick="logout()">Logout</button>
         <span id="header-date">02/14/2025</span>
       </div>
-    </div>
+    </header>
     
     <!-- Overview Cards -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <!-- Finished Goods Card with Chart -->
         <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
           <div id="finishedGoodsInfo">Loading...</div>
-          <!-- New canvas element for the line graph -->
           <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
@@ -250,7 +246,6 @@
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
-          <!-- New canvas element for the line graph -->
           <canvas id="activeContractsChart" width="250" height="200"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
@@ -268,10 +263,10 @@
           <div id="price-StainlessSteel">Stainless Steel: $1,600.00</div>
         </div>
       </div>
-    </div>
+    </section>
     
     <!-- Finished Goods Inventory (Greenspark) -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Finished Goods Inventory (Greenspark)</div>
       <table id="greenspark-table">
         <thead>
@@ -385,10 +380,10 @@
           </tr>
         </tfoot>
       </table>
-    </div>
+    </section>
     
     <!-- Simulated Trade Section (One Line) -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
       <div class="d-flex align-items-center flex-wrap gap-3">
         <div class="d-flex align-items-center">
@@ -427,10 +422,10 @@
           <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
         </div>
       </div>
-    </div>
+    </section>
     
     <!-- Trade Log Section -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Trade Log</div>
       <table id="trade-log-table">
         <thead>
@@ -446,10 +441,10 @@
           <!-- Trade entries appended here -->
         </tbody>
       </table>
-    </div>
+    </section>
     
     <!-- Active Contracts Section -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Active Contracts</div>
       <table id="active-contracts-table" class="table table-hover align-middle">
         <thead>
@@ -478,10 +473,10 @@
           </tr>
         </tfoot>
       </table>
-    </div>
+    </section>
     
     <!-- Metals Market Overview Section -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Metals Market Overview</div>
       <table id="metals-market-table" class="table table-hover align-middle">
         <thead>
@@ -509,7 +504,6 @@
             <td>155,552</td>
             <td>02/21/25</td>
           </tr>
-          <!-- Updated: Insulated Copper Wire now shows Apr '25 and uses snapshot price -->
           <tr data-initialSnapshotPrice="">
             <td>ICWR25</td>
             <td>Insulated Copper Wire (Apr '25)</td>
@@ -532,7 +526,6 @@
             <td>36,500</td>
             <td>02/21/25</td>
           </tr>
-          <!-- Electric Motors row; will also update from snapshot -->
           <tr data-initialSnapshotPrice="">
             <td>EMOT25</td>
             <td>Electric Motors (Apr '25)</td>
@@ -544,7 +537,6 @@
             <td>25,650</td>
             <td>02/21/25</td>
           </tr>
-          <!-- Updated: Brass now replaces Palladium -->
           <tr data-initialSnapshotPrice="">
             <td>BRSS25</td>
             <td>Brass (May '25)</td>
@@ -602,17 +594,17 @@
           </tr>
         </tbody>
       </table>
-    </div>
+    </section>
     
     <!-- Trade Alerts Ticker Section -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Trade Alerts</div>
       <div class="ticker-wrapper">
         <div id="trade-alerts-ticker" class="ticker">
           <!-- Ticker content will be rendered here by JavaScript -->
         </div>
       </div>
-    </div>
+    </section>
   </div>
   
   <!-- Bootstrap Bundle JS and Chart.js -->
@@ -681,10 +673,8 @@
             scales: {
               y: { 
                 beginAtZero: true,
-                max: 10000,   // Increased y-axis range to 10,000
-                ticks: {
-                  stepSize: 2000  // Tick marks every 2,000 units
-                }
+                max: 10000,
+                ticks: { stepSize: 2000 }
               }
             }
           }
@@ -710,10 +700,7 @@
           },
           options: {
             scales: {
-              y: { 
-                beginAtZero: true,
-                max: 300  // Increased y-axis range to 300 tons
-              }
+              y: { beginAtZero: true, max: 300 }
             }
           }
         });
@@ -741,19 +728,13 @@
         sumTotal += totalLbs;
         sumPurchase += purchaseValue;
         
-        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
+        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       });
       
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
       document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
-      });
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
       // Update Finished Goods Card Info and Chart
       if(document.getElementById('finishedGoodsInfo')){
@@ -924,7 +905,6 @@
       tableBody.appendChild(newRow);
     }
     
-    // Append a new active contract row using the executed price as the Sale Price.
     function addActiveContract(commodity, expiration, salePrice) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const snapshotPrice = marketSnapshotPrices[commodity] || 0;
@@ -934,7 +914,7 @@
       const marginRequirement = totalContractValue * 0.07;
       
       const expDate = new Date(expiration);
-      const expFormatted = expDate.toLocaleString('default', { month: 'short' }) +
+      const expFormatted = new Date(expiration).toLocaleString('default', { month: 'short' }) +
                            " '" + expDate.getFullYear().toString().slice(-2);
       
       const ticker = tickerMapping[commodity] || '';
@@ -949,10 +929,7 @@
          <td>${salePrice.toFixed(2)}</td>
          <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
          <td>${expiration}</td>
-         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { 
-               minimumFractionDigits: 2, 
-               maximumFractionDigits: 2 
-             })}</td>
+         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
          <td>
            <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
            <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
@@ -960,13 +937,12 @@
       tableBody.appendChild(newRow);
     }
     
-    // Update Active Contracts Table to include total change calculation.
     function updateActiveContractsTable() {
       const table = document.getElementById('active-contracts-table');
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
       let totalMarginRequirement = 0;
-      let totalChange = 0; // Initialize total change accumulator
+      let totalChange = 0;
       const contractSize = 10;
       
       rows.forEach(row => {
@@ -974,46 +950,32 @@
         const salePrice = parseFloat(row.dataset.salePrice);
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
         const priceDifference = salePrice - snapshotPrice;
-        totalChange += priceDifference; // Accumulate change
+        totalChange += priceDifference;
         
-        // Update change cell
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
         
         const totalContractValue = contractSize * snapshotPrice;
         const marginRequirement = totalContractValue * 0.07;
-        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         totalMarginRequirement += marginRequirement;
       });
       
       document.getElementById('activeContractsCount').textContent = totalContracts;
       document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
+        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
-      document.getElementById('active-contracts-margin').textContent = "Margin: $" +
-        totalMarginRequirement.toLocaleString(undefined, { 
-          minimumFractionDigits: 2, 
-          maximumFractionDigits: 2 
-        });
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update the total change footer cell and overview card
       const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
       document.getElementById('total-change').textContent = totalChangeText;
       document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
       
-      // Update the line chart with the new total change value
       const now = new Date();
       const label = now.toLocaleTimeString();
       activeContractsChangeHistory.push(totalChange);
       activeContractsChartLabels.push(label);
       
-      // Optional: Limit history to last 10 data points
       if (activeContractsChangeHistory.length > 10) {
         activeContractsChangeHistory.shift();
         activeContractsChartLabels.shift();
@@ -1096,7 +1058,7 @@
         }
       }
       updateTradeOptions();
-      updateActiveContractsTable(); // Update the active contracts change values based on the new market snapshot.
+      updateActiveContractsTable();
     }
     
     setInterval(updateMarketSnapshot, 15000);
@@ -1137,7 +1099,6 @@
       
       rows.forEach(row => {
         let ticker = row.cells[0].textContent.trim();
-        // For our special traded contracts, override the "last" price using snapshot values
         if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
           let commodity = "";
           if (ticker === 'ICWR25') {
@@ -1150,7 +1111,6 @@
           let elementId = "price-" + commodity.replace(/\s/g, '');
           let snapshotElem = document.getElementById(elementId);
           if (snapshotElem) {
-            // Expecting text like "Insulated Copper Wire: $36,000.00"
             let priceText = snapshotElem.textContent;
             let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
             if (match) {
@@ -1172,28 +1132,19 @@
           let newLast = openPrice * (1 + randomFactor);
           newLast = parseFloat(newLast.toFixed(2));
   
-          row.cells[2].textContent = newLast.toLocaleString(undefined, { 
-            minimumFractionDigits: 2, 
-            maximumFractionDigits: 2 
-          });
+          row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
           let change = newLast - openPrice;
           row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
   
           let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
           if (newLast > currentHigh) {
-            row.cells[5].textContent = newLast.toLocaleString(undefined, { 
-              minimumFractionDigits: 2, 
-              maximumFractionDigits: 2 
-            });
+            row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           }
   
           let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
           if (newLast < currentLow) {
-            row.cells[6].textContent = newLast.toLocaleString(undefined, { 
-              minimumFractionDigits: 2, 
-              maximumFractionDigits: 2 
-            });
+            row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           }
   
           let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
@@ -1203,7 +1154,7 @@
       });
     }
     setInterval(updateMetalsMarketOverview, 7000);
-  
+    
     /***************************************
      * FUTURES TICKER LOGIC
      ***************************************/
@@ -1275,15 +1226,12 @@
                     </span>`;
         content += `<span class="ticker-separator"> ---- </span>`;
       });
-      // Duplicate content for seamless scrolling
       ticker.innerHTML = content + content;
     }
     
     function updateHiddenJSON() {
-      // Optional: update a hidden JSON element if needed.
     }
     
-    // Optional: define data fluctuation for futuresData every 5 minutes
     function fluctuateData() {
       futuresData.forEach(item => {
         let pct = (Math.random() * 5 - 2.5) / 100;
