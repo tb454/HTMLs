@@ -368,6 +368,7 @@
 
         const row = document.createElement("tr");
         row.innerHTML = 
+        <>
           <td>${item.contractName}</td>
           <td>${item.last.toFixed(2)}</td>
           <td class="${chgClass}">${dispChange}</td>
@@ -376,6 +377,7 @@
           <td>${item.volume.toLocaleString()}</td>
           <td>${item.time}</td>
           <td><span class="dots-menu">&#8230;</span></td>
+          </>
         ;
         tbody.appendChild(row);
       });
@@ -390,6 +392,7 @@
         // color code the signal
         const sigColor = trade.signal === "BUY" ? "green" : "red";
         row.innerHTML = 
+        <>
           <td>${trade.contractName}</td>
           <td style="color:${sigColor}; font-weight:bold;">${trade.signal}</td>
           <td>${trade.entryDate}</td>
@@ -399,6 +402,7 @@
           <td>${trade.timeHorizon}</td>
           <td>${trade.strength}</td>
           <td><button class="btn-view-trade">View Complete Trade</button></td>
+          </>
         ;
         guideTbody.appendChild(row);
       });
