@@ -843,7 +843,7 @@
         totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     
-    // simulateTrade() now subtracts the secured tonnage from the Finished Goods inventory.
+    // simulateTrade() now subtracts the secured tonnage from the Finished Goods inventory in the Greenspark table.
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -869,6 +869,10 @@
           let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
           let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
           row.cells[2].textContent = updatedFinished.toLocaleString();
+          
+          let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          let updatedTotal = currentTotal - (numTrades * contractWeightLbs);
+          row.cells[3].textContent = updatedTotal.toLocaleString();
         }
       }
       
