@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>  
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -843,26 +843,37 @@
         totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     
-    // simulateTrade() now calls the updated addActiveContract function.
+    // simulateTrade() now subtracts the secured tonnage from the Finished Goods inventory.
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const chosenPrice = parseFloat(document.getElementById('create-price').value);
       const chosenCost = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
+      const contractWeightLbs = 20000; // 10 tons per contract = 20,000 lbs
       
+      // Loop through each trade: log trade and add active contract.
       for (let i = 0; i < numTrades; i++) {
         const quantity = 10; // each trade is 10 tons.
         const totalCost = quantity * chosenPrice;
-        // Append new trade log entry.
         appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
-        // Append new active contract entry using the updated function.
         addActiveContract(material, expiration);
       }
       
-      // Refresh the active contracts table to recalc margins.
+      // Subtract secured weight from the Finished Goods inventory in the Greenspark table.
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        // Compare the row's commodity with the mapping for the material.
+        if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
+          let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
+          row.cells[2].textContent = updatedFinished.toLocaleString();
+        }
+      }
+      
+      // Refresh the active contracts table and the Finished Goods totals.
       updateActiveContractsTable();
-      // Also update the Finished Goods totals.
       updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
