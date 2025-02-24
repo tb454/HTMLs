@@ -190,10 +190,11 @@
     <div class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <div class="card-custom" onclick="cardClicked('Finished Goods')">
+        <!-- Finished Goods card now has an ID and will be updated dynamically -->
+        <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
-          <div>24 Contracts Available</div>
-          <div>~560.0 Total Tons</div>
+          <div>Loading...</div>
+          <div>Loading...</div>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
@@ -342,14 +343,14 @@
         <label for="create-material">Material:</label>
         <select id="create-material" onchange="updateTradeOptions()">
           <option value="Copper">Copper</option>
+          <option value="Busheling Steel">Busheling Steel</option>
           <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
           <option value="Aluminum">Aluminum</option>
           <option value="Electric Motors">Electric Motors</option>
           <option value="Insulated Copper Wire">Insulated Copper Wire</option>
           <option value="Lead">Lead</option>
-          <option value="Steel #2">Steel #2</option>
-          <option value="Radiator Product">Radiator Product</option>
+          <option value="HMS Steel #2">HMS Steel #2</option>
+          <option value="Cu Radiator (50Cu/50Brass)">Cu Radiator (50Cu/50Brass)</option>
           <option value="Carbide">Carbide</option>
           <option value="Stainless Steel">Stainless Steel</option>
         </select>
@@ -666,33 +667,51 @@
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
       });
+      
+      // Update Finished Goods Card:
+      // Contracts available are based on the Finished Goods (lbs) total divided by 20,000 (rounded down)
+      // Total Tons are based on the Total (lbs) sum divided by 20,000.
+      if(document.getElementById('finished-goods-card')){
+        let contractsAvailable = Math.floor(sumFinished / 20000);
+        let totalTons = sumTotal / 20000;
+        let cardHTML = `<div><strong>Finished Goods</strong></div>
+                        <div>${contractsAvailable} Contracts Available</div>
+                        <div>~${totalTons.toFixed(1)} Total Tons</div>`;
+        document.getElementById('finished-goods-card').innerHTML = cardHTML;
+      }
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
   
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
-    // Market Snapshot prices (assumed static as shown in Overview Card)
+    // Updated Market Snapshot prices to match the overview card.
     const marketSnapshotPrices = {
-      Copper: 9500,
-      Brass: 7500,
-      Steel: 500,
-      Aluminum: 2200
+      "Copper": 9500,
+      "Busheling Steel": 700,
+      "Brass": 7500,
+      "Aluminum": 2200,
+      "Electric Motors": 9000,
+      "Insulated Copper Wire": 36000,
+      "Lead": 15000,
+      "HMS Steel #2": 500,
+      "Cu Radiator (50Cu/50Brass)": 56000,
+      "Carbide": 200000,
+      "Stainless Steel": 16000
     };
   
-    // Mapping from dropdown material values to Greenspark table names.
-    // Updated to exactly match the table's commodity names.
+    // Updated mapping to match the names in the Market Snapshot and Greenspark table.
     const commodityMapping = {
-      Copper: "COPPER",
-      Brass: "BRASS",
-      Steel: "STEEL",
-      Aluminum: "ALUMINUM",
+      "Copper": "COPPER",
+      "Busheling Steel": "BUSHELING STEEL",
+      "Brass": "BRASS",
+      "Aluminum": "ALUMINUM",
       "Electric Motors": "ELECTRIC MOTORS",
       "Insulated Copper Wire": "INSULATED COPPER WIRE",
-      Lead: "LEAD",
-      "Steel #2": "STEEL #2",
-      "Radiator Product": "RADIATOR PRODUCT",
-      Carbide: "CARBIDE",
+      "Lead": "LEAD",
+      "HMS Steel #2": "HMS STEEL #2",
+      "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
+      "Carbide": "CARBIDE",
       "Stainless Steel": "STAINLESS STEEL"
     };
   
