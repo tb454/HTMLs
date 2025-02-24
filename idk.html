@@ -199,6 +199,7 @@
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
+          <div id="active-contracts-change">Total Change: $0.00</div>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -864,6 +865,10 @@
       
       // Update the total change footer cell
       document.getElementById('total-change').textContent = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      
+      // Update the total change on the overview card
+      document.getElementById('active-contracts-change').textContent = "Total Change: " + 
+        (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
     }
     
     function simulateTrade() {
