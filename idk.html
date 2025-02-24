@@ -323,18 +323,12 @@
         </tbody>
         <tfoot>
           <tr>
-            <td>
-              <strong>Total Contracts: <span id="activeContractsCount">0</span></strong>
-            </td>
-            <td colspan="2"></td>
-            <td>
-              <strong>Total Change: <span id="activeContractsChangeTotal">0.00</span></strong>
-            </td>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
             <td></td>
-            <td>
-              <strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong>
-            </td>
-            <td></td>
+            <td id="total-purchase">0</td>
           </tr>
         </tfoot>
       </table>
@@ -421,17 +415,9 @@
         </tbody>
         <tfoot>
           <tr>
-            <td>
-              <strong>Total Contracts: <span id="activeContractsCount">0</span></strong>
-            </td>
-            <td colspan="2"></td>
-            <td>
-              <strong>Total Change: <span id="activeContractsChangeTotal">0.00</span></strong>
-            </td>
-            <td></td>
-            <td>
-              <strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong>
-            </td>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td colspan="4"></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
           </tr>
         </tfoot>
@@ -836,7 +822,6 @@
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
       let totalMarginRequirement = 0;
-      let totalChange = 0;  // New variable for summing change values
       const contractSize = 10;
       
       rows.forEach(row => {
@@ -845,11 +830,7 @@
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
         const priceDifference = salePrice - snapshotPrice;
         
-        // Update the change cell (4th cell; index 3)
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
-        
-        // Accumulate the change
-        totalChange += priceDifference;
         
         const totalContractValue = contractSize * snapshotPrice;
         const marginRequirement = totalContractValue * 0.07;
@@ -861,16 +842,12 @@
         totalMarginRequirement += marginRequirement;
       });
       
-      // Update totals in the footer
       document.getElementById('activeContractsCount').textContent = totalContracts;
       document.getElementById('activeContractsMarginTotal').textContent =
         '$' + totalMarginRequirement.toLocaleString(undefined, { 
           minimumFractionDigits: 2, 
           maximumFractionDigits: 2 
         });
-      document.getElementById('activeContractsChangeTotal').textContent =
-        (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
-      
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
       document.getElementById('active-contracts-margin').textContent = "Margin: $" +
         totalMarginRequirement.toLocaleString(undefined, { 
@@ -980,7 +957,7 @@
       updatePurchaseValues();
     }
   
-    setInterval(increaseTableValues, 60000);
+    setInterval(increaseTableValues, 300000);
     
     /***************************************
      * Update Metals Market Overview Every Minute
