@@ -200,6 +200,8 @@
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
+          <!-- New canvas element for the line graph -->
+          <canvas id="activeContractsChart" width="250" height="100"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -571,6 +573,11 @@
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
+    
+    // Global variables for Active Contracts Chart
+    let activeContractsChart;
+    const activeContractsChangeHistory = [];
+    const activeContractsChartLabels = [];
   
     // Initialize Trading Graph using Chart.js (if chart exists)
     const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
@@ -593,6 +600,33 @@
         }
       });
     }
+    
+    // Initialize Active Contracts Chart once DOM is loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      const activeContractsCanvas = document.getElementById('activeContractsChart');
+      if(activeContractsCanvas){
+        const ctxActive = activeContractsCanvas.getContext('2d');
+        activeContractsChart = new Chart(ctxActive, {
+          type: 'line',
+          data: {
+            labels: activeContractsChartLabels,
+            datasets: [{
+              label: 'Total Change',
+              data: activeContractsChangeHistory,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true }
+            }
+          }
+        });
+      }
+    });
   
     /***************************************
      * Update Total Purchase Value for Finished Goods Inventory
@@ -837,7 +871,7 @@
         const priceDifference = salePrice - snapshotPrice;
         totalChange += priceDifference; // Accumulate change
         
-        // Update the change cell with a plus sign if positive
+        // Update change cell
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
         
         const totalContractValue = contractSize * snapshotPrice;
@@ -863,12 +897,26 @@
           maximumFractionDigits: 2 
         });
       
-      // Update the total change footer cell
-      document.getElementById('total-change').textContent = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      // Update the total change footer cell and overview card
+      const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      document.getElementById('total-change').textContent = totalChangeText;
+      document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
       
-      // Update the total change on the overview card
-      document.getElementById('active-contracts-change').textContent = "Total Change: " + 
-        (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      // Update the line chart with the new total change value
+      const now = new Date();
+      const label = now.toLocaleTimeString();
+      activeContractsChangeHistory.push(totalChange);
+      activeContractsChartLabels.push(label);
+      
+      // Optional: Limit history to last 10 data points
+      if (activeContractsChangeHistory.length > 10) {
+        activeContractsChangeHistory.shift();
+        activeContractsChartLabels.shift();
+      }
+      
+      if (activeContractsChart) {
+        activeContractsChart.update();
+      }
     }
     
     function simulateTrade() {
