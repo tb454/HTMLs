@@ -232,10 +232,12 @@
     <div class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
+        <!-- Finished Goods Card with Chart -->
         <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
-          <div>Loading...</div>
-          <div>Loading...</div>
+          <div id="finishedGoodsInfo">Loading...</div>
+          <!-- New canvas element for the line graph -->
+          <canvas id="finishedGoodsChart" width="250" height="100"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
@@ -623,6 +625,11 @@
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
+    
+    // Global variables for Finished Goods Chart
+    let finishedGoodsChart;
+    let finishedGoodsChartLabels = [];
+    let finishedGoodsChartData = [];
   
     // Initialize Trading Graph using Chart.js (if chart exists)
     const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
@@ -671,6 +678,31 @@
           }
         });
       }
+      
+      // Initialize Finished Goods Chart
+      const finishedCanvas = document.getElementById('finishedGoodsChart');
+      if(finishedCanvas){
+        const ctxFinished = finishedCanvas.getContext('2d');
+        finishedGoodsChart = new Chart(ctxFinished, {
+          type: 'line',
+          data: {
+            labels: finishedGoodsChartLabels,
+            datasets: [{
+              label: 'Total Tons',
+              data: finishedGoodsChartData,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true }
+            }
+          }
+        });
+      }
     });
   
     /***************************************
@@ -685,10 +717,8 @@
         const cells = row.getElementsByTagName('td');
         const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
         const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-        const totalText = cells[3].textContent.replace(/,/g, '').trim();
-        const totalLbs = parseFloat(totalText) || 0;
-        const avgCostText = cells[4].textContent.replace(/[^0-9.]/g, '').trim();
-        const avgCost = parseFloat(avgCostText) || 0;
+        const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+        const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
         const purchaseValue = totalLbs * avgCost;
         
         sumWIP += wip;
@@ -710,13 +740,28 @@
         maximumFractionDigits: 2 
       });
       
-      if(document.getElementById('finished-goods-card')){
+      // Update Finished Goods Card Info and Chart
+      if(document.getElementById('finishedGoodsInfo')){
         let contractsAvailable = Math.floor(sumFinished / 20000);
         let totalTons = sumTotal / 20000;
-        let cardHTML = `<div><strong>Finished Goods</strong></div>
-                        <div>${contractsAvailable} Contracts Available</div>
-                        <div>~${totalTons.toFixed(1)} Total Tons</div>`;
-        document.getElementById('finished-goods-card').innerHTML = cardHTML;
+        document.getElementById('finishedGoodsInfo').innerHTML = `
+          <div>${contractsAvailable} Contracts Available</div>
+          <div>~${totalTons.toFixed(1)} Total Tons</div>
+        `;
+        
+        if (finishedGoodsChart) {
+          const now = new Date().toLocaleTimeString();
+          finishedGoodsChartLabels.push(now);
+          finishedGoodsChartData.push(totalTons);
+          
+          // Limit history to last 10 data points
+          if (finishedGoodsChartData.length > 10) {
+            finishedGoodsChartLabels.shift();
+            finishedGoodsChartData.shift();
+          }
+          
+          finishedGoodsChart.update();
+        }
       }
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
