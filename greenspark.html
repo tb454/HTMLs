@@ -100,6 +100,48 @@
     </table>
   </div>
 
+  <!-- Sales Section -->
+  <div class="table-wrap" id="sales-section">
+    <h2>Sales</h2>
+    <form id="salesForm">
+      <div class="mb-3">
+        <label for="commodity" class="form-label">Commodity</label>
+        <select id="commodity" class="form-select">
+          <option value="">Select commodity</option>
+          <option value="ALUMINUM">ALUMINUM</option>
+          <option value="Electric Motors">Electric Motors</option>
+          <option value="Insulated copper wire">Insulated copper wire</option>
+          <option value="LEAD">LEAD</option>
+          <option value="HMS Steel #2">HMS Steel #2</option>
+          <option value="CU RADIATOR (50Cu/50Brass)">CU RADIATOR (50Cu/50Brass)</option>
+          <option value="COPPER">COPPER</option>
+          <option value="BRASS">BRASS</option>
+          <option value="Carbide">Carbide</option>
+          <option value="Stainless Steel">Stainless Steel</option>
+          <option value="Busheling Steel">Busheling Steel</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label for="saleAmount" class="form-label">Sale Amount (lbs)</label>
+        <input type="number" id="saleAmount" class="form-control" required />
+      </div>
+      <button type="submit" class="btn btn-primary">Record Sale</button>
+    </form>
+
+    <table id="salesTable" class="mt-4">
+      <thead>
+        <tr>
+          <th>Commodity</th>
+          <th>Sale Amount</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Sales records will be added here -->
+      </tbody>
+    </table>
+  </div>
+
   <!-- Hidden JSON for external fetch -->
   <script id="greenspark-data" type="application/json">
     {}
@@ -171,6 +213,57 @@
       // Update the hidden JSON for potential external use
       document.getElementById("greenspark-data").textContent = JSON.stringify({ inventory: inventoryData });
     }
+
+    // Listen for sales form submission
+    document.getElementById('salesForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      const commodity = document.getElementById('commodity').value;
+      const saleAmount = parseInt(document.getElementById('saleAmount').value, 10);
+      
+      if (!commodity || isNaN(saleAmount) || saleAmount <= 0) {
+        alert("Please select a valid commodity and enter a positive sale amount.");
+        return;
+      }
+      
+      // Find the corresponding commodity in the inventory data
+      const item = inventoryData.find(item => item.commodity === commodity);
+      if (!item) {
+        alert("Commodity not found in inventory.");
+        return;
+      }
+      
+      // Ensure there is enough finished goods available for the sale
+      if (item.finishedGoods < saleAmount) {
+        alert("Not enough finished goods available to record this sale.");
+        return;
+      }
+      
+      // Update the finished goods amount
+      item.finishedGoods -= saleAmount;
+      
+      // Record the sale in the sales table
+      const saleRecord = {
+        commodity: commodity,
+        amount: saleAmount,
+        date: new Date().toLocaleString()
+      };
+      
+      const salesTbody = document.getElementById('salesTable').querySelector('tbody');
+      const saleRow = document.createElement('tr');
+      saleRow.innerHTML = `
+        <td>${saleRecord.commodity}</td>
+        <td>${saleRecord.amount.toLocaleString()} lbs</td>
+        <td>${saleRecord.date}</td>
+      `;
+      salesTbody.appendChild(saleRow);
+      
+      // Update the inventory table to reflect the sale
+      renderTable();
+      
+      // Reset the form
+      document.getElementById('salesForm').reset();
+    });
 
     // Initialize table rendering and periodic updates
     function init() {
