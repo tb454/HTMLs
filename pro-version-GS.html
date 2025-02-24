@@ -336,38 +336,46 @@
       </table>
     </div>
     
-    <!-- Simulated Trade Section -->
+    <!-- Simulated Trade Section (One Line) -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Busheling Steel">Busheling Steel</option>
-          <option value="Brass">Brass</option>
-          <option value="Aluminum">Aluminum</option>
-          <option value="Electric Motors">Electric Motors</option>
-          <option value="Insulated Copper Wire">Insulated Copper Wire</option>
-          <option value="Lead">Lead</option>
-          <option value="HMS Steel #2">HMS Steel #2</option>
-          <option value="Cu Radiator (50Cu/50Brass)">Cu Radiator (50Cu/50Brass)</option>
-          <option value="Carbide">Carbide</option>
-          <option value="Stainless Steel">Stainless Steel</option>
-        </select>
-        
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
+      <div class="d-flex align-items-center flex-wrap gap-3">
+        <div class="d-flex align-items-center">
+          <label for="create-material" class="me-2">Material:</label>
+          <select id="create-material" onchange="updateTradeOptions()">
+            <option value="Copper">Copper</option>
+            <option value="Busheling Steel">Busheling Steel</option>
+            <option value="Brass">Brass</option>
+            <option value="Aluminum">Aluminum</option>
+            <option value="Electric Motors">Electric Motors</option>
+            <option value="Insulated Copper Wire">Insulated Copper Wire</option>
+            <option value="Lead">Lead</option>
+            <option value="HMS Steel #2">HMS Steel #2</option>
+            <option value="Cu Radiator (50Cu/50Brass)">Cu Radiator (50Cu/50Brass)</option>
+            <option value="Carbide">Carbide</option>
+            <option value="Stainless Steel">Stainless Steel</option>
+          </select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-contracts" class="me-2">Creatable Contracts:</label>
+          <select id="create-contracts"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-price" class="me-2">Price/ton:</label>
+          <select id="create-price"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-cost" class="me-2">Cost to Create:</label>
+          <select id="create-cost"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-expiration" class="me-2">Expiration Date:</label>
+          <select id="create-expiration"></select>
+        </div>
+        <div>
+          <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+        </div>
       </div>
-      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </div>
     
     <!-- Trade Log Section -->
