@@ -982,7 +982,7 @@
         if (openPrice <= 0) return; // safeguard
         
         // Generate a new "Last" price within ±10% of the open price
-        let randomFactor = (Math.random() * 0.2) - 0.1; // between -0.1 and +0.1
+        let randomFactor = (Math.random() * 0.2) - 0.1;
         let newLast = openPrice * (1 + randomFactor);
         newLast = parseFloat(newLast.toFixed(2));
         
@@ -1006,12 +1006,17 @@
           row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         
-        // Optionally, update the Time column (cell index 8) to the current time
+        // Increase the "Volume" (cell index 7) by 0.1% and round up to the nearest whole number.
+        let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
+        let newVolume = Math.ceil(currentVolume * 1.001);
+        row.cells[7].textContent = newVolume.toLocaleString();
+        
+        // Optionally, update the Time column (cell index 8) with the current time
         // row.cells[8].textContent = new Date().toLocaleTimeString();
       });
     }
-    // Trigger updateMetalsMarketOverview() every minute (7000 ms)
-    setInterval(updateMetalsMarketOverview, 7000);
+    // Trigger updateMetalsMarketOverview() every minute (60000 ms)
+    setInterval(updateMetalsMarketOverview, 60000);
   
   </script>
 </body>
