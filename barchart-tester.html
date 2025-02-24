@@ -74,12 +74,6 @@
       <div class="date">Thu, Feb 20th, 2025</div>
     </div>
 
-    <!-- Major Markets Overview Ticker -->
-    <h3 class="section-title">Major Markets Overview</h3>
-    <div class="ticker-wrap" id="futuresTickerWrap">
-      <div class="ticker" id="futuresTicker"></div>
-    </div>
-
     <!-- Futures Trading Guide Ticker -->
     <h3 class="section-title">Futures Trading Guide: New Trade Alerts</h3>
     <div class="ticker-wrap" id="guideTickerWrap">
@@ -177,25 +171,8 @@
     }
 
     /************************************************************************
-     * 4) RENDER TICKERS
+     * 4) RENDER GUIDE TICKER
      ************************************************************************/
-    function renderFuturesTicker() {
-      const ticker = document.getElementById("futuresTicker");
-      let content = "";
-      futuresData.forEach(item => {
-        let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
-        let trendArrow = item.change > 0 ? "▲" : (item.change < 0 ? "▼" : "-");
-        content += `<span class="ticker-item">
-                      ${item.contractName} ${item.last.toFixed(2)} ${dispChange} 
-                      ${item.high.toFixed(2)} ${item.low.toFixed(2)} 
-                      ${item.volume.toLocaleString()} ${item.time} ${trendArrow}
-                    </span>`;
-        content += `<span class="ticker-separator"> ---- </span>`;
-      });
-      // Duplicate content for continuous scrolling
-      ticker.innerHTML = content + content;
-    }
-
     function renderGuideTicker() {
       const ticker = document.getElementById("guideTicker");
       let content = "";
@@ -227,13 +204,11 @@
      ************************************************************************/
     function init() {
       generateTradingGuide();
-      renderFuturesTicker();
       renderGuideTicker();
       updateHiddenJSON();
 
       setInterval(() => {
         fluctuateData();
-        renderFuturesTicker();
         renderGuideTicker();
         updateHiddenJSON();
       }, 5 * 60 * 1000);
