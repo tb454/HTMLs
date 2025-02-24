@@ -249,6 +249,27 @@
       </table>
     </div>
     
+    <!-- Local Storage Inventory Section -->
+    <div class="section">
+      <div class="section-title">Local Storage Inventory</div>
+      <table id="inventoryTable">
+        <thead>
+          <tr>
+            <th>Commodity</th>
+            <th>WIP (lbs)</th>
+            <th>Finished Goods (lbs)</th>
+            <th>Total (lbs)</th>
+            <th>Avg Cost</th>
+            <th>Value</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Data rendered from localStorage will appear here -->
+        </tbody>
+      </table>
+    </div>
+    
     <!-- Simulated Trade Section (One Line) -->
     <div class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
@@ -801,6 +822,54 @@
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
+  
+    /***************************************
+     * Local Storage Inventory Table Rendering
+     ***************************************/
+    // Function to render the inventory table from localStorage 
+    function renderTableFromStorage() {
+      const storedData = localStorage.getItem('greensparkData');
+      if (storedData) {
+        // Parse the data and update your local inventoryData variable
+        const inventoryData = JSON.parse(storedData);
+        
+        const tbody = document.getElementById("inventoryTable").querySelector("tbody");
+        tbody.innerHTML = "";
+        
+        inventoryData.forEach(item => {
+          const wipLabel = item.wip.toLocaleString() + " lbs";
+          const fgLabel = item.finishedGoods.toLocaleString() + " lbs";
+          const totalLabel = (item.wip + item.finishedGoods).toLocaleString() + " lbs";
+          const avgCostStr = `$${item.avgCost.toFixed(4)}/lb`;
+          const valStr = `$${item.value.toLocaleString()}`;
+      
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${item.commodity}</td>
+            <td>${wipLabel}</td>
+            <td>${fgLabel}</td>
+            <td>${totalLabel}</td>
+            <td>${avgCostStr}</td>
+            <td>${valStr}</td>
+            <td>
+              <button class="btn-view">VIEW</button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+      }
+    }
+    
+    // Listen for changes in localStorage from greenspark.html
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'greensparkData') {
+        renderTableFromStorage();
+      }
+    });
+    
+    // Optionally, render the table on page load
+    window.addEventListener("DOMContentLoaded", renderTableFromStorage);
+  
   </script>
 </body>
 </html>
