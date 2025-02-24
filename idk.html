@@ -1,4 +1,4 @@
-<!DOCTYPE html>  
+<!DOCTYPE html>   
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -899,6 +899,37 @@
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
+    
+    /***************************************
+     * Increase Table Values Every Minute by 10%
+     ***************************************/
+    function increaseTableValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+  
+      rows.forEach(row => {
+        // Get current values from WIP (cell index 1), Finished Goods (cell index 2), and Total (cell index 3)
+        let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
+        let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+        let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+  
+        // Increase each by 10%
+        wip *= 1.1;
+        finished *= 1.1;
+        total *= 1.1;
+  
+        // Update the cells (using Math.round for simplicity)
+        row.cells[1].textContent = Math.round(wip).toLocaleString();
+        row.cells[2].textContent = Math.round(finished).toLocaleString();
+        row.cells[3].textContent = Math.round(total).toLocaleString();
+      });
+  
+      // Update totals row
+      updatePurchaseValues();
+    }
+  
+    // Call increaseTableValues() every minute (60000 ms)
+    setInterval(increaseTableValues, 60000);
   </script>
 </body>
 </html>
