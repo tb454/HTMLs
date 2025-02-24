@@ -176,23 +176,43 @@
     .ticker-wrapper {
       overflow: hidden;
       background-color: #fff;
-      padding: 10px;
-      border: 1px solid #e1e4e8;
+      border: 1px solid #ddd;
+      padding: 5px 0;
       border-radius: 5px;
+      margin-bottom: 20px;
     }
     .ticker {
       display: inline-block;
       white-space: nowrap;
-      animation: ticker-scroll 20s linear infinite;
+      padding-left: 100%;
+      animation: ticker 90s linear infinite;
     }
-    .ticker span {
-      margin-right: 50px;
-      font-size: 16px;
-      color: #333;
+    /* New ticker item styles based on your provided HTML */
+    .ticker-item { 
+      margin-right: 20px; 
+      font-size: 0.95rem; 
     }
-    @keyframes ticker-scroll {
-      0% { transform: translateX(100%); }
-      100% { transform: translateX(-100%); }
+    .ticker-separator { 
+      margin-right: 20px; 
+      color: #666; 
+    }
+    /* Signal and Strength Colors */
+    .signal-buy { 
+      color: #27ae60; 
+      font-weight: bold; 
+    }
+    .signal-sell { 
+      color: #e74c3c; 
+      font-weight: bold; 
+    }
+    .strength-weak { color: #e74c3c; }
+    .strength-moderate { color: #f39c12; }
+    .strength-uncertain { color: #f1c40f; }
+    .strength-strong { color: #2ecc71; }
+    .strength-very-strong { color: #27ae60; }
+    @keyframes ticker {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
     }
   </style>
 </head>
@@ -581,10 +601,7 @@
       <div class="section-title">Trade Alerts</div>
       <div class="ticker-wrapper">
         <div id="trade-alerts-ticker" class="ticker">
-          <span>Alert: New trade executed for Copper.</span>
-          <span>Alert: Price updated for Brass.</span>
-          <span>Alert: Trade executed for Electric Motors.</span>
-          <!-- Add additional alerts as needed -->
+          <!-- Ticker content will be rendered here by JavaScript -->
         </div>
       </div>
     </div>
@@ -1127,6 +1144,116 @@
     }
     setInterval(updateMetalsMarketOverview, 7000);
   
+    /***************************************
+     * FUTURES TICKER LOGIC
+     ***************************************/
+    let futuresData = [
+      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
+      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
+      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
+      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
+      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
+      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
+      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
+      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
+      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
+      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
+      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
+    ];
+    
+    let futuresGuide = [];
+    
+    function generateTradingGuide() {
+      const signals = ["BUY", "SELL"];
+      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
+      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
+      
+      futuresGuide = futuresData.map(item => {
+        let sig = signals[Math.floor(Math.random() * signals.length)];
+        let entryPct = (Math.random() * 2 + 1) / 100;
+        if (sig === "SELL") entryPct *= -1;
+        let entryPrice = item.last * (1 + entryPct);
+        let stopDiff = Math.abs(entryPrice * 0.05);
+        let profitDiff = Math.abs(entryPrice * 0.1);
+        let stop, takeProfit;
+        if (sig === "BUY") {
+          stop = entryPrice - stopDiff;
+          takeProfit = entryPrice + profitDiff;
+        } else {
+          stop = entryPrice + stopDiff;
+          takeProfit = entryPrice - profitDiff;
+        }
+        let strength = strengths[Math.floor(Math.random() * strengths.length)];
+        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
+    
+        return {
+          contractName: item.contractName,
+          signal: sig,
+          entryDate: "02/20/25",
+          entryPrice: parseFloat(entryPrice.toFixed(2)),
+          stopLoss: parseFloat(stop.toFixed(2)),
+          takeProfit: parseFloat(takeProfit.toFixed(2)),
+          timeHorizon: horizon,
+          strength: strength
+        };
+      });
+    }
+    
+    function renderGuideTicker() {
+      const ticker = document.getElementById("trade-alerts-ticker");
+      let content = "";
+      futuresGuide.forEach(trade => {
+        const signalClass = trade.signal === "BUY" ? "signal-buy" : "signal-sell";
+        const strengthClass = trade.strength.toLowerCase().replace(/\s+/g, '-');
+        content += `<span class="ticker-item">
+                      ${trade.contractName} 
+                      <span class="signal ${signalClass}">${trade.signal}</span> 
+                      ${trade.entryDate} ${trade.entryPrice.toFixed(2)} 
+                      ${trade.stopLoss.toFixed(2)} ${trade.takeProfit.toFixed(2)} 
+                      ${trade.timeHorizon} 
+                      <span class="strength ${strengthClass}">${trade.strength}</span>
+                    </span>`;
+        content += `<span class="ticker-separator"> ---- </span>`;
+      });
+      // Duplicate content for seamless scrolling
+      ticker.innerHTML = content + content;
+    }
+    
+    function updateHiddenJSON() {
+      // Optional: update a hidden JSON element if needed.
+    }
+    
+    // Optional: define data fluctuation for futuresData every 5 minutes
+    function fluctuateData() {
+      futuresData.forEach(item => {
+        let pct = (Math.random() * 5 - 2.5) / 100;
+        let oldLast = item.last;
+        let newLast = oldLast * (1 + pct);
+        item.last = parseFloat(newLast.toFixed(2));
+        let diff = item.last - oldLast;
+        item.change = parseFloat(diff.toFixed(2));
+        let highPct = (Math.random() * 3) / 100;
+        let lowPct = (Math.random() * 3) / 100;
+        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
+        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
+        let volPct = (Math.random() * 20 - 10) / 100;
+        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
+      });
+      generateTradingGuide();
+    }
+    
+    function initTicker() {
+      generateTradingGuide();
+      renderGuideTicker();
+      updateHiddenJSON();
+      setInterval(() => {
+        fluctuateData();
+        renderGuideTicker();
+        updateHiddenJSON();
+      }, 5 * 60 * 1000);
+    }
+    
+    window.addEventListener("DOMContentLoaded", initTicker);
   </script>
 </body>
 </html>
