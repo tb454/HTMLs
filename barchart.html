@@ -151,20 +151,11 @@
 
   <script>
     /************************************************************************
-     * 1) FUTURES DATA (Same as before, matching your GreenSpark Commodities)
+     * 1) FUTURES DATA (Modified to remove waste commodity and update contract names)
      ************************************************************************/
     let futuresData = [
       {
-        contractName: "WASTE (Mar '25)",
-        last: 100.0,
-        change: -0.50,
-        high: 102.0,
-        low: 99.5,
-        volume: 50123,
-        time: "14:47 CT"
-      },
-      {
-        contractName: "ALUMINUM (May '25)",
+        contractName: "ALUM25",
         last: 220.0,
         change: 1.25,
         high: 222.0,
@@ -173,7 +164,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "Electric Motors (Feb '25)",
+        contractName: "EMOT25",
         last: 89.0,
         change: 0.75,
         high: 90.0,
@@ -182,7 +173,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "Insulated copper wire (Mar '25)",
+        contractName: "ICWR25",
         last: 310.0,
         change: 2.0,
         high: 315.0,
@@ -191,7 +182,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "LEAD (Jul '25)",
+        contractName: "LEAD25",
         last: 45.2,
         change: -0.2,
         high: 46.0,
@@ -200,7 +191,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "FERROUS (Jun '25)",
+        contractName: "HMS225",
         last: 502.0,
         change: 1.5,
         high: 505.0,
@@ -209,7 +200,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "RADIATOR PRODUCT (Apr '25)",
+        contractName: "CRAD25",
         last: 128.0,
         change: 0.75,
         high: 129.5,
@@ -218,7 +209,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "COPPER PRODUCT (Mar '25)",
+        contractName: "COPR25",
         last: 955.0,
         change: 3.5,
         high: 960.0,
@@ -227,7 +218,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "BRASS PRODUCT (May '25)",
+        contractName: "BRSS25",
         last: 780.0,
         change: -2.0,
         high: 785.0,
@@ -236,7 +227,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "MISC PRODUCT (Sep '25)",
+        contractName: "CARB25",
         last: 410.0,
         change: 1.0,
         high: 415.0,
@@ -245,7 +236,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "STAINLESS STEEL PRODUCT (Aug '25)",
+        contractName: "STLS25",
         last: 215.0,
         change: 0.50,
         high: 217.0,
@@ -254,7 +245,7 @@
         time: "14:47 CT"
       },
       {
-        contractName: "E-SCRAP (Nov '25)",
+        contractName: "BSTE25",
         last: 32.0,
         change: -0.25,
         high: 32.5,
@@ -266,12 +257,7 @@
 
     /************************************************************************
      * 2) “FUTURES TRADING GUIDE” DATA
-     *    We'll create one row per item in `futuresData`, but with expanded info:
-     *      - random signal: BUY or SELL
-     *      - random entry price ~ last ± 1-2%
-     *      - random stop loss & take profit around entry
-     *      - random time horizon
-     *      - random strength (Weak, Moderate, Strong)
+     *    We'll create one row per item in `futuresData`, but with expanded info.
      ************************************************************************/
     let futuresGuide = [];
 
@@ -285,16 +271,13 @@
         let sig = signals[Math.floor(Math.random() * signals.length)];
 
         // entry price ~ last ±1-2%
-        let entryPct = (Math.random() * 2 + 1) / 100; // 1-3%
-        // if SELL, maybe entry is slightly below last
+        let entryPct = (Math.random() * 2 + 1) / 100;
         if (sig === "SELL") entryPct *= -1;
         let entryPrice = item.last * (1 + entryPct);
 
         // random stop/take profit
-        // if BUY, stop < entry, takeProfit > entry
-        // if SELL, stop > entry, takeProfit < entry
-        let stopDiff = Math.abs(entryPrice * 0.05);      // ~5% away
-        let profitDiff = Math.abs(entryPrice * 0.1);     // ~10% away
+        let stopDiff = Math.abs(entryPrice * 0.05);
+        let profitDiff = Math.abs(entryPrice * 0.1);
         let stop, takeProfit;
         if (sig === "BUY") {
           stop = entryPrice - stopDiff;
@@ -304,7 +287,6 @@
           takeProfit = entryPrice - profitDiff;
         }
 
-        // random strength & horizon
         let strength = strengths[Math.floor(Math.random() * strengths.length)];
         let horizon = horizons[Math.floor(Math.random() * horizons.length)];
 
@@ -323,33 +305,26 @@
 
     /************************************************************************
      * 3) RANDOM FLUCTUATIONS every 5 minutes
-     *    ~±2-3% for last, high, low; ±10% for volume
-     *    Then re-generate trading guide as well.
      ************************************************************************/
     function fluctuateData() {
       futuresData.forEach(item => {
-        // for last
-        let pct = (Math.random() * 5 - 2.5) / 100; // ~±2.5%
+        let pct = (Math.random() * 5 - 2.5) / 100;
         let oldLast = item.last;
         let newLast = oldLast * (1 + pct);
         item.last = parseFloat(newLast.toFixed(2));
 
-        // change
         let diff = item.last - oldLast;
         item.change = parseFloat(diff.toFixed(2));
 
-        // high/low around newLast
-        let highPct = (Math.random() * 3) / 100; // up to +3%
-        let lowPct = (Math.random() * 3) / 100;  // up to +3%
+        let highPct = (Math.random() * 3) / 100;
+        let lowPct = (Math.random() * 3) / 100;
         item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
         item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
 
-        // volume ±10%
         let volPct = (Math.random() * 20 - 10) / 100;
         item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
       });
 
-      // Also re-generate the trading guide with new data
       generateTradingGuide();
     }
 
@@ -361,9 +336,7 @@
       tbody.innerHTML = "";
 
       futuresData.forEach(item => {
-        // color for change
         const chgClass = item.change >= 0 ? "change-positive" : "change-negative";
-        // sign
         let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
 
         const row = document.createElement("tr");
@@ -386,9 +359,8 @@
       guideTbody.innerHTML = "";
 
       futuresGuide.forEach(trade => {
-        const row = document.createElement("tr");
-        // color code the signal
         const sigColor = trade.signal === "BUY" ? "green" : "red";
+        const row = document.createElement("tr");
         row.innerHTML = `
           <td>${trade.contractName}</td>
           <td style="color:${sigColor}; font-weight:bold;">${trade.signal}</td>
@@ -409,7 +381,6 @@
      ************************************************************************/
     function updateHiddenJSON() {
       const dataScript = document.getElementById("futures-data");
-      // Combine both tables into a single object
       const dataObj = {
         futures: futuresData,
         tradingGuide: futuresGuide
@@ -421,13 +392,11 @@
      * 6) INIT + AUTO-UPDATE EVERY 5 MIN
      ************************************************************************/
     function init() {
-      // Generate guide for the first time
       generateTradingGuide();
       renderFuturesTable();
       renderFuturesGuideTable();
       updateHiddenJSON();
 
-      // Then every 5 minutes
       setInterval(() => {
         fluctuateData();
         renderFuturesTable();
@@ -440,4 +409,3 @@
   </script>
 </body>
 </html>
-
