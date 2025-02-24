@@ -453,9 +453,10 @@
             <td>155,552</td>
             <td>02/21/25</td>
           </tr>
-          <tr>
-            <td>SIH25</td>
-            <td>Silver (Mar '25)</td>
+          <!-- Updated: Insulated Copper Wire now shows Apr '25 and uses snapshot price -->
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
             <td>23.95</td>
             <td>+0.10</td>
             <td>23.85</td>
@@ -475,9 +476,10 @@
             <td>36,500</td>
             <td>02/21/25</td>
           </tr>
-          <tr>
-            <td>PLJ25</td>
-            <td>Platinum (Apr '25)</td>
+          <!-- Electric Motors row; will also update from snapshot -->
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
             <td>997.35</td>
             <td>+7.50</td>
             <td>990.00</td>
@@ -486,9 +488,10 @@
             <td>25,650</td>
             <td>02/21/25</td>
           </tr>
-          <tr>
-            <td>PAH25</td>
-            <td>Palladium (Mar '25)</td>
+          <!-- Updated: Brass now replaces Palladium -->
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
             <td>1,483.00</td>
             <td>-9.70</td>
             <td>1,490.00</td>
@@ -955,7 +958,7 @@
     }
   
     setInterval(increaseTableValues, 300000);
-  
+    
     /***************************************
      * Update Metals Market Overview Every Minute
      ***************************************/
@@ -965,32 +968,70 @@
       const rows = table.querySelectorAll('tbody tr');
       
       rows.forEach(row => {
-        let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
-        if (openPrice <= 0) return;
-        
-        let randomFactor = (Math.random() * 0.2) - 0.1;
-        let newLast = openPrice * (1 + randomFactor);
-        newLast = parseFloat(newLast.toFixed(2));
-        
-        row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        let change = newLast - openPrice;
-        let changeFormatted = (change >= 0 ? '+' : '') + change.toFixed(2);
-        row.cells[3].textContent = changeFormatted;
-        
-        let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
-        if (newLast > currentHigh) {
-          row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        let ticker = row.cells[0].textContent.trim();
+        // For our special traded contracts, override the "last" price using snapshot values
+        if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
+          let commodity = "";
+          if (ticker === 'ICWR25') {
+            commodity = "Insulated Copper Wire";
+          } else if (ticker === 'EMOT25') {
+            commodity = "Electric Motors";
+          } else if (ticker === 'BRSS25') {
+            commodity = "Brass";
+          }
+          let elementId = "price-" + commodity.replace(/\s/g, '');
+          let snapshotElem = document.getElementById(elementId);
+          if (snapshotElem) {
+            // Expecting text like "Insulated Copper Wire: $36,000.00"
+            let priceText = snapshotElem.textContent;
+            let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
+            if (match) {
+              let snapshotPrice = parseFloat(match[1].replace(/,/g, ''));
+              row.cells[2].textContent = snapshotPrice.toFixed(2);
+              if (!row.dataset.initialSnapshotPrice || row.dataset.initialSnapshotPrice === "") {
+                row.dataset.initialSnapshotPrice = snapshotPrice;
+              }
+              let initialPrice = parseFloat(row.dataset.initialSnapshotPrice);
+              let change = snapshotPrice - initialPrice;
+              row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
+            }
+          }
+        } else {
+          let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
+          if (openPrice <= 0) return;
+  
+          let randomFactor = (Math.random() * 0.2) - 0.1;
+          let newLast = openPrice * (1 + randomFactor);
+          newLast = parseFloat(newLast.toFixed(2));
+  
+          row.cells[2].textContent = newLast.toLocaleString(undefined, { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+          });
+  
+          let change = newLast - openPrice;
+          row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
+  
+          let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
+          if (newLast > currentHigh) {
+            row.cells[5].textContent = newLast.toLocaleString(undefined, { 
+              minimumFractionDigits: 2, 
+              maximumFractionDigits: 2 
+            });
+          }
+  
+          let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
+          if (newLast < currentLow) {
+            row.cells[6].textContent = newLast.toLocaleString(undefined, { 
+              minimumFractionDigits: 2, 
+              maximumFractionDigits: 2 
+            });
+          }
+  
+          let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
+          let newVolume = Math.ceil(currentVolume * 1.001);
+          row.cells[7].textContent = newVolume.toLocaleString();
         }
-        
-        let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
-        if (newLast < currentLow) {
-          row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-        
-        let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
-        let newVolume = Math.ceil(currentVolume * 1.001);
-        row.cells[7].textContent = newVolume.toLocaleString();
       });
     }
     setInterval(updateMetalsMarketOverview, 7000);
