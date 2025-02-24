@@ -416,7 +416,10 @@
         <tfoot>
           <tr>
             <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-            <td colspan="4"></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
             <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
           </tr>
@@ -817,11 +820,13 @@
       tableBody.appendChild(newRow);
     }
     
+    // Update Active Contracts Table to include total change calculation.
     function updateActiveContractsTable() {
       const table = document.getElementById('active-contracts-table');
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
       let totalMarginRequirement = 0;
+      let totalChange = 0; // Initialize total change accumulator
       const contractSize = 10;
       
       rows.forEach(row => {
@@ -829,7 +834,9 @@
         const salePrice = parseFloat(row.dataset.salePrice);
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
         const priceDifference = salePrice - snapshotPrice;
+        totalChange += priceDifference; // Accumulate change
         
+        // Update the change cell with a plus sign if positive
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
         
         const totalContractValue = contractSize * snapshotPrice;
@@ -854,6 +861,9 @@
           minimumFractionDigits: 2, 
           maximumFractionDigits: 2 
         });
+      
+      // Update the total change footer cell
+      document.getElementById('total-change').textContent = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
     }
     
     function simulateTrade() {
