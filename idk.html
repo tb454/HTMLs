@@ -323,12 +323,11 @@
         </tbody>
         <tfoot>
           <tr>
-            <td><strong>Totals:</strong></td>
-            <td id="total-wip">0</td>
-            <td id="total-finished">0</td>
-            <td id="total-total">0</td>
+            <td><strong>Totals: Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td><strong>Change: <span id="activeContractsChangeTotal">0.00</span></strong></td>
+            <td colspan="3"></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
-            <td id="total-purchase">0</td>
           </tr>
         </tfoot>
       </table>
@@ -415,8 +414,9 @@
         </tbody>
         <tfoot>
           <tr>
-            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-            <td colspan="4"></td>
+            <td><strong>Totals: Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td><strong>Change: <span id="activeContractsChangeTotal">0.00</span></strong></td>
+            <td colspan="3"></td>
             <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
           </tr>
@@ -822,6 +822,7 @@
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
       let totalMarginRequirement = 0;
+      let totalChange = 0;
       const contractSize = 10;
       
       rows.forEach(row => {
@@ -830,7 +831,9 @@
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
         const priceDifference = salePrice - snapshotPrice;
         
+        // Update the Change column (4th cell)
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
+        totalChange += priceDifference;
         
         const totalContractValue = contractSize * snapshotPrice;
         const marginRequirement = totalContractValue * 0.07;
@@ -838,7 +841,6 @@
           minimumFractionDigits: 2, 
           maximumFractionDigits: 2 
         });
-        
         totalMarginRequirement += marginRequirement;
       });
       
@@ -848,6 +850,9 @@
           minimumFractionDigits: 2, 
           maximumFractionDigits: 2 
         });
+      document.getElementById('activeContractsChangeTotal').textContent =
+        (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
       document.getElementById('active-contracts-margin').textContent = "Margin: $" +
         totalMarginRequirement.toLocaleString(undefined, { 
@@ -928,13 +933,13 @@
         }
       }
       updateTradeOptions();
-      updateActiveContractsTable(); // Update the active contracts change values based on the new market snapshot.
+      updateActiveContractsTable(); // Update active contracts' change values based on the new market snapshot.
     }
     
     setInterval(updateMarketSnapshot, 15000);
     
     /***************************************
-     * Increase Table Values Every Minute by 10%
+     * Increase Table Values Every 5 Minutes by 10%
      ***************************************/
     function increaseTableValues() {
       const table = document.getElementById('greenspark-table');
@@ -960,7 +965,7 @@
     setInterval(increaseTableValues, 300000);
     
     /***************************************
-     * Update Metals Market Overview Every Minute
+     * Update Metals Market Overview Every 7 Seconds
      ***************************************/
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
