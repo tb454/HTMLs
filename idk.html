@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -726,4 +726,168 @@
       // Update "Price/ton" dropdown: 6 options using multipliers.
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
-      const multipliers = [0.95, 0.
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
+      });
+      
+      // Update "Cost to Create" dropdown: single option = 0.1% of base price per ton.
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const costToCreate = basePricePerTon * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOption);
+      
+      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments.
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = expDate.getDate().toString().padStart(2, '0');
+        const year = expDate.getFullYear();
+        const dateStr = month + '/' + day + '/' + year;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    
+    // Append a new row to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tradeTime = new Date().toLocaleTimeString();
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = `
+        <td>${tradeTime}</td>
+        <td>${material}</td>
+        <td>${quantity}</td>
+        <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+        <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+      `;
+      tableBody.appendChild(newRow);
+    }
+    
+    // Updated function to append a new active contract row.
+    function addActiveContract(commodity, expiration) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      // Retrieve current market price from the overview cards (market snapshot)
+      const marketPrice = marketSnapshotPrices[commodity] || 0;
+      const contractSize = 10; // contract size in tons
+      const totalContractValue = contractSize * marketPrice;
+      const marginRequirement = totalContractValue * 0.07; // 7% margin
+      
+      // Format expiration as "Jun '25"
+      const expDate = new Date(expiration);
+      const expFormatted = expDate.toLocaleString('default', { month: 'short' }) +
+                           " '" + expDate.getFullYear().toString().slice(-2);
+      
+      const newRow = document.createElement('tr');
+      // Store the commodity name for later updates
+      newRow.dataset.commodity = commodity;
+      
+      newRow.innerHTML = `
+        <td>${commodity} (${expFormatted})</td>
+        <td>${marketPrice.toFixed(2)}</td>
+        <td>+0.00</td>
+        <td>+0.00%</td>
+        <td>${expiration}</td>
+        <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+        </td>
+      `;
+      tableBody.appendChild(newRow);
+    }
+    
+    // Updated function to recalc and update all active contract rows.
+    function updateActiveContractsTable() {
+      const table = document.getElementById('active-contracts-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let totalContracts = rows.length;
+      let totalMarginRequirement = 0;
+      const contractSize = 10;
+      
+      rows.forEach(row => {
+        // Retrieve the commodity name from the data attribute
+        const commodity = row.dataset.commodity;
+        // Use the latest market snapshot price for this commodity
+        const marketPrice = marketSnapshotPrices[commodity] || 0;
+        const totalContractValue = contractSize * marketPrice;
+        const marginRequirement = totalContractValue * 0.07;
+        
+        // Update the last price and margin cells
+        row.cells[1].textContent = marketPrice.toFixed(2);
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        totalMarginRequirement += marginRequirement;
+      });
+      
+      // Update the totals in the table footer and the Active Contracts overview card.
+      document.getElementById('activeContractsCount').textContent = totalContracts;
+      document.getElementById('activeContractsMarginTotal').textContent =
+        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" +
+        totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    
+    // simulateTrade() now calls the updated addActiveContract function.
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      for (let i = 0; i < numTrades; i++) {
+        const quantity = 10; // each trade is 10 tons.
+        const totalCost = quantity * chosenPrice;
+        // Append new trade log entry.
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
+        // Append new active contract entry using the updated function.
+        addActiveContract(material, expiration);
+      }
+      
+      // Refresh the active contracts table to recalc margins.
+      updateActiveContractsTable();
+      // Also update the Finished Goods totals.
+      updatePurchaseValues();
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+    
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+  </script>
+</body>
+</html>
