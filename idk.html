@@ -90,6 +90,8 @@
       text-align: center;
       cursor: pointer;
       transition: box-shadow 0.2s ease, transform 0.2s ease;
+      display: flex;         /* Added for alignment */
+      flex-direction: column;/* Added for alignment */
     }
     .card-custom:hover {
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
@@ -98,6 +100,10 @@
     .card-custom div {
       margin-bottom: 8px;
       font-size: 16px;
+    }
+    /* Align canvas at the bottom */
+    .card-custom canvas {
+      margin-top: auto;
     }
     /* Tables */
     table {
