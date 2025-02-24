@@ -243,7 +243,7 @@
           <div><strong>Finished Goods</strong></div>
           <div id="finishedGoodsInfo">Loading...</div>
           <!-- New canvas element for the line graph -->
-          <canvas id="finishedGoodsChart" width="250" height="100"></canvas>
+          <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
@@ -251,7 +251,7 @@
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
           <!-- New canvas element for the line graph -->
-          <canvas id="activeContractsChart" width="250" height="100"></canvas>
+          <canvas id="activeContractsChart" width="250" height="200"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -681,9 +681,9 @@
             scales: {
               y: { 
                 beginAtZero: true,
-                max: 5000,   // y-axis goes up to 5,000
+                max: 10000,   // Increased y-axis range to 10,000
                 ticks: {
-                  stepSize: 1000  // Tick marks every 1,000 units
+                  stepSize: 2000  // Tick marks every 2,000 units
                 }
               }
             }
@@ -712,7 +712,7 @@
             scales: {
               y: { 
                 beginAtZero: true,
-                max: 150  // y-axis goes up to 150 tons
+                max: 300  // Increased y-axis range to 300 tons
               }
             }
           }
