@@ -390,7 +390,32 @@
     }
 
     /************************************************************************
-     * 6) INIT + AUTO-UPDATE EVERY 5 MIN
+     * 6) AUTO-SCROLL TABLES
+     ************************************************************************/
+    // Auto-scroll function for a given container element
+    function autoScroll(container) {
+      // Set the scroll step (in pixels) and interval (in ms)
+      const step = 1;
+      const intervalTime = 50;
+      setInterval(() => {
+        // Calculate the maximum scroll position
+        const maxScroll = container.scrollHeight - container.clientHeight;
+        if (container.scrollTop < maxScroll) {
+          container.scrollTop += step;
+        } else {
+          container.scrollTop = 0;
+        }
+      }, intervalTime);
+    }
+
+    // Function to start auto-scrolling for all scrollable tables
+    function startAutoScroll() {
+      const scrollableContainers = document.querySelectorAll('.scrollable-table');
+      scrollableContainers.forEach(container => autoScroll(container));
+    }
+
+    /************************************************************************
+     * 7) INIT + AUTO-UPDATE EVERY 5 MIN
      ************************************************************************/
     function init() {
       generateTradingGuide();
@@ -398,6 +423,10 @@
       renderFuturesGuideTable();
       updateHiddenJSON();
 
+      // Start auto-scrolling tables
+      startAutoScroll();
+
+      // Update data and re-render every 5 minutes
       setInterval(() => {
         fluctuateData();
         renderFuturesTable();
