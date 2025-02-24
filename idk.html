@@ -404,6 +404,7 @@
       <table id="active-contracts-table" class="table table-hover align-middle">
         <thead>
           <tr>
+            <th>Ticker</th>
             <th>Material</th>
             <th>Last Price</th>
             <th>Change</th>
@@ -419,7 +420,7 @@
         <tfoot>
           <tr>
             <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-            <td colspan="4"></td>
+            <td colspan="5"></td>
             <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
             <td></td>
           </tr>
@@ -687,6 +688,21 @@
       "Carbide": "CARBIDE",
       "Stainless Steel": "STAINLESS STEEL"
     };
+
+    // Ticker symbol mapping for active contracts
+    const tickerMapping = {
+      "Aluminum": "ALUM25",
+      "Electric Motors": "EMOT25",
+      "Insulated Copper Wire": "ICWR25",
+      "Lead": "LEAD25",
+      "HMS Steel #2": "HMS225",
+      "Cu Radiator (50Cu/50Brass)": "CRAD25",
+      "Copper": "COPR25",
+      "Brass": "BRSS25",
+      "Carbide": "CARB25",
+      "Stainless Steel": "STLS25",
+      "Busheling Steel": "BSTE25"
+    };
   
     function getCommodityData(material) {
       const target = commodityMapping[material];
@@ -801,12 +817,16 @@
       const expFormatted = expDate.toLocaleString('default', { month: 'short' }) +
                            " '" + expDate.getFullYear().toString().slice(-2);
       
+      // Get ticker symbol from tickerMapping
+      const ticker = tickerMapping[commodity] || '';
+      
       const newRow = document.createElement('tr');
       // Store the commodity name for later updates
       newRow.dataset.commodity = commodity;
       
       newRow.innerHTML = 
-        `<td>${commodity} (${expFormatted})</td>
+        `<td>${ticker}</td>
+         <td>${commodity} (${expFormatted})</td>
          <td>${marketPrice.toFixed(2)}</td>
          <td>+0.00</td>
          <td>+0.00%</td>
@@ -836,8 +856,8 @@
         const marginRequirement = totalContractValue * 0.07;
         
         // Update the last price and margin cells
-        row.cells[1].textContent = marketPrice.toFixed(2);
-        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        row.cells[2].textContent = marketPrice.toFixed(2);
+        row.cells[6].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         totalMarginRequirement += marginRequirement;
       });
