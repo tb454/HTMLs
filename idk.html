@@ -1006,7 +1006,7 @@
           row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         
-        // Increase the "Volume" (cell index 7) by 0.01% and round up to the nearest whole number.
+        // Increase the "Volume" (cell index 7) by 0.001% and round up to the nearest whole number.
         let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
         let newVolume = Math.ceil(currentVolume * 1.001);
         row.cells[7].textContent = newVolume.toLocaleString();
