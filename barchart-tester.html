@@ -63,6 +63,17 @@
       0%   { transform: translateX(0); }
       100% { transform: translateX(-50%); }
     }
+    /* ------------------ Custom Colors ------------------ */
+    /* Strength colors: red (weak) to green (very strong) */
+    .strength-weak { color: #e74c3c; }         /* Weak = Red */
+    .strength-moderate { color: #f39c12; }       /* Moderate = Orange */
+    .strength-uncertain { color: #f1c40f; }      /* Uncertain = Yellow */
+    .strength-strong { color: #2ecc71; }         /* Strong = Light Green */
+    .strength-very-strong { color: #27ae60; }    /* Very Strong = Green */
+
+    /* Signal colors */
+    .signal-buy { color: #27ae60; font-weight: bold; }  /* BUY = Green */
+    .signal-sell { color: #e74c3c; font-weight: bold; } /* SELL = Red */
   </style>
 </head>
 
@@ -177,10 +188,17 @@
       const ticker = document.getElementById("guideTicker");
       let content = "";
       futuresGuide.forEach(trade => {
+        // Determine the proper classes for signal and strength.
+        const signalClass = trade.signal === "BUY" ? "signal-buy" : "signal-sell";
+        // Normalize strength for CSS class (e.g., "Very Strong" becomes "very-strong")
+        const strengthClass = trade.strength.toLowerCase().replace(/\s+/g, '-');
         content += `<span class="ticker-item">
-                      ${trade.contractName} ${trade.signal} ${trade.entryDate} 
-                      ${trade.entryPrice.toFixed(2)} ${trade.stopLoss.toFixed(2)} 
-                      ${trade.takeProfit.toFixed(2)} ${trade.timeHorizon} ${trade.strength}
+                      ${trade.contractName} 
+                      <span class="signal ${signalClass}">${trade.signal}</span> 
+                      ${trade.entryDate} ${trade.entryPrice.toFixed(2)} 
+                      ${trade.stopLoss.toFixed(2)} ${trade.takeProfit.toFixed(2)} 
+                      ${trade.timeHorizon} 
+                      <span class="strength ${strengthClass}">${trade.strength}</span>
                     </span>`;
         content += `<span class="ticker-separator"> ---- </span>`;
       });
