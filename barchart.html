@@ -59,7 +59,7 @@
     .change-negative {
       color: red;
     }
-    /* “Links” column: show an ellipsis or small “More” link */
+    /* “Dots” column originally - now removed in favor of Trend arrows */
     .dots-menu {
       cursor: pointer;
       color: #007bff;
@@ -83,7 +83,6 @@
     .btn-view-trade:hover {
       background-color: #0056b3;
     }
-    /* Hidden JSON script is just to store data for external fetch. */
   </style>
 </head>
 
@@ -108,7 +107,7 @@
             <th>Low</th>
             <th>Volume</th>
             <th>Time</th>
-            <th>Links</th>
+            <th>Trend</th>
           </tr>
         </thead>
         <tbody>
@@ -257,7 +256,6 @@
 
     /************************************************************************
      * 2) “FUTURES TRADING GUIDE” DATA
-     *    We'll create one row per item in `futuresData`, but with expanded info.
      ************************************************************************/
     let futuresGuide = [];
 
@@ -267,15 +265,10 @@
       const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
 
       futuresGuide = futuresData.map(item => {
-        // random signal
         let sig = signals[Math.floor(Math.random() * signals.length)];
-
-        // entry price ~ last ±1-2%
         let entryPct = (Math.random() * 2 + 1) / 100;
         if (sig === "SELL") entryPct *= -1;
         let entryPrice = item.last * (1 + entryPct);
-
-        // random stop/take profit
         let stopDiff = Math.abs(entryPrice * 0.05);
         let profitDiff = Math.abs(entryPrice * 0.1);
         let stop, takeProfit;
@@ -286,7 +279,6 @@
           stop = entryPrice + stopDiff;
           takeProfit = entryPrice - profitDiff;
         }
-
         let strength = strengths[Math.floor(Math.random() * strengths.length)];
         let horizon = horizons[Math.floor(Math.random() * horizons.length)];
 
@@ -312,15 +304,12 @@
         let oldLast = item.last;
         let newLast = oldLast * (1 + pct);
         item.last = parseFloat(newLast.toFixed(2));
-
         let diff = item.last - oldLast;
         item.change = parseFloat(diff.toFixed(2));
-
         let highPct = (Math.random() * 3) / 100;
         let lowPct = (Math.random() * 3) / 100;
         item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
         item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
-
         let volPct = (Math.random() * 20 - 10) / 100;
         item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
       });
@@ -338,6 +327,15 @@
       futuresData.forEach(item => {
         const chgClass = item.change >= 0 ? "change-positive" : "change-negative";
         let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
+        // Determine arrow based on the change value
+        let trendArrow = "";
+        if (item.change > 0) {
+          trendArrow = '<span style="color: green;">&#9650;</span>';
+        } else if (item.change < 0) {
+          trendArrow = '<span style="color: red;">&#9660;</span>';
+        } else {
+          trendArrow = '<span>-</span>';
+        }
 
         const row = document.createElement("tr");
         row.innerHTML = `
@@ -348,7 +346,7 @@
           <td>${item.low.toFixed(2)}</td>
           <td>${item.volume.toLocaleString()}</td>
           <td>${item.time}</td>
-          <td><span class="dots-menu">&#8230;</span></td>
+          <td>${trendArrow}</td>
         `;
         tbody.appendChild(row);
       });
