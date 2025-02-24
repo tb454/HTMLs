@@ -172,6 +172,28 @@
       border: 1px solid #e1e4e8;
       box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
+    /* Ticker Styles */
+    .ticker-wrapper {
+      overflow: hidden;
+      background-color: #fff;
+      padding: 10px;
+      border: 1px solid #e1e4e8;
+      border-radius: 5px;
+    }
+    .ticker {
+      display: inline-block;
+      white-space: nowrap;
+      animation: ticker-scroll 20s linear infinite;
+    }
+    .ticker span {
+      margin-right: 50px;
+      font-size: 16px;
+      color: #333;
+    }
+    @keyframes ticker-scroll {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
   </style>
 </head>
 <body>
@@ -554,11 +576,17 @@
       </table>
     </div>
     
-    <!-- Live Data Updates Section -->
+    <!-- Trade Alerts Ticker Section -->
     <div class="section">
-      <div class="section-title">Live Data Updates</div>
-      <div id="barchart-container"></div>
-      <div id="green-spark-container"></div>
+      <div class="section-title">Trade Alerts</div>
+      <div class="ticker-wrapper">
+        <div id="trade-alerts-ticker" class="ticker">
+          <span>Alert: New trade executed for Copper.</span>
+          <span>Alert: Price updated for Brass.</span>
+          <span>Alert: Trade executed for Electric Motors.</span>
+          <!-- Add additional alerts as needed -->
+        </div>
+      </div>
     </div>
   </div>
   
