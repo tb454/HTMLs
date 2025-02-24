@@ -8,19 +8,31 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Using Orbitron for a futuristic vibe alongside Roboto -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   
   <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   
   <style>
+    /* CSS Variables for easy color adjustments */
+    :root {
+      --bg-dark: #0e0e0e;
+      --bg-glass: rgba(30, 30, 30, 0.75);
+      --accent-neon: #00BFFF;
+      --accent-glow: 0 0 10px #00BFFF;
+      --border-glass: rgba(255, 255, 255, 0.1);
+      --text-light: #eee;
+      --text-shadow: 0 0 8px var(--accent-neon);
+    }
+    
     /* Base Styling */
     body {
       font-family: 'Roboto', sans-serif;
-      background-color: #f4f6f8;
+      background: var(--bg-dark);
       margin: 0;
       padding: 20px;
-      color: #333;
+      color: var(--text-light);
     }
     .container {
       max-width: 1200px;
@@ -28,52 +40,59 @@
     }
     /* Header */
     header.header {
-      background: linear-gradient(90deg, #2c3e50, #34495e);
+      background: linear-gradient(135deg, #1a1a1a, #0e0e0e);
       color: #fff;
-      padding: 15px 20px;
-      border-radius: 8px;
+      padding: 20px 25px;
+      border-radius: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
+      margin-bottom: 25px;
+      box-shadow: 0 0 20px var(--accent-neon);
     }
     header.header h1 {
-      font-size: 28px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 32px;
       margin: 0;
+      text-shadow: var(--text-shadow);
     }
     .user-info {
       font-size: 14px;
     }
     .user-info button {
       margin: 0 10px;
-      padding: 6px 14px;
+      padding: 8px 16px;
       border: none;
       background-color: #e74c3c;
       color: #fff;
-      border-radius: 4px;
+      border-radius: 6px;
       cursor: pointer;
       transition: background-color 0.3s;
     }
     .user-info button:hover {
       background-color: #c0392b;
     }
-    /* Section Styling */
+    /* Section Styling (Glassmorphism) */
     section.section {
-      background-color: #fff;
-      padding: 20px;
-      margin-bottom: 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+      background: var(--bg-glass);
+      padding: 25px;
+      margin-bottom: 25px;
+      border-radius: 12px;
+      border: 1px solid var(--border-glass);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 0 15px rgba(0, 191, 255, 0.3);
     }
     .section-title {
+      font-family: 'Orbitron', sans-serif;
       font-weight: 700;
       margin-bottom: 15px;
-      font-size: 20px;
-      border-bottom: 3px solid #3498db;
+      font-size: 22px;
+      border-bottom: 2px solid var(--accent-neon);
       padding-bottom: 5px;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: #3498db;
+      color: var(--accent-neon);
+      text-shadow: var(--text-shadow);
     }
     /* Overview Cards */
     .overview-cards {
@@ -84,19 +103,20 @@
     .card-custom {
       flex: 1;
       min-width: 250px;
-      background-color: #fff;
-      border: 1px solid #e1e4e8;
-      border-radius: 8px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
       padding: 20px;
       text-align: center;
       cursor: pointer;
       transition: transform 0.3s, box-shadow 0.3s;
       display: flex;
       flex-direction: column;
+      color: var(--text-light);
     }
     .card-custom:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+      transform: translateY(-4px);
+      box-shadow: 0 0 20px var(--accent-neon);
     }
     .card-custom div {
       margin-bottom: 8px;
@@ -109,44 +129,49 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 10px;
+      margin-bottom: 15px;
+      background: #1a1a1a;
+      color: var(--text-light);
+      border-radius: 8px;
+      overflow: hidden;
     }
     th, td {
       padding: 12px 15px;
-      border-bottom: 1px solid #e1e4e8;
+      border-bottom: 1px solid #222;
       text-align: left;
     }
     th {
-      background-color: #f7f7f7;
+      background: #222;
       font-weight: 500;
     }
     tr:hover {
-      background-color: #f9f9f9;
+      background: #242424;
       cursor: pointer;
     }
     /* Buttons */
     .action-btn {
-      padding: 10px 20px;
-      background-color: #3498db;
+      padding: 12px 24px;
+      background-color: var(--accent-neon);
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
       color: #fff;
       cursor: pointer;
-      font-size: 15px;
-      transition: background-color 0.3s;
+      font-size: 16px;
+      transition: background-color 0.3s, box-shadow 0.3s;
     }
     .action-btn:hover {
-      background-color: #2980b9;
+      background-color: #009acd;
+      box-shadow: 0 0 15px var(--accent-neon);
     }
     .secondary-btn,
     .danger-btn {
-      padding: 6px 12px;
+      padding: 8px 16px;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
       color: #fff;
       cursor: pointer;
       font-size: 14px;
-      transition: background-color 0.3s;
+      transition: background-color 0.3s, box-shadow 0.3s;
       margin-right: 5px;
     }
     .secondary-btn {
@@ -154,43 +179,49 @@
     }
     .secondary-btn:hover {
       background-color: #1e8449;
+      box-shadow: 0 0 10px #27ae60;
     }
     .danger-btn {
       background-color: #e74c3c;
     }
     .danger-btn:hover {
       background-color: #c0392b;
+      box-shadow: 0 0 10px #e74c3c;
     }
     /* Form Inputs */
     select, input[type="number"], input[type="date"] {
       margin-right: 8px;
-      padding: 8px;
+      padding: 10px;
       font-size: 14px;
-      border: 1px solid #ced4da;
-      border-radius: 4px;
+      border: 1px solid #555;
+      border-radius: 6px;
+      background: #1a1a1a;
+      color: var(--text-light);
     }
     /* Chart Container */
     .chart-container {
-      background-color: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      border: 1px solid #e1e4e8;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+      background: var(--bg-glass);
+      padding: 25px;
+      border-radius: 12px;
+      border: 1px solid var(--border-glass);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 0 15px rgba(0, 191, 255, 0.3);
     }
     /* Ticker Styles */
     .ticker-wrapper {
       overflow: hidden;
-      background-color: #fff;
-      border: 1px solid #ddd;
-      padding: 8px 0;
-      border-radius: 8px;
-      margin-bottom: 20px;
+      background: #1a1a1a;
+      border: 1px solid #222;
+      padding: 10px 0;
+      border-radius: 12px;
+      margin-bottom: 25px;
     }
     .ticker {
       display: inline-block;
       white-space: nowrap;
       padding-left: 100%;
       animation: ticker 90s linear infinite;
+      color: var(--text-light);
     }
     .ticker-item { 
       margin-right: 20px; 
@@ -202,12 +233,14 @@
     }
     /* Signal and Strength Colors */
     .signal-buy { 
-      color: #27ae60; 
+      color: #00FF00;
       font-weight: bold; 
+      text-shadow: 0 0 5px #00FF00;
     }
     .signal-sell { 
-      color: #e74c3c; 
+      color: #FF4500;
       font-weight: bold; 
+      text-shadow: 0 0 5px #FF4500;
     }
     .strength-weak { color: #e74c3c; }
     .strength-moderate { color: #f39c12; }
@@ -518,10 +551,10 @@
           <tr>
             <td>HGG25</td>
             <td>High Grade Copper (May '25)</td>
-            <td>4.6155</td>
+            <td>4,615.50</td>
             <td>-0.0050</td>
             <td>4,590.00</td>
-            <td>4,669.0</td>
+            <td>4,669.00</td>
             <td>4,580.00</td>
             <td>36,500</td>
             <td>02/21/25</td>
@@ -613,7 +646,7 @@
   
   <script>
     // Accent color for charts and highlights
-    const accentColor = '#3498db';
+    const accentColor = var(--accent-neon) || '#00BFFF';
     document.querySelectorAll('.section-title').forEach(el => {
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
@@ -640,7 +673,7 @@
             label: 'Trading Data',
             data: [100, 150, 130, 170, 160, 180],
             borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
+            backgroundColor: 'rgba(0,191,255,0.2)',
             fill: true,
             tension: 0.1
           }]
@@ -664,7 +697,7 @@
               label: 'Total Change',
               data: activeContractsChangeHistory,
               borderColor: accentColor,
-              backgroundColor: 'rgba(52,152,219,0.2)',
+              backgroundColor: 'rgba(0,191,255,0.2)',
               fill: true,
               tension: 0.1
             }]
@@ -693,7 +726,7 @@
               label: 'Total Tons',
               data: finishedGoodsChartData,
               borderColor: accentColor,
-              backgroundColor: 'rgba(52,152,219,0.2)',
+              backgroundColor: 'rgba(0,191,255,0.2)',
               fill: true,
               tension: 0.1
             }]
