@@ -705,6 +705,8 @@
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
       const data = getCommodityData(material);
+      
+      // Assume contract size is 10 tons = 20,000 lbs.
       const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
@@ -923,9 +925,10 @@
         }
       }
       updateTradeOptions();
+      updateActiveContractsTable(); // Update the active contracts change values based on the new market snapshot.
     }
     
-    setInterval(updateMarketSnapshot, 60000);
+    setInterval(updateMarketSnapshot, 15000);
     
     /***************************************
      * Increase Table Values Every Minute by 10%
