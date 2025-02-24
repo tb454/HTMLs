@@ -1,245 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Barchart-Style Futures</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- (Optional) Bootstrap for quick styling -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  />
-
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Major Markets Overview</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background-color: #f9f9f9;
+      font-family: 'Roboto', sans-serif;
+      background-color: #f0f2f5;
       margin: 20px;
-    }
-    .futures-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .futures-header h2 {
-      margin: 0;
-      font-size: 1.25rem;
-    }
-    .futures-header .date {
-      font-size: 0.95rem;
-      color: #666;
-    }
-    .section-title {
-      margin-bottom: 1rem;
-      font-weight: bold;
       color: #333;
-      font-size: 1.15rem;
     }
-    /* ------------------ Ticker Styles ------------------ */
-    .ticker-wrap {
-      overflow: hidden;
-      background-color: #fff;
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 12px 15px;
       border: 1px solid #ddd;
-      padding: 5px 0;
-      margin-bottom: 20px;
+      text-align: left;
     }
-    .ticker {
-      display: inline-block;
-      white-space: nowrap;
-      /* Start with an offset so the ticker content enters smoothly */
-      padding-left: 100%;
-      animation: ticker 90s linear infinite;
+    th {
+      background-color: #f7f7f7;
     }
-    .ticker-item {
-      margin-right: 20px;
-      font-size: 0.95rem;
-    }
-    .ticker-separator {
-      margin-right: 20px;
-      color: #666;
-    }
-    @keyframes ticker {
-      0%   { transform: translateX(0); }
-      100% { transform: translateX(-50%); }
+    tr:hover {
+      background-color: #f9f9f9;
     }
   </style>
 </head>
-
 <body>
   <div class="container">
-    <!-- Top Header -->
-    <div class="futures-header">
-      <h2>Futures Market Overview</h2>
-      <div class="date">Thu, Feb 20th, 2025</div>
-    </div>
-
-    <!-- Major Markets Overview Ticker -->
-    <h3 class="section-title">Major Markets Overview</h3>
-    <div class="ticker-wrap" id="futuresTickerWrap">
-      <div class="ticker" id="futuresTicker"></div>
-    </div>
-
-    <!-- Futures Trading Guide Ticker -->
-    <h3 class="section-title">Futures Trading Guide: New Trade Alerts</h3>
-    <div class="ticker-wrap" id="guideTickerWrap">
-      <div class="ticker" id="guideTicker"></div>
-    </div>
+    <h1>Major Markets Overview</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Price</th>
+          <th>Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>NYSE</td>
+          <td>15,000</td>
+          <td>+1.2%</td>
+        </tr>
+        <tr>
+          <td>NASDAQ</td>
+          <td>14,500</td>
+          <td>-0.8%</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
-
-  <!-- Hidden JSON for external fetch -->
-  <script id="futures-data" type="application/json">
-    {}
-  </script>
-
-  <!-- (Optional) Bootstrap JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-  <script>
-    /************************************************************************
-     * 1) FUTURES DATA
-     ************************************************************************/
-    let futuresData = [
-      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
-      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
-      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
-      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
-      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
-      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
-      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
-      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
-      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
-      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
-      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
-    ];
-
-    /************************************************************************
-     * 2) FUTURES TRADING GUIDE DATA
-     ************************************************************************/
-    let futuresGuide = [];
-
-    function generateTradingGuide() {
-      const signals = ["BUY", "SELL"];
-      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
-      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
-
-      futuresGuide = futuresData.map(item => {
-        let sig = signals[Math.floor(Math.random() * signals.length)];
-        let entryPct = (Math.random() * 2 + 1) / 100;
-        if (sig === "SELL") entryPct *= -1;
-        let entryPrice = item.last * (1 + entryPct);
-        let stopDiff = Math.abs(entryPrice * 0.05);
-        let profitDiff = Math.abs(entryPrice * 0.1);
-        let stop, takeProfit;
-        if (sig === "BUY") {
-          stop = entryPrice - stopDiff;
-          takeProfit = entryPrice + profitDiff;
-        } else {
-          stop = entryPrice + stopDiff;
-          takeProfit = entryPrice - profitDiff;
-        }
-        let strength = strengths[Math.floor(Math.random() * strengths.length)];
-        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
-
-        return {
-          contractName: item.contractName,
-          signal: sig,
-          entryDate: "02/20/25",
-          entryPrice: parseFloat(entryPrice.toFixed(2)),
-          stopLoss: parseFloat(stop.toFixed(2)),
-          takeProfit: parseFloat(takeProfit.toFixed(2)),
-          timeHorizon: horizon,
-          strength: strength
-        };
-      });
-    }
-
-    /************************************************************************
-     * 3) RANDOM FLUCTUATIONS every 5 minutes
-     ************************************************************************/
-    function fluctuateData() {
-      futuresData.forEach(item => {
-        let pct = (Math.random() * 5 - 2.5) / 100;
-        let oldLast = item.last;
-        let newLast = oldLast * (1 + pct);
-        item.last = parseFloat(newLast.toFixed(2));
-        let diff = item.last - oldLast;
-        item.change = parseFloat(diff.toFixed(2));
-        let highPct = (Math.random() * 3) / 100;
-        let lowPct = (Math.random() * 3) / 100;
-        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
-        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
-        let volPct = (Math.random() * 20 - 10) / 100;
-        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
-      });
-
-      generateTradingGuide();
-    }
-
-    /************************************************************************
-     * 4) RENDER TICKERS
-     ************************************************************************/
-    function renderFuturesTicker() {
-      const ticker = document.getElementById("futuresTicker");
-      let content = "";
-      futuresData.forEach(item => {
-        let dispChange = (item.change >= 0 ? "+" : "") + item.change.toFixed(2);
-        let trendArrow = item.change > 0 ? "▲" : (item.change < 0 ? "▼" : "-");
-        content += `<span class="ticker-item">
-                      ${item.contractName} ${item.last.toFixed(2)} ${dispChange} 
-                      ${item.high.toFixed(2)} ${item.low.toFixed(2)} 
-                      ${item.volume.toLocaleString()} ${item.time} ${trendArrow}
-                    </span>`;
-        content += `<span class="ticker-separator"> ---- </span>`;
-      });
-      // Duplicate content for continuous scrolling
-      ticker.innerHTML = content + content;
-    }
-
-    function renderGuideTicker() {
-      const ticker = document.getElementById("guideTicker");
-      let content = "";
-      futuresGuide.forEach(trade => {
-        content += `<span class="ticker-item">
-                      ${trade.contractName} ${trade.signal} ${trade.entryDate} 
-                      ${trade.entryPrice.toFixed(2)} ${trade.stopLoss.toFixed(2)} 
-                      ${trade.takeProfit.toFixed(2)} ${trade.timeHorizon} ${trade.strength}
-                    </span>`;
-        content += `<span class="ticker-separator"> ---- </span>`;
-      });
-      ticker.innerHTML = content + content;
-    }
-
-    /************************************************************************
-     * 5) UPDATE HIDDEN JSON
-     ************************************************************************/
-    function updateHiddenJSON() {
-      const dataScript = document.getElementById("futures-data");
-      const dataObj = {
-        futures: futuresData,
-        tradingGuide: futuresGuide
-      };
-      dataScript.textContent = JSON.stringify(dataObj);
-    }
-
-    /************************************************************************
-     * 6) INIT + AUTO-UPDATE EVERY 5 MIN
-     ************************************************************************/
-    function init() {
-      generateTradingGuide();
-      renderFuturesTicker();
-      renderGuideTicker();
-      updateHiddenJSON();
-
-      setInterval(() => {
-        fluctuateData();
-        renderFuturesTicker();
-        renderGuideTicker();
-        updateHiddenJSON();
-      }, 5 * 60 * 1000);
-    }
-
-    window.addEventListener("DOMContentLoaded", init);
-  </script>
 </body>
 </html>
