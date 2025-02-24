@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -413,54 +413,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr onclick="rowClicked('Copper')">
-            <td>Copper (May '25)</td>
-            <td>4.6155</td>
-            <td>+0.02</td>
-            <td>+0.43%</td>
-            <td>05/25/2025</td>
-            <td class="margin-cell"></td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(0); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(0); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr onclick="rowClicked('Brass')">
-            <td>Brass (May '25)</td>
-            <td>7.5000</td>
-            <td>-0.05</td>
-            <td>-0.67%</td>
-            <td>05/25/2025</td>
-            <td class="margin-cell"></td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(1); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(1); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr onclick="rowClicked('Steel')">
-            <td>Steel (Jun '25)</td>
-            <td>975.50</td>
-            <td>+1.00</td>
-            <td>+0.10%</td>
-            <td>06/25/2025</td>
-            <td class="margin-cell"></td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(2); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(2); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
-          <tr onclick="rowClicked('Aluminum')">
-            <td>Aluminum (Mar '25)</td>
-            <td>2.3500</td>
-            <td>-0.10</td>
-            <td>-0.42%</td>
-            <td>03/25/2025</td>
-            <td class="margin-cell"></td>
-            <td>
-              <button class="secondary-btn" onclick="rollContract(3); event.stopPropagation();">Roll</button>
-              <button class="danger-btn" onclick="closeContract(3); event.stopPropagation();">Close</button>
-            </td>
-          </tr>
+          <!-- Active contract rows appended here -->
         </tbody>
         <tfoot>
           <tr>
@@ -825,17 +778,31 @@
       tableBody.appendChild(newRow);
     }
     
-    // Append a new row to the Active Contracts table.
-    function addActiveContract(material, lastPrice, expiration) {
+    // Updated function to append a new active contract row.
+    function addActiveContract(commodity, expiration) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      // Retrieve current market price from the overview cards (market snapshot)
+      const marketPrice = marketSnapshotPrices[commodity] || 0;
+      const contractSize = 10; // contract size in tons
+      const totalContractValue = contractSize * marketPrice;
+      const marginRequirement = totalContractValue * 0.07; // 7% margin
+      
+      // Format expiration as "Jun '25"
+      const expDate = new Date(expiration);
+      const expFormatted = expDate.toLocaleString('default', { month: 'short' }) +
+                           " '" + expDate.getFullYear().toString().slice(-2);
+      
       const newRow = document.createElement('tr');
+      // Store the commodity name for later updates
+      newRow.dataset.commodity = commodity;
+      
       newRow.innerHTML = `
-        <td>${material}</td>
-        <td>${lastPrice}</td>
-        <td>0</td>
-        <td>0%</td>
+        <td>${commodity} (${expFormatted})</td>
+        <td>${marketPrice.toFixed(2)}</td>
+        <td>+0.00</td>
+        <td>+0.00%</td>
         <td>${expiration}</td>
-        <td class="margin-cell"></td>
+        <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         <td>
           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
@@ -844,7 +811,39 @@
       tableBody.appendChild(newRow);
     }
     
-    // simulateTrade() appends new rows to both the Trade Log and Active Contracts tables.
+    // Updated function to recalc and update all active contract rows.
+    function updateActiveContractsTable() {
+      const table = document.getElementById('active-contracts-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let totalContracts = rows.length;
+      let totalMarginRequirement = 0;
+      const contractSize = 10;
+      
+      rows.forEach(row => {
+        // Retrieve the commodity name from the data attribute
+        const commodity = row.dataset.commodity;
+        // Use the latest market snapshot price for this commodity
+        const marketPrice = marketSnapshotPrices[commodity] || 0;
+        const totalContractValue = contractSize * marketPrice;
+        const marginRequirement = totalContractValue * 0.07;
+        
+        // Update the last price and margin cells
+        row.cells[1].textContent = marketPrice.toFixed(2);
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        totalMarginRequirement += marginRequirement;
+      });
+      
+      // Update the totals in the table footer and the Active Contracts overview card.
+      document.getElementById('activeContractsCount').textContent = totalContracts;
+      document.getElementById('activeContractsMarginTotal').textContent =
+        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" +
+        totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    
+    // simulateTrade() now calls the updated addActiveContract function.
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -853,63 +852,20 @@
       const expiration = document.getElementById('create-expiration').value;
       
       for (let i = 0; i < numTrades; i++) {
-        const quantity = 10; // each trade for 10 tons.
+        const quantity = 10; // each trade is 10 tons.
         const totalCost = quantity * chosenPrice;
-        // Append new trade entry.
+        // Append new trade log entry.
         appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
-        // Append new active contract entry.
-        addActiveContract(material + ' (Trade #' + (i + 1) + ')', chosenPrice, expiration);
+        // Append new active contract entry using the updated function.
+        addActiveContract(material, expiration);
       }
       
-      // Update Active Contracts table (for margin calculations and totals).
+      // Refresh the active contracts table to recalc margins.
       updateActiveContractsTable();
-      // Also update the Finished Goods Inventory totals.
+      // Also update the Finished Goods totals.
       updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
-    }
-    
-    /***************************************
-     * Update Active Contracts Table
-     ***************************************/
-    function updateActiveContractsTable() {
-      const table = document.getElementById('active-contracts-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let totalContracts = rows.length;
-      let totalMarginRequirement = 0;
-      
-      rows.forEach(row => {
-        const material = row.cells[0].textContent.toLowerCase();
-        const lastPrice = parseFloat(row.cells[1].textContent.replace(/[^0-9.]/g, '')) || 0;
-        let marginRequirement = NaN;
-        
-        // For Copper and Brass: contract size of 20,000 lbs at 7%.
-        if (material.includes("copper") || material.includes("brass")) {
-          marginRequirement = 20000 * lastPrice * 0.07;
-        }
-        // For Steel and Aluminum: contract size of 10 tons (10 units) at 7%.
-        else if (material.includes("steel") || material.includes("aluminum")) {
-          marginRequirement = 10 * lastPrice * 0.07;
-        }
-        
-        const marginCell = row.querySelector('.margin-cell');
-        if (!isNaN(marginRequirement)) {
-          marginCell.textContent = '$' + marginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-          totalMarginRequirement += marginRequirement;
-        } else {
-          marginCell.textContent = 'N/A';
-        }
-      });
-      
-      // Update the totals row in the table footer.
-      document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-      
-      // Also update the Active Contracts card values.
-      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
-      document.getElementById('active-contracts-margin').textContent = "Margin: $" +
-        totalMarginRequirement.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     
     document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
