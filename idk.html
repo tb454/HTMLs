@@ -202,19 +202,20 @@
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
         </div>
+        <!-- Updated Market Snapshot card with individual IDs for each commodity -->
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
-          <div>Copper: $9,500</div>
-          <div>Busheling Steel: $700</div>
-          <div>Brass: $7,500</div>
-          <div>Aluminum: $2,200</div>
-          <div>Electric Motors: $9,000</div>
-          <div>Insulated Copper Wire: $36,000</div>
-          <div>Lead: $15,000</div>
-          <div>HMS Steel #2: $500</div>
-          <div>Cu Radiator (50Cu/50Brass): $56,000</div>
-          <div>Carbide: $200,000</div>
-          <div>Stainless Steel: $16,000</div>
+          <div id="price-Copper">Copper: $9,500.00</div>
+          <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
+          <div id="price-Brass">Brass: $7,500.00</div>
+          <div id="price-Aluminum">Aluminum: $2,200.00</div>
+          <div id="price-ElectricMotors">Electric Motors: $9,000.00</div>
+          <div id="price-InsulatedCopperWire">Insulated Copper Wire: $36,000.00</div>
+          <div id="price-Lead">Lead: $15,000.00</div>
+          <div id="price-HMSSteel2">HMS Steel #2: $500.00</div>
+          <div id="price-CuRadiator50Cu50Brass">Cu Radiator (50Cu/50Brass): $56,000.00</div>
+          <div id="price-Carbide">Carbide: $200,000.00</div>
+          <div id="price-StainlessSteel">Stainless Steel: $16,000.00</div>
         </div>
       </div>
     </div>
@@ -647,7 +648,8 @@
      * Simulated Trade Section and Functions
      ***************************************/
     // Updated Market Snapshot prices to match the overview card.
-    const marketSnapshotPrices = {
+    // Note: These prices will be dynamically updated below.
+    const baseMarketSnapshotPrices = {
       "Copper": 9500,
       "Busheling Steel": 700,
       "Brass": 7500,
@@ -661,7 +663,16 @@
       "Stainless Steel": 16000
     };
   
-    // Updated mapping to match the names in the Market Snapshot and Greenspark table.
+    // Duplicate object to be updated every minute.
+    let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
+  
+    // Helper function to generate a valid element ID from commodity names.
+    function getCommodityId(commodity) {
+      return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
+    }
+  
+    // Look up commodity data from the Greenspark table.
+    // Returns the Finished Goods (lbs) for the commodity.
     const commodityMapping = {
       "Copper": "COPPER",
       "Busheling Steel": "BUSHELING STEEL",
@@ -676,8 +687,6 @@
       "Stainless Steel": "STAINLESS STEEL"
     };
   
-    // Look up commodity data from the Greenspark table.
-    // Returns the Finished Goods (lbs) for the commodity.
     function getCommodityData(material) {
       const target = commodityMapping[material];
       const table = document.getElementById('greenspark-table');
@@ -903,6 +912,31 @@
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
+    
+    /***************************************
+     * Update Market Snapshot Prices Every Minute (±10% fluctuation)
+     ***************************************/
+    function updateMarketSnapshot() {
+      for (let commodity in baseMarketSnapshotPrices) {
+        const basePrice = baseMarketSnapshotPrices[commodity];
+        // Random factor between -0.1 and +0.1
+        const randomFactor = (Math.random() * 0.2) - 0.1;
+        const newPrice = basePrice * (1 + randomFactor);
+        marketSnapshotPrices[commodity] = newPrice;
+        
+        // Update the corresponding element in the Market Snapshot card.
+        const priceElement = document.getElementById(getCommodityId(commodity));
+        if (priceElement) {
+          priceElement.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+      }
+      
+      // Refresh trade options so the Price/ton and Cost to Create update.
+      updateTradeOptions();
+    }
+    
+    // Trigger updateMarketSnapshot() every 60 seconds (60000 ms)
+    setInterval(updateMarketSnapshot, 60000);
     
     /***************************************
      * Increase Table Values Every Minute by 10%
