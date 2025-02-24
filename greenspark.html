@@ -127,8 +127,9 @@
         let fgFluct = (Math.random() * 10 - 5) / 100;
         item.finishedGoods = Math.round(item.finishedGoods * (1 + fgFluct));
 
-        let costFluct = (Math.random() * 4 - 2) / 100;
-        item.avgCost = parseFloat((item.avgCost * (1 + costFluct)).toFixed(4));
+        // Keep avgCost fixed by commenting out the fluctuation
+        // let costFluct = (Math.random() * 4 - 2) / 100;
+        // item.avgCost = parseFloat((item.avgCost * (1 + costFluct)).toFixed(4));
 
         let valFluct = (Math.random() * 10 - 5) / 100;
         item.value = parseFloat((item.value * (1 + valFluct)).toFixed(2));
@@ -144,7 +145,7 @@
         const wipLabel = item.wip.toLocaleString() + " lbs";
         const fgLabel = item.finishedGoods.toLocaleString() + " lbs";
         const totalLabel = (item.wip + item.finishedGoods).toLocaleString() + " lbs";
-        const avgCostStr = `$${item.avgCost.toFixed(4)}/lb`;
+        const avgCostStr = `$${item.avgCost.toFixed(2)}/lb`;
         const valStr = `$${item.value.toLocaleString()}`;
 
         const row = document.createElement("tr");
