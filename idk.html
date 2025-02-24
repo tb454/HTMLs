@@ -242,16 +242,16 @@
         <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
           <div id="finishedGoodsInfo">Loading...</div>
-          <!-- Increased canvas height to 200 for a larger graph -->
-          <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
+          <!-- New canvas element for the line graph -->
+          <canvas id="finishedGoodsChart" width="250" height="100"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
-          <!-- Increased canvas height to 200 for a larger graph -->
-          <canvas id="activeContractsChart" width="250" height="200"></canvas>
+          <!-- New canvas element for the line graph -->
+          <canvas id="activeContractsChart" width="250" height="100"></canvas>
         </div>
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
@@ -678,7 +678,6 @@
             }]
           },
           options: {
-            maintainAspectRatio: false,
             scales: {
               y: { 
                 beginAtZero: true,
@@ -710,7 +709,6 @@
             }]
           },
           options: {
-            maintainAspectRatio: false,
             scales: {
               y: { 
                 beginAtZero: true,
