@@ -17,10 +17,10 @@
     /* Base styling */
     body {
       font-family: 'Roboto', sans-serif;
-      background-color: #1e1e2f;
+      background-color: #f0f2f5;
       margin: 0;
       padding: 20px;
-      color: #d1d1e0;
+      color: #333;
     }
     .container {
       max-width: 1200px;
@@ -28,7 +28,7 @@
     }
     /* Header */
     .header {
-      background-color: #12121a;
+      background-color: #2c3e50;
       color: #ecf0f1;
       padding: 15px 20px;
       margin-bottom: 20px;
@@ -40,7 +40,6 @@
     .header h1 {
       margin: 0;
       font-size: 24px;
-      font-weight: 700;
     }
     .user-info {
       font-size: 14px;
@@ -53,18 +52,17 @@
       color: #fff;
       border-radius: 3px;
       cursor: pointer;
-      font-weight: 500;
     }
     .user-info button:hover {
       background-color: #c0392b;
     }
     /* Section styling */
     .section {
-      background-color: #1c1c2e;
+      background-color: #fff;
       padding: 20px;
       margin-bottom: 20px;
       border-radius: 5px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .section-title {
       font-weight: 700;
@@ -85,18 +83,18 @@
     .card-custom {
       flex: 1;
       min-width: 250px;
-      background-color: #2a2a3c;
-      border: 1px solid #3a3a4c;
+      background-color: #fff;
+      border: 1px solid #e1e4e8;
       border-radius: 5px;
       padding: 20px;
       text-align: center;
       cursor: pointer;
       transition: box-shadow 0.2s ease, transform 0.2s ease;
-      display: flex;
-      flex-direction: column;
+      display: flex;         /* Added for alignment */
+      flex-direction: column;/* Added for alignment */
     }
     .card-custom:hover {
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
       transform: translateY(-2px);
     }
     .card-custom div {
@@ -115,15 +113,15 @@
     }
     th, td {
       padding: 12px 15px;
-      border-bottom: 1px solid #3a3a4c;
+      border-bottom: 1px solid #e1e4e8;
       text-align: left;
     }
     th {
-      background-color: #2d2d3f;
+      background-color: #f7f7f7;
       font-weight: 500;
     }
     tr:hover {
-      background-color: #242435;
+      background-color: #f9f9f9;
       cursor: pointer;
     }
     /* Buttons */
@@ -135,7 +133,6 @@
       color: #fff;
       cursor: pointer;
       font-size: 14px;
-      font-weight: 500;
     }
     .action-btn:hover {
       background-color: #2980b9;
@@ -149,7 +146,6 @@
       cursor: pointer;
       font-size: 13px;
       margin-right: 5px;
-      font-weight: 500;
     }
     .secondary-btn:hover {
       background-color: #1e8449;
@@ -162,7 +158,6 @@
       color: #fff;
       cursor: pointer;
       font-size: 13px;
-      font-weight: 500;
     }
     .danger-btn:hover {
       background-color: #c0392b;
@@ -172,18 +167,16 @@
       margin-right: 8px;
       padding: 8px;
       font-size: 14px;
-      border: 1px solid #3a3a4c;
+      border: 1px solid #ced4da;
       border-radius: 3px;
-      background-color: #2a2a3c;
-      color: #d1d1e0;
     }
     /* Trading Chart Container */
     .chart-container {
-      background-color: #1c1c2e;
+      background-color: #fff;
       padding: 20px;
       border-radius: 5px;
-      border: 1px solid #3a3a4c;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+      border: 1px solid #e1e4e8;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     /* Ticker Styles */
     .ticker-wrapper {
@@ -200,6 +193,7 @@
       padding-left: 100%;
       animation: ticker 90s linear infinite;
     }
+    /* New ticker item styles based on your provided HTML */
     .ticker-item { 
       margin-right: 20px; 
       font-size: 0.95rem; 
@@ -208,6 +202,7 @@
       margin-right: 20px; 
       color: #666; 
     }
+    /* Signal and Strength Colors */
     .signal-buy { 
       color: #27ae60; 
       font-weight: bold; 
@@ -686,9 +681,9 @@
             scales: {
               y: { 
                 beginAtZero: true,
-                max: 5000,
+                max: 5000,   // y-axis goes up to 5,000
                 ticks: {
-                  stepSize: 1000
+                  stepSize: 1000  // Tick marks every 1,000 units
                 }
               }
             }
@@ -717,7 +712,7 @@
             scales: {
               y: { 
                 beginAtZero: true,
-                max: 150
+                max: 150  // y-axis goes up to 150 tons
               }
             }
           }
@@ -774,6 +769,7 @@
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
           
+          // Limit history to last 10 data points
           if (finishedGoodsChartData.length > 10) {
             finishedGoodsChartLabels.shift();
             finishedGoodsChartData.shift();
@@ -856,6 +852,7 @@
       const material = materialSelect.value;
       const data = getCommodityData(material);
       
+      // Assume contract size is 10 tons = 20,000 lbs.
       const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
@@ -927,6 +924,7 @@
       tableBody.appendChild(newRow);
     }
     
+    // Append a new active contract row using the executed price as the Sale Price.
     function addActiveContract(commodity, expiration, salePrice) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const snapshotPrice = marketSnapshotPrices[commodity] || 0;
@@ -962,12 +960,13 @@
       tableBody.appendChild(newRow);
     }
     
+    // Update Active Contracts Table to include total change calculation.
     function updateActiveContractsTable() {
       const table = document.getElementById('active-contracts-table');
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
       let totalMarginRequirement = 0;
-      let totalChange = 0;
+      let totalChange = 0; // Initialize total change accumulator
       const contractSize = 10;
       
       rows.forEach(row => {
@@ -975,8 +974,9 @@
         const salePrice = parseFloat(row.dataset.salePrice);
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
         const priceDifference = salePrice - snapshotPrice;
-        totalChange += priceDifference;
+        totalChange += priceDifference; // Accumulate change
         
+        // Update change cell
         row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
         
         const totalContractValue = contractSize * snapshotPrice;
@@ -1002,15 +1002,18 @@
           maximumFractionDigits: 2 
         });
       
+      // Update the total change footer cell and overview card
       const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
       document.getElementById('total-change').textContent = totalChangeText;
       document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
       
+      // Update the line chart with the new total change value
       const now = new Date();
       const label = now.toLocaleTimeString();
       activeContractsChangeHistory.push(totalChange);
       activeContractsChartLabels.push(label);
       
+      // Optional: Limit history to last 10 data points
       if (activeContractsChangeHistory.length > 10) {
         activeContractsChangeHistory.shift();
         activeContractsChartLabels.shift();
@@ -1093,7 +1096,7 @@
         }
       }
       updateTradeOptions();
-      updateActiveContractsTable();
+      updateActiveContractsTable(); // Update the active contracts change values based on the new market snapshot.
     }
     
     setInterval(updateMarketSnapshot, 15000);
@@ -1134,6 +1137,7 @@
       
       rows.forEach(row => {
         let ticker = row.cells[0].textContent.trim();
+        // For our special traded contracts, override the "last" price using snapshot values
         if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
           let commodity = "";
           if (ticker === 'ICWR25') {
@@ -1146,6 +1150,7 @@
           let elementId = "price-" + commodity.replace(/\s/g, '');
           let snapshotElem = document.getElementById(elementId);
           if (snapshotElem) {
+            // Expecting text like "Insulated Copper Wire: $36,000.00"
             let priceText = snapshotElem.textContent;
             let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
             if (match) {
@@ -1198,7 +1203,7 @@
       });
     }
     setInterval(updateMetalsMarketOverview, 7000);
-    
+  
     /***************************************
      * FUTURES TICKER LOGIC
      ***************************************/
@@ -1270,6 +1275,7 @@
                     </span>`;
         content += `<span class="ticker-separator"> ---- </span>`;
       });
+      // Duplicate content for seamless scrolling
       ticker.innerHTML = content + content;
     }
     
@@ -1277,6 +1283,7 @@
       // Optional: update a hidden JSON element if needed.
     }
     
+    // Optional: define data fluctuation for futuresData every 5 minutes
     function fluctuateData() {
       futuresData.forEach(item => {
         let pct = (Math.random() * 5 - 2.5) / 100;
