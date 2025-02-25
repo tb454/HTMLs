@@ -17,7 +17,7 @@
     /* Base Styling */
     body {
       font-family: 'Roboto', sans-serif;
-      background-color: #f4f6f8;
+      background-color: #f7f7f7; /* light, clean background */
       margin: 0;
       padding: 20px;
       color: #333;
@@ -26,94 +26,95 @@
       max-width: 1200px;
       margin: auto;
     }
+    
     /* Header */
     header.header {
-      background: linear-gradient(90deg, #2c3e50, #34495e);
+      background: linear-gradient(90deg, #34495e, #2c3e50);
       color: #fff;
-      padding: 15px 20px;
+      padding: 20px;
       border-radius: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     }
     header.header h1 {
-      font-size: 28px;
+      font-size: 32px;
       margin: 0;
     }
     .user-info {
-      font-size: 14px;
+      font-size: 16px;
     }
     .user-info button {
       margin: 0 10px;
-      padding: 6px 14px;
+      padding: 8px 16px;
       border: none;
       background-color: #e74c3c;
       color: #fff;
       border-radius: 4px;
       cursor: pointer;
-      transition: background-color 0.3s;
+      transition: background-color 0.3s ease;
     }
     .user-info button:hover {
       background-color: #c0392b;
     }
-    /* Section Styling */
+    
+    /* Sections */
     section.section {
       background-color: #fff;
-      padding: 20px;
-      margin-bottom: 20px;
+      padding: 30px;
+      margin-bottom: 30px;
       border-radius: 8px;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
     .section-title {
       font-weight: 700;
-      margin-bottom: 15px;
-      font-size: 20px;
-      border-bottom: 3px solid #3498db;
-      padding-bottom: 5px;
+      margin-bottom: 20px;
+      font-size: 24px;
+      border-bottom: 3px solid #2980b9;
+      padding-bottom: 8px;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: #3498db;
+      color: #2980b9;
     }
+    
     /* Overview Cards */
     .overview-cards {
       display: flex;
-      gap: 15px;
+      gap: 20px;
       flex-wrap: wrap;
     }
     .card-custom {
       flex: 1;
       min-width: 250px;
       background-color: #fff;
-      border: 1px solid #e1e4e8;
+      border: 1px solid #e0e0e0;
       border-radius: 8px;
       padding: 20px;
       text-align: center;
-      cursor: pointer;
-      transition: transform 0.3s, box-shadow 0.3s;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
       display: flex;
       flex-direction: column;
     }
     .card-custom:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+      transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     .card-custom div {
-      margin-bottom: 8px;
+      margin-bottom: 10px;
       font-size: 16px;
     }
-    .card-custom canvas {
-      margin-top: auto;
-    }
+    
     /* Tables */
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 10px;
+      margin-bottom: 20px;
     }
     th, td {
-      padding: 12px 15px;
-      border-bottom: 1px solid #e1e4e8;
+      padding: 15px 20px;
+      border-bottom: 1px solid #e0e0e0;
       text-align: left;
     }
     th {
@@ -122,31 +123,31 @@
     }
     tr:hover {
       background-color: #f9f9f9;
-      cursor: pointer;
     }
+    
     /* Buttons */
     .action-btn {
-      padding: 10px 20px;
-      background-color: #3498db;
+      padding: 12px 24px;
+      background-color: #2980b9;
       border: none;
       border-radius: 4px;
       color: #fff;
       cursor: pointer;
-      font-size: 15px;
-      transition: background-color 0.3s;
+      font-size: 16px;
+      transition: background-color 0.3s ease;
     }
     .action-btn:hover {
-      background-color: #2980b9;
+      background-color: #1c5980;
     }
     .secondary-btn,
     .danger-btn {
-      padding: 6px 12px;
+      padding: 8px 16px;
       border: none;
       border-radius: 4px;
       color: #fff;
       cursor: pointer;
       font-size: 14px;
-      transition: background-color 0.3s;
+      transition: background-color 0.3s ease;
       margin-right: 5px;
     }
     .secondary-btn {
@@ -161,30 +162,33 @@
     .danger-btn:hover {
       background-color: #c0392b;
     }
+    
     /* Form Inputs */
     select, input[type="number"], input[type="date"] {
-      margin-right: 8px;
-      padding: 8px;
+      margin-right: 10px;
+      padding: 10px;
       font-size: 14px;
-      border: 1px solid #ced4da;
+      border: 1px solid #ccc;
       border-radius: 4px;
     }
+    
     /* Chart Container */
     .chart-container {
       background-color: #fff;
-      padding: 20px;
+      padding: 30px;
       border-radius: 8px;
-      border: 1px solid #e1e4e8;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+      border: 1px solid #e0e0e0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
+    
     /* Ticker Styles */
     .ticker-wrapper {
       overflow: hidden;
       background-color: #fff;
       border: 1px solid #ddd;
-      padding: 8px 0;
+      padding: 10px 0;
       border-radius: 8px;
-      margin-bottom: 20px;
+      margin-bottom: 30px;
     }
     .ticker {
       display: inline-block;
@@ -200,6 +204,7 @@
       margin-right: 20px; 
       color: #666; 
     }
+    
     /* Signal and Strength Colors */
     .signal-buy { 
       color: #27ae60; 
@@ -214,8 +219,9 @@
     .strength-uncertain { color: #f1c40f; }
     .strength-strong { color: #2ecc71; }
     .strength-very-strong { color: #27ae60; }
+    
     @keyframes ticker {
-      0%   { transform: translateX(0); }
+      0% { transform: translateX(0); }
       100% { transform: translateX(-50%); }
     }
   </style>
