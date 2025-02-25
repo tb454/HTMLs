@@ -228,6 +228,8 @@
       <div class="user-info">
         <span>User: John Doe</span>
         <button onclick="logout()">Logout</button>
+        <button onclick="startGuidedTour()">Start Tour</button>
+        <button onclick="showArchOverview()">View Architecture</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
@@ -605,6 +607,59 @@
         </div>
       </div>
     </section>
+    
+    <!-- Key Performance Indicators (KPIs) Section -->
+    <section class="section">
+      <div class="section-title">Key Performance Indicators (KPIs)</div>
+      <div class="kpi-content">
+        <canvas id="kpiChart" width="400" height="200"></canvas>
+      </div>
+      <button class="action-btn mt-3" onclick="showKPIDetails()">View KPI Details</button>
+    </section>
+  </div>
+  
+  <!-- KPI Detail Modal -->
+  <div class="modal fade" id="kpiDetailModal" tabindex="-1" aria-labelledby="kpiDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="kpiDetailModalLabel">KPI Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Detailed KPI info goes here -->
+          <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Architecture Overview Modal -->
+  <div class="modal fade" id="archModal" tabindex="-1" aria-labelledby="archModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="archModalLabel">Architecture & Scalability Overview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>This solution is designed with scalability and security in mind. Key features include:</p>
+          <ul>
+            <li><strong>Live Data Integration:</strong> Simulated API calls and WebSocket integration for real-time market data.</li>
+            <li><strong>Data Analytics & KPIs:</strong> Dedicated sections and interactive charts provide actionable insights.</li>
+            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems, ensuring robust performance under high data loads.</li>
+            <li><strong>Security Measures:</strong> Token-based authentication, secure API endpoints, and data encryption ensure protection of sensitive information.</li>
+          </ul>
+          <p>Further details can be discussed during the presentation.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
   
   <!-- Bootstrap Bundle JS and Chart.js -->
@@ -628,6 +683,11 @@
     let finishedGoodsChart;
     let finishedGoodsChartLabels = [];
     let finishedGoodsChartData = [];
+    
+    // Global variables for KPI Chart
+    let kpiChart;
+    let kpiChartLabels = [];
+    let kpiChartData = [];
   
     // Initialize Trading Graph using Chart.js (if chart exists)
     const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
@@ -651,7 +711,7 @@
       });
     }
     
-    // Initialize Active Contracts and Finished Goods Charts once DOM is loaded
+    // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas){
@@ -702,6 +762,29 @@
             scales: {
               y: { beginAtZero: true, max: 300 }
             }
+          }
+        });
+      }
+      
+      // Initialize KPI Chart with simulated data
+      const kpiCanvas = document.getElementById('kpiChart');
+      if(kpiCanvas){
+        const ctxKPI = kpiCanvas.getContext('2d');
+        // Initialize with sample KPI data (e.g., trade volume trends)
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        kpiChartData = [500, 700, 650, 800, 750, 900];
+        kpiChart = new Chart(ctxKPI, {
+          type: 'bar',
+          data: {
+            labels: kpiChartLabels,
+            datasets: [{
+              label: 'Monthly Trade Volume',
+              data: kpiChartData,
+              backgroundColor: accentColor
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true } }
           }
         });
       }
@@ -1263,6 +1346,24 @@
     }
     
     window.addEventListener("DOMContentLoaded", initTicker);
+    
+    /***************************************
+     * Modal and Guided Tour Functions
+     ***************************************/
+    function showKPIDetails() {
+      var kpiModal = new bootstrap.Modal(document.getElementById('kpiDetailModal'));
+      kpiModal.show();
+    }
+    
+    function showArchOverview() {
+      var archModal = new bootstrap.Modal(document.getElementById('archModal'));
+      archModal.show();
+    }
+    
+    function startGuidedTour() {
+      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
+      alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
+    }
   </script>
 </body>
 </html>
