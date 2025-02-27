@@ -598,6 +598,19 @@
       </table>
     </section>
     
+    <!-- Additional Visualizations Section -->
+    <section class="section">
+      <div class="section-title">Additional Visualizations</div>
+      <div class="row">
+        <div class="col-md-6">
+          <canvas id="lineChart" width="400" height="200"></canvas>
+        </div>
+        <div class="col-md-6">
+          <canvas id="doughnutChart" width="400" height="200"></canvas>
+        </div>
+      </div>
+    </section>
+    
     <!-- Trade Alerts Ticker Section -->
     <section class="section">
       <div class="section-title">Trade Alerts</div>
@@ -627,7 +640,6 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <!-- Detailed KPI info goes here -->
           <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
         </div>
         <div class="modal-footer">
@@ -770,7 +782,6 @@
       const kpiCanvas = document.getElementById('kpiChart');
       if(kpiCanvas){
         const ctxKPI = kpiCanvas.getContext('2d');
-        // Initialize with sample KPI data (e.g., trade volume trends)
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
         kpiChartData = [500, 700, 650, 800, 750, 900];
         kpiChart = new Chart(ctxKPI, {
@@ -788,8 +799,93 @@
           }
         });
       }
+      
+      // Initialize Additional Charts
+      initLineChart();
+      initDoughnutChart();
     });
-  
+    
+    /***************************************
+     * Additional Visualizations: Line Chart & Doughnut Chart
+     ***************************************/
+    let lineChart;
+    let lineChartLabels = [];
+    let lineChartData = [];
+    
+    function initLineChart() {
+      const ctxLine = document.getElementById('lineChart').getContext('2d');
+      // Create 10 initial data points
+      for (let i = 0; i < 10; i++) {
+        lineChartLabels.push(new Date().toLocaleTimeString());
+        lineChartData.push(Math.floor(Math.random() * 1000));
+      }
+      lineChart = new Chart(ctxLine, {
+        type: 'line',
+        data: {
+          labels: lineChartLabels,
+          datasets: [{
+            label: 'Market Trend',
+            data: lineChartData,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            fill: true,
+            tension: 0.3
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+    
+    function updateLineChart() {
+      lineChartLabels.push(new Date().toLocaleTimeString());
+      lineChartData.push(Math.floor(Math.random() * 1000));
+      if (lineChartLabels.length > 10) {
+        lineChartLabels.shift();
+        lineChartData.shift();
+      }
+      lineChart.update();
+    }
+    
+    let doughnutChart;
+    function initDoughnutChart() {
+      const ctxDoughnut = document.getElementById('doughnutChart').getContext('2d');
+      const commodityLabels = ['Copper', 'Aluminum', 'Brass', 'Electric Motors', 'Lead'];
+      const commodityDistribution = commodityLabels.map(() => Math.floor(Math.random() * 100));
+      doughnutChart = new Chart(ctxDoughnut, {
+        type: 'doughnut',
+        data: {
+          labels: commodityLabels,
+          datasets: [{
+            label: 'Commodity Distribution',
+            data: commodityDistribution,
+            backgroundColor: [
+              'rgba(255, 99, 132, 0.6)',
+              'rgba(54, 162, 235, 0.6)',
+              'rgba(255, 206, 86, 0.6)',
+              'rgba(75, 192, 192, 0.6)',
+              'rgba(153, 102, 255, 0.6)'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: { responsive: true }
+      });
+    }
+    
+    function updateDoughnutChart() {
+      doughnutChart.data.datasets[0].data = doughnutChart.data.labels.map(() => Math.floor(Math.random() * 100));
+      doughnutChart.update();
+    }
+    
+    // Update the additional charts every 15 seconds
+    setInterval(() => {
+      updateLineChart();
+      updateDoughnutChart();
+    }, 15000);
+    
     /***************************************
      * Update Total Purchase Value for Finished Goods Inventory
      ***************************************/
@@ -819,7 +915,6 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card Info and Chart
       if(document.getElementById('finishedGoodsInfo')){
         let contractsAvailable = Math.floor(sumFinished / 20000);
         let totalTons = sumTotal / 20000;
@@ -832,19 +927,16 @@
           const now = new Date().toLocaleTimeString();
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
-          
-          // Limit history to last 10 data points
           if (finishedGoodsChartData.length > 10) {
             finishedGoodsChartLabels.shift();
             finishedGoodsChartData.shift();
           }
-          
           finishedGoodsChart.update();
         }
       }
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-  
+    
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
@@ -861,13 +953,13 @@
       "Carbide": 20000,
       "Stainless Steel": 1600
     };
-  
+    
     let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
-  
+    
     function getCommodityId(commodity) {
       return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
     }
-  
+    
     const commodityMapping = {
       "Copper": "COPPER",
       "Busheling Steel": "BUSHELING STEEL",
@@ -881,7 +973,7 @@
       "Carbide": "CARBIDE",
       "Stainless Steel": "STAINLESS STEEL"
     };
-
+    
     const tickerMapping = {
       "Aluminum": "ALUM25",
       "Electric Motors": "EMOT25",
@@ -895,7 +987,7 @@
       "Stainless Steel": "STLS25",
       "Busheling Steel": "BSTE25"
     };
-  
+    
     function getCommodityData(material) {
       const target = commodityMapping[material];
       const table = document.getElementById('greenspark-table');
@@ -910,13 +1002,12 @@
       }
       return { finishedGoods: 0 };
     }
-  
+    
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
       const data = getCommodityData(material);
       
-      // Assume contract size is 10 tons = 20,000 lbs.
       const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
@@ -1361,19 +1452,16 @@
     }
     
     function startGuidedTour() {
-      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
       alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
     }
     
     /***************************************
      * Fetch Simulated Market Data from the Backend
      ***************************************/
-    // Function to fetch simulated market data from the backend
     function fetchMarketData() {
       fetch('/api/trade-data')
         .then(response => response.json())
         .then(data => {
-          // Example: update the Copper price on the Market Snapshot card
           const copperPriceElement = document.getElementById('price-Copper');
           if (copperPriceElement && data.marketPrices.Copper) {
             copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
@@ -1383,9 +1471,7 @@
         .catch(err => console.error('Error fetching market data:', err));
     }
     
-    // Call the function every 15 seconds (adjust as needed)
     setInterval(fetchMarketData, 15000);
-    // Optionally, call it immediately on load
     document.addEventListener('DOMContentLoaded', fetchMarketData);
   </script>
 </body>
