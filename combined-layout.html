@@ -3,70 +3,107 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BRidge Combined Dashboard</title>
+  <title>BRidge Dashboard</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   
   <!-- Bootstrap CSS -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  />
-
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
   <style>
-    /* Basic reset and styling */
+    /* Base Styling */
     body {
-      font-family: Arial, sans-serif;
-      background-color: #f5f5f5;
+      font-family: 'Roboto', sans-serif;
+      background-color: #f4f6f8;
       margin: 0;
       padding: 20px;
+      color: #333;
     }
     .container {
       max-width: 1200px;
-      margin: 0 auto;
+      margin: auto;
     }
-    .header, .section {
-      background-color: #fff;
-      border: 1px solid #ccc;
-      padding: 10px;
-      margin-bottom: 20px;
-    }
-    .header {
+    /* Header */
+    header.header {
+      background: linear-gradient(90deg, #2c3e50, #34495e);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 20px;
     }
-    .header h1 {
+    header.header h1 {
+      font-size: 28px;
       margin: 0;
-      font-size: 20px;
     }
     .user-info {
       font-size: 14px;
     }
     .user-info button {
       margin: 0 10px;
-      padding: 5px 10px;
+      padding: 6px 14px;
+      border: none;
+      background-color: #e74c3c;
+      color: #fff;
+      border-radius: 4px;
       cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .user-info button:hover {
+      background-color: #c0392b;
+    }
+    /* Section Styling */
+    section.section {
+      background-color: #fff;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
     }
     .section-title {
-      font-weight: bold;
-      margin-bottom: 10px;
-      /* Default color, will be overridden by accent below */
-      color: #000;
+      font-weight: 700;
+      margin-bottom: 15px;
+      font-size: 20px;
+      border-bottom: 3px solid #3498db;
+      padding-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #3498db;
     }
     /* Overview Cards */
     .overview-cards {
       display: flex;
-      gap: 10px;
+      gap: 15px;
+      flex-wrap: wrap;
     }
-    .card {
+    .card-custom {
       flex: 1;
-      border: 1px solid #ccc;
-      padding: 10px;
+      min-width: 250px;
+      background-color: #fff;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 20px;
       text-align: center;
       cursor: pointer;
-      transition: background-color 0.2s ease;
+      transition: transform 0.3s, box-shadow 0.3s;
+      display: flex;
+      flex-direction: column;
     }
-    .card:hover {
-      background-color: #e9ecef;
+    .card-custom:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .card-custom div {
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+    .card-custom canvas {
+      margin-top: auto;
     }
     /* Tables */
     table {
@@ -75,180 +112,322 @@
       margin-bottom: 10px;
     }
     th, td {
-      padding: 8px;
-      border: 1px solid #ccc;
+      padding: 12px 15px;
+      border-bottom: 1px solid #e1e4e8;
       text-align: left;
     }
     th {
-      background-color: #eee;
+      background-color: #f7f7f7;
+      font-weight: 500;
     }
     tr:hover {
-      background-color: #f1f1f1;
+      background-color: #f9f9f9;
       cursor: pointer;
     }
     /* Buttons */
     .action-btn {
-      padding: 5px 10px;
-      background-color: #007BFF;
+      padding: 10px 20px;
+      background-color: #3498db;
       border: none;
+      border-radius: 4px;
       color: #fff;
       cursor: pointer;
+      font-size: 15px;
+      transition: background-color 0.3s;
     }
     .action-btn:hover {
-      background-color: #0056b3;
+      background-color: #2980b9;
     }
-    .secondary-btn {
-      padding: 3px 8px;
-      background-color: #28a745;
+    .secondary-btn,
+    .danger-btn {
+      padding: 6px 12px;
       border: none;
+      border-radius: 4px;
       color: #fff;
       cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.3s;
       margin-right: 5px;
     }
+    .secondary-btn {
+      background-color: #27ae60;
+    }
     .secondary-btn:hover {
-      background-color: #218838;
+      background-color: #1e8449;
     }
     .danger-btn {
-      padding: 3px 8px;
-      background-color: #dc3545;
-      border: none;
-      color: #fff;
-      cursor: pointer;
+      background-color: #e74c3c;
     }
     .danger-btn:hover {
-      background-color: #c82333;
+      background-color: #c0392b;
     }
     /* Form Inputs */
     select, input[type="number"], input[type="date"] {
       margin-right: 8px;
-      padding: 5px;
+      padding: 8px;
       font-size: 14px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
     }
-
-    /* Extra button styling for "Refresh Data" */
-    .refresh-btn {
-      margin-bottom: 10px;
-      background-color: #17a2b8;
-      border: none;
-      color: #fff;
-      padding: 5px 15px;
-      cursor: pointer;
+    /* Chart Container */
+    .chart-container {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #e1e4e8;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
     }
-    .refresh-btn:hover {
-      background-color: #138496;
+    /* Ticker Styles */
+    .ticker-wrapper {
+      overflow: hidden;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      padding: 8px 0;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .ticker {
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 100%;
+      animation: ticker 90s linear infinite;
+    }
+    .ticker-item { 
+      margin-right: 20px; 
+      font-size: 0.95rem; 
+    }
+    .ticker-separator { 
+      margin-right: 20px; 
+      color: #666; 
+    }
+    /* Signal and Strength Colors */
+    .signal-buy { 
+      color: #27ae60; 
+      font-weight: bold; 
+    }
+    .signal-sell { 
+      color: #e74c3c; 
+      font-weight: bold; 
+    }
+    .strength-weak { color: #e74c3c; }
+    .strength-moderate { color: #f39c12; }
+    .strength-uncertain { color: #f1c40f; }
+    .strength-strong { color: #2ecc71; }
+    .strength-very-strong { color: #27ae60; }
+    @keyframes ticker {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <!-- Header -->
-    <div class="header">
+    <header class="header">
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span>User: John Doe</span>
         <button onclick="logout()">Logout</button>
+        <button onclick="startGuidedTour()">Start Tour</button>
+        <button onclick="showArchOverview()">View Architecture</button>
         <span id="header-date">02/14/2025</span>
       </div>
-    </div>
+    </header>
     
     <!-- Overview Cards -->
-    <div class="section">
-      <div class="section-title">OVERVIEW CARDS</div>
+    <section class="section">
+      <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <div class="card" onclick="cardClicked('Finished Goods')">
-          <div>Finished Goods:</div>
-          <div>24 Contracts Available</div>
-          <div>~560.0 total tons</div>
+        <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
+          <div><strong>Finished Goods</strong></div>
+          <div id="finishedGoodsInfo">Loading...</div>
+          <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
         </div>
-        <div class="card" onclick="cardClicked('Active Contracts')">
-          <div>Active Contracts:</div>
-          <div>8 Secured</div>
-          <div>Margin: $12,000</div>
+        <div class="card-custom" onclick="cardClicked('Active Contracts')">
+          <div><strong>Active Contracts</strong></div>
+          <div id="active-contracts-secured">0 Secured</div>
+          <div id="active-contracts-margin">Margin: $0.00</div>
+          <div id="active-contracts-change">Total Change: $0.00</div>
+          <canvas id="activeContractsChart" width="250" height="200"></canvas>
         </div>
-        <div class="card" onclick="cardClicked('Market Snapshot')">
-          <div>Market Snapshot:</div>
-          <div>Copper: $9,500</div>
-          <div>Steel: $500</div>
-          <div>Brass: $7,500</div>
-          <div>Aluminum: $2,200</div>
+        <div class="card-custom" onclick="cardClicked('Market Snapshot')">
+          <div><strong>Market Snapshot</strong></div>
+          <div id="price-Copper">Copper: $9,500.00</div>
+          <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
+          <div id="price-Brass">Brass: $7,500.00</div>
+          <div id="price-Aluminum">Aluminum: $2,200.00</div>
+          <div id="price-ElectricMotors">Electric Motors: $900.00</div>
+          <div id="price-InsulatedCopperWire">Insulated Copper Wire: $3,600.00</div>
+          <div id="price-Lead">Lead: $1,500.00</div>
+          <div id="price-HMSSteel2">HMS Steel #2: $500.00</div>
+          <div id="price-CuRadiator50Cu50Brass">Cu Radiator (50Cu/50Brass): $5,600.00</div>
+          <div id="price-Carbide">Carbide: $20,000.00</div>
+          <div id="price-StainlessSteel">Stainless Steel: $1,600.00</div>
         </div>
       </div>
-    </div>
+    </section>
     
-    <!-- Finished Goods Inventory (Populated from Greenspark) -->
-    <div class="section">
+    <!-- Finished Goods Inventory (Greenspark) -->
+    <section class="section">
       <div class="section-title">Finished Goods Inventory (Greenspark)</div>
-      <!-- Optional: a button to manually refresh data from Greenspark/Barchart -->
-      <button class="refresh-btn" onclick="fetchAllData()">Refresh Data</button>
-
-      <table>
+      <table id="greenspark-table">
         <thead>
           <tr>
-            <th>Material</th>
-            <th>Quantity (tons)</th>
-            <th>Price/ton</th>
-            <th>Value of Material</th>
-            <th>Date Created</th>
-            <th>Status</th>
+            <th>Commodities</th>
+            <th>WIP (lbs)</th>
+            <th>Finished Goods (lbs)</th>
+            <th>Total (lbs)</th>
+            <th>Avg Cost ($/lb)</th>
+            <th>Total Purchase Value</th>
           </tr>
         </thead>
-        <tbody id="greenspark-inventory-body">
-          <!-- We'll dynamically fill these rows from greenspark.html JSON -->
+        <tbody>
+          <tr onclick="rowClicked('ALUMINUM')">
+            <td>Aluminum</td>
+            <td>32,105</td>
+            <td>64,351</td>
+            <td>96,456</td>
+            <td>$0.50</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Electric Motors')">
+            <td>Electric Motors</td>
+            <td>11,052</td>
+            <td>30,844</td>
+            <td>41,897</td>
+            <td>$0.30</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Insulated copper wire')">
+            <td>Insulated copper wire</td>
+            <td>71,649</td>
+            <td>50,673</td>
+            <td>122,322</td>
+            <td>$1.20</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('LEAD')">
+            <td>LEAD</td>
+            <td>5,802</td>
+            <td>1,640</td>
+            <td>7,443</td>
+            <td>$0.40</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('FERROUS')">
+            <td>HMS Steel #2</td>
+            <td>124,380</td>
+            <td>190,048</td>
+            <td>314,429</td>
+            <td>$0.09</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('RADIATOR PRODUCT')">
+            <td>Cu Radiator (50Cu/50Brass)</td>
+            <td>15,677</td>
+            <td>324</td>
+            <td>16,001</td>
+            <td>$1.40</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('COPPER PRODUCT')">
+            <td>COPPER</td>
+            <td>32,373</td>
+            <td>73,560</td>
+            <td>105,934</td>
+            <td>$2.80</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('BRASS PRODUCT')">
+            <td>BRASS</td>
+            <td>15,633</td>
+            <td>20,246</td>
+            <td>35,879</td>
+            <td>$1.20</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Carbide')">
+            <td>Carbide</td>
+            <td>468</td>
+            <td>287</td>
+            <td>755</td>
+            <td>$8.80</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('STAINLESS STEEL')">
+            <td>STAINLESS STEEL</td>
+            <td>13,482</td>
+            <td>15,671</td>
+            <td>29,153</td>
+            <td>$0.60</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('STEEL')">
+            <td>Busheling STEEL</td>
+            <td>128,763</td>
+            <td>134,678</td>
+            <td>263,442</td>
+            <td>$0.14</td>
+            <td>$0.00</td>
+          </tr>
         </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
       </table>
-    </div>
+    </section>
     
-    <!-- Trading Graph Section -->
-    <div class="section">
-      <div class="section-title">Trading Graphs</div>
-      <div class="card" style="padding: 20px;">
-        <canvas id="tradingChart" width="400" height="200"></canvas>
-      </div>
-    </div>
-    
-    <!-- Contract Creation Section (Simulated Trade) -->
-    <div class="section">
+    <!-- Simulated Trade Section (One Line) -->
+    <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div>
-        <!-- Material dropdown -->
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
-        </select>
-
-        <!-- Creatable Contracts dropdown (based on quantity/10) -->
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts">
-          <!-- Options updated by JS -->
-        </select>
-
-        <!-- Price/ton dropdown (6 options: 3 below, 3 above base) -->
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price">
-          <!-- Options updated by JS -->
-        </select>
-
-        <!-- Cost to Create dropdown (0.1% of base price) -->
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost">
-          <!-- Option updated by JS -->
-        </select>
-
-        <!-- Expiration Date dropdown (5 future dates, 1 month increments) -->
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration">
-          <!-- Options updated by JS -->
-        </select>
-
-        <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+      <div class="d-flex align-items-center flex-wrap gap-3">
+        <div class="d-flex align-items-center">
+          <label for="create-material" class="me-2">Material:</label>
+          <select id="create-material" onchange="updateTradeOptions()">
+            <option value="Copper">Copper</option>
+            <option value="Busheling Steel">Busheling Steel</option>
+            <option value="Brass">Brass</option>
+            <option value="Aluminum">Aluminum</option>
+            <option value="Electric Motors">Electric Motors</option>
+            <option value="Insulated Copper Wire">Insulated Copper Wire</option>
+            <option value="Lead">Lead</option>
+            <option value="HMS Steel #2">HMS Steel #2</option>
+            <option value="Cu Radiator (50Cu/50Brass)">Cu Radiator (50Cu/50Brass)</option>
+            <option value="Carbide">Carbide</option>
+            <option value="Stainless Steel">Stainless Steel</option>
+          </select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-contracts" class="me-2">Creatable Contracts:</label>
+          <select id="create-contracts"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-price" class="me-2">Price/ton:</label>
+          <select id="create-price"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-cost" class="me-2">Cost to Create:</label>
+          <select id="create-cost"></select>
+        </div>
+        <div class="d-flex align-items-center">
+          <label for="create-expiration" class="me-2">Expiration Date:</label>
+          <select id="create-expiration"></select>
+        </div>
+        <div>
+          <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+        </div>
       </div>
-    </div>
-
+    </section>
+    
     <!-- Trade Log Section -->
-    <div class="section">
+    <section class="section">
       <div class="section-title">Trade Log</div>
       <table id="trade-log-table">
         <thead>
@@ -257,202 +436,532 @@
             <th>Material</th>
             <th>Quantity (tons)</th>
             <th>Price/ton</th>
-            <th>Total Cost</th>
+            <th>Total Contract Value</th>
           </tr>
         </thead>
         <tbody>
           <!-- Trade entries appended here -->
         </tbody>
       </table>
-    </div>
-
-    <!-- Active Contracts Section -->
-    <div class="section">
-      <div class="section-title">Active Contracts</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Material</th>
-            <th>Last Price</th>
-            <th>Change</th>
-            <th>Change %</th>
-            <th>Expiration</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="active-contracts-body">
-          <!-- Active Contracts populated by JavaScript -->
-        </tbody>
-      </table>
-    </div>
+    </section>
     
-    <!-- Futures / Market Data Section (Populated from Barchart) -->
-    <div class="section">
-      <div class="section-title">Futures / Market Data (CME)</div>
-      <table>
+    <!-- Active Contracts Section -->
+    <section class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
         <thead>
           <tr>
+            <th>Ticker</th>
             <th>Material</th>
-            <th>Contract</th>
-            <th>Last Price</th>
+            <th>Sale Price</th>
             <th>Change</th>
-            <th>Change %</th>
             <th>Expiration</th>
+            <th>Margin Requirement</th>
             <th>Action</th>
           </tr>
         </thead>
-        <tbody id="futures-body">
-          <!-- We'll dynamically fill these rows from barchart.html JSON -->
+        <tbody>
+          <!-- Active contract rows appended here -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Metals Market Overview Section -->
+    <section class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table id="metals-market-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.90</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
         </tbody>
       </table>
+    </section>
+    
+    <!-- Trade Alerts Ticker Section -->
+    <section class="section">
+      <div class="section-title">Trade Alerts</div>
+      <div class="ticker-wrapper">
+        <div id="trade-alerts-ticker" class="ticker">
+          <!-- Ticker content will be rendered here by JavaScript -->
+        </div>
+      </div>
+    </section>
+    
+    <!-- Key Performance Indicators (KPIs) Section -->
+    <section class="section">
+      <div class="section-title">Key Performance Indicators (KPIs)</div>
+      <div class="kpi-content">
+        <canvas id="kpiChart" width="400" height="200"></canvas>
+      </div>
+      <button class="action-btn mt-3" onclick="showKPIDetails()">View KPI Details</button>
+    </section>
+  </div>
+  
+  <!-- KPI Detail Modal -->
+  <div class="modal fade" id="kpiDetailModal" tabindex="-1" aria-labelledby="kpiDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="kpiDetailModalLabel">KPI Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Detailed KPI info goes here -->
+          <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
     </div>
   </div>
-
-  <!-- Bootstrap + Chart.js -->
+  
+  <!-- Architecture Overview Modal -->
+  <div class="modal fade" id="archModal" tabindex="-1" aria-labelledby="archModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="archModalLabel">Architecture & Scalability Overview</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>This solution is designed with scalability and security in mind. Key features include:</p>
+          <ul>
+            <li><strong>Live Data Integration:</strong> Simulated API calls and WebSocket integration for real-time market data.</li>
+            <li><strong>Data Analytics & KPIs:</strong> Dedicated sections and interactive charts provide actionable insights.</li>
+            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems, ensuring robust performance under high data loads.</li>
+            <li><strong>Security Measures:</strong> Token-based authentication, secure API endpoints, and data encryption ensure protection of sensitive information.</li>
+          </ul>
+          <p>Further details can be discussed during the presentation.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+  
   <script>
-    /********************************************************
-     * 1) Accent color for section titles (light green)
-     ********************************************************/
-    const accentColor = '#90ee90';
+    // Accent color for charts and highlights
+    const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
+      el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
-
-    /********************************************************
-     * 2) Initialize Trading Chart
-     ********************************************************/
-    const ctx = document.getElementById('tradingChart').getContext('2d');
-    const tradingChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-        datasets: [{
-          label: 'Trading Data',
-          data: [100, 150, 130, 170, 160, 180],
-          borderColor: accentColor,
-          backgroundColor: 'rgba(144,238,144,0.2)',
-          fill: true,
-          tension: 0.1
-        }]
-      },
-      options: {
-        scales: { y: { beginAtZero: true } }
+    
+    // Global variables for Active Contracts Chart
+    let activeContractsChart;
+    const activeContractsChangeHistory = [];
+    const activeContractsChartLabels = [];
+    
+    // Global variables for Finished Goods Chart
+    let finishedGoodsChart;
+    let finishedGoodsChartLabels = [];
+    let finishedGoodsChartData = [];
+    
+    // Global variables for KPI Chart
+    let kpiChart;
+    let kpiChartLabels = [];
+    let kpiChartData = [];
+  
+    // Initialize Trading Graph using Chart.js (if chart exists)
+    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
+    if(ctx){
+      const tradingChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
+          datasets: [{
+            label: 'Trading Data',
+            data: [100, 150, 130, 170, 160, 180],
+            borderColor: accentColor,
+            backgroundColor: 'rgba(52,152,219,0.2)',
+            fill: true,
+            tension: 0.1
+          }]
+        },
+        options: {
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+    
+    // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      const activeContractsCanvas = document.getElementById('activeContractsChart');
+      if(activeContractsCanvas){
+        const ctxActive = activeContractsCanvas.getContext('2d');
+        activeContractsChart = new Chart(ctxActive, {
+          type: 'line',
+          data: {
+            labels: activeContractsChartLabels,
+            datasets: [{
+              label: 'Total Change',
+              data: activeContractsChangeHistory,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: {
+              y: { 
+                beginAtZero: true,
+                max: 10000,
+                ticks: { stepSize: 2000 }
+              }
+            }
+          }
+        });
+      }
+      
+      // Initialize Finished Goods Chart
+      const finishedCanvas = document.getElementById('finishedGoodsChart');
+      if(finishedCanvas){
+        const ctxFinished = finishedCanvas.getContext('2d');
+        finishedGoodsChart = new Chart(ctxFinished, {
+          type: 'line',
+          data: {
+            labels: finishedGoodsChartLabels,
+            datasets: [{
+              label: 'Total Tons',
+              data: finishedGoodsChartData,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true, max: 300 }
+            }
+          }
+        });
+      }
+      
+      // Initialize KPI Chart with simulated data
+      const kpiCanvas = document.getElementById('kpiChart');
+      if(kpiCanvas){
+        const ctxKPI = kpiCanvas.getContext('2d');
+        // Initialize with sample KPI data (e.g., trade volume trends)
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        kpiChartData = [500, 700, 650, 800, 750, 900];
+        kpiChart = new Chart(ctxKPI, {
+          type: 'bar',
+          data: {
+            labels: kpiChartLabels,
+            datasets: [{
+              label: 'Monthly Trade Volume',
+              data: kpiChartData,
+              backgroundColor: accentColor
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true } }
+          }
+        });
       }
     });
-
-    /********************************************************
-     * 3) SIMULATED “Finished Goods Data” used by “Simulated Trade”
-     *    (This was part of your existing wireframe logic)
-     ********************************************************/
-    const finishedGoodsData = {
-      Copper: { quantity: 80, price: 9500 },
-      Brass: { quantity: 100, price: 7500 },
-      Steel: { quantity: 280, price: 500 },
-      Aluminum: { quantity: 100, price: 2200 }
+  
+    /***************************************
+     * Update Total Purchase Value for Finished Goods Inventory
+     ***************************************/
+    function updatePurchaseValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
+      rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+        const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+        const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+        const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+        const purchaseValue = totalLbs * avgCost;
+        
+        sumWIP += wip;
+        sumFinished += finished;
+        sumTotal += totalLbs;
+        sumPurchase += purchaseValue;
+        
+        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      });
+      
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      // Update Finished Goods Card Info and Chart
+      if(document.getElementById('finishedGoodsInfo')){
+        let contractsAvailable = Math.floor(sumFinished / 20000);
+        let totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `
+          <div>${contractsAvailable} Contracts Available</div>
+          <div>~${totalTons.toFixed(1)} Total Tons</div>
+        `;
+        
+        if (finishedGoodsChart) {
+          const now = new Date().toLocaleTimeString();
+          finishedGoodsChartLabels.push(now);
+          finishedGoodsChartData.push(totalTons);
+          
+          // Limit history to last 10 data points
+          if (finishedGoodsChartData.length > 10) {
+            finishedGoodsChartLabels.shift();
+            finishedGoodsChartData.shift();
+          }
+          
+          finishedGoodsChart.update();
+        }
+      }
+    }
+    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+  
+    /***************************************
+     * Simulated Trade Section and Functions
+     ***************************************/
+    const baseMarketSnapshotPrices = {
+      "Copper": 9500,
+      "Busheling Steel": 700,
+      "Brass": 7500,
+      "Aluminum": 2200,
+      "Electric Motors": 900,
+      "Insulated Copper Wire": 3600,
+      "Lead": 1500,
+      "HMS Steel #2": 500,
+      "Cu Radiator (50Cu/50Brass)": 5600,
+      "Carbide": 20000,
+      "Stainless Steel": 1600
+    };
+  
+    let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
+  
+    function getCommodityId(commodity) {
+      return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
+    }
+  
+    const commodityMapping = {
+      "Copper": "COPPER",
+      "Busheling Steel": "BUSHELING STEEL",
+      "Brass": "BRASS",
+      "Aluminum": "ALUMINUM",
+      "Electric Motors": "ELECTRIC MOTORS",
+      "Insulated Copper Wire": "INSULATED COPPER WIRE",
+      "Lead": "LEAD",
+      "HMS Steel #2": "HMS STEEL #2",
+      "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
+      "Carbide": "CARBIDE",
+      "Stainless Steel": "STAINLESS STEEL"
     };
 
-    /********************************************************
-     * 4) Active Contracts (was empty array)
-     ********************************************************/
-    let activeContracts = [];
-    function renderActiveContracts() {
-      const tableBody = document.getElementById('active-contracts-body');
-      tableBody.innerHTML = '';
-      activeContracts.forEach((contract, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${contract.material}</td>
-          <td>$${Number(contract.lastPrice).toLocaleString()}</td>
-          <td>${contract.change}</td>
-          <td>${contract.changePercent}</td>
-          <td>${contract.expiration}</td>
-          <td>
-            <button class="secondary-btn" onclick="rollContract(${index}); event.stopPropagation();">Roll</button>
-            <button class="danger-btn" onclick="closeContract(${index}); event.stopPropagation();">Close</button>
-          </td>
-        `;
-        tableBody.appendChild(row);
-      });
+    const tickerMapping = {
+      "Aluminum": "ALUM25",
+      "Electric Motors": "EMOT25",
+      "Insulated Copper Wire": "ICWR25",
+      "Lead": "LEAD25",
+      "HMS Steel #2": "HMS225",
+      "Cu Radiator (50Cu/50Brass)": "CRAD25",
+      "Copper": "COPR25",
+      "Brass": "BRSS25",
+      "Carbide": "CARB25",
+      "Stainless Steel": "STLS25",
+      "Busheling Steel": "BSTE25"
+    };
+  
+    function getCommodityData(material) {
+      const target = commodityMapping[material];
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
+        if (rowMaterial === target.toUpperCase()) {
+          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+          const finishedGoods = parseFloat(finishedGoodsText) || 0;
+          return { finishedGoods };
+        }
+      }
+      return { finishedGoods: 0 };
     }
-
-    /********************************************************
-     * 5) Table “Trade Log”
-     ********************************************************/
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document
-        .getElementById('trade-log-table')
-        .getElementsByTagName('tbody')[0];
-      const tradeTime = new Date().toLocaleTimeString();
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = `
-        <td>${tradeTime}</td>
-        <td>${material}</td>
-        <td>${quantity}</td>
-        <td>$${Number(price).toLocaleString()}</td>
-        <td>$${Number(totalCost).toLocaleString()}</td>
-      `;
-      tableBody.appendChild(newRow);
-    }
-
-    /********************************************************
-     * 6) Simulated Trade logic
-     ********************************************************/
+  
     function updateTradeOptions() {
-      const material = document.getElementById('create-material').value;
-      const data = finishedGoodsData[material];
-
-      // "Creatable Contracts": floor(quantity / 10)
+      const materialSelect = document.getElementById('create-material');
+      const material = materialSelect.value;
+      const data = getCommodityData(material);
+      
+      // Assume contract size is 10 tons = 20,000 lbs.
+      const contractSize = 20000;
+      const availableContracts = Math.floor(data.finishedGoods / contractSize);
+      
       const contractsSelect = document.getElementById('create-contracts');
       contractsSelect.innerHTML = '';
-      const maxContracts = Math.floor(data.quantity / 10);
-      for (let i = 1; i <= maxContracts; i++) {
+      if (availableContracts < 1) {
         const option = document.createElement('option');
-        option.value = i;
-        option.textContent = i;
+        option.value = 0;
+        option.textContent = "0";
         contractsSelect.appendChild(option);
+      } else {
+        for (let i = 1; i <= availableContracts; i++) {
+          const option = document.createElement('option');
+          option.value = i;
+          option.textContent = i;
+          contractsSelect.appendChild(option);
+        }
       }
-
-      // "Price/ton": 3 below & 3 above base in 10% increments
+      
+      const basePricePerTon = marketSnapshotPrices[material] || 0;
+      
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
-      const basePrice = data.price;
-      [0.7, 0.8, 0.9].forEach(mult => {
-        const opt = document.createElement('option');
-        opt.value = (basePrice * mult).toFixed(2);
-        opt.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(opt);
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
       });
-      [1.1, 1.2, 1.3].forEach(mult => {
-        const opt = document.createElement('option');
-        opt.value = (basePrice * mult).toFixed(2);
-        opt.textContent = '$' + Number(basePrice * mult).toLocaleString();
-        priceSelect.appendChild(opt);
-      });
-
-      // "Cost to Create": single option = 0.1% of base price
+      
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
-      const cost = basePrice * 0.001; // 0.1%
+      const costToCreate = basePricePerTon * 0.001;
       const costOption = document.createElement('option');
-      costOption.value = cost.toFixed(2);
-      costOption.textContent = '$' + Number(cost).toLocaleString();
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
-
-      // "Expiration Date": 5 future dates in 1-month increments
+      
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
-      const headerDateStr = document.getElementById('header-date').textContent; // "02/14/2025"
-      const parts = headerDateStr.split('/');
-      const headerDate = new Date(parts[2], parts[0] - 1, parts[1]);
+      const today = new Date();
       for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(
-          headerDate.getFullYear(),
-          headerDate.getMonth() + i,
-          headerDate.getDate()
-        );
+        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
         const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
         const day = expDate.getDate().toString().padStart(2, '0');
         const year = expDate.getFullYear();
@@ -463,191 +972,421 @@
         expirationSelect.appendChild(option);
       }
     }
-
+    
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tradeTime = new Date().toLocaleTimeString();
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = 
+        `<td>${tradeTime}</td>
+         <td>${material}</td>
+         <td>${quantity}</td>
+         <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+         <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
+      tableBody.appendChild(newRow);
+    }
+    
+    function addActiveContract(commodity, expiration, salePrice) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+      const priceDifference = salePrice - snapshotPrice;
+      const contractSize = 10;
+      const totalContractValue = contractSize * snapshotPrice;
+      const marginRequirement = totalContractValue * 0.07;
+      
+      const expDate = new Date(expiration);
+      const expFormatted = new Date(expiration).toLocaleString('default', { month: 'short' }) +
+                           " '" + expDate.getFullYear().toString().slice(-2);
+      
+      const ticker = tickerMapping[commodity] || '';
+      
+      const newRow = document.createElement('tr');
+      newRow.dataset.commodity = commodity;
+      newRow.dataset.salePrice = salePrice;
+      
+      newRow.innerHTML = 
+        `<td>${ticker}</td>
+         <td>${commodity} (${expFormatted})</td>
+         <td>${salePrice.toFixed(2)}</td>
+         <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
+         <td>${expiration}</td>
+         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+         <td>
+           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+         </td>`;
+      tableBody.appendChild(newRow);
+    }
+    
+    function updateActiveContractsTable() {
+      const table = document.getElementById('active-contracts-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let totalContracts = rows.length;
+      let totalMarginRequirement = 0;
+      let totalChange = 0;
+      const contractSize = 10;
+      
+      rows.forEach(row => {
+        const commodity = row.dataset.commodity;
+        const salePrice = parseFloat(row.dataset.salePrice);
+        const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+        const priceDifference = salePrice - snapshotPrice;
+        totalChange += priceDifference;
+        
+        row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
+        
+        const totalContractValue = contractSize * snapshotPrice;
+        const marginRequirement = totalContractValue * 0.07;
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        totalMarginRequirement += marginRequirement;
+      });
+      
+      document.getElementById('activeContractsCount').textContent = totalContracts;
+      document.getElementById('activeContractsMarginTotal').textContent =
+        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      document.getElementById('total-change').textContent = totalChangeText;
+      document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
+      
+      const now = new Date();
+      const label = now.toLocaleTimeString();
+      activeContractsChangeHistory.push(totalChange);
+      activeContractsChartLabels.push(label);
+      
+      if (activeContractsChangeHistory.length > 10) {
+        activeContractsChangeHistory.shift();
+        activeContractsChartLabels.shift();
+      }
+      
+      if (activeContractsChart) {
+        activeContractsChart.update();
+      }
+    }
+    
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const chosenPrice = parseFloat(document.getElementById('create-price').value);
       const chosenCost = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
-
+      const contractWeightLbs = 20000;
+      
       for (let i = 0; i < numTrades; i++) {
-        const totalCost = 10 * chosenPrice;
-        appendTradeLogEntry(
-          material + ' (Trade #' + (i + 1) + ')',
-          10,
-          chosenPrice,
-          totalCost
-        );
+        const quantity = 10;
+        const totalCost = quantity * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
+        addActiveContract(material, expiration, chosenPrice);
       }
-      alert(
-        numTrades + ' simulated trade(s) for ' + material + ' executed.\n' +
-        'Cost to create each position: $' + chosenCost.toFixed(2)
-      );
+      
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
+          let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
+          row.cells[2].textContent = updatedFinished.toLocaleString();
+          
+          let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          let updatedTotal = currentTotal - (numTrades * contractWeightLbs);
+          row.cells[3].textContent = updatedTotal.toLocaleString();
+        }
+      }
+      
+      updateActiveContractsTable();
+      updatePurchaseValues();
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
-
-    function addContracts() {
-      // If you want to directly push to "activeContracts," left as in your original code
-      // Not used by default, but available if needed
-    }
-
-    /********************************************************
-     * 7) Basic Click Handlers
-     ********************************************************/
+    
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+    
     function logout() {
       alert('Logging out...');
     }
     function cardClicked(cardName) {
-      alert(cardName + ' card clicked!');
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
     }
     function rowClicked(itemName) {
       alert('Row for ' + itemName + ' clicked!');
     }
-    function rollContract(index) {
-      alert('Rolling contract: ' + activeContracts[index].material);
-    }
-    function closeContract(index) {
-      alert('Closing contract: ' + activeContracts[index].material);
-      activeContracts.splice(index, 1);
-      renderActiveContracts();
-    }
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
-
-    /********************************************************
-     * 8) FETCH “greenspark.html” & “barchart.html,” then fill tables
-     ********************************************************/
-    function fetchGreenSparkData() {
-      // Adjust the path if needed to match your file location
-      return fetch("greenspark.html")
-        .then(res => res.text())
-        .then(html => {
-          // Parse the HTML
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, "text/html");
-          // Extract the hidden JSON from <script id="greenspark-data">
-          const rawJSON = doc.getElementById("greenspark-data").textContent;
-          const { inventory } = JSON.parse(rawJSON); // => {inventory: [...]} in the original
-          return inventory;
-        })
-        .catch(err => {
-          console.error("Error fetching GreenSpark:", err);
-          return []; // fallback
-        });
-    }
-
-    function fetchBarchartData() {
-      return fetch("barchart.html")
-        .then(res => res.text())
-        .then(html => {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, "text/html");
-          // <script id="futures-data" type="application/json">
-          const rawJSON = doc.getElementById("futures-data").textContent;
-          // => { futures: [...], tradingGuide: [...] }
-          return JSON.parse(rawJSON);
-        })
-        .catch(err => {
-          console.error("Error fetching Barchart:", err);
-          return { futures: [], tradingGuide: [] };
-        });
-    }
-
-    function renderGreenSparkInventory(inventory) {
-      const tbody = document.getElementById("greenspark-inventory-body");
-      tbody.innerHTML = "";
-      // We'll approximate the columns: "Material", "Quantity (tons)", "Price/ton", "Value of Material", "Date Created", "Status"
-      // from your greenSpark items like:
-      //   { commodity: "ALUMINUM", wip: 9463, finishedGoods: 1937, avgCost: 0.3886, value: 4430.31, ... }
-      // Convert (wip + finishedGoods) from lbs to tons ( /2000 ), use item.value, etc.
-      inventory.forEach(item => {
-        const totalLbs = item.wip + item.finishedGoods;
-        const quantityTons = (totalLbs / 2000).toFixed(2); 
-        // approximate Price/ton from avgCost * 2000
-        const pricePerTon = (item.avgCost * 2000).toFixed(2);
-        // item.value is total $ value, we can just use it
-        const dateCreated = "N/A";  // or we can see if item had a date
-        const status = "Available"; // or logic from item
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${item.commodity}</td>
-          <td>${quantityTons}</td>
-          <td>$${Number(pricePerTon).toLocaleString()}</td>
-          <td>$${Number(item.value).toLocaleString()}</td>
-          <td>${dateCreated}</td>
-          <td>${status}</td>
-        `;
-        tbody.appendChild(row);
-      });
-    }
-
-    function renderFuturesData(futures) {
-      const tbody = document.getElementById("futures-body");
-      tbody.innerHTML = "";
-      // We'll match columns: Material, Contract, Last Price, Change, Change %, Expiration, Action
-      // “futures” from barchart might look like:
-      // { contractName: "ALUMINUM (May '25)", last: 220, change: 1.25, ... } etc.
-      futures.forEach(item => {
-        // Let's parse out the commodity & contract from item.contractName
-        // e.g. "ALUMINUM (May '25)" => commodity = "ALUMINUM", contract = "May '25"
-        // naive split by "(":
-        let commodity = item.contractName;
-        let contract = "N/A";
-        const parenIdx = item.contractName.indexOf("(");
-        if (parenIdx > 0) {
-          commodity = item.contractName.slice(0, parenIdx).trim();
-          contract = item.contractName.slice(parenIdx + 1).replace(")", "").trim();
+    
+    /***************************************
+     * Update Market Snapshot Prices Every Minute (±10% fluctuation)
+     ***************************************/
+    function updateMarketSnapshot() {
+      for (let commodity in baseMarketSnapshotPrices) {
+        const basePrice = baseMarketSnapshotPrices[commodity];
+        const randomFactor = (Math.random() * 0.2) - 0.1;
+        const newPrice = basePrice * (1 + randomFactor);
+        marketSnapshotPrices[commodity] = newPrice;
+        
+        const priceElement = document.getElementById(getCommodityId(commodity));
+        if (priceElement) {
+          priceElement.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
-        const lastPrice = item.last.toFixed(2);
-        // For “Change %,” we'll guess: (change / oldLast * 100)? 
-        // But in your data you might already have item.change. We'll do a naive approach:
-        let changeSign = item.change >= 0 ? "+" : "";
-        let changePercent = "1.00%"; // or parse from item if you track it
-        // We'll just guess for demonstration or see if we have item.change
-        // We'll store everything in the table as is:
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${commodity}</td>
-          <td>${contract}</td>
-          <td>${lastPrice}</td>
-          <td>${changeSign}${item.change.toFixed(2)}</td>
-          <td>${changePercent}</td>
-          <td>${contract}</td>
-          <td>
-            <button class="action-btn" onclick="createFuturesContract('${commodity}', '${contract}'); event.stopPropagation();">
-              Create Contract 
-            </button>
-          </td>
-        `;
-        tbody.appendChild(row);
+      }
+      updateTradeOptions();
+      updateActiveContractsTable();
+    }
+    
+    setInterval(updateMarketSnapshot, 15000);
+    
+    /***************************************
+     * Increase Table Values Every Minute by 10%
+     ***************************************/
+    function increaseTableValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+  
+      rows.forEach(row => {
+        let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
+        let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+        let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+  
+        wip *= 1.1;
+        finished *= 1.1;
+        total *= 1.1;
+  
+        row.cells[1].textContent = Math.round(wip).toLocaleString();
+        row.cells[2].textContent = Math.round(finished).toLocaleString();
+        row.cells[3].textContent = Math.round(total).toLocaleString();
+      });
+  
+      updatePurchaseValues();
+    }
+  
+    setInterval(increaseTableValues, 300000);
+    
+    /***************************************
+     * Update Metals Market Overview Every Minute
+     ***************************************/
+    function updateMetalsMarketOverview() {
+      const table = document.getElementById('metals-market-table');
+      if (!table) return;
+      const rows = table.querySelectorAll('tbody tr');
+      
+      rows.forEach(row => {
+        let ticker = row.cells[0].textContent.trim();
+        if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
+          let commodity = "";
+          if (ticker === 'ICWR25') {
+            commodity = "Insulated Copper Wire";
+          } else if (ticker === 'EMOT25') {
+            commodity = "Electric Motors";
+          } else if (ticker === 'BRSS25') {
+            commodity = "Brass";
+          }
+          let elementId = "price-" + commodity.replace(/\s/g, '');
+          let snapshotElem = document.getElementById(elementId);
+          if (snapshotElem) {
+            let priceText = snapshotElem.textContent;
+            let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
+            if (match) {
+              let snapshotPrice = parseFloat(match[1].replace(/,/g, ''));
+              row.cells[2].textContent = snapshotPrice.toFixed(2);
+              if (!row.dataset.initialSnapshotPrice || row.dataset.initialSnapshotPrice === "") {
+                row.dataset.initialSnapshotPrice = snapshotPrice;
+              }
+              let initialPrice = parseFloat(row.dataset.initialSnapshotPrice);
+              let change = snapshotPrice - initialPrice;
+              row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
+            }
+          }
+        } else {
+          let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
+          if (openPrice <= 0) return;
+  
+          let randomFactor = (Math.random() * 0.2) - 0.1;
+          let newLast = openPrice * (1 + randomFactor);
+          newLast = parseFloat(newLast.toFixed(2));
+  
+          row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+          let change = newLast - openPrice;
+          row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
+  
+          let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
+          if (newLast > currentHigh) {
+            row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }
+  
+          let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
+          if (newLast < currentLow) {
+            row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }
+  
+          let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
+          let newVolume = Math.ceil(currentVolume * 1.001);
+          row.cells[7].textContent = newVolume.toLocaleString();
+        }
       });
     }
-
-    // Combine fetch calls
-    function fetchAllData() {
-      Promise.all([fetchGreenSparkData(), fetchBarchartData()])
-        .then(([greensparkInventory, barchart]) => {
-          // greensparkInventory is array from { inventory: [...] }
-          // barchart = { futures: [...], tradingGuide: [...] }
-          renderGreenSparkInventory(greensparkInventory);
-          renderFuturesData(barchart.futures);
-
-          // If you want to do something with barchart.tradingGuide, you can parse that too
-          // For now, we just fill the main futures table.
-        });
+    setInterval(updateMetalsMarketOverview, 7000);
+    
+    /***************************************
+     * FUTURES TICKER LOGIC
+     ***************************************/
+    let futuresData = [
+      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
+      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
+      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
+      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
+      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
+      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
+      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
+      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
+      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
+      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
+      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
+    ];
+    
+    let futuresGuide = [];
+    
+    function generateTradingGuide() {
+      const signals = ["BUY", "SELL"];
+      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
+      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
+      
+      futuresGuide = futuresData.map(item => {
+        let sig = signals[Math.floor(Math.random() * signals.length)];
+        let entryPct = (Math.random() * 2 + 1) / 100;
+        if (sig === "SELL") entryPct *= -1;
+        let entryPrice = item.last * (1 + entryPct);
+        let stopDiff = Math.abs(entryPrice * 0.05);
+        let profitDiff = Math.abs(entryPrice * 0.1);
+        let stop, takeProfit;
+        if (sig === "BUY") {
+          stop = entryPrice - stopDiff;
+          takeProfit = entryPrice + profitDiff;
+        } else {
+          stop = entryPrice + stopDiff;
+          takeProfit = entryPrice - profitDiff;
+        }
+        let strength = strengths[Math.floor(Math.random() * strengths.length)];
+        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
+    
+        return {
+          contractName: item.contractName,
+          signal: sig,
+          entryDate: "02/20/25",
+          entryPrice: parseFloat(entryPrice.toFixed(2)),
+          stopLoss: parseFloat(stop.toFixed(2)),
+          takeProfit: parseFloat(takeProfit.toFixed(2)),
+          timeHorizon: horizon,
+          strength: strength
+        };
+      });
     }
-
-    /********************************************************
-     * 9) On Page Load
-     ********************************************************/
-    window.onload = function() {
-      // Initialize local logic
-      updateTradeOptions();
-      renderActiveContracts();
-      // Then fetch external data from greenspark & barchart
-      fetchAllData();
-    };
+    
+    function renderGuideTicker() {
+      const ticker = document.getElementById("trade-alerts-ticker");
+      let content = "";
+      futuresGuide.forEach(trade => {
+        const signalClass = trade.signal === "BUY" ? "signal-buy" : "signal-sell";
+        const strengthClass = trade.strength.toLowerCase().replace(/\s+/g, '-');
+        content += `<span class="ticker-item">
+                      ${trade.contractName} 
+                      <span class="signal ${signalClass}">${trade.signal}</span> 
+                      ${trade.entryDate} ${trade.entryPrice.toFixed(2)} 
+                      ${trade.stopLoss.toFixed(2)} ${trade.takeProfit.toFixed(2)} 
+                      ${trade.timeHorizon} 
+                      <span class="strength ${strengthClass}">${trade.strength}</span>
+                    </span>`;
+        content += `<span class="ticker-separator"> ---- </span>`;
+      });
+      ticker.innerHTML = content + content;
+    }
+    
+    function updateHiddenJSON() {
+      // Placeholder for any JSON updates if needed.
+    }
+    
+    function fluctuateData() {
+      futuresData.forEach(item => {
+        let pct = (Math.random() * 5 - 2.5) / 100;
+        let oldLast = item.last;
+        let newLast = oldLast * (1 + pct);
+        item.last = parseFloat(newLast.toFixed(2));
+        let diff = item.last - oldLast;
+        item.change = parseFloat(diff.toFixed(2));
+        let highPct = (Math.random() * 3) / 100;
+        let lowPct = (Math.random() * 3) / 100;
+        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
+        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
+        let volPct = (Math.random() * 20 - 10) / 100;
+        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
+      });
+      generateTradingGuide();
+    }
+    
+    function initTicker() {
+      generateTradingGuide();
+      renderGuideTicker();
+      updateHiddenJSON();
+      setInterval(() => {
+        fluctuateData();
+        renderGuideTicker();
+        updateHiddenJSON();
+      }, 5 * 60 * 1000);
+    }
+    
+    window.addEventListener("DOMContentLoaded", initTicker);
+    
+    /***************************************
+     * Modal and Guided Tour Functions
+     ***************************************/
+    function showKPIDetails() {
+      var kpiModal = new bootstrap.Modal(document.getElementById('kpiDetailModal'));
+      kpiModal.show();
+    }
+    
+    function showArchOverview() {
+      var archModal = new bootstrap.Modal(document.getElementById('archModal'));
+      archModal.show();
+    }
+    
+    function startGuidedTour() {
+      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
+      alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
+    }
+    
+    /***************************************
+     * Fetch Simulated Market Data from the Backend
+     ***************************************/
+    // Function to fetch simulated market data from the backend
+    function fetchMarketData() {
+      fetch('/api/trade-data')
+        .then(response => response.json())
+        .then(data => {
+          // Example: update the Copper price on the Market Snapshot card
+          const copperPriceElement = document.getElementById('price-Copper');
+          if (copperPriceElement && data.marketPrices.Copper) {
+            copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
+          }
+          // You can similarly update other commodities using data.marketPrices.Aluminum, etc.
+        })
+        .catch(err => console.error('Error fetching market data:', err));
+    }
+    
+    // Call the function every 15 seconds (adjust as needed)
+    setInterval(fetchMarketData, 15000);
+    // Optionally, call it immediately on load
+    document.addEventListener('DOMContentLoaded', fetchMarketData);
   </script>
 </body>
 </html>
