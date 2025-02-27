@@ -1364,6 +1364,29 @@
       // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
       alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
     }
+    
+    /***************************************
+     * Fetch Simulated Market Data from the Backend
+     ***************************************/
+    // Function to fetch simulated market data from the backend
+    function fetchMarketData() {
+      fetch('/api/trade-data')
+        .then(response => response.json())
+        .then(data => {
+          // Example: update the Copper price on the Market Snapshot card
+          const copperPriceElement = document.getElementById('price-Copper');
+          if (copperPriceElement && data.marketPrices.Copper) {
+            copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
+          }
+          // You can similarly update other commodities using data.marketPrices.Aluminum, etc.
+        })
+        .catch(err => console.error('Error fetching market data:', err));
+    }
+    
+    // Call the function every 15 seconds (adjust as needed)
+    setInterval(fetchMarketData, 15000);
+    // Optionally, call it immediately on load
+    document.addEventListener('DOMContentLoaded', fetchMarketData);
   </script>
 </body>
 </html>
