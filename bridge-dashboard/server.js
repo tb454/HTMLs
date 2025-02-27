@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const { PythonShell } = require('python-shell'); // Added PythonShell for running Python scripts
 const app = express();
-const port = 3002;
+const port = 4000;
 
 // Serve static files from the "public" folder
 app.use(express.static(path.join(__dirname, 'public')));
