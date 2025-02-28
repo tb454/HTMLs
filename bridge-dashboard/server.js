@@ -32,3 +32,10 @@ app.listen(port, (err) => {
   }
   console.log(`Server is listening on port ${port}`);
 });
+
+app.get('/generate-prices', (req, res) => {
+  PythonShell.run('./backend-python/price_data.py', null, function (err) {
+      if (err) res.status(500).send("Error running script: " + err.message);
+      else res.send("✅ Scrap prices generated successfully!");
+  });
+});
