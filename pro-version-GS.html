@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bridge Dashboard</title>
+  <title>BRidge Dashboard</title>
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -224,13 +224,12 @@
   <div class="container">
     <!-- Header -->
     <header class="header">
-      <h1>Bridge Dashboard</h1>
+      <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span>User: John Doe</span>
-        <!-- Removed inline onclicks; IDs added for attaching event listeners -->
-        <button id="logoutButton">Logout</button>
-        <button id="startTourButton">Start Tour</button>
-        <button id="archOverviewButton">View Architecture</button>
+        <button onclick="logout()">Logout</button>
+        <button onclick="startGuidedTour()">Start Tour</button>
+        <button onclick="showArchOverview()">View Architecture</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
@@ -239,19 +238,19 @@
     <section class="section">
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
-        <div id="finished-goods-card" class="card-custom" data-card="Finished Goods">
+        <div id="finished-goods-card" class="card-custom" onclick="cardClicked('Finished Goods')">
           <div><strong>Finished Goods</strong></div>
           <div id="finishedGoodsInfo">Loading...</div>
           <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
         </div>
-        <div class="card-custom" data-card="Active Contracts">
+        <div class="card-custom" onclick="cardClicked('Active Contracts')">
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
           <canvas id="activeContractsChart" width="250" height="200"></canvas>
         </div>
-        <div class="card-custom" data-card="Market Snapshot">
+        <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
           <div id="price-Copper">Copper: $9,500.00</div>
           <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
@@ -283,7 +282,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr data-commodity="ALUMINUM">
+          <tr onclick="rowClicked('ALUMINUM')">
             <td>Aluminum</td>
             <td>32,105</td>
             <td>64,351</td>
@@ -291,7 +290,7 @@
             <td>$0.50</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="ELECTRIC MOTORS">
+          <tr onclick="rowClicked('Electric Motors')">
             <td>Electric Motors</td>
             <td>11,052</td>
             <td>30,844</td>
@@ -299,7 +298,7 @@
             <td>$0.30</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="INSULATED COPPER WIRE">
+          <tr onclick="rowClicked('Insulated copper wire')">
             <td>Insulated copper wire</td>
             <td>71,649</td>
             <td>50,673</td>
@@ -307,7 +306,7 @@
             <td>$1.20</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="LEAD">
+          <tr onclick="rowClicked('LEAD')">
             <td>LEAD</td>
             <td>5,802</td>
             <td>1,640</td>
@@ -315,7 +314,7 @@
             <td>$0.40</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="HMS STEEL #2">
+          <tr onclick="rowClicked('FERROUS')">
             <td>HMS Steel #2</td>
             <td>124,380</td>
             <td>190,048</td>
@@ -323,7 +322,7 @@
             <td>$0.09</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="CU RADIATOR (50CU/50BRASS)">
+          <tr onclick="rowClicked('RADIATOR PRODUCT')">
             <td>Cu Radiator (50Cu/50Brass)</td>
             <td>15,677</td>
             <td>324</td>
@@ -331,7 +330,7 @@
             <td>$1.40</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="COPPER">
+          <tr onclick="rowClicked('COPPER PRODUCT')">
             <td>COPPER</td>
             <td>32,373</td>
             <td>73,560</td>
@@ -339,7 +338,7 @@
             <td>$2.80</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="BRASS">
+          <tr onclick="rowClicked('BRASS PRODUCT')">
             <td>BRASS</td>
             <td>15,633</td>
             <td>20,246</td>
@@ -347,7 +346,7 @@
             <td>$1.20</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="CARBIDE">
+          <tr onclick="rowClicked('Carbide')">
             <td>Carbide</td>
             <td>468</td>
             <td>287</td>
@@ -355,7 +354,7 @@
             <td>$8.80</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="STAINLESS STEEL">
+          <tr onclick="rowClicked('STAINLESS STEEL')">
             <td>STAINLESS STEEL</td>
             <td>13,482</td>
             <td>15,671</td>
@@ -363,7 +362,7 @@
             <td>$0.60</td>
             <td>$0.00</td>
           </tr>
-          <tr data-commodity="BUSHELING STEEL">
+          <tr onclick="rowClicked('STEEL')">
             <td>Busheling STEEL</td>
             <td>128,763</td>
             <td>134,678</td>
@@ -391,7 +390,7 @@
       <div class="d-flex align-items-center flex-wrap gap-3">
         <div class="d-flex align-items-center">
           <label for="create-material" class="me-2">Material:</label>
-          <select id="create-material">
+          <select id="create-material" onchange="updateTradeOptions()">
             <option value="Copper">Copper</option>
             <option value="Busheling Steel">Busheling Steel</option>
             <option value="Brass">Brass</option>
@@ -422,7 +421,7 @@
           <select id="create-expiration"></select>
         </div>
         <div>
-          <button class="action-btn" id="simulateTradeButton">Execute Trade</button>
+          <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
         </div>
       </div>
     </section>
@@ -628,7 +627,7 @@
       <div class="kpi-content">
         <canvas id="kpiChart" width="400" height="200"></canvas>
       </div>
-      <button class="action-btn mt-3" id="kpiDetailsButton">View KPI Details</button>
+      <button class="action-btn mt-3" onclick="showKPIDetails()">View KPI Details</button>
     </section>
   </div>
   
@@ -680,37 +679,54 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <script>
-    // Global variables for charts and data
+    // Accent color for charts and highlights
     const accentColor = '#3498db';
+    document.querySelectorAll('.section-title').forEach(el => {
+      el.style.borderColor = accentColor;
+      el.style.color = accentColor;
+    });
+    
+    // Global variables for Active Contracts Chart
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
     
+    // Global variables for Finished Goods Chart
     let finishedGoodsChart;
-    const finishedGoodsChartLabels = [];
-    const finishedGoodsChartData = [];
+    let finishedGoodsChartLabels = [];
+    let finishedGoodsChartData = [];
     
+    // Global variables for KPI Chart
     let kpiChart;
     let kpiChartLabels = [];
     let kpiChartData = [];
-    
-    let lineChart;
-    const lineChartLabels = [];
-    const lineChartData = [];
-    
-    let doughnutChart;
-    
-    // Consolidated initialization function
-    function initDashboard() {
-      // Set accent color for section titles
-      document.querySelectorAll('.section-title').forEach(el => {
-        el.style.borderColor = accentColor;
-        el.style.color = accentColor;
+  
+    // Initialize Trading Graph using Chart.js (if chart exists)
+    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
+    if(ctx){
+      const tradingChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
+          datasets: [{
+            label: 'Trading Data',
+            data: [100, 150, 130, 170, 160, 180],
+            borderColor: accentColor,
+            backgroundColor: 'rgba(52,152,219,0.2)',
+            fill: true,
+            tension: 0.1
+          }]
+        },
+        options: {
+          scales: { y: { beginAtZero: true } }
+        }
       });
-      
-      // Initialize Active Contracts Chart
+    }
+    
+    // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
+    document.addEventListener('DOMContentLoaded', () => {
       const activeContractsCanvas = document.getElementById('activeContractsChart');
-      if(activeContractsCanvas) {
+      if(activeContractsCanvas){
         const ctxActive = activeContractsCanvas.getContext('2d');
         activeContractsChart = new Chart(ctxActive, {
           type: 'line',
@@ -739,7 +755,7 @@
       
       // Initialize Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
-      if(finishedCanvas) {
+      if(finishedCanvas){
         const ctxFinished = finishedCanvas.getContext('2d');
         finishedGoodsChart = new Chart(ctxFinished, {
           type: 'line',
@@ -764,7 +780,7 @@
       
       // Initialize KPI Chart with simulated data
       const kpiCanvas = document.getElementById('kpiChart');
-      if(kpiCanvas) {
+      if(kpiCanvas){
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
         kpiChartData = [500, 700, 650, 800, 750, 900];
@@ -787,25 +803,18 @@
       // Initialize Additional Charts
       initLineChart();
       initDoughnutChart();
-      
-      // Other initialization functions
-      updatePurchaseValues();
-      updateTradeOptions();
-      updateActiveContractsTable();
-      fetchMarketData();
-      initTicker();
-      
-      // Attach event listeners for header buttons and trade simulation
-      document.getElementById('logoutButton').addEventListener('click', logout);
-      document.getElementById('startTourButton').addEventListener('click', startGuidedTour);
-      document.getElementById('archOverviewButton').addEventListener('click', showArchOverview);
-      document.getElementById('kpiDetailsButton').addEventListener('click', showKPIDetails);
-      document.getElementById('simulateTradeButton').addEventListener('click', simulateTrade);
-    }
+    });
     
-    // Initialize Line Chart
+    /***************************************
+     * Additional Visualizations: Line Chart & Doughnut Chart
+     ***************************************/
+    let lineChart;
+    let lineChartLabels = [];
+    let lineChartData = [];
+    
     function initLineChart() {
       const ctxLine = document.getElementById('lineChart').getContext('2d');
+      // Create 10 initial data points
       for (let i = 0; i < 10; i++) {
         lineChartLabels.push(new Date().toLocaleTimeString());
         lineChartData.push(Math.floor(Math.random() * 1000));
@@ -840,7 +849,7 @@
       lineChart.update();
     }
     
-    // Initialize Doughnut Chart
+    let doughnutChart;
     function initDoughnutChart() {
       const ctxDoughnut = document.getElementById('doughnutChart').getContext('2d');
       const commodityLabels = ['Copper', 'Aluminum', 'Brass', 'Electric Motors', 'Lead'];
@@ -871,7 +880,7 @@
       doughnutChart.update();
     }
     
-    // Update additional charts periodically
+    // Update the additional charts every 15 seconds
     setInterval(() => {
       updateLineChart();
       updateDoughnutChart();
@@ -926,6 +935,7 @@
         }
       }
     }
+    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
     
     /***************************************
      * Simulated Trade Section and Functions
@@ -1054,6 +1064,8 @@
       }
     }
     
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
       const tradeTime = new Date().toLocaleTimeString();
@@ -1181,6 +1193,27 @@
       updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+    
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
     /***************************************
@@ -1403,6 +1436,8 @@
       }, 5 * 60 * 1000);
     }
     
+    window.addEventListener("DOMContentLoaded", initTicker);
+    
     /***************************************
      * Modal and Guided Tour Functions
      ***************************************/
@@ -1432,12 +1467,12 @@
             copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
           }
           // You can similarly update other commodities using data.marketPrices.Aluminum, etc.
-        }) 
+        })
         .catch(err => console.error('Error fetching market data:', err));
     }
     
-    // Consolidate all initialization on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', initDashboard);
+    setInterval(fetchMarketData, 15000);
+    document.addEventListener('DOMContentLoaded', fetchMarketData);
   </script>
 </body>
 </html>
