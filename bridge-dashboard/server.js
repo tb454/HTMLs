@@ -4,7 +4,11 @@ const express = require('express');
 const path = require('path');
 const app = express();
 
-const port = 4000; 
+const port = 4000;
+app.listen(port, () => {
+  console.log(`🔥 Server running on http://localhost:${port}`);
+});
+
 
 // Serve static files from the "public" folder
 app.use(express.static(path.join(__dirname, 'public')));
