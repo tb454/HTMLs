@@ -1,66 +1,34 @@
-// server.js
-const { PythonShell } = require('python-shell');
 const express = require('express');
-const path = require('path');
 const app = express();
+const port = process.env.PORT || 4000;
 
-const port = 4000;
-const server = app.listen(port, () => {
-  console.log(`🔥 Server running on http://localhost:${port}`);
-});
+// Serve static files from the current directory (adjust as needed)
+app.use(express.static(__dirname));
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${port} is already in use. Please choose a different port.`);
-  } else {
-    console.error('Server error:', err);
-  }
-  process.exit(1);
-});
-
-
-// Serve static files from the "public" folder
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Simulated Market Data API
+// Sample API endpoint for trade data
 app.get('/api/trade-data', (req, res) => {
   res.json({
-    timestamp: new Date().toISOString(),
     marketPrices: {
-      Copper: 9500 + (Math.random() * 200 - 100),
-      Aluminum: 2200 + (Math.random() * 100 - 50),
-    },
+      Copper: 9500,
+      'Busheling Steel': 700,
+      Brass: 7500,
+      Aluminum: 2200,
+      'Electric Motors': 900,
+      'Insulated Copper Wire': 3600,
+      Lead: 1500,
+      'HMS Steel #2': 500,
+      'Cu Radiator (50Cu/50Brass)': 5600,
+      Carbide: 20000,
+      'Stainless Steel': 1600
+    }
   });
 });
 
-// API to Generate Scrap Prices
-app.get('/generate-prices', (req, res) => {
-    PythonShell.run('./backend-python/price_data.py', null, function (err) {
-        if (err) {
-            res.status(500).send("Error running script: " + err.message);
-        } else {
-            res.send("✅ Scrap prices generated successfully!");
-        }
-    });
-});
-
-// API to Run Hedge Simulator
-app.get('/run-hedge', (req, res) => {
-    PythonShell.run('./backend-python/hedge_sim.py', null, function (err) {
-        if (err) {
-            res.status(500).send("Error running hedge simulation: " + err.message);
-        } else {
-            res.send("✅ Hedge simulation completed!");
-        }
-    });
-});
-
-// Root route to serve index.html explicitly
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Start the server
-app.listen(port, () => {
-  console.log(`🔥 Server running on http://localhost:${port}`);
+// Start server with error handling
+app.listen(port, (err) => {
+  if (err) {
+    console.error('Error starting server:', err);
+    process.exit(1);
+  }
+  console.log(`Server is listening on port ${port}`);
 });
