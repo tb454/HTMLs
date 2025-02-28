@@ -5,7 +5,19 @@ const path = require('path');
 const app = express();
 
 const port = 4000;
-app.listen
+const server = app.listen(port, () => {
+  console.log(`🔥 Server running on http://localhost:${port}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${port} is already in use. Please choose a different port.`);
+  } else {
+    console.error('Server error:', err);
+  }
+  process.exit(1);
+});
+
 
 // Serve static files from the "public" folder
 app.use(express.static(path.join(__dirname, 'public')));
