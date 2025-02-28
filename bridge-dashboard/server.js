@@ -39,3 +39,7 @@ app.get('/generate-prices', (req, res) => {
       else res.send("✅ Scrap prices generated successfully!");
   });
 });
+
+app.get('/', (req, res) => {
+  res.send("✅ Server is running, but no index.html found. Try /generate-prices");
+});
