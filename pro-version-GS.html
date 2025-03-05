@@ -1468,5 +1468,23 @@
     setInterval(fetchMarketData, 15000);
     document.addEventListener('DOMContentLoaded', fetchMarketData);
   </script>
+
+  <!-- Include the TradingView Charting Library -->
+<script type="text/javascript" src="charting_library/charting_library.min.js"></script>
+
+<script type="text/javascript">
+  // Initialize the TradingView widget using the demo datafeed
+  new TradingView.widget({
+    container_id: "tv_chart_container",
+    datafeed: new Datafeeds.UDFCompatibleDatafeed("https://demo_feed.tradingview.com"),
+    library_path: "charting_library/",
+    locale: "en",
+    disabled_features: ["header_widget"],
+    enabled_features: ["study_templates"],
+    symbol: "AAPL", // Change this symbol as needed
+    interval: "D"   // Daily interval; modify if desired
+  });
+</script>
+
 </body>
 </html>
