@@ -598,35 +598,6 @@
       </table>
     </section>
     
-    <!-- TradingView Ticker Tape Widget BEGIN -->
-<div class="tradingview-widget-container">
-  <div class="tradingview-widget-container__widget"></div>
-  <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
-  {
-    "symbols": [
-      {
-        "description": "S&P 500",
-        "proName": "INDEX:SPX"
-      },
-      {
-        "description": "Dow Jones",
-        "proName": "INDEX:DJI"
-      },
-      {
-        "description": "NASDAQ 100",
-        "proName": "INDEX:NDX"
-      }
-    ],
-    "colorTheme": "light",
-    "isTransparent": false,
-    "displayMode": "adaptive",
-    "locale": "en"
-  }
-  </script>
-</div>
-<!-- TradingView Ticker Tape Widget END -->
-
-
     <!-- Trade Alerts Ticker Section -->
     <section class="section">
       <div class="section-title">Trade Alerts</div>
@@ -1407,7 +1378,7 @@
           if (copperPriceElement && data.marketPrices.Copper) {
             copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
           }
-          // Update other commodities as needed...
+          // You can similarly update other commodities using data.marketPrices.Aluminum, etc.
         })
         .catch(err => console.error('Error fetching market data:', err));
     }
