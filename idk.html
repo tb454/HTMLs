@@ -1126,27 +1126,26 @@
     /***************************************
      * Fetch Market Data from the Backend
      ***************************************/
-    function fetchMarketData() {
-      fetch('http://localhost:5000/api/market-data')
-        .then(response => response.json())
-        .then(data => {
-          // data.marketPrices is an object mapping commodity names to prices.
-          for (const commodity in data.marketPrices) {
-            const price = data.marketPrices[commodity];
-            // Generate an element ID matching your existing convention:
-            const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
-            const element = document.getElementById(elementId);
-            if (element && price !== null) {
-              element.textContent = `${commodity}: $${price.toFixed(2)}`;
-            }
-          }
-        })
-        .catch(err => console.error('Error fetching market data:', err));
-    }
-    
-    // Call the function on DOM load and every 15 seconds:
-    document.addEventListener('DOMContentLoaded', fetchMarketData);
-    setInterval(fetchMarketData, 15000);
+     function fetchMarketData() {
+  fetch('http://localhost:5000/api/market-data')
+    .then(response => response.json())
+    .then(data => {
+      // data.marketPrices is an object mapping commodity names to prices.
+      for (const commodity in data.marketPrices) {
+        const price = data.marketPrices[commodity];
+        // Update the global marketSnapshotPrices variable:
+        marketSnapshotPrices[commodity] = price;
+        // Generate an element ID matching your existing convention:
+        const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
+        const element = document.getElementById(elementId);
+        if (element && price !== null) {
+          element.textContent = `${commodity}: $${price.toFixed(2)}`;
+        }
+      }
+    })
+    .catch(err => console.error('Error fetching market data:', err));
+}
+ 
   
   </script>
 </body>
