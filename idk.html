@@ -493,7 +493,7 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Sample rows -->
+          <!-- Sample static rows -->
           <tr onclick="rowClicked('ALUMINUM')">
             <td>Aluminum</td>
             <td>32,105</td>
@@ -582,6 +582,7 @@
             <td>$0.14</td>
             <td>$0.00</td>
           </tr>
+          <!-- Computed materials rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1001,39 +1002,58 @@
         }
       }
     }
-    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
     
-    // Material-to-Commodity Mapping and Ticker Mapping
-    const baseMarketSnapshotPrices = {
-      "Copper": 9500, "Busheling Steel": 700, "Brass": 7500, "Aluminum": 2200,
-      "Electric Motors": 900, "Insulated Copper Wire": 3600, "Lead": 1500,
-      "HMS Steel #2": 500, "Cu Radiator (50Cu/50Brass)": 5600, "Carbide": 20000, "Stainless Steel": 1600
-    };
-    let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
-    const commodityMapping = {
-      "Copper": "COPPER", "Busheling Steel": "BUSHELING STEEL", "Brass": "BRASS",
-      "Aluminum": "ALUMINUM", "Electric Motors": "ELECTRIC MOTORS", "Insulated Copper Wire": "INSULATED COPPER WIRE",
-      "Lead": "LEAD", "HMS Steel #2": "HMS STEEL #2", "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
-      "Carbide": "CARBIDE", "Stainless Steel": "STAINLESS STEEL"
-    };
-    const tickerMapping = {
-      "Aluminum": "ALUM25", "Electric Motors": "EMOT25", "Insulated Copper Wire": "ICWR25",
-      "Lead": "LEAD25", "HMS Steel #2": "HMS225", "Cu Radiator (50Cu/50Brass)": "CRAD25",
-      "Copper": "COPR25", "Brass": "BRSS25", "Carbide": "CARB25", "Stainless Steel": "STLS25",
-      "Busheling Steel": "BSTE25"
-    };
+    // NEW: Function to update the finished goods inventory table with computed material rows.
+    function updateComputedMaterialsInventory() {
+      const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
+      
+      // Remove any previously added computed rows (if re-running the update)
+      const computedRows = tableBody.querySelectorAll('tr[data-computed="true"]');
+      computedRows.forEach(row => row.remove());
+      
+      // Object mapping category names to their material arrays and pricing functions.
+      const computedCategories = {
+        'Copper': { materials: copperMaterials, pricingFunc: copperPrice },
+        'Aluminum': { materials: aluminumMaterials, pricingFunc: aluminumPrice },
+        'Brass': { materials: brassMaterials, pricingFunc: brassPrice },
+        'Lead': { materials: leadMaterials, pricingFunc: leadPrice },
+        'Stainless Steel': { materials: stainlessMaterials, pricingFunc: stainlessPrice },
+        'Insulated Wire': { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
+        'Misc Product': { materials: miscProductMaterials, pricingFunc: miscProductPrice },
+        'Radiator Product': { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
+      };
     
-    function getCommodityData(material) {
-      const target = commodityMapping[material];
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      for (let row of rows) {
-        if (row.cells[0].textContent.trim().toUpperCase() === target.toUpperCase()) {
-          const finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          return { finishedGoods };
-        }
+      // Iterate through each category and add a row for each material.
+      for (let category in computedCategories) {
+        const { materials, pricingFunc } = computedCategories[category];
+        materials.forEach(material => {
+          const computedPrice = pricingFunc(material);
+          if (computedPrice !== null) {
+            // For simulation, assign arbitrary values for inventory:
+            const wip = Math.floor(Math.random() * 10000) + 5000;        // WIP between 5,000 and 15,000 lbs
+            const finished = Math.floor(Math.random() * 20000) + 10000;    // Finished Goods between 10,000 and 30,000 lbs
+            const total = wip + finished;
+            const avgCost = computedPrice.toFixed(2);  // price per lb computed from formula
+            const totalPurchaseValue = (total * computedPrice).toFixed(2);
+    
+            // Create a new table row for the computed material
+            const row = document.createElement('tr');
+            row.setAttribute('data-computed', 'true');
+            // Optional: Use the rowClicked function when the row is clicked
+            row.onclick = function() { rowClicked(material); };
+    
+            row.innerHTML = `
+              <td>${material} (${category})</td>
+              <td>${wip.toLocaleString()}</td>
+              <td>${finished.toLocaleString()}</td>
+              <td>${total.toLocaleString()}</td>
+              <td>$${avgCost}</td>
+              <td>$${Number(totalPurchaseValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            `;
+            tableBody.appendChild(row);
+          }
+        });
       }
-      return { finishedGoods: 0 };
     }
     
     // Update Trade Options, including grade selection for formula-based materials.
@@ -1168,7 +1188,6 @@
         expirationSelect.appendChild(opt);
       }
     }
-    document.addEventListener('DOMContentLoaded', updateTradeOptions);
     
     // Append a trade log entry
     function appendTradeLogEntry(material, quantity, price, totalCost) {
@@ -1269,7 +1288,6 @@
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
-    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
     
     // Dummy functions for Roll and Close (to be implemented as needed)
     function rollContract() { alert('Roll contract function to be implemented.'); }
@@ -1303,6 +1321,12 @@
         })
         .catch(err => console.error('Error fetching market data:', err));
     }
+    
+    // Event listeners to update various parts on DOM load
+    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    document.addEventListener('DOMContentLoaded', updateComputedMaterialsInventory);
   </script>
 </body>
 </html>
