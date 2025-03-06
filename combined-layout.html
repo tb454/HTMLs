@@ -627,7 +627,6 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <!-- Detailed KPI info goes here -->
           <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
         </div>
         <div class="modal-footer">
@@ -648,7 +647,7 @@
         <div class="modal-body">
           <p>This solution is designed with scalability and security in mind. Key features include:</p>
           <ul>
-            <li><strong>Live Data Integration:</strong> Simulated API calls and WebSocket integration for real-time market data.</li>
+            <li><strong>Live Data Integration:</strong> Data fetched from a backend (via yfinance) now updates market data in real time.</li>
             <li><strong>Data Analytics & KPIs:</strong> Dedicated sections and interactive charts provide actionable insights.</li>
             <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems, ensuring robust performance under high data loads.</li>
             <li><strong>Security Measures:</strong> Token-based authentication, secure API endpoints, and data encryption ensure protection of sensitive information.</li>
@@ -770,7 +769,6 @@
       const kpiCanvas = document.getElementById('kpiChart');
       if(kpiCanvas){
         const ctxKPI = kpiCanvas.getContext('2d');
-        // Initialize with sample KPI data (e.g., trade volume trends)
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
         kpiChartData = [500, 700, 650, 800, 750, 900];
         kpiChart = new Chart(ctxKPI, {
@@ -789,7 +787,7 @@
         });
       }
     });
-  
+    
     /***************************************
      * Update Total Purchase Value for Finished Goods Inventory
      ***************************************/
@@ -844,7 +842,7 @@
       }
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-  
+    
     /***************************************
      * Simulated Trade Section and Functions
      ***************************************/
@@ -1126,256 +1124,17 @@
     }
     
     /***************************************
-     * Update Market Snapshot Prices Every Minute (±10% fluctuation)
+     * Fetch Market Data from the Backend
      ***************************************/
-    function updateMarketSnapshot() {
-      for (let commodity in baseMarketSnapshotPrices) {
-        const basePrice = baseMarketSnapshotPrices[commodity];
-        const randomFactor = (Math.random() * 0.2) - 0.1;
-        const newPrice = basePrice * (1 + randomFactor);
-        marketSnapshotPrices[commodity] = newPrice;
-        
-        const priceElement = document.getElementById(getCommodityId(commodity));
-        if (priceElement) {
-          priceElement.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-      }
-      updateTradeOptions();
-      updateActiveContractsTable();
-    }
-    
-    setInterval(updateMarketSnapshot, 15000);
-    
-    /***************************************
-     * Increase Table Values Every Minute by 10%
-     ***************************************/
-    function increaseTableValues() {
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-  
-      rows.forEach(row => {
-        let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
-        let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-        let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
-  
-        wip *= 1.1;
-        finished *= 1.1;
-        total *= 1.1;
-  
-        row.cells[1].textContent = Math.round(wip).toLocaleString();
-        row.cells[2].textContent = Math.round(finished).toLocaleString();
-        row.cells[3].textContent = Math.round(total).toLocaleString();
-      });
-  
-      updatePurchaseValues();
-    }
-  
-    setInterval(increaseTableValues, 300000);
-    
-    /***************************************
-     * Update Metals Market Overview Every Minute
-     ***************************************/
-    function updateMetalsMarketOverview() {
-      const table = document.getElementById('metals-market-table');
-      if (!table) return;
-      const rows = table.querySelectorAll('tbody tr');
-      
-      rows.forEach(row => {
-        let ticker = row.cells[0].textContent.trim();
-        if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
-          let commodity = "";
-          if (ticker === 'ICWR25') {
-            commodity = "Insulated Copper Wire";
-          } else if (ticker === 'EMOT25') {
-            commodity = "Electric Motors";
-          } else if (ticker === 'BRSS25') {
-            commodity = "Brass";
-          }
-          let elementId = "price-" + commodity.replace(/\s/g, '');
-          let snapshotElem = document.getElementById(elementId);
-          if (snapshotElem) {
-            let priceText = snapshotElem.textContent;
-            let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
-            if (match) {
-              let snapshotPrice = parseFloat(match[1].replace(/,/g, ''));
-              row.cells[2].textContent = snapshotPrice.toFixed(2);
-              if (!row.dataset.initialSnapshotPrice || row.dataset.initialSnapshotPrice === "") {
-                row.dataset.initialSnapshotPrice = snapshotPrice;
-              }
-              let initialPrice = parseFloat(row.dataset.initialSnapshotPrice);
-              let change = snapshotPrice - initialPrice;
-              row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
-            }
-          }
-        } else {
-          let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
-          if (openPrice <= 0) return;
-  
-          let randomFactor = (Math.random() * 0.2) - 0.1;
-          let newLast = openPrice * (1 + randomFactor);
-          newLast = parseFloat(newLast.toFixed(2));
-  
-          row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-          let change = newLast - openPrice;
-          row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
-  
-          let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
-          if (newLast > currentHigh) {
-            row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }
-  
-          let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
-          if (newLast < currentLow) {
-            row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }
-  
-          let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
-          let newVolume = Math.ceil(currentVolume * 1.001);
-          row.cells[7].textContent = newVolume.toLocaleString();
-        }
-      });
-    }
-    setInterval(updateMetalsMarketOverview, 7000);
-    
-    /***************************************
-     * FUTURES TICKER LOGIC
-     ***************************************/
-    let futuresData = [
-      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
-      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
-      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
-      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
-      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
-      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
-      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
-      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
-      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
-      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
-      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
-    ];
-    
-    let futuresGuide = [];
-    
-    function generateTradingGuide() {
-      const signals = ["BUY", "SELL"];
-      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
-      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
-      
-      futuresGuide = futuresData.map(item => {
-        let sig = signals[Math.floor(Math.random() * signals.length)];
-        let entryPct = (Math.random() * 2 + 1) / 100;
-        if (sig === "SELL") entryPct *= -1;
-        let entryPrice = item.last * (1 + entryPct);
-        let stopDiff = Math.abs(entryPrice * 0.05);
-        let profitDiff = Math.abs(entryPrice * 0.1);
-        let stop, takeProfit;
-        if (sig === "BUY") {
-          stop = entryPrice - stopDiff;
-          takeProfit = entryPrice + profitDiff;
-        } else {
-          stop = entryPrice + stopDiff;
-          takeProfit = entryPrice - profitDiff;
-        }
-        let strength = strengths[Math.floor(Math.random() * strengths.length)];
-        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
-    
-        return {
-          contractName: item.contractName,
-          signal: sig,
-          entryDate: "02/20/25",
-          entryPrice: parseFloat(entryPrice.toFixed(2)),
-          stopLoss: parseFloat(stop.toFixed(2)),
-          takeProfit: parseFloat(takeProfit.toFixed(2)),
-          timeHorizon: horizon,
-          strength: strength
-        };
-      });
-    }
-    
-    function renderGuideTicker() {
-      const ticker = document.getElementById("trade-alerts-ticker");
-      let content = "";
-      futuresGuide.forEach(trade => {
-        const signalClass = trade.signal === "BUY" ? "signal-buy" : "signal-sell";
-        const strengthClass = trade.strength.toLowerCase().replace(/\s+/g, '-');
-        content += `<span class="ticker-item">
-                      ${trade.contractName} 
-                      <span class="signal ${signalClass}">${trade.signal}</span> 
-                      ${trade.entryDate} ${trade.entryPrice.toFixed(2)} 
-                      ${trade.stopLoss.toFixed(2)} ${trade.takeProfit.toFixed(2)} 
-                      ${trade.timeHorizon} 
-                      <span class="strength ${strengthClass}">${trade.strength}</span>
-                    </span>`;
-        content += `<span class="ticker-separator"> ---- </span>`;
-      });
-      ticker.innerHTML = content + content;
-    }
-    
-    function updateHiddenJSON() {
-      // Placeholder for any JSON updates if needed.
-    }
-    
-    function fluctuateData() {
-      futuresData.forEach(item => {
-        let pct = (Math.random() * 5 - 2.5) / 100;
-        let oldLast = item.last;
-        let newLast = oldLast * (1 + pct);
-        item.last = parseFloat(newLast.toFixed(2));
-        let diff = item.last - oldLast;
-        item.change = parseFloat(diff.toFixed(2));
-        let highPct = (Math.random() * 3) / 100;
-        let lowPct = (Math.random() * 3) / 100;
-        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
-        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
-        let volPct = (Math.random() * 20 - 10) / 100;
-        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
-      });
-      generateTradingGuide();
-    }
-    
-    function initTicker() {
-      generateTradingGuide();
-      renderGuideTicker();
-      updateHiddenJSON();
-      setInterval(() => {
-        fluctuateData();
-        renderGuideTicker();
-        updateHiddenJSON();
-      }, 5 * 60 * 1000);
-    }
-    
-    window.addEventListener("DOMContentLoaded", initTicker);
-    
-    /***************************************
-     * Modal and Guided Tour Functions
-     ***************************************/
-    function showKPIDetails() {
-      var kpiModal = new bootstrap.Modal(document.getElementById('kpiDetailModal'));
-      kpiModal.show();
-    }
-    
-    function showArchOverview() {
-      var archModal = new bootstrap.Modal(document.getElementById('archModal'));
-      archModal.show();
-    }
-    
-    function startGuidedTour() {
-      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
-      alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
-    }
-    
-    /***************************************
-     * Fetch Simulated Market Data from the Backend
-     ***************************************/
-    // Function to fetch simulated market data from the backend
-    function fetchMarketData() {
+     function fetchMarketData() {
   fetch('http://localhost:5000/api/market-data')
     .then(response => response.json())
     .then(data => {
       // data.marketPrices is an object mapping commodity names to prices.
       for (const commodity in data.marketPrices) {
         const price = data.marketPrices[commodity];
+        // Update the global marketSnapshotPrices variable:
+        marketSnapshotPrices[commodity] = price;
         // Generate an element ID matching your existing convention:
         const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
         const element = document.getElementById(elementId);
@@ -1386,10 +1145,7 @@
     })
     .catch(err => console.error('Error fetching market data:', err));
 }
-
-// Call the function on DOM load and every 15 seconds:
-document.addEventListener('DOMContentLoaded', fetchMarketData);
-setInterval(fetchMarketData, 15000);
+ 
   
   </script>
 </body>
