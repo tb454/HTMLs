@@ -1370,23 +1370,27 @@
      ***************************************/
     // Function to fetch simulated market data from the backend
     function fetchMarketData() {
-      fetch('/api/trade-data')
-        .then(response => response.json())
-        .then(data => {
-          // Example: update the Copper price on the Market Snapshot card
-          const copperPriceElement = document.getElementById('price-Copper');
-          if (copperPriceElement && data.marketPrices.Copper) {
-            copperPriceElement.textContent = `Copper: $${data.marketPrices.Copper.toFixed(2)}`;
-          }
-          // You can similarly update other commodities using data.marketPrices.Aluminum, etc.
-        })
-        .catch(err => console.error('Error fetching market data:', err));
-    }
-    
-    // Call the function every 15 seconds (adjust as needed)
-    setInterval(fetchMarketData, 15000);
-    // Optionally, call it immediately on load
-    document.addEventListener('DOMContentLoaded', fetchMarketData);
+  fetch('http://localhost:5000/api/market-data')
+    .then(response => response.json())
+    .then(data => {
+      // data.marketPrices is an object mapping commodity names to prices.
+      for (const commodity in data.marketPrices) {
+        const price = data.marketPrices[commodity];
+        // Generate an element ID matching your existing convention:
+        const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
+        const element = document.getElementById(elementId);
+        if (element && price !== null) {
+          element.textContent = `${commodity}: $${price.toFixed(2)}`;
+        }
+      }
+    })
+    .catch(err => console.error('Error fetching market data:', err));
+}
+
+// Call the function on DOM load and every 15 seconds:
+document.addEventListener('DOMContentLoaded', fetchMarketData);
+setInterval(fetchMarketData, 15000);
+  
   </script>
 </body>
 </html>
