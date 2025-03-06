@@ -219,6 +219,217 @@
       100% { transform: translateX(-50%); }
     }
   </style>
+  
+  <!-- Material Arrays and Pricing Formulas -->
+  <script>
+    // Base market prices (from yfinance and exchanges)
+    const COMEX_Cu = 4.19;                    // Copper per lb (COMEX)
+    const LME_Al = 1.25;                      // Aluminum per lb (LME)
+    const LME_Lead = 2034 / 2000;             // Lead per lb (~$1.017)
+    const LME_Zinc = 2879 / 2000;             // Zinc per lb (~$1.44)
+    const LME_Ni = 15675 / 2000;              // Nickel per lb (~$7.84)
+
+    // Material Arrays (using your provided lists)
+    const copperMaterials = [
+      "Barley",      // Cu BB
+      "#1",          // Berry & Candy
+      "#2",          // Birch & Cliff
+      "#3"           // Sheet Copper
+    ];
+    const aluminumMaterials = [
+      "AL6061_NewBareExtrusion",
+      "AL6061_ClipPlatePipe",
+      "AL6063_Secondary",
+      "AL6063_OldExtrusion",
+      "AL6063_Extrusion10/10",
+      "AL_PAS_Baled",
+      "AL_Cast_Clean",
+      "AL_RADS_CleanBaled",
+      "AL_RADS_DirtyBaled",
+      "AL_Sheet_CleanBaled",
+      "AL_WheelAuto_Clean",
+      "AL_WheelChrome_Clean",
+      "TruckWheel_Clean",
+      "AL_Wire_BareCATV",
+      "AL_Wire_NeopreneACSR",
+      "AL_Wire_ECPrepared",
+      "AL_MLC_Prepared"
+    ];
+    const brassMaterials = [
+      "Brass_Hard",
+      "Brass_Red_Ebony",
+      "Brass_Red_Semi",
+      "Brass_Shaving_AlBronze",
+      "Brass_Shaving_BrassRed",
+      "Brass_Shell",
+      "Brass_Special",
+      "Brass_YellowRegular"
+    ];
+    const leadMaterials = [
+      "Lead_Clean",
+      "Lead_Range"
+    ];
+    const stainlessMaterials = [
+      "SS304",
+      "SS316"
+    ];
+    const eScrapMaterials = [
+      "E_Scrap_Board"
+    ];
+    const insulatedWireMaterials = [
+      "ICW_LowGrade_ChristmasLights",
+      "ICW_LowGrade_ComputerWire25",
+      "ICW_LowGrade_CuCATV",
+      "ICW_LowGrade_ExtCords35Up",
+      "ICW_LowGrade_MixedWire40Up",
+      "ICW1_Heliax57_OpenEyeBaled",
+      "ICW1_MCM85HG",
+      "ICW1_Romex65_NoWeatherProof",
+      "ICW1_THHN80",
+      "ICW2_50Cat5TelWire",
+      "ICW2_HarnessWireNoFuseBoxes",
+      "ICW2_BX_Cable_AL",
+      "ICW2_BX_Cable_FE24"
+    ];
+    const miscProductMaterials = [
+      "Ballast_Electronic",
+      "Ballast_Regular",
+      "BatteryAuto_PbAcid",
+      "BatterySteelCase_Industrial",
+      "Compressor_SealedUnitNoCastIron",
+      "EMotorLowGrade_CeilingFanMotors",
+      "EMotorMix_NoPumpsPowerToolsFans",
+      "EMotorLarge_LessThan1000lbs",
+      "Transformer_AluLargeOnly",
+      "TransformerCu_AlCu",
+      "TransformerCu_SmallPalmSize",
+      "TransformerCu_MediumOver200lbs",
+      "TransformerCu_Large",
+      "Zinc_DieCast"
+    ];
+    const radiatorProductMaterials = [
+      "ACReefer_CleanTalkBaled",
+      "ACReefer_CleanUnbaled",
+      "ACReefer_DirtyTalkBaled",
+      "ACReefer_DirtyUnbaled",
+      "Radiator_CleanCar",
+      "CuBkg_ACReeferEnd"
+    ];
+
+    // Pricing Formulas (as provided)
+    function copperPrice(grade) {
+      switch(grade) {
+        case 'Barley': return COMEX_Cu * 0.94;
+        case '#1': return COMEX_Cu * 0.91;
+        case '#2': return COMEX_Cu * 0.85;
+        case '#3': return COMEX_Cu * 0.83;
+        default: return null;
+      }
+    }
+    function aluminumPrice(product) {
+      switch(product) {
+        case 'AL6061_NewBareExtrusion': return LME_Al * 0.84;
+        case 'AL6061_ClipPlatePipe': return LME_Al * 0.78;
+        case 'AL6063_Secondary': return LME_Al * 0.78;
+        case 'AL6063_OldExtrusion': return LME_Al * 0.95;
+        case 'AL6063_Extrusion10/10': return LME_Al * 0.85;
+        case 'AL_PAS_Baled': return LME_Al * 0.82;
+        case 'AL_Cast_Clean': return LME_Al * 0.72;
+        case 'AL_RADS_CleanBaled': return LME_Al * 0.67;
+        case 'AL_RADS_DirtyBaled': return LME_Al * 0.46;
+        case 'AL_Sheet_CleanBaled': return LME_Al * 0.75;
+        case 'AL_WheelAuto_Clean': return LME_Al * 0.93;
+        case 'AL_WheelChrome_Clean': return LME_Al * 0.80;
+        case 'TruckWheel_Clean': return LME_Al * 0.72;
+        case 'AL_Wire_BareCATV': return LME_Al * 0.43;
+        case 'AL_Wire_NeopreneACSR': return LME_Al * 0.54;
+        case 'AL_Wire_ECPrepared': return LME_Al * 1.03;
+        case 'AL_MLC_Prepared': return LME_Al * 0.84;
+        default: return null;
+      }
+    }
+    function brassPrice(product) {
+      switch(product) {
+        case 'Brass_Hard': return COMEX_Cu * 0.81;
+        case 'Brass_Red_Ebony': return COMEX_Cu * 0.77;
+        case 'Brass_Red_Semi': return COMEX_Cu * 0.72;
+        case 'Brass_Shaving_AlBronze': return COMEX_Cu * 0.57;
+        case 'Brass_Shaving_BrassRed': return COMEX_Cu * 0.61;
+        case 'Brass_Shell': return COMEX_Cu * 0.60;
+        case 'Brass_Special': return COMEX_Cu * 0.64;
+        case 'Brass_YellowRegular': return COMEX_Cu * 0.61;
+        default: return null;
+      }
+    }
+    function leadPrice(product) {
+      switch(product) {
+        case 'Lead_Clean': return LME_Lead * 0.718;
+        case 'Lead_Range': return LME_Lead * 0.728;
+        default: return null;
+      }
+    }
+    function stainlessPrice(product) {
+      switch(product) {
+        case 'SS304': return LME_Ni * 0.0638;
+        case 'SS316': return LME_Ni * 0.1174;
+        default: return null;
+      }
+    }
+    function eScrapPrice(goldContent, goldSpot, silverContent, silverSpot, copperContent, processingFee) {
+      return (goldContent * goldSpot) +
+             (silverContent * silverSpot) +
+             (copperContent * COMEX_Cu) -
+             processingFee;
+    }
+    function insulatedWirePrice(product) {
+      switch(product) {
+        case 'ICW_LowGrade_ChristmasLights': return LME_Al * 0.528;
+        case 'ICW_LowGrade_ComputerWire25': return LME_Al * 0.448;
+        case 'ICW_LowGrade_CuCATV': return LME_Al * 1.008;
+        case 'ICW_LowGrade_ExtCords35Up': return LME_Al * 0.92;
+        case 'ICW_LowGrade_MixedWire40Up': return LME_Al * 1.08;
+        case 'ICW1_Heliax57_OpenEyeBaled': return LME_Al * 1.536;
+        case 'ICW1_MCM85HG': return LME_Al * 2.536;
+        case 'ICW1_Romex65_NoWeatherProof': return LME_Al * 1.904;
+        case 'ICW1_THHN80': return LME_Al * 2.36;
+        case 'ICW2_50Cat5TelWire': return LME_Al * 1.384;
+        case 'ICW2_HarnessWireNoFuseBoxes': return LME_Al * 1.408;
+        case 'ICW2_BX_Cable_AL': return LME_Al * 1.648;
+        case 'ICW2_BX_Cable_FE24': return LME_Al * 0.6;
+        default: return null;
+      }
+    }
+    function miscProductPrice(product) {
+      switch(product) {
+        case 'Ballast_Electronic': return LME_Al * 0.12;
+        case 'Ballast_Regular': return LME_Al * 0.216;
+        case 'BatteryAuto_PbAcid': return LME_Al * 0.216;
+        case 'BatterySteelCase_Industrial': return LME_Al * 0.192;
+        case 'Compressor_SealedUnitNoCastIron': return LME_Al * 0.264;
+        case 'EMotorLowGrade_CeilingFanMotors': return LME_Al * 0.144;
+        case 'EMotorMix_NoPumpsPowerToolsFans': return LME_Al * 0.344;
+        case 'EMotorLarge_LessThan1000lbs': return LME_Al * 0.312;
+        case 'Transformer_AluLargeOnly': return LME_Al * 0.176;
+        case 'TransformerCu_AlCu': return LME_Al * 0.28;
+        case 'TransformerCu_SmallPalmSize': return LME_Al * 0.56;
+        case 'TransformerCu_MediumOver200lbs': return LME_Al * 0.592;
+        case 'TransformerCu_Large': return LME_Al * 0.624;
+        case 'Zinc_DieCast': return LME_Zinc * 0.5903;
+        default: return null;
+      }
+    }
+    function radiatorProductPrice(product) {
+      switch(product) {
+        case 'ACReefer_CleanTalkBaled': return LME_Al * 1.608;
+        case 'ACReefer_CleanUnbaled': return LME_Al * 1.592;
+        case 'ACReefer_DirtyTalkBaled': return LME_Al * 1.496;
+        case 'ACReefer_DirtyUnbaled': return LME_Al * 1.48;
+        case 'Radiator_CleanCar': return LME_Al * 1.984;
+        case 'CuBkg_ACReeferEnd': return LME_Al * 1.008;
+        default: return null;
+      }
+    }
+  </script>
 </head>
 <body>
   <div class="container">
@@ -282,6 +493,7 @@
           </tr>
         </thead>
         <tbody>
+          <!-- Sample rows -->
           <tr onclick="rowClicked('ALUMINUM')">
             <td>Aluminum</td>
             <td>32,105</td>
@@ -384,7 +596,7 @@
       </table>
     </section>
     
-    <!-- Simulated Trade Section (One Line) -->
+    <!-- Simulated Trade Section -->
     <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
       <div class="d-flex align-items-center flex-wrap gap-3">
@@ -403,6 +615,11 @@
             <option value="Carbide">Carbide</option>
             <option value="Stainless Steel">Stainless Steel</option>
           </select>
+        </div>
+        <!-- Grade Dropdown (only shown for materials that require formula pricing) -->
+        <div class="d-flex align-items-center" id="grade-selection" style="display:none;">
+          <label for="create-grade" class="me-2">Grade:</label>
+          <select id="create-grade" onchange="updateTradeOptions()"></select>
         </div>
         <div class="d-flex align-items-center">
           <label for="create-contracts" class="me-2">Creatable Contracts:</label>
@@ -603,7 +820,7 @@
       <div class="section-title">Trade Alerts</div>
       <div class="ticker-wrapper">
         <div id="trade-alerts-ticker" class="ticker">
-          <!-- Ticker content will be rendered here by JavaScript -->
+          <!-- Ticker content rendered by JavaScript -->
         </div>
       </div>
     </section>
@@ -627,7 +844,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
+          <p>This section provides a detailed analysis of KPIs such as monthly revenue, cost savings, and trade volume trends.</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -647,10 +864,10 @@
         <div class="modal-body">
           <p>This solution is designed with scalability and security in mind. Key features include:</p>
           <ul>
-            <li><strong>Live Data Integration:</strong> Data fetched from a backend (via yfinance) now updates market data in real time.</li>
-            <li><strong>Data Analytics & KPIs:</strong> Dedicated sections and interactive charts provide actionable insights.</li>
-            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems, ensuring robust performance under high data loads.</li>
-            <li><strong>Security Measures:</strong> Token-based authentication, secure API endpoints, and data encryption ensure protection of sensitive information.</li>
+            <li><strong>Live Data Integration:</strong> Data is fetched via yfinance for real-time market updates.</li>
+            <li><strong>Data Analytics & KPIs:</strong> Interactive charts provide actionable insights.</li>
+            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems.</li>
+            <li><strong>Security Measures:</strong> Secure API endpoints and data encryption.</li>
           </ul>
           <p>Further details can be discussed during the presentation.</p>
         </div>
@@ -665,55 +882,31 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
+  <!-- Main Application Script -->
   <script>
-    // Accent color for charts and highlights
+    // Accent color for charts
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
     
-    // Global variables for Active Contracts Chart
+    // Global variables for charts
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
-    
-    // Global variables for Finished Goods Chart
     let finishedGoodsChart;
     let finishedGoodsChartLabels = [];
     let finishedGoodsChartData = [];
-    
-    // Global variables for KPI Chart
     let kpiChart;
     let kpiChartLabels = [];
     let kpiChartData = [];
   
-    // Initialize Trading Graph using Chart.js (if chart exists)
-    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
-    if(ctx){
-      const tradingChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-          datasets: [{
-            label: 'Trading Data',
-            data: [100, 150, 130, 170, 160, 180],
-            borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
-            fill: true,
-            tension: 0.1
-          }]
-        },
-        options: {
-          scales: { y: { beginAtZero: true } }
-        }
-      });
-    }
-    
-    // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
+    // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
+      // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
-      if(activeContractsCanvas){
+      if(activeContractsCanvas) {
         const ctxActive = activeContractsCanvas.getContext('2d');
         activeContractsChart = new Chart(ctxActive, {
           type: 'line',
@@ -729,20 +922,14 @@
             }]
           },
           options: {
-            scales: {
-              y: { 
-                beginAtZero: true,
-                max: 10000,
-                ticks: { stepSize: 2000 }
-              }
-            }
+            scales: { y: { beginAtZero: true, max: 10000, ticks: { stepSize: 2000 } } }
           }
         });
       }
       
-      // Initialize Finished Goods Chart
+      // Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
-      if(finishedCanvas){
+      if(finishedCanvas) {
         const ctxFinished = finishedCanvas.getContext('2d');
         finishedGoodsChart = new Chart(ctxFinished, {
           type: 'line',
@@ -757,17 +944,13 @@
               tension: 0.1
             }]
           },
-          options: {
-            scales: {
-              y: { beginAtZero: true, max: 300 }
-            }
-          }
+          options: { scales: { y: { beginAtZero: true, max: 300 } } }
         });
       }
       
-      // Initialize KPI Chart with simulated data
+      // KPI Chart
       const kpiCanvas = document.getElementById('kpiChart');
-      if(kpiCanvas){
+      if(kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
         kpiChartData = [500, 700, 650, 800, 750, 900];
@@ -775,22 +958,14 @@
           type: 'bar',
           data: {
             labels: kpiChartLabels,
-            datasets: [{
-              label: 'Monthly Trade Volume',
-              data: kpiChartData,
-              backgroundColor: accentColor
-            }]
+            datasets: [{ label: 'Monthly Trade Volume', data: kpiChartData, backgroundColor: accentColor }]
           },
-          options: {
-            scales: { y: { beginAtZero: true } }
-          }
+          options: { scales: { y: { beginAtZero: true } } }
         });
       }
     });
     
-    /***************************************
-     * Update Total Purchase Value for Finished Goods Inventory
-     ***************************************/
+    // Update Finished Goods Inventory Purchase Values
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -803,12 +978,7 @@
         const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
         const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
         const purchaseValue = totalLbs * avgCost;
-        
-        sumWIP += wip;
-        sumFinished += finished;
-        sumTotal += totalLbs;
-        sumPurchase += purchaseValue;
-        
+        sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
         cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       });
       
@@ -817,336 +987,322 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card Info and Chart
+      // Update Finished Goods Card
       if(document.getElementById('finishedGoodsInfo')){
-        let contractsAvailable = Math.floor(sumFinished / 20000);
-        let totalTons = sumTotal / 20000;
-        document.getElementById('finishedGoodsInfo').innerHTML = `
-          <div>${contractsAvailable} Contracts Available</div>
-          <div>~${totalTons.toFixed(1)} Total Tons</div>
-        `;
-        
+        const contractsAvailable = Math.floor(sumFinished / 20000);
+        const totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
         if (finishedGoodsChart) {
           const now = new Date().toLocaleTimeString();
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
-          
-          // Limit history to last 10 data points
-          if (finishedGoodsChartData.length > 10) {
-            finishedGoodsChartLabels.shift();
-            finishedGoodsChartData.shift();
-          }
-          
+          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
           finishedGoodsChart.update();
         }
       }
     }
     document.addEventListener('DOMContentLoaded', updatePurchaseValues);
     
-    /***************************************
-     * Simulated Trade Section and Functions
-     ***************************************/
+    // Material-to-Commodity Mapping and Ticker Mapping
     const baseMarketSnapshotPrices = {
-      "Copper": 9500,
-      "Busheling Steel": 700,
-      "Brass": 7500,
-      "Aluminum": 2200,
-      "Electric Motors": 900,
-      "Insulated Copper Wire": 3600,
-      "Lead": 1500,
-      "HMS Steel #2": 500,
-      "Cu Radiator (50Cu/50Brass)": 5600,
-      "Carbide": 20000,
-      "Stainless Steel": 1600
+      "Copper": 9500, "Busheling Steel": 700, "Brass": 7500, "Aluminum": 2200,
+      "Electric Motors": 900, "Insulated Copper Wire": 3600, "Lead": 1500,
+      "HMS Steel #2": 500, "Cu Radiator (50Cu/50Brass)": 5600, "Carbide": 20000, "Stainless Steel": 1600
     };
-  
     let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
-  
-    function getCommodityId(commodity) {
-      return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
-    }
-  
     const commodityMapping = {
-      "Copper": "COPPER",
-      "Busheling Steel": "BUSHELING STEEL",
-      "Brass": "BRASS",
-      "Aluminum": "ALUMINUM",
-      "Electric Motors": "ELECTRIC MOTORS",
-      "Insulated Copper Wire": "INSULATED COPPER WIRE",
-      "Lead": "LEAD",
-      "HMS Steel #2": "HMS STEEL #2",
-      "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
-      "Carbide": "CARBIDE",
-      "Stainless Steel": "STAINLESS STEEL"
+      "Copper": "COPPER", "Busheling Steel": "BUSHELING STEEL", "Brass": "BRASS",
+      "Aluminum": "ALUMINUM", "Electric Motors": "ELECTRIC MOTORS", "Insulated Copper Wire": "INSULATED COPPER WIRE",
+      "Lead": "LEAD", "HMS Steel #2": "HMS STEEL #2", "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
+      "Carbide": "CARBIDE", "Stainless Steel": "STAINLESS STEEL"
     };
-
     const tickerMapping = {
-      "Aluminum": "ALUM25",
-      "Electric Motors": "EMOT25",
-      "Insulated Copper Wire": "ICWR25",
-      "Lead": "LEAD25",
-      "HMS Steel #2": "HMS225",
-      "Cu Radiator (50Cu/50Brass)": "CRAD25",
-      "Copper": "COPR25",
-      "Brass": "BRSS25",
-      "Carbide": "CARB25",
-      "Stainless Steel": "STLS25",
+      "Aluminum": "ALUM25", "Electric Motors": "EMOT25", "Insulated Copper Wire": "ICWR25",
+      "Lead": "LEAD25", "HMS Steel #2": "HMS225", "Cu Radiator (50Cu/50Brass)": "CRAD25",
+      "Copper": "COPR25", "Brass": "BRSS25", "Carbide": "CARB25", "Stainless Steel": "STLS25",
       "Busheling Steel": "BSTE25"
     };
-  
+    
     function getCommodityData(material) {
       const target = commodityMapping[material];
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
-        const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
-        if (rowMaterial === target.toUpperCase()) {
-          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
-          const finishedGoods = parseFloat(finishedGoodsText) || 0;
+        if (row.cells[0].textContent.trim().toUpperCase() === target.toUpperCase()) {
+          const finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
           return { finishedGoods };
         }
       }
       return { finishedGoods: 0 };
     }
-  
+    
+    // Update Trade Options, including grade selection for formula-based materials.
     function updateTradeOptions() {
-      const materialSelect = document.getElementById('create-material');
-      const material = materialSelect.value;
+      const material = document.getElementById('create-material').value;
+      const gradeSelect = document.getElementById('create-grade');
+      
+      // Show grade dropdown only for formula-driven materials
+      if(["Aluminum", "Copper", "Brass", "Lead", "Stainless Steel", "Insulated Copper Wire"].includes(material)) {
+        document.getElementById('grade-selection').style.display = 'flex';
+        gradeSelect.innerHTML = '';
+        if(material === "Aluminum"){
+          aluminumMaterials.forEach(product => {
+            let opt = document.createElement('option');
+            opt.value = product;
+            opt.textContent = product.replace(/_/g, ' ');
+            gradeSelect.appendChild(opt);
+          });
+        } else if(material === "Copper"){
+          copperMaterials.forEach(grade => {
+            let opt = document.createElement('option');
+            opt.value = grade;
+            opt.textContent = grade;
+            gradeSelect.appendChild(opt);
+          });
+        } else if(material === "Brass"){
+          brassMaterials.forEach(product => {
+            let opt = document.createElement('option');
+            opt.value = product;
+            opt.textContent = product.replace(/_/g, ' ');
+            gradeSelect.appendChild(opt);
+          });
+        } else if(material === "Lead"){
+          leadMaterials.forEach(product => {
+            let opt = document.createElement('option');
+            opt.value = product;
+            opt.textContent = product.replace(/_/g, ' ');
+            gradeSelect.appendChild(opt);
+          });
+        } else if(material === "Stainless Steel"){
+          stainlessMaterials.forEach(product => {
+            let opt = document.createElement('option');
+            opt.value = product;
+            opt.textContent = product;
+            gradeSelect.appendChild(opt);
+          });
+        } else if(material === "Insulated Copper Wire"){
+          insulatedWireMaterials.forEach(product => {
+            let opt = document.createElement('option');
+            opt.value = product;
+            opt.textContent = product.replace(/_/g, ' ');
+            gradeSelect.appendChild(opt);
+          });
+        }
+      } else {
+        document.getElementById('grade-selection').style.display = 'none';
+      }
+      
+      // Compute base price per ton
+      let basePricePerTon;
+      if(document.getElementById('grade-selection').style.display === 'flex') {
+        const selectedGrade = gradeSelect.value;
+        if(material === "Aluminum") {
+          basePricePerTon = aluminumPrice(selectedGrade) * 1000;
+        } else if(material === "Copper") {
+          basePricePerTon = copperPrice(selectedGrade) * 1000;
+        } else if(material === "Brass") {
+          basePricePerTon = brassPrice(selectedGrade) * 1000;
+        } else if(material === "Lead") {
+          basePricePerTon = leadPrice(selectedGrade) * 1000;
+        } else if(material === "Stainless Steel") {
+          basePricePerTon = stainlessPrice(selectedGrade) * 1000;
+        } else if(material === "Insulated Copper Wire") {
+          basePricePerTon = insulatedWirePrice(selectedGrade) * 1000;
+        }
+      } else {
+        basePricePerTon = marketSnapshotPrices[material] || 0;
+      }
+      
+      // Update available contracts based on finished goods (contract size = 20000 lbs)
       const data = getCommodityData(material);
-      
-      // Assume contract size is 10 tons = 20,000 lbs.
-      const contractSize = 20000;
-      const availableContracts = Math.floor(data.finishedGoods / contractSize);
-      
+      const availableContracts = Math.floor(data.finishedGoods / 20000);
       const contractsSelect = document.getElementById('create-contracts');
       contractsSelect.innerHTML = '';
-      if (availableContracts < 1) {
-        const option = document.createElement('option');
-        option.value = 0;
-        option.textContent = "0";
-        contractsSelect.appendChild(option);
+      if(availableContracts < 1){
+        let opt = document.createElement('option');
+        opt.value = 0;
+        opt.textContent = "0";
+        contractsSelect.appendChild(opt);
       } else {
-        for (let i = 1; i <= availableContracts; i++) {
-          const option = document.createElement('option');
-          option.value = i;
-          option.textContent = i;
-          contractsSelect.appendChild(option);
+        for(let i = 1; i <= availableContracts; i++){
+          let opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = i;
+          contractsSelect.appendChild(opt);
         }
       }
       
-      const basePricePerTon = marketSnapshotPrices[material] || 0;
-      
+      // Update price options with multipliers
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
       multipliers.forEach(mult => {
-        const option = document.createElement('option');
-        const price = basePricePerTon * mult;
-        option.value = price.toFixed(2);
-        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        priceSelect.appendChild(option);
+        let opt = document.createElement('option');
+        let price = basePricePerTon * mult;
+        opt.value = price.toFixed(2);
+        opt.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(opt);
       });
       
+      // Update cost to create
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
-      const costToCreate = basePricePerTon * 0.001;
-      const costOption = document.createElement('option');
-      costOption.value = costToCreate.toFixed(2);
-      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      costSelect.appendChild(costOption);
+      let costToCreate = basePricePerTon * 0.001;
+      let costOpt = document.createElement('option');
+      costOpt.value = costToCreate.toFixed(2);
+      costOpt.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOpt);
       
+      // Update expiration dates (next 5 months)
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
-      for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
-        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = expDate.getDate().toString().padStart(2, '0');
-        const year = expDate.getFullYear();
-        const dateStr = month + '/' + day + '/' + year;
-        const option = document.createElement('option');
-        option.value = dateStr;
-        option.textContent = dateStr;
-        expirationSelect.appendChild(option);
+      for(let i = 1; i <= 5; i++){
+        let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        let month = (expDate.getMonth()+1).toString().padStart(2, '0');
+        let day = expDate.getDate().toString().padStart(2, '0');
+        let dateStr = month + '/' + day + '/' + expDate.getFullYear();
+        let opt = document.createElement('option');
+        opt.value = dateStr;
+        opt.textContent = dateStr;
+        expirationSelect.appendChild(opt);
       }
     }
-    
     document.addEventListener('DOMContentLoaded', updateTradeOptions);
     
+    // Append a trade log entry
     function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = 
-        `<td>${tradeTime}</td>
-         <td>${material}</td>
-         <td>${quantity}</td>
-         <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-         <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
+      let newRow = document.createElement('tr');
+      newRow.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td><td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
       tableBody.appendChild(newRow);
     }
     
+    // Add an active contract entry
     function addActiveContract(commodity, expiration, salePrice) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-      const priceDifference = salePrice - snapshotPrice;
+      const priceDiff = salePrice - snapshotPrice;
       const contractSize = 10;
       const totalContractValue = contractSize * snapshotPrice;
       const marginRequirement = totalContractValue * 0.07;
-      
       const expDate = new Date(expiration);
-      const expFormatted = new Date(expiration).toLocaleString('default', { month: 'short' }) +
-                           " '" + expDate.getFullYear().toString().slice(-2);
-      
+      const expFormatted = expDate.toLocaleString('default', { month: 'short' }) + " '" + expDate.getFullYear().toString().slice(-2);
       const ticker = tickerMapping[commodity] || '';
-      
-      const newRow = document.createElement('tr');
+      let newRow = document.createElement('tr');
       newRow.dataset.commodity = commodity;
       newRow.dataset.salePrice = salePrice;
-      
-      newRow.innerHTML = 
-        `<td>${ticker}</td>
-         <td>${commodity} (${expFormatted})</td>
-         <td>${salePrice.toFixed(2)}</td>
-         <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
-         <td>${expiration}</td>
-         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-         <td>
-           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
-           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
-         </td>`;
+      newRow.innerHTML = `<td>${ticker}</td><td>${commodity} (${expFormatted})</td><td>${salePrice.toFixed(2)}</td><td>${priceDiff>=0?'+':''}${priceDiff.toFixed(2)}</td><td>${expiration}</td><td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td>
+        <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+        <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+      </td>`;
       tableBody.appendChild(newRow);
     }
     
+    // Update active contracts table totals and chart
     function updateActiveContractsTable() {
       const table = document.getElementById('active-contracts-table');
       const rows = table.querySelectorAll('tbody tr');
       let totalContracts = rows.length;
-      let totalMarginRequirement = 0;
-      let totalChange = 0;
+      let totalMargin = 0, totalChange = 0;
       const contractSize = 10;
-      
       rows.forEach(row => {
         const commodity = row.dataset.commodity;
         const salePrice = parseFloat(row.dataset.salePrice);
         const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-        const priceDifference = salePrice - snapshotPrice;
-        totalChange += priceDifference;
-        
-        row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
-        
-        const totalContractValue = contractSize * snapshotPrice;
-        const marginRequirement = totalContractValue * 0.07;
-        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        totalMarginRequirement += marginRequirement;
+        const diff = salePrice - snapshotPrice;
+        totalChange += diff;
+        row.cells[3].textContent = (diff>=0?'+':'') + diff.toFixed(2);
+        const margin = (contractSize * snapshotPrice) * 0.07;
+        row.cells[5].textContent = '$' + margin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        totalMargin += margin;
       });
-      
       document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMargin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
       document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
-      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      
-      const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMargin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      const totalChangeText = (totalChange>=0?'+':'') + totalChange.toFixed(2);
       document.getElementById('total-change').textContent = totalChangeText;
       document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
       
       const now = new Date();
-      const label = now.toLocaleTimeString();
       activeContractsChangeHistory.push(totalChange);
-      activeContractsChartLabels.push(label);
-      
-      if (activeContractsChangeHistory.length > 10) {
+      activeContractsChartLabels.push(now.toLocaleTimeString());
+      if(activeContractsChangeHistory.length > 10) {
         activeContractsChangeHistory.shift();
         activeContractsChartLabels.shift();
       }
-      
-      if (activeContractsChart) {
-        activeContractsChart.update();
-      }
+      if(activeContractsChart) activeContractsChart.update();
     }
     
+    // Simulate a trade execution
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const chosenPrice = parseFloat(document.getElementById('create-price').value);
       const chosenCost = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
-      const contractWeightLbs = 20000;
+      const contractWeight = 20000;
       
-      for (let i = 0; i < numTrades; i++) {
+      for(let i=0; i<numTrades; i++){
         const quantity = 10;
         const totalCost = quantity * chosenPrice;
-        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
+        appendTradeLogEntry(material + ' (Trade #' + (i+1) + ')', quantity, chosenPrice, totalCost);
         addActiveContract(material, expiration, chosenPrice);
       }
       
+      // Update finished goods inventory for the traded material
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
-      for (let row of rows) {
-        if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
+      rows.forEach(row => {
+        if(row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()){
           let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
-          row.cells[2].textContent = updatedFinished.toLocaleString();
-          
+          row.cells[2].textContent = (currentFinished - numTrades * contractWeight).toLocaleString();
           let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
-          let updatedTotal = currentTotal - (numTrades * contractWeightLbs);
-          row.cells[3].textContent = updatedTotal.toLocaleString();
+          row.cells[3].textContent = (currentTotal - numTrades * contractWeight).toLocaleString();
         }
-      }
+      });
       
       updateActiveContractsTable();
       updatePurchaseValues();
       
       alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
     }
-    
     document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
     
-    function logout() {
-      alert('Logging out...');
-    }
+    // Dummy functions for Roll and Close (to be implemented as needed)
+    function rollContract() { alert('Roll contract function to be implemented.'); }
+    function closeContract() { alert('Close contract function to be implemented.'); }
+    
+    function logout() { alert('Logging out...'); }
     function cardClicked(cardName) {
-      if (cardName === "Active Contracts") {
-        const contracts = document.getElementById('activeContractsCount').textContent;
-        const margin = document.getElementById('activeContractsMarginTotal').textContent;
-        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      if(cardName === "Active Contracts"){
+        alert(cardName + " card clicked!\n" + document.getElementById('activeContractsCount').textContent + " Secured\nMargin: " + document.getElementById('activeContractsMarginTotal').textContent);
       } else {
         alert(cardName + " card clicked!");
       }
     }
-    function rowClicked(itemName) {
-      alert('Row for ' + itemName + ' clicked!');
-    }
-    function createFuturesContract(material, contractName) {
-      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
+    function rowClicked(itemName) { alert('Row for ' + itemName + ' clicked!'); }
+    function createFuturesContract(material, contractName) { alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')'); }
     
-    /***************************************
-     * Fetch Market Data from the Backend
-     ***************************************/
-     function fetchMarketData() {
-  fetch('http://localhost:5000/api/market-data')
-    .then(response => response.json())
-    .then(data => {
-      // data.marketPrices is an object mapping commodity names to prices.
-      for (const commodity in data.marketPrices) {
-        const price = data.marketPrices[commodity];
-        // Update the global marketSnapshotPrices variable:
-        marketSnapshotPrices[commodity] = price;
-        // Generate an element ID matching your existing convention:
-        const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
-        const element = document.getElementById(elementId);
-        if (element && price !== null) {
-          element.textContent = `${commodity}: $${price.toFixed(2)}`;
-        }
-      }
-    })
-    .catch(err => console.error('Error fetching market data:', err));
-}
- 
-  
+    // Fetch market data from backend (yfinance)
+    function fetchMarketData() {
+      fetch('http://localhost:5000/api/market-data')
+        .then(response => response.json())
+        .then(data => {
+          for(const commodity in data.marketPrices) {
+            const price = data.marketPrices[commodity];
+            marketSnapshotPrices[commodity] = price;
+            const elementId = "price-" + commodity.replace(/[^a-zA-Z0-9]/g, '');
+            const element = document.getElementById(elementId);
+            if(element && price !== null){
+              element.textContent = `${commodity}: $${price.toFixed(2)}`;
+            }
+          }
+        })
+        .catch(err => console.error('Error fetching market data:', err));
+    }
   </script>
 </body>
 </html>
