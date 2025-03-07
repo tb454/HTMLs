@@ -620,8 +620,8 @@
     // Add a new active contract entry.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Generate ticker using the hidden scrap material reference.
-      const ticker = getTickerFromReference(material);
+      // Create a dummy ticker for demonstration purposes.
+      const ticker = material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
       // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
@@ -666,7 +666,7 @@
         const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
         if (cellMaterial.includes(material.toLowerCase())) {
           let finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          let total = parseFloat(row.cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
           finishedGoods = Math.max(finishedGoods - reduction, 0);
           total = Math.max(total - reduction, 0);
           row.cells[2].textContent = finishedGoods.toLocaleString();
@@ -1273,129 +1273,53 @@
     }
     
     // ----------------------------
-    // Trade Log, Active Contracts & Inventory Update Functions (duplicate simulateTrade function removed)
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    // Append a new entry to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      // For a 10-ton load, total quantity is 10 * numTrades (tons)
+      const totalQuantity = 10 * numTrades;
+      // Total contract value = tradePrice per ton * 10 tons * number of contracts
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      // Record in Trade Log
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      // Add Active Contract entry
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
+      reduceInventory(material, numTrades * 20000);
+      // Update purchase values to reflect inventory changes
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
+    }
+    
     // ----------------------------
     // On DOMContentLoaded: Initialize Dropdowns and Inventory
+    // ----------------------------
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
       updatePurchaseValues();
     });
-  </script>
-  
-  <!-- Hidden Scrap Material Codes Reference and Ticker Generator -->
-  <script>
-    // Hidden reference object (not rendered) to be used for ticker generation
-    const scrapMaterialCodes = {
-      copper: {
-        "CUB": "Barley (Cu BB)",
-        "CU1": "#1 (Berry & Candy)",
-        "CU2": "#2 (Birch & Cliff)",
-        "CU3": "#3 (Sheet Copper)"
-      },
-      aluminum: {
-        "AL61-NBE": "AL6061 New Bare Extrusion",
-        "AL61-CPP": "AL6061 Clip Plate Pipe",
-        "AL63-SEC": "AL6063 Secondary",
-        "AL63-OE": "AL6063 Old Extrusion",
-        "AL63-E10": "AL6063 Extrusion 10/10",
-        "AL-PAS": "AL PAS Baled",
-        "AL-C": "AL Cast Clean",
-        "AL-RS-CB": "AL RADS Clean Baled",
-        "AL-RS-DB": "AL RADS Dirty Baled",
-        "AL-ST": "AL Sheet Clean Baled",
-        "AL-AUTO": "AL Wheel Auto Clean",
-        "AL-WH-CH": "AL Wheel Chrome Clean",
-        "AL-TRUCKWH": "Truck Wheel Clean",
-        "AL-WIRE-CATV": "AL Wire Bare CATV",
-        "AL-WIRE-NEO": "AL Wire Neoprene ACSR",
-        "AL-WIRE-EC": "AL Wire EC Prepared",
-        "AL-MLC": "AL MLC Prepared"
-      },
-      brass: {
-        "BR-H": "Brass Hard",
-        "BR-R": "Brass Red Ebony",
-        "BR-RS": "Brass Red Semi",
-        "BR-SH-AL": "Brass Shaving Al Bronze",
-        "BR-SH-R": "Brass Shaving Brass Red",
-        "BR-SHELL": "Brass Shell",
-        "BR-SPEC": "Brass Special (Al Bronze Solid)",
-        "BR-YLW": "Brass Yellow Regular"
-      },
-      lead: {
-        "PB-C": "Lead Clean",
-        "PB-R": "Lead Range"
-      },
-      stainless: {
-        "SS304": "Stainless Steel 304",
-        "SS316": "Stainless Steel 316"
-      },
-      eScrap: {
-        "ES-BOARD": "E-Scrap Board"
-      },
-      insulatedWire: {
-        "IWLG-XL": "ICW Low Grade Christmas Lights",
-        "IWLG-25-": "ICW Low Grade Computer Wire 25%",
-        "IWLG-CATV": "ICW Low Grade Cu CATV",
-        "IWLG-35-": "ICW Low Grade Ext Cords 35%+",
-        "IWLG-40-": "ICW Low Grade Mixed Wire 40%+",
-        "IW-HX": "ICW1 Heliax 57 Open Eye Baled",
-        "IW-MCM85": "ICW1 MCM 85HG",
-        "IW-R65": "ICW1 Romex 65 No Weatherproof",
-        "IW-THHN": "ICW1 THHN 80",
-        "IW-CAT5": "ICW2 50Cat5 Tel Wire",
-        "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
-        "IW-BX-AL": "ICW2 BX Cable AL",
-        "IW-BX-FE": "ICW2 BX Cable FE24"
-      },
-      miscellaneous: {
-        "BAL-E": "Ballast Electronic",
-        "BAL-R": "Ballast Regular",
-        "BAT-PB": "Battery Auto Pb Acid",
-        "BAT-ST": "Battery Steel Case Industrial",
-        "COMP": "Compressor Sealed Unit No Cast Iron",
-        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
-        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
-        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
-        "TR-AL": "Transformer Alu Large Only",
-        "TR-CU-AL": "Transformer Cu AlCu",
-        "TR-CU-SM": "Transformer Cu Small Palm Size",
-        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
-        "TR-CU-LG": "Transformer Cu Large",
-        "ZN-CAST": "Zinc Die Cast"
-      },
-      radiator: {
-        "AC-RADB": "AC Reefer Clean Talk Baled",
-        "AC-RADU": "AC Reefer Clean Unbaled",
-        "AC-RADDB": "AC Reefer Dirty Talk Baled",
-        "AC-RADDU": "AC Reefer Dirty Unbaled",
-        "AL-RADCC": "Radiator Clean Car",
-        "RAD-ENDS": "Cu Bkg AC Reefer End"
-      }
-    };
-
-    // Helper function to generate a ticker based on material name.
-    // It searches computedCategoriesMapping for the category and then matches the material with the reference.
-    function getTickerFromReference(material) {
-      // Loop through computedCategoriesMapping to find the category for the material.
-      for (let category in computedCategoriesMapping) {
-        if (computedCategoriesMapping[category].materials.includes(material)) {
-          // Use the lower-case category to reference the scrapMaterialCodes object.
-          let catLower = category.toLowerCase();
-          if (scrapMaterialCodes[catLower]) {
-            // Check each code to see if its description contains the material name.
-            for (const code in scrapMaterialCodes[catLower]) {
-              if (scrapMaterialCodes[catLower][code].toLowerCase().includes(material.toLowerCase())) {
-                return code;
-              }
-            }
-          }
-        }
-      }
-      // Fallback if no match is found.
-      return material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
-    }
   </script>
 </body>
 </html>
