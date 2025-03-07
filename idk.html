@@ -573,29 +573,35 @@
       return snapshot[key] || 0;
     }
     
-    // Determine the base price per ton for a given material.
-    // First, try using the Market Snapshot price. If not available, fall back to the pricing function.
+    // ----------------------------
+    // Updated getBasePrice Function
+    // ----------------------------
+    // This function first checks if the material string includes a category (e.g., "ICW1_Romex65_NoWeatherProof (Insulated Wire)")
+    // It then attempts to retrieve a price from the Market Snapshot (using the category if present) and, if not found,
+    // falls back to the appropriate pricing function from computedCategoriesMapping.
     function getBasePrice(material) {
       let baseMaterial = material;
-      // If the material string includes a category in parentheses, extract it.
+      let category = "";
       if (material.indexOf('(') !== -1) {
-        baseMaterial = material.split(" (")[0].trim();
-        const category = material.split(" (")[1].replace(")","").trim();
-        let price = getMarketSnapshotPrice(category);
-        if (price > 0) {
-          return price;
-        }
-        if (computedCategoriesMapping[category]) {
-          return computedCategoriesMapping[category].pricingFunc(baseMaterial) || 0;
+        const parts = material.split('(');
+        baseMaterial = parts[0].trim();
+        category = parts[1].replace(")", "").trim();
+      }
+      
+      // Check Market Snapshot using the category (if available) or the full material name
+      if (category) {
+        let snapshotPrice = getMarketSnapshotPrice(category);
+        if (snapshotPrice > 0) {
+          return snapshotPrice;
         }
       }
-      // Try direct market snapshot lookup.
-      let price = getMarketSnapshotPrice(material);
-      if (price > 0) return price;
-      // Otherwise, search through computed categories.
+      let directPrice = getMarketSnapshotPrice(material);
+      if (directPrice > 0) return directPrice;
+      
+      // Otherwise, search through computed categories to get the price using the pricing function
       for (let cat in computedCategoriesMapping) {
-        if (computedCategoriesMapping[cat].materials.includes(material)) {
-          return computedCategoriesMapping[cat].pricingFunc(material) || 0;
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          return computedCategoriesMapping[cat].pricingFunc(baseMaterial) || 0;
         }
       }
       return 0;
@@ -701,7 +707,9 @@
         contractsSelect.appendChild(option);
       }
       
-      // Determine base price per ton from Market Snapshot or Pricing Functions
+      // Determine base price per ton from Market Snapshot or Pricing Functions.
+      // If the material (from the dropdown) is not represented in the Market Snapshot,
+      // the fallback is to use the pricing function defined in computedCategoriesMapping.
       const basePricePerTon = getBasePrice(material);
       
       // Update Price/ton dropdown with 6 multiplier options
@@ -1267,55 +1275,6 @@
         }
       }
     }
-    
-    // ----------------------------
-    // Trade Log, Active Contracts & Inventory Update Functions
-    // ----------------------------
-    // Append a new entry to the Trade Log table.
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
-      const tradeTime = new Date().toLocaleTimeString();
-      const row = document.createElement('tr');
-      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
-      tableBody.appendChild(row);
-    }
-    
-    // ----------------------------
-    // Simulated Trade Execution
-    // ----------------------------
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const tradePrice = parseFloat(document.getElementById('create-price').value);
-      const costToCreate = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
-      const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
-      const totalContractValue = tradePrice * 10 * numTrades;
-      
-      // Record in Trade Log
-      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
-      addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
-      reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
-      updatePurchaseValues();
-      
-      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
-    }
-    
-    // ----------------------------
-    // On DOMContentLoaded: Initialize Dropdowns and Inventory
-    // ----------------------------
-    document.addEventListener('DOMContentLoaded', () => {
-      populateTradeMaterialDropdown();
-      updateTradeOptions();
-      updateGroupedComputedMaterialsInventory();
-      updatePurchaseValues();
-    });
   </script>
 </body>
 </html>
