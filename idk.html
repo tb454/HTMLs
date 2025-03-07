@@ -222,19 +222,7 @@
   
   <!-- Material Arrays and Pricing Formulas (unchanged) -->
   <script>
-    // ... (your existing material arrays and pricing functions) ...
-    
-    // Global mapping for computed categories
-    const computedCategoriesMapping = {
-      "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
-      "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
-      "Brass": { materials: brassMaterials, pricingFunc: brassPrice },
-      "Lead": { materials: leadMaterials, pricingFunc: leadPrice },
-      "Stainless Steel": { materials: stainlessMaterials, pricingFunc: stainlessPrice },
-      "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
-      "Misc Product": { materials: miscProductMaterials, pricingFunc: miscProductPrice },
-      "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
-    };
+    // (Your material arrays and pricing functions remain unchanged)
   </script>
   
   <!-- Trade Functions and Updated updateTradeOptions() -->
@@ -501,7 +489,6 @@
       el.style.color = accentColor;
     });
     
-    // Global variables for charts
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
