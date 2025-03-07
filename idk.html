@@ -462,7 +462,7 @@
     // ----------------------------
     function updateGroupedComputedMaterialsInventory() {
       const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
-      // Remove any previously added group rows (they will have a data-group attribute)
+      // Remove any previously added group rows (they have a data-group attribute)
       const previousGroupRows = tableBody.querySelectorAll('tr[data-group]');
       previousGroupRows.forEach(row => row.remove());
       
@@ -574,11 +574,10 @@
     }
     
     // Determine the base price per ton for a given material.
-    // First try: if the material (or its category) has a market snapshot price.
-    // Otherwise, use the corresponding pricing function.
+    // First, try using the Market Snapshot price. If not available, fall back to the pricing function.
     function getBasePrice(material) {
       let baseMaterial = material;
-      // If the material has a category (e.g., "Barley (Copper)"), extract it.
+      // If the material string includes a category in parentheses, extract it.
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")","").trim();
@@ -593,7 +592,7 @@
       // Try direct market snapshot lookup.
       let price = getMarketSnapshotPrice(material);
       if (price > 0) return price;
-      // If not found, search through computed categories.
+      // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
           return computedCategoriesMapping[cat].pricingFunc(material) || 0;
@@ -672,9 +671,7 @@
       alert(`${numTrades} simulated trade(s) for ${material}: Price/ton: $${tradePrice.toFixed(2)}, Cost to Create: $${costToCreate.toFixed(2)}, Expiration: ${expiration}`);
     }
     
-    // ----------------------------
     // Other Helper Functions
-    // ----------------------------
     function logout() {
       alert('Logging out...');
     }
@@ -694,16 +691,13 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options, and update computed inventory groups.
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options, update computed inventory groups, and update purchase values.
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
-      // Update purchase values for static rows.
       updatePurchaseValues();
     });
-    
-    // (Other functions such as updateActiveContractsTable() can be called here as needed.)
   </script>
 </head>
 <body>
@@ -1013,6 +1007,622 @@
             <td>02/21/25</td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Simulated Trade Section -->
+    <section class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <!-- Options populated dynamically from the Finished Goods Inventory -->
+        </select>
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
+      </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+    </section>
+    
+    <!-- Trade Log Section -->
+    <section class="section">
+      <div class="section-title">Trade Log</div>
+      <table id="trade-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Contract Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Trade entries appended here -->
+        </tbody>
+      </table>
+    </section>
+    
+    <!-- Active Contracts Section -->
+    <section class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Material</th>
+            <th>Sale Price</th>
+            <th>Change</th>
+            <th>Expiration</th>
+            <th>Margin Requirement</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Active contract rows appended here -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Metals Market Overview Section -->
+    <section class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table id="metals-market-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.90</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Simulated Trade Section -->
+    <section class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <!-- Options populated dynamically from the Finished Goods Inventory -->
+        </select>
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
+      </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+    </section>
+    
+    <!-- Trade Log Section -->
+    <section class="section">
+      <div class="section-title">Trade Log</div>
+      <table id="trade-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Contract Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Trade entries appended here -->
+        </tbody>
+      </table>
+    </section>
+    
+    <!-- Active Contracts Section -->
+    <section class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Material</th>
+            <th>Sale Price</th>
+            <th>Change</th>
+            <th>Expiration</th>
+            <th>Margin Requirement</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Active contract rows appended here -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Metals Market Overview Section -->
+    <section class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table id="metals-market-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.90</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Simulated Trade Section -->
+    <section class="section">
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <!-- Options populated dynamically from the Finished Goods Inventory -->
+        </select>
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
+      </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
+    </section>
+    
+    <!-- Trade Log Section -->
+    <section class="section">
+      <div class="section-title">Trade Log</div>
+      <table id="trade-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Contract Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Trade entries appended here -->
+        </tbody>
+      </table>
+    </section>
+    
+    <!-- Active Contracts Section -->
+    <section class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Material</th>
+            <th>Sale Price</th>
+            <th>Change</th>
+            <th>Expiration</th>
+            <th>Margin Requirement</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Active contract rows appended here -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Metals Market Overview Section -->
+    <section class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table id="metals-market-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.90</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Totals:</strong></td>
+            <td id="total-wip">0</td>
+            <td id="total-finished">0</td>
+            <td id="total-total">0</td>
+            <td></td>
+            <td id="total-purchase">0</td>
+          </tr>
+        </tfoot>
       </table>
     </section>
     
@@ -1204,6 +1814,15 @@
         }
       }
     }
+    
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
+    // update computed inventory groups, and update purchase values.
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
   </script>
 </body>
 </html>
