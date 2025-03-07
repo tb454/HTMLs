@@ -747,6 +747,51 @@
     }
     
     // ----------------------------
+    // KPI Update Function: Calculate margin difference for each active contract
+    // ----------------------------
+    function updateKPISection() {
+      const kpiLabels = [];
+      const kpiData = [];
+      const activeRows = document.querySelectorAll("#active-contracts-table tbody tr");
+      
+      activeRows.forEach(row => {
+        // Ensure the row has enough cells to be an active contract row
+        if (row.cells.length < 3) return;
+        
+        // Extract the material name from the second cell (format: "Material (Expiration)")
+        const materialCellText = row.cells[1].textContent.trim();
+        const material = materialCellText.split(" (")[0];
+        
+        // Extract the sale price from the third cell (price per ton)
+        const salePriceText = row.cells[2].textContent.trim().replace('$','');
+        const salePricePerTon = parseFloat(salePriceText);
+        if(isNaN(salePricePerTon)) return;
+        // Convert sale price to per-pound value (1 ton = 2000 lbs)
+        const salePricePerLb = salePricePerTon / 2000;
+        
+        // Get the average cost from the Greenspark inventory for this material
+        const commodityData = getCommodityData(material);
+        const avgCost = commodityData.avgCost;
+        
+        // Calculate the margin difference (sale price per lb minus average cost)
+        const marginDiff = salePricePerLb - avgCost;
+        
+        kpiLabels.push(material);
+        kpiData.push(marginDiff);
+      });
+      
+      // Update the KPI chart if it exists
+      if (kpiChart) {
+        kpiChart.data.labels = kpiLabels;
+        kpiChart.data.datasets[0].data = kpiData;
+        kpiChart.data.datasets[0].label = 'Margin Diff ($/lb)';
+        kpiChart.update();
+      } else {
+        console.warn("KPI chart is not defined.");
+      }
+    }
+    
+    // ----------------------------
     // Simulated Trade Execution
     // ----------------------------
     function simulateTrade() {
@@ -769,6 +814,8 @@
       reduceInventory(material, numTrades * 20000);
       // Update purchase values to reflect inventory changes
       updatePurchaseValues();
+      // Update the KPI section with margin differences
+      updateKPISection();
       
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
@@ -1272,75 +1319,8 @@
       }
     }
     
-    // ----------------------------
-    // Trade Log, Active Contracts & Inventory Update Functions
-    // ----------------------------
-    // Append a new entry to the Trade Log table.
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
-      const tradeTime = new Date().toLocaleTimeString();
-      const row = document.createElement('tr');
-      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
-      tableBody.appendChild(row);
-    }
-    
-    // ----------------------------
-    // Simulated Trade Execution
-    // ----------------------------
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const tradePrice = parseFloat(document.getElementById('create-price').value);
-      const costToCreate = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
-      const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
-      const totalContractValue = tradePrice * 10 * numTrades;
-      
-      // Record in Trade Log
-      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
-      addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
-      reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
-      updatePurchaseValues();
-      
-      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
-    }
-    
-    // ----------------------------
-    // Other Helper Functions
-    // ----------------------------
-    function logout() {
-      alert('Logging out...');
-    }
-    function cardClicked(cardName) {
-      if (cardName === "Active Contracts") {
-        const contracts = document.getElementById('activeContractsCount').textContent;
-        const margin = document.getElementById('activeContractsMarginTotal').textContent;
-        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
-      } else {
-        alert(cardName + " card clicked!");
-      }
-    }
-    function rowClicked(itemName) {
-      alert('Row for ' + itemName + ' clicked!');
-    }
-    function createFuturesContract(material, contractName) {
-      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
-    
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
-    document.addEventListener('DOMContentLoaded', () => {
-      populateTradeMaterialDropdown();
-      updateTradeOptions();
-      updateGroupedComputedMaterialsInventory();
-      updatePurchaseValues();
-    });
+    // Additional duplicate simulateTrade definition removed for clarity.
+    // Other helper functions already defined above.
   </script>
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
@@ -1407,30 +1387,6 @@
         "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
         "IW-BX-AL": "ICW2 BX Cable AL",
         "IW-BX-FE": "ICW2 BX Cable FE24"
-      },
-      miscellaneous: {
-        "BAL-E": "Ballast Electronic",
-        "BAL-R": "Ballast Regular",
-        "BAT-PB": "Battery Auto Pb Acid",
-        "BAT-ST": "Battery Steel Case Industrial",
-        "COMP": "Compressor Sealed Unit No Cast Iron",
-        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
-        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
-        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
-        "TR-AL": "Transformer Alu Large Only",
-        "TR-CU-AL": "Transformer Cu AlCu",
-        "TR-CU-SM": "Transformer Cu Small Palm Size",
-        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
-        "TR-CU-LG": "Transformer Cu Large",
-        "ZN-CAST": "Zinc Die Cast"
-      },
-      radiator: {
-        "AC-RADB": "AC Reefer Clean Talk Baled",
-        "AC-RADU": "AC Reefer Clean Unbaled",
-        "AC-RADDB": "AC Reefer Dirty Talk Baled",
-        "AC-RADDU": "AC Reefer Dirty Unbaled",
-        "AL-RADCC": "Radiator Clean Car",
-        "RAD-ENDS": "Cu Bkg AC Reefer End"
       }
     };
 
