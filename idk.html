@@ -601,7 +601,61 @@
       return 0;
     }
     
-    // Update Trade Options in Simulated Trade section
+    // ----------------------------
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    // Append a new entry to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // Add a new active contract entry.
+    function addActiveContract(material, expiration, salePrice, quantity) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      // Create a dummy ticker for demonstration purposes.
+      const ticker = material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+      // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
+      const totalContractValue = salePrice * 10 * quantity;
+      const marginRequirement = totalContractValue * 0.07;
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${ticker}</td><td>${material} (${expiration})</td><td>$${salePrice.toFixed(2)}</td><td>$0.00</td><td>${expiration}</td><td>$${marginRequirement.toFixed(2)}</td><td><button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button><button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button></td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // Reduce inventory in the Greenspark table for the given material.
+    function reduceInventory(material, reduction) {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.classList.contains('group-header')) continue;
+        const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+        if (cellMaterial.includes(material.toLowerCase())) {
+          let finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          finishedGoods = Math.max(finishedGoods - reduction, 0);
+          total = Math.max(total - reduction, 0);
+          row.cells[2].textContent = finishedGoods.toLocaleString();
+          row.cells[3].textContent = total.toLocaleString();
+          break;
+        }
+      }
+    }
+    
+    // Stub functions for contract actions
+    function rollContract() {
+      alert("Roll contract functionality not implemented.");
+    }
+    function closeContract() {
+      alert("Close contract functionality not implemented.");
+    }
+    
+    // ----------------------------
+    // Update Trade Options in Simulated Trade Section
+    // ----------------------------
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
@@ -661,6 +715,9 @@
       }
     }
     
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -668,10 +725,26 @@
       const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      alert(`${numTrades} simulated trade(s) for ${material}: Price/ton: $${tradePrice.toFixed(2)}, Cost to Create: $${costToCreate.toFixed(2)}, Expiration: ${expiration}`);
+      // For a 10-ton load, total quantity is 10 * numTrades (tons)
+      const totalQuantity = 10 * numTrades;
+      // Total contract value = tradePrice per ton * 10 tons * number of contracts
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      // Record in Trade Log
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      // Add Active Contract entry
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
+      reduceInventory(material, numTrades * 20000);
+      // Update purchase values to reflect inventory changes
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
+    // ----------------------------
     // Other Helper Functions
+    // ----------------------------
     function logout() {
       alert('Logging out...');
     }
@@ -691,7 +764,8 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options, update computed inventory groups, and update purchase values.
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
+    // update computed inventory groups, and update purchase values.
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
@@ -824,208 +898,6 @@
       <div class="mb-3">
         <label for="create-material">Material:</label>
         <select id="create-material" onchange="updateTradeOptions()">
-          <!-- Options populated dynamically from the Greenspark table -->
-        </select>
-        <label for="create-contracts">Creatable Contracts:</label>
-        <select id="create-contracts"></select>
-        <label for="create-price">Price/ton:</label>
-        <select id="create-price"></select>
-        <label for="create-cost">Cost to Create:</label>
-        <select id="create-cost"></select>
-        <label for="create-expiration">Expiration Date:</label>
-        <select id="create-expiration"></select>
-      </div>
-      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-    </section>
-    
-    <!-- Trade Log Section -->
-    <section class="section">
-      <div class="section-title">Trade Log</div>
-      <table id="trade-log-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Material</th>
-            <th>Quantity (tons)</th>
-            <th>Price/ton</th>
-            <th>Total Contract Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Trade entries appended here -->
-        </tbody>
-      </table>
-    </section>
-    
-    <!-- Active Contracts Section -->
-    <section class="section">
-      <div class="section-title">Active Contracts</div>
-      <table id="active-contracts-table" class="table table-hover align-middle">
-        <thead>
-          <tr>
-            <th>Ticker</th>
-            <th>Material</th>
-            <th>Sale Price</th>
-            <th>Change</th>
-            <th>Expiration</th>
-            <th>Margin Requirement</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Active contract rows appended here -->
-        </tbody>
-        <tfoot>
-          <tr>
-            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
-            <td></td>
-            <td></td>
-            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
-            <td></td>
-            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table>
-    </section>
-    
-    <!-- Metals Market Overview Section -->
-    <section class="section">
-      <div class="section-title">Metals Market Overview</div>
-      <table id="metals-market-table" class="table table-hover align-middle">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th>Contract Name</th>
-            <th>Last</th>
-            <th>Change</th>
-            <th>Open</th>
-            <th>High</th>
-            <th>Low</th>
-            <th>Volume</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>GCJ25</td>
-            <td>Gold (Apr '25)</td>
-            <td>2,953.25</td>
-            <td>-2.90</td>
-            <td>2,957.50</td>
-            <td>2,964.70</td>
-            <td>2,920.00</td>
-            <td>155,552</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr data-initialSnapshotPrice="">
-            <td>ICWR25</td>
-            <td>Insulated Copper Wire (Apr '25)</td>
-            <td>23.95</td>
-            <td>+0.10</td>
-            <td>23.85</td>
-            <td>24.20</td>
-            <td>23.65</td>
-            <td>80,334</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr>
-            <td>HGG25</td>
-            <td>High Grade Copper (May '25)</td>
-            <td>4.6155</td>
-            <td>-0.0050</td>
-            <td>4,590.00</td>
-            <td>4,669.0</td>
-            <td>4,580.00</td>
-            <td>36,500</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr data-initialSnapshotPrice="">
-            <td>EMOT25</td>
-            <td>Electric Motors (Apr '25)</td>
-            <td>997.35</td>
-            <td>+7.50</td>
-            <td>990.00</td>
-            <td>1,003.80</td>
-            <td>988.00</td>
-            <td>25,650</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr data-initialSnapshotPrice="">
-            <td>BRSS25</td>
-            <td>Brass (May '25)</td>
-            <td>1,483.00</td>
-            <td>-9.70</td>
-            <td>1,490.00</td>
-            <td>1,508.00</td>
-            <td>1,478.00</td>
-            <td>11,000</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr>
-            <td>ALX25</td>
-            <td>Aluminum (Mar '25)</td>
-            <td>2,350.00</td>
-            <td>+15.00</td>
-            <td>2,335.00</td>
-            <td>2,370.00</td>
-            <td>2,320.00</td>
-            <td>20,500</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr>
-            <td>HMX25</td>
-            <td>US Midwest Steel (Jun '25)</td>
-            <td>975.50</td>
-            <td>-4.00</td>
-            <td>980.00</td>
-            <td>990.00</td>
-            <td>970.00</td>
-            <td>9,750</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr>
-            <td>PLX25</td>
-            <td>Platinum (Jul '25)</td>
-            <td>1,015.50</td>
-            <td>+5.10</td>
-            <td>1,010.00</td>
-            <td>1,025.00</td>
-            <td>1,005.00</td>
-            <td>8,230</td>
-            <td>02/21/25</td>
-          </tr>
-          <tr>
-            <td>LMG25</td>
-            <td>Aluminum (Feb '25)</td>
-            <td>2,325.00</td>
-            <td>+8.00</td>
-            <td>2,320.00</td>
-            <td>2,340.00</td>
-            <td>2,310.00</td>
-            <td>4,800</td>
-            <td>02/21/25</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <td><strong>Totals:</strong></td>
-            <td id="total-wip">0</td>
-            <td id="total-finished">0</td>
-            <td id="total-total">0</td>
-            <td></td>
-            <td id="total-purchase">0</td>
-          </tr>
-        </tfoot>
-      </table>
-    </section>
-    
-    <!-- Simulated Trade Section -->
-    <section class="section">
-      <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="mb-3">
-        <label for="create-material">Material:</label>
-        <select id="create-material" onchange="updateTradeOptions()">
           <!-- Options populated dynamically from the Finished Goods Inventory -->
         </select>
         <label for="create-contracts">Creatable Contracts:</label>
@@ -1626,17 +1498,199 @@
       </table>
     </section>
     
-    <!-- Trade Alerts Ticker Section -->
+    <!-- Simulated Trade Section -->
     <section class="section">
-      <div class="section-title">Trade Alerts</div>
-      <div class="ticker-wrapper">
-        <div id="trade-alerts-ticker" class="ticker">
-          <!-- Ticker content rendered by JavaScript -->
-        </div>
+      <div class="section-title">Simulated Trade (10-ton loads)</div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <!-- Options populated dynamically from the Finished Goods Inventory -->
+        </select>
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
       </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </section>
     
-    <!-- Key Performance Indicators (KPIs) Section -->
+    <!-- Trade Log Section -->
+    <section class="section">
+      <div class="section-title">Trade Log</div>
+      <table id="trade-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Material</th>
+            <th>Quantity (tons)</th>
+            <th>Price/ton</th>
+            <th>Total Contract Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Trade entries appended here -->
+        </tbody>
+      </table>
+    </section>
+    
+    <!-- Active Contracts Section -->
+    <section class="section">
+      <div class="section-title">Active Contracts</div>
+      <table id="active-contracts-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Material</th>
+            <th>Sale Price</th>
+            <th>Change</th>
+            <th>Expiration</th>
+            <th>Margin Requirement</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Active contract rows appended here -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td><strong>Total Contracts: <span id="activeContractsCount">0</span></strong></td>
+            <td></td>
+            <td></td>
+            <td><strong>Total Change: <span id="total-change">$0.00</span></strong></td>
+            <td></td>
+            <td><strong>Total Margin: <span id="activeContractsMarginTotal">$0.00</span></strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+    
+    <!-- Metals Market Overview Section -->
+    <section class="section">
+      <div class="section-title">Metals Market Overview</div>
+      <table id="metals-market-table" class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GCJ25</td>
+            <td>Gold (Apr '25)</td>
+            <td>2,953.25</td>
+            <td>-2.90</td>
+            <td>2,957.50</td>
+            <td>2,964.70</td>
+            <td>2,920.00</td>
+            <td>155,552</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>ICWR25</td>
+            <td>Insulated Copper Wire (Apr '25)</td>
+            <td>23.95</td>
+            <td>+0.10</td>
+            <td>23.85</td>
+            <td>24.20</td>
+            <td>23.65</td>
+            <td>80,334</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HGG25</td>
+            <td>High Grade Copper (May '25)</td>
+            <td>4.6155</td>
+            <td>-0.0050</td>
+            <td>4,590.00</td>
+            <td>4,669.0</td>
+            <td>4,580.00</td>
+            <td>36,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>EMOT25</td>
+            <td>Electric Motors (Apr '25)</td>
+            <td>997.35</td>
+            <td>+7.50</td>
+            <td>990.00</td>
+            <td>1,003.80</td>
+            <td>988.00</td>
+            <td>25,650</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr data-initialSnapshotPrice="">
+            <td>BRSS25</td>
+            <td>Brass (May '25)</td>
+            <td>1,483.00</td>
+            <td>-9.70</td>
+            <td>1,490.00</td>
+            <td>1,508.00</td>
+            <td>1,478.00</td>
+            <td>11,000</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>ALX25</td>
+            <td>Aluminum (Mar '25)</td>
+            <td>2,350.00</td>
+            <td>+15.00</td>
+            <td>2,335.00</td>
+            <td>2,370.00</td>
+            <td>2,320.00</td>
+            <td>20,500</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>HMX25</td>
+            <td>US Midwest Steel (Jun '25)</td>
+            <td>975.50</td>
+            <td>-4.00</td>
+            <td>980.00</td>
+            <td>990.00</td>
+            <td>970.00</td>
+            <td>9,750</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>PLX25</td>
+            <td>Platinum (Jul '25)</td>
+            <td>1,015.50</td>
+            <td>+5.10</td>
+            <td>1,010.00</td>
+            <td>1,025.00</td>
+            <td>1,005.00</td>
+            <td>8,230</td>
+            <td>02/21/25</td>
+          </tr>
+          <tr>
+            <td>LMG25</td>
+            <td>Aluminum (Feb '25)</td>
+            <td>2,325.00</td>
+            <td>+8.00</td>
+            <td>2,320.00</td>
+            <td>2,340.00</td>
+            <td>2,310.00</td>
+            <td>4,800</td>
+            <td>02/21/25</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    
+    <!-- KPI Section -->
     <section class="section">
       <div class="section-title">Key Performance Indicators (KPIs)</div>
       <div class="kpi-content">
@@ -1815,8 +1869,173 @@
       }
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
+    // ----------------------------
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    // Append a new entry to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // Add a new active contract entry.
+    function addActiveContract(material, expiration, salePrice, quantity) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      // Create a dummy ticker for demonstration purposes.
+      const ticker = material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+      // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
+      const totalContractValue = salePrice * 10 * quantity;
+      const marginRequirement = totalContractValue * 0.07;
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${ticker}</td><td>${material} (${expiration})</td><td>$${salePrice.toFixed(2)}</td><td>$0.00</td><td>${expiration}</td><td>$${marginRequirement.toFixed(2)}</td><td><button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button><button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button></td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // Reduce inventory in the Greenspark table for the given material.
+    function reduceInventory(material, reduction) {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.classList.contains('group-header')) continue;
+        const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+        if (cellMaterial.includes(material.toLowerCase())) {
+          let finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          finishedGoods = Math.max(finishedGoods - reduction, 0);
+          total = Math.max(total - reduction, 0);
+          row.cells[2].textContent = finishedGoods.toLocaleString();
+          row.cells[3].textContent = total.toLocaleString();
+          break;
+        }
+      }
+    }
+    
+    // Stub functions for contract actions
+    function rollContract() {
+      alert("Roll contract functionality not implemented.");
+    }
+    function closeContract() {
+      alert("Close contract functionality not implemented.");
+    }
+    
+    // ----------------------------
+    // Helper Functions for Simulated Trade Section
+    // ----------------------------
+    // Populate the "Material" dropdown in Simulated Trade from all materials in Greenspark table.
+    function populateTradeMaterialDropdown() {
+      const dropdown = document.getElementById('create-material');
+      dropdown.innerHTML = '';
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      const materialsSet = new Set();
+      rows.forEach(row => {
+        // Skip group header rows
+        if (row.classList.contains('group-header')) return;
+        const materialText = row.cells[0].textContent.trim();
+        if (materialText) {
+          materialsSet.add(materialText);
+        }
+      });
+      const materials = Array.from(materialsSet).sort();
+      materials.forEach(material => {
+        const option = document.createElement('option');
+        option.value = material;
+        option.textContent = material;
+        dropdown.appendChild(option);
+      });
+    }
+    
+    // Get commodity data from the Greenspark table (by matching material name)
+    function getCommodityData(material) {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        // Ignore group header rows
+        if (row.classList.contains('group-header')) continue;
+        const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+        if (cellMaterial.includes(material.toLowerCase())) {
+          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+          const finishedGoods = parseFloat(finishedGoodsText) || 0;
+          const avgCostText = row.cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+          const avgCost = parseFloat(avgCostText) || 0;
+          return { finishedGoods, avgCost };
+        }
+      }
+      return { finishedGoods: 0, avgCost: 0 };
+    }
+    
+    // Get the Market Snapshot price for a given key (e.g., "Copper", "Brass", etc.)
+    function getMarketSnapshotPrice(key) {
+      const snapshot = {
+        "Copper": 9500,
+        "Brass": 7500,
+        "Steel": 500,
+        "Aluminum": 2200
+      };
+      return snapshot[key] || 0;
+    }
+    
+    // Determine the base price per ton for a given material.
+    // First, try using the Market Snapshot price. If not available, fall back to the pricing function.
+    function getBasePrice(material) {
+      let baseMaterial = material;
+      // If the material string includes a category in parentheses, extract it.
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        const category = material.split(" (")[1].replace(")","").trim();
+        let price = getMarketSnapshotPrice(category);
+        if (price > 0) {
+          return price;
+        }
+        if (computedCategoriesMapping[category]) {
+          return computedCategoriesMapping[category].pricingFunc(baseMaterial) || 0;
+        }
+      }
+      // Try direct market snapshot lookup.
+      let price = getMarketSnapshotPrice(material);
+      if (price > 0) return price;
+      // Otherwise, search through computed categories.
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(material)) {
+          return computedCategoriesMapping[cat].pricingFunc(material) || 0;
+        }
+      }
+      return 0;
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      // For a 10-ton load, total quantity is 10 * numTrades (tons)
+      const totalQuantity = 10 * numTrades;
+      // Total contract value = tradePrice per ton * 10 tons * number of contracts
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      // Record in Trade Log
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      // Add Active Contract entry
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
+      reduceInventory(material, numTrades * 20000);
+      // Update purchase values to reflect inventory changes
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
+    }
+    
+    // ----------------------------
+    // On DOMContentLoaded: Initialize Dropdowns and Inventory
+    // ----------------------------
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
