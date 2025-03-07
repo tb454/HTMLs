@@ -124,6 +124,14 @@
       background-color: #f9f9f9;
       cursor: pointer;
     }
+    /* Group Header Row */
+    tr.group-header {
+      background-color: #e9ecef;
+      cursor: pointer;
+    }
+    tr.group-header td {
+      font-weight: bold;
+    }
     /* Buttons */
     .action-btn {
       padding: 10px 20px;
@@ -222,20 +230,17 @@
   
   <!-- Material Arrays and Pricing Formulas -->
   <script>
-    // Base market prices (from yfinance and exchanges)
-    const COMEX_Cu = 4.19;                    
-    const LME_Al = 1.25;                      
-    const LME_Lead = 2034 / 2000;             
-    const LME_Zinc = 2879 / 2000;             
-    const LME_Ni = 15675 / 2000;              
-
-    // Material Arrays (using your provided lists)
+    // ----------------------------
+    // Material Name Arrays
+    // ----------------------------
+    // 1) Copper
     const copperMaterials = [
-      "Barley",
-      "#1",
-      "#2",
-      "#3"
+      "Barley",      // Cu BB
+      "#1",          // Berry & Candy
+      "#2",          // Birch & Cliff
+      "#3"           // Sheet Copper
     ];
+    // 2) Aluminum
     const aluminumMaterials = [
       "AL6061_NewBareExtrusion",
       "AL6061_ClipPlatePipe",
@@ -255,6 +260,7 @@
       "AL_Wire_ECPrepared",
       "AL_MLC_Prepared"
     ];
+    // 3) Brass
     const brassMaterials = [
       "Brass_Hard",
       "Brass_Red_Ebony",
@@ -265,17 +271,21 @@
       "Brass_Special",
       "Brass_YellowRegular"
     ];
+    // 4) Lead
     const leadMaterials = [
       "Lead_Clean",
       "Lead_Range"
     ];
+    // 5) Stainless
     const stainlessMaterials = [
       "SS304",
       "SS316"
     ];
+    // 6) E-Scrap (generic placeholder)
     const eScrapMaterials = [
       "E_Scrap_Board"
     ];
+    // 7) Insulated Wire
     const insulatedWireMaterials = [
       "ICW_LowGrade_ChristmasLights",
       "ICW_LowGrade_ComputerWire25",
@@ -291,6 +301,7 @@
       "ICW2_BX_Cable_AL",
       "ICW2_BX_Cable_FE24"
     ];
+    // 8) Misc Product
     const miscProductMaterials = [
       "Ballast_Electronic",
       "Ballast_Regular",
@@ -307,6 +318,7 @@
       "TransformerCu_Large",
       "Zinc_DieCast"
     ];
+    // 9) Radiator Product
     const radiatorProductMaterials = [
       "ACReefer_CleanTalkBaled",
       "ACReefer_CleanUnbaled",
@@ -315,135 +327,203 @@
       "Radiator_CleanCar",
       "CuBkg_ACReeferEnd"
     ];
-
-    // Pricing Formulas (as provided)
+    
+    // ----------------------------
+    // Pricing Functions
+    // ----------------------------
     function copperPrice(grade) {
       switch(grade) {
-        case 'Barley': return COMEX_Cu * 0.94;
-        case '#1': return COMEX_Cu * 0.91;
-        case '#2': return COMEX_Cu * 0.85;
-        case '#3': return COMEX_Cu * 0.83;
+        case 'Barley': return 4.19 * 0.94;
+        case '#1': return 4.19 * 0.91;
+        case '#2': return 4.19 * 0.85;
+        case '#3': return 4.19 * 0.83;
         default: return null;
       }
     }
     function aluminumPrice(product) {
       switch(product) {
-        case 'AL6061_NewBareExtrusion': return LME_Al * 0.84;
-        case 'AL6061_ClipPlatePipe': return LME_Al * 0.78;
-        case 'AL6063_Secondary': return LME_Al * 0.78;
-        case 'AL6063_OldExtrusion': return LME_Al * 0.95;
-        case 'AL6063_Extrusion10/10': return LME_Al * 0.85;
-        case 'AL_PAS_Baled': return LME_Al * 0.82;
-        case 'AL_Cast_Clean': return LME_Al * 0.72;
-        case 'AL_RADS_CleanBaled': return LME_Al * 0.67;
-        case 'AL_RADS_DirtyBaled': return LME_Al * 0.46;
-        case 'AL_Sheet_CleanBaled': return LME_Al * 0.75;
-        case 'AL_WheelAuto_Clean': return LME_Al * 0.93;
-        case 'AL_WheelChrome_Clean': return LME_Al * 0.80;
-        case 'TruckWheel_Clean': return LME_Al * 0.72;
-        case 'AL_Wire_BareCATV': return LME_Al * 0.43;
-        case 'AL_Wire_NeopreneACSR': return LME_Al * 0.54;
-        case 'AL_Wire_ECPrepared': return LME_Al * 1.03;
-        case 'AL_MLC_Prepared': return LME_Al * 0.84;
+        case 'AL6061_NewBareExtrusion': return 1.25 * 0.84;
+        case 'AL6061_ClipPlatePipe': return 1.25 * 0.78;
+        case 'AL6063_Secondary': return 1.25 * 0.78;
+        case 'AL6063_OldExtrusion': return 1.25 * 0.95;
+        case 'AL6063_Extrusion10/10': return 1.25 * 0.85;
+        case 'AL_PAS_Baled': return 1.25 * 0.82;
+        case 'AL_Cast_Clean': return 1.25 * 0.72;
+        case 'AL_RADS_CleanBaled': return 1.25 * 0.67;
+        case 'AL_RADS_DirtyBaled': return 1.25 * 0.46;
+        case 'AL_Sheet_CleanBaled': return 1.25 * 0.75;
+        case 'AL_WheelAuto_Clean': return 1.25 * 0.93;
+        case 'AL_WheelChrome_Clean': return 1.25 * 0.80;
+        case 'TruckWheel_Clean': return 1.25 * 0.72;
+        case 'AL_Wire_BareCATV': return 1.25 * 0.43;
+        case 'AL_Wire_NeopreneACSR': return 1.25 * 0.54;
+        case 'AL_Wire_ECPrepared': return 1.25 * 1.03;
+        case 'AL_MLC_Prepared': return 1.25 * 0.84;
         default: return null;
       }
     }
     function brassPrice(product) {
       switch(product) {
-        case 'Brass_Hard': return COMEX_Cu * 0.81;
-        case 'Brass_Red_Ebony': return COMEX_Cu * 0.77;
-        case 'Brass_Red_Semi': return COMEX_Cu * 0.72;
-        case 'Brass_Shaving_AlBronze': return COMEX_Cu * 0.57;
-        case 'Brass_Shaving_BrassRed': return COMEX_Cu * 0.61;
-        case 'Brass_Shell': return COMEX_Cu * 0.60;
-        case 'Brass_Special': return COMEX_Cu * 0.64;
-        case 'Brass_YellowRegular': return COMEX_Cu * 0.61;
+        case 'Brass_Hard': return 4.19 * 0.81;
+        case 'Brass_Red_Ebony': return 4.19 * 0.77;
+        case 'Brass_Red_Semi': return 4.19 * 0.72;
+        case 'Brass_Shaving_AlBronze': return 4.19 * 0.57;
+        case 'Brass_Shaving_BrassRed': return 4.19 * 0.61;
+        case 'Brass_Shell': return 4.19 * 0.60;
+        case 'Brass_Special': return 4.19 * 0.64;
+        case 'Brass_YellowRegular': return 4.19 * 0.61;
         default: return null;
       }
     }
     function leadPrice(product) {
       switch(product) {
-        case 'Lead_Clean': return LME_Lead * 0.718;
-        case 'Lead_Range': return LME_Lead * 0.728;
+        case 'Lead_Clean': return (2034/2000) * 0.718;
+        case 'Lead_Range': return (2034/2000) * 0.728;
         default: return null;
       }
     }
     function stainlessPrice(product) {
       switch(product) {
-        case 'SS304': return LME_Ni * 0.0638;
-        case 'SS316': return LME_Ni * 0.1174;
+        case 'SS304': return (15675/2000) * 0.0638;
+        case 'SS316': return (15675/2000) * 0.1174;
         default: return null;
       }
     }
-    function eScrapPrice(goldContent, goldSpot, silverContent, silverSpot, copperContent, processingFee) {
-      return (goldContent * goldSpot) +
-             (silverContent * silverSpot) +
-             (copperContent * COMEX_Cu) -
-             processingFee;
+    // For E-Scrap we use a placeholder pricing function.
+    function eScrapPrice(product) {
+      return 0.5;
     }
     function insulatedWirePrice(product) {
       switch(product) {
-        case 'ICW_LowGrade_ChristmasLights': return LME_Al * 0.528;
-        case 'ICW_LowGrade_ComputerWire25': return LME_Al * 0.448;
-        case 'ICW_LowGrade_CuCATV': return LME_Al * 1.008;
-        case 'ICW_LowGrade_ExtCords35Up': return LME_Al * 0.92;
-        case 'ICW_LowGrade_MixedWire40Up': return LME_Al * 1.08;
-        case 'ICW1_Heliax57_OpenEyeBaled': return LME_Al * 1.536;
-        case 'ICW1_MCM85HG': return LME_Al * 2.536;
-        case 'ICW1_Romex65_NoWeatherProof': return LME_Al * 1.904;
-        case 'ICW1_THHN80': return LME_Al * 2.36;
-        case 'ICW2_50Cat5TelWire': return LME_Al * 1.384;
-        case 'ICW2_HarnessWireNoFuseBoxes': return LME_Al * 1.408;
-        case 'ICW2_BX_Cable_AL': return LME_Al * 1.648;
-        case 'ICW2_BX_Cable_FE24': return LME_Al * 0.6;
+        case 'ICW_LowGrade_ChristmasLights': return 1.25 * 0.528;
+        case 'ICW_LowGrade_ComputerWire25': return 1.25 * 0.448;
+        case 'ICW_LowGrade_CuCATV': return 1.25 * 1.008;
+        case 'ICW_LowGrade_ExtCords35Up': return 1.25 * 0.92;
+        case 'ICW_LowGrade_MixedWire40Up': return 1.25 * 1.08;
+        case 'ICW1_Heliax57_OpenEyeBaled': return 1.25 * 1.536;
+        case 'ICW1_MCM85HG': return 1.25 * 2.536;
+        case 'ICW1_Romex65_NoWeatherProof': return 1.25 * 1.904;
+        case 'ICW1_THHN80': return 1.25 * 2.36;
+        case 'ICW2_50Cat5TelWire': return 1.25 * 1.384;
+        case 'ICW2_HarnessWireNoFuseBoxes': return 1.25 * 1.408;
+        case 'ICW2_BX_Cable_AL': return 1.25 * 1.648;
+        case 'ICW2_BX_Cable_FE24': return 1.25 * 0.6;
         default: return null;
       }
     }
     function miscProductPrice(product) {
       switch(product) {
-        case 'Ballast_Electronic': return LME_Al * 0.12;
-        case 'Ballast_Regular': return LME_Al * 0.216;
-        case 'BatteryAuto_PbAcid': return LME_Al * 0.216;
-        case 'BatterySteelCase_Industrial': return LME_Al * 0.192;
-        case 'Compressor_SealedUnitNoCastIron': return LME_Al * 0.264;
-        case 'EMotorLowGrade_CeilingFanMotors': return LME_Al * 0.144;
-        case 'EMotorMix_NoPumpsPowerToolsFans': return LME_Al * 0.344;
-        case 'EMotorLarge_LessThan1000lbs': return LME_Al * 0.312;
-        case 'Transformer_AluLargeOnly': return LME_Al * 0.176;
-        case 'TransformerCu_AlCu': return LME_Al * 0.28;
-        case 'TransformerCu_SmallPalmSize': return LME_Al * 0.56;
-        case 'TransformerCu_MediumOver200lbs': return LME_Al * 0.592;
-        case 'TransformerCu_Large': return LME_Al * 0.624;
-        case 'Zinc_DieCast': return LME_Zinc * 0.5903;
+        case 'Ballast_Electronic': return 1.25 * 0.12;
+        case 'Ballast_Regular': return 1.25 * 0.216;
+        case 'BatteryAuto_PbAcid': return 1.25 * 0.216;
+        case 'BatterySteelCase_Industrial': return 1.25 * 0.192;
+        case 'Compressor_SealedUnitNoCastIron': return 1.25 * 0.264;
+        case 'EMotorLowGrade_CeilingFanMotors': return 1.25 * 0.144;
+        case 'EMotorMix_NoPumpsPowerToolsFans': return 1.25 * 0.344;
+        case 'EMotorLarge_LessThan1000lbs': return 1.25 * 0.312;
+        case 'Transformer_AluLargeOnly': return 1.25 * 0.176;
+        case 'TransformerCu_AlCu': return 1.25 * 0.28;
+        case 'TransformerCu_SmallPalmSize': return 1.25 * 0.56;
+        case 'TransformerCu_MediumOver200lbs': return 1.25 * 0.592;
+        case 'TransformerCu_Large': return 1.25 * 0.624;
+        case 'Zinc_DieCast': return (2879/2000) * 0.5903;
         default: return null;
       }
     }
     function radiatorProductPrice(product) {
       switch(product) {
-        case 'ACReefer_CleanTalkBaled': return LME_Al * 1.608;
-        case 'ACReefer_CleanUnbaled': return LME_Al * 1.592;
-        case 'ACReefer_DirtyTalkBaled': return LME_Al * 1.496;
-        case 'ACReefer_DirtyUnbaled': return LME_Al * 1.48;
-        case 'Radiator_CleanCar': return LME_Al * 1.984;
-        case 'CuBkg_ACReeferEnd': return LME_Al * 1.008;
+        case 'ACReefer_CleanTalkBaled': return 1.25 * 1.608;
+        case 'ACReefer_CleanUnbaled': return 1.25 * 1.592;
+        case 'ACReefer_DirtyTalkBaled': return 1.25 * 1.496;
+        case 'ACReefer_DirtyUnbaled': return 1.25 * 1.48;
+        case 'Radiator_CleanCar': return 1.25 * 1.984;
+        case 'CuBkg_ACReeferEnd': return 1.25 * 1.008;
         default: return null;
       }
     }
-
+    
+    // ----------------------------
     // Global mapping for computed categories
+    // ----------------------------
     const computedCategoriesMapping = {
       "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
       "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
       "Brass": { materials: brassMaterials, pricingFunc: brassPrice },
       "Lead": { materials: leadMaterials, pricingFunc: leadPrice },
-      "Stainless Steel": { materials: stainlessMaterials, pricingFunc: stainlessPrice },
+      "Stainless": { materials: stainlessMaterials, pricingFunc: stainlessPrice },
+      "E-Scrap": { materials: eScrapMaterials, pricingFunc: eScrapPrice },
       "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
       "Misc Product": { materials: miscProductMaterials, pricingFunc: miscProductPrice },
       "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
     };
-
-    // Helper: Look up commodity data from the Greenspark table
-    // Updated to use .includes() for better matching
+    
+    // ----------------------------
+    // Finished Goods Inventory: Grouped Computed Materials
+    // ----------------------------
+    function updateGroupedComputedMaterialsInventory() {
+      const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
+      // Remove any previously added group rows (they will have a data-group attribute)
+      const previousGroupRows = tableBody.querySelectorAll('tr[data-group]');
+      previousGroupRows.forEach(row => row.remove());
+      
+      // Iterate over each category in computedCategoriesMapping
+      for (let category in computedCategoriesMapping) {
+        const { materials, pricingFunc } = computedCategoriesMapping[category];
+        
+        // Create a group header row with a toggle icon
+        const groupRow = document.createElement('tr');
+        groupRow.setAttribute('data-group', category);
+        groupRow.classList.add('group-header');
+        groupRow.onclick = () => toggleGroup(category);
+        groupRow.innerHTML = `<td colspan="6">${category} <span style="float:right;">&#9660;</span></td>`;
+        tableBody.appendChild(groupRow);
+        
+        // For each material, create a sub-row (initially hidden)
+        materials.forEach(material => {
+          const computedPrice = pricingFunc(material);
+          if (computedPrice !== null) {
+            // Simulated inventory values (you can adjust these as needed)
+            const wip = Math.floor(Math.random() * 10000) + 5000;        
+            const finished = Math.floor(Math.random() * 20000) + 10000;    
+            const total = wip + finished;
+            const avgCost = computedPrice.toFixed(2);
+            const totalPurchaseValue = (total * computedPrice).toFixed(2);
+            
+            const subRow = document.createElement('tr');
+            subRow.setAttribute('data-group', category);
+            subRow.classList.add('group-sub');
+            subRow.style.display = 'none'; // Initially hidden
+            subRow.onclick = (e) => { e.stopPropagation(); rowClicked(material); };
+            subRow.innerHTML = `
+              <td>${material} (${category})</td>
+              <td>${wip.toLocaleString()}</td>
+              <td>${finished.toLocaleString()}</td>
+              <td>${total.toLocaleString()}</td>
+              <td>$${avgCost}</td>
+              <td>$${Number(totalPurchaseValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            `;
+            tableBody.appendChild(subRow);
+          }
+        });
+      }
+    }
+    
+    // Toggle the display of sub-rows in a group
+    function toggleGroup(category) {
+      const subRows = document.querySelectorAll(`tr.group-sub[data-group='${category}']`);
+      subRows.forEach(row => {
+        if (row.style.display === 'none') {
+          row.style.display = 'table-row';
+        } else {
+          row.style.display = 'none';
+        }
+      });
+    }
+    
+    // ----------------------------
+    // Other Helper Functions (for Simulated Trade, etc.)
+    // ----------------------------
+    // Helper: Look up commodity data from the Greenspark table (by matching material name)
     function getCommodityData(material) {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -459,7 +539,7 @@
       }
       return { finishedGoods: 0, avgCost: 0 };
     }
-
+    
     // Helper: Get the Market Snapshot price for the selected material
     function getMarketSnapshotPrice(material) {
       const snapshot = {
@@ -470,8 +550,8 @@
       };
       return snapshot[material] || 0;
     }
-
-    // Updated Trade Options function
+    
+    // Updated Trade Options function for the Simulated Trade section
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
@@ -541,7 +621,10 @@
       alert(`${numTrades} simulated trade(s) for ${material}: Price/ton: $${tradePrice.toFixed(2)}, Cost to Create: $${costToCreate.toFixed(2)}, Expiration: ${expiration}`);
     }
     
-    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    document.addEventListener('DOMContentLoaded', () => {
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+    });
   </script>
 </head>
 <body>
@@ -606,8 +689,8 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Sample static rows -->
-          <tr onclick="rowClicked('ALUMINUM')">
+          <!-- Static sample rows -->
+          <tr onclick="rowClicked('Aluminum')">
             <td>Aluminum</td>
             <td>32,105</td>
             <td>64,351</td>
@@ -639,7 +722,7 @@
             <td>$0.40</td>
             <td>$0.00</td>
           </tr>
-          <tr onclick="rowClicked('FERROUS')">
+          <tr onclick="rowClicked('Busheling STEEL')">
             <td>Busheling STEEL</td>
             <td>128,763</td>
             <td>134,678</td>
@@ -647,55 +730,7 @@
             <td>$0.14</td>
             <td>$0.00</td>
           </tr>
-          <tr onclick="rowClicked('RADIATOR PRODUCT')">
-            <td>Cu Radiator (50Cu/50Brass)</td>
-            <td>15,677</td>
-            <td>324</td>
-            <td>16,001</td>
-            <td>$1.40</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('COPPER PRODUCT')">
-            <td>COPPER</td>
-            <td>32,373</td>
-            <td>73,560</td>
-            <td>105,934</td>
-            <td>$2.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('BRASS PRODUCT')">
-            <td>BRASS</td>
-            <td>15,633</td>
-            <td>20,246</td>
-            <td>35,879</td>
-            <td>$1.20</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Carbide')">
-            <td>Carbide</td>
-            <td>468</td>
-            <td>287</td>
-            <td>755</td>
-            <td>$8.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STAINLESS STEEL')">
-            <td>STAINLESS STEEL</td>
-            <td>13,482</td>
-            <td>15,671</td>
-            <td>29,153</td>
-            <td>$0.60</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STEEL')">
-            <td>Busheling STEEL</td>
-            <td>128,763</td>
-            <td>134,678</td>
-            <td>263,442</td>
-            <td>$0.14</td>
-            <td>$0.00</td>
-          </tr>
-          <!-- Computed materials rows will be appended here by JavaScript -->
+          <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1085,13 +1120,15 @@
       
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
-        const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
-        const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-        const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
-        const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
-        const purchaseValue = totalLbs * avgCost;
-        sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
-        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if(cells.length >= 6) {
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
       });
       
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
@@ -1114,52 +1151,11 @@
       }
     }
     
-    // Update the finished goods inventory with computed material rows
-    function updateComputedMaterialsInventory() {
-      const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
-      
-      // Remove any previously added computed rows
-      const computedRows = tableBody.querySelectorAll('tr[data-computed="true"]');
-      computedRows.forEach(row => row.remove());
-      
-      // Iterate through each computed category
-      for (let category in computedCategoriesMapping) {
-        const { materials, pricingFunc } = computedCategoriesMapping[category];
-        materials.forEach(material => {
-          const computedPrice = pricingFunc(material);
-          if (computedPrice !== null) {
-            // Simulate inventory values (adjust as needed)
-            const wip = Math.floor(Math.random() * 10000) + 5000;        
-            const finished = Math.floor(Math.random() * 20000) + 10000;    
-            const total = wip + finished;
-            const avgCost = computedPrice.toFixed(2);
-            const totalPurchaseValue = (total * computedPrice).toFixed(2);
-    
-            const row = document.createElement('tr');
-            row.setAttribute('data-computed', 'true');
-            row.onclick = function() { rowClicked(material); };
-    
-            row.innerHTML = `
-              <td>${material} (${category})</td>
-              <td>${wip.toLocaleString()}</td>
-              <td>${finished.toLocaleString()}</td>
-              <td>${total.toLocaleString()}</td>
-              <td>$${avgCost}</td>
-              <td>$${Number(totalPurchaseValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            `;
-            tableBody.appendChild(row);
-          }
-        });
-      }
-    }
-    
-    // Populate material dropdown with static options for Simulated Trade section
-    // (No longer using the dynamic populateMaterialDropdown function)
-    
     // Call update functions on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
-    document.addEventListener('DOMContentLoaded', updateComputedMaterialsInventory);
+    document.addEventListener('DOMContentLoaded', () => {
+      updatePurchaseValues();
+      // Other functions such as updateActiveContractsTable() can be called here
+    });
   </script>
 </body>
 </html>
