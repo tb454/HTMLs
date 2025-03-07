@@ -774,78 +774,6 @@
     }
     
     // ----------------------------
-    // Update Finished Goods Inventory Purchase Values
-    // ----------------------------
-    function updatePurchaseValues() {
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-      
-      rows.forEach(row => {
-        const cells = row.getElementsByTagName('td');
-        if(cells.length >= 6) {
-          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
-          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
-          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
-          const purchaseValue = totalLbs * avgCost;
-          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
-          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-      });
-      
-      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      
-      // Update Finished Goods Card
-      if(document.getElementById('finishedGoodsInfo')){
-        const contractsAvailable = Math.floor(sumFinished / 20000);
-        const totalTons = sumTotal / 20000;
-        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
-        if (finishedGoodsChart) {
-          const now = new Date().toLocaleTimeString();
-          finishedGoodsChartLabels.push(now);
-          finishedGoodsChartData.push(totalTons);
-          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
-          finishedGoodsChart.update();
-        }
-      }
-    }
-    
-    // ----------------------------
-    // New Function: Update Active Contracts Change Column
-    // ----------------------------
-    function updateActiveContractsChange() {
-      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      const rows = tableBody.querySelectorAll('tr');
-      rows.forEach(row => {
-        // Make sure the row has at least 4 cells (Ticker, Material, Sale Price, Change)
-        if (row.cells.length >= 4) {
-          // Extract material from the second cell (e.g., "Copper (02/14/2025)")
-          let materialText = row.cells[1].textContent;
-          let materialName = materialText.split('(')[0].trim();
-  
-          // Get the original sale price from the third cell (formatted as "$X.XX")
-          let salePrice = parseFloat(row.cells[2].textContent.replace('$', ''));
-          
-          // Get the current market price per ton using your existing function.
-          let currentPrice = getBasePrice(materialName);
-          
-          // Calculate the difference per ton
-          let priceDiff = currentPrice - salePrice;
-  
-          // Update the "Change" cell (fourth column) with the formatted difference.
-          row.cells[3].textContent = '$' + priceDiff.toFixed(2);
-        }
-      });
-    }
-    
-    // Update active contracts change every 5 seconds.
-    setInterval(updateActiveContractsChange, 5000);
-    
-    // ----------------------------
     // Other Helper Functions
     // ----------------------------
     function logout() {
@@ -865,23 +793,6 @@
     }
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
-    
-    // ----------------------------
-    // Stub functions for missing functionality
-    // ----------------------------
-    function startGuidedTour() {
-      alert("Guided tour functionality not implemented yet.");
-    }
-    function showArchOverview() {
-      // Show the Architecture Overview modal
-      var archModal = new bootstrap.Modal(document.getElementById('archModal'));
-      archModal.show();
-    }
-    function showKPIDetails() {
-      // Show the KPI Details modal
-      var kpiModal = new bootstrap.Modal(document.getElementById('kpiDetailModal'));
-      kpiModal.show();
     }
     
     // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
@@ -1239,6 +1150,199 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
+  <!-- Main Application Script -->
+  <script>
+    // Accent color for charts
+    const accentColor = '#3498db';
+    document.querySelectorAll('.section-title').forEach(el => {
+      el.style.borderColor = accentColor;
+      el.style.color = accentColor;
+    });
+    
+    // Global variables for charts
+    let activeContractsChart;
+    const activeContractsChangeHistory = [];
+    const activeContractsChartLabels = [];
+    let finishedGoodsChart;
+    let finishedGoodsChartLabels = [];
+    let finishedGoodsChartData = [];
+    let kpiChart;
+    let kpiChartLabels = [];
+    let kpiChartData = [];
+  
+    // Initialize charts once DOM is loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      // Active Contracts Chart
+      const activeContractsCanvas = document.getElementById('activeContractsChart');
+      if(activeContractsCanvas) {
+        const ctxActive = activeContractsCanvas.getContext('2d');
+        activeContractsChart = new Chart(ctxActive, {
+          type: 'line',
+          data: {
+            labels: activeContractsChartLabels,
+            datasets: [{
+              label: 'Total Change',
+              data: activeContractsChangeHistory,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true, max: 10000, ticks: { stepSize: 2000 } } }
+          }
+        });
+      }
+      
+      // Finished Goods Chart
+      const finishedCanvas = document.getElementById('finishedGoodsChart');
+      if(finishedCanvas) {
+        const ctxFinished = finishedCanvas.getContext('2d');
+        finishedGoodsChart = new Chart(ctxFinished, {
+          type: 'line',
+          data: {
+            labels: finishedGoodsChartLabels,
+            datasets: [{
+              label: 'Total Tons',
+              data: finishedGoodsChartData,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: { scales: { y: { beginAtZero: true, max: 300 } } }
+        });
+      }
+      
+      // KPI Chart
+      const kpiCanvas = document.getElementById('kpiChart');
+      if(kpiCanvas) {
+        const ctxKPI = kpiCanvas.getContext('2d');
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        kpiChartData = [500, 700, 650, 800, 750, 900];
+        kpiChart = new Chart(ctxKPI, {
+          type: 'bar',
+          data: {
+            labels: kpiChartLabels,
+            datasets: [{ label: 'Monthly Trade Volume', data: kpiChartData, backgroundColor: accentColor }]
+          },
+          options: { scales: { y: { beginAtZero: true } } }
+        });
+      }
+    });
+    
+    // Update Finished Goods Inventory Purchase Values
+    function updatePurchaseValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
+      rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        if(cells.length >= 6) {
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+      });
+      
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      // Update Finished Goods Card
+      if(document.getElementById('finishedGoodsInfo')){
+        const contractsAvailable = Math.floor(sumFinished / 20000);
+        const totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
+        if (finishedGoodsChart) {
+          const now = new Date().toLocaleTimeString();
+          finishedGoodsChartLabels.push(now);
+          finishedGoodsChartData.push(totalTons);
+          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
+          finishedGoodsChart.update();
+        }
+      }
+    }
+    
+    // ----------------------------
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    // Append a new entry to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      // For a 10-ton load, total quantity is 10 * numTrades (tons)
+      const totalQuantity = 10 * numTrades;
+      // Total contract value = tradePrice per ton * 10 tons * number of contracts
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      // Record in Trade Log
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      // Add Active Contract entry
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
+      reduceInventory(material, numTrades * 20000);
+      // Update purchase values to reflect inventory changes
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
+    }
+    
+    // ----------------------------
+    // Other Helper Functions
+    // ----------------------------
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
+    // update computed inventory groups, and update purchase values.
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
+  
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
   <script>
     // Hidden reference object (not rendered) to be used for ticker generation
@@ -1303,6 +1407,30 @@
         "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
         "IW-BX-AL": "ICW2 BX Cable AL",
         "IW-BX-FE": "ICW2 BX Cable FE24"
+      },
+      miscellaneous: {
+        "BAL-E": "Ballast Electronic",
+        "BAL-R": "Ballast Regular",
+        "BAT-PB": "Battery Auto Pb Acid",
+        "BAT-ST": "Battery Steel Case Industrial",
+        "COMP": "Compressor Sealed Unit No Cast Iron",
+        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
+        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
+        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
+        "TR-AL": "Transformer Alu Large Only",
+        "TR-CU-AL": "Transformer Cu AlCu",
+        "TR-CU-SM": "Transformer Cu Small Palm Size",
+        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
+        "TR-CU-LG": "Transformer Cu Large",
+        "ZN-CAST": "Zinc Die Cast"
+      },
+      radiator: {
+        "AC-RADB": "AC Reefer Clean Talk Baled",
+        "AC-RADU": "AC Reefer Clean Unbaled",
+        "AC-RADDB": "AC Reefer Dirty Talk Baled",
+        "AC-RADDU": "AC Reefer Dirty Unbaled",
+        "AL-RADCC": "Radiator Clean Car",
+        "RAD-ENDS": "Cu Bkg AC Reefer End"
       }
     };
 
