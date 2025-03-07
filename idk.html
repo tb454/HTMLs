@@ -430,7 +430,7 @@
       }
     }
 
-    // Global mapping of computed categories for use in both inventory updates and trade pricing
+    // Global mapping for computed categories
     const computedCategoriesMapping = {
       "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
       "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
@@ -442,15 +442,18 @@
       "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
     };
 
-    // Helper function: Given a material name, return its computed base price per ton.
-    function getComputedBasePrice(material) {
-      for (let category in computedCategoriesMapping) {
-        if (computedCategoriesMapping[category].materials.includes(material)) {
-          return computedCategoriesMapping[category].pricingFunc(material) * 1000;
+    // Helper: Given a material name, return commodity data from the greenspark table
+    function getCommodityData(material) {
+      const target = commodityMapping[material];
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.cells[0].textContent.trim().toUpperCase() === target.toUpperCase()){
+          const finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          return { finishedGoods };
         }
       }
-      // Fallback to marketSnapshotPrices if not found in computed lists.
-      return marketSnapshotPrices[material] || 0;
+      return { finishedGoods: 0 };
     }
   </script>
 </head>
@@ -624,12 +627,11 @@
     <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
       <div class="d-flex align-items-center flex-wrap gap-3">
-        <!-- Material Dropdown (populated dynamically with the entire list) -->
+        <!-- Material Dropdown (populated dynamically) -->
         <div class="d-flex align-items-center">
           <label for="create-material" class="me-2">Material:</label>
           <select id="create-material" onchange="updateTradeOptions()"></select>
         </div>
-        <!-- The grade dropdown has been removed as requested -->
         <div class="d-flex align-items-center">
           <label for="create-contracts" class="me-2">Creatable Contracts:</label>
           <select id="create-contracts"></select>
@@ -887,6 +889,223 @@
     </div>
   </div>
   
+  <!-- Added Trade Functions -->
+  <script>
+    function updateTradeOptions() { 
+      const materialSelect = document.getElementById('create-material');
+      const material = materialSelect.value;
+      const data = getCommodityData(material);
+      
+      const contractSize = 20000;
+      const availableContracts = Math.floor(data.finishedGoods / contractSize);
+      
+      const contractsSelect = document.getElementById('create-contracts');
+      contractsSelect.innerHTML = '';
+      if (availableContracts < 1) {
+        const option = document.createElement('option');
+        option.value = 0;
+        option.textContent = "0";
+        contractsSelect.appendChild(option);
+      } else {
+        for (let i = 1; i <= availableContracts; i++) {
+          const option = document.createElement('option');
+          option.value = i;
+          option.textContent = i;
+          contractsSelect.appendChild(option);
+        }
+      }
+      
+      const basePricePerTon = marketSnapshotPrices[material] || 0;
+      
+      const priceSelect = document.getElementById('create-price');
+      priceSelect.innerHTML = '';
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
+      });
+      
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const costToCreate = basePricePerTon * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOption);
+      
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = expDate.getDate().toString().padStart(2, '0');
+        const year = expDate.getFullYear();
+        const dateStr = month + '/' + day + '/' + year;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateTradeOptions);
+    
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tradeTime = new Date().toLocaleTimeString();
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = 
+        `<td>${tradeTime}</td>
+         <td>${material}</td>
+         <td>${quantity}</td>
+         <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+         <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
+      tableBody.appendChild(newRow);
+    }
+    
+    function addActiveContract(commodity, expiration, salePrice) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+      const priceDifference = salePrice - snapshotPrice;
+      const contractSize = 10;
+      const totalContractValue = contractSize * snapshotPrice;
+      const marginRequirement = totalContractValue * 0.07;
+      
+      const expDate = new Date(expiration);
+      const expFormatted = new Date(expiration).toLocaleString('default', { month: 'short' }) +
+                           " '" + expDate.getFullYear().toString().slice(-2);
+      
+      const ticker = tickerMapping[commodity] || '';
+      
+      const newRow = document.createElement('tr');
+      newRow.dataset.commodity = commodity;
+      newRow.dataset.salePrice = salePrice;
+      
+      newRow.innerHTML = 
+        `<td>${ticker}</td>
+         <td>${commodity} (${expFormatted})</td>
+         <td>${salePrice.toFixed(2)}</td>
+         <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
+         <td>${expiration}</td>
+         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+         <td>
+           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+         </td>`;
+      tableBody.appendChild(newRow);
+    }
+    
+    function updateActiveContractsTable() {
+      const table = document.getElementById('active-contracts-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let totalContracts = rows.length;
+      let totalMarginRequirement = 0;
+      let totalChange = 0;
+      const contractSize = 10;
+      
+      rows.forEach(row => {
+        const commodity = row.dataset.commodity;
+        const salePrice = parseFloat(row.dataset.salePrice);
+        const snapshotPrice = marketSnapshotPrices[commodity] || 0;
+        const priceDifference = salePrice - snapshotPrice;
+        totalChange += priceDifference;
+        
+        row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
+        
+        const totalContractValue = contractSize * snapshotPrice;
+        const marginRequirement = totalContractValue * 0.07;
+        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        totalMarginRequirement += marginRequirement;
+      });
+      
+      document.getElementById('activeContractsCount').textContent = totalContracts;
+      document.getElementById('activeContractsMarginTotal').textContent =
+        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
+      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
+      document.getElementById('total-change').textContent = totalChangeText;
+      document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
+      
+      const now = new Date();
+      const label = now.toLocaleTimeString();
+      activeContractsChangeHistory.push(totalChange);
+      activeContractsChartLabels.push(label);
+      
+      if (activeContractsChangeHistory.length > 10) {
+        activeContractsChangeHistory.shift();
+        activeContractsChartLabels.shift();
+      }
+      
+      if (activeContractsChart) {
+        activeContractsChart.update();
+      }
+    }
+    
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const chosenPrice = parseFloat(document.getElementById('create-price').value);
+      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      const contractWeightLbs = 20000;
+      
+      for (let i = 0; i < numTrades; i++) {
+        const quantity = 10;
+        const totalCost = quantity * chosenPrice;
+        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
+        addActiveContract(material, expiration, chosenPrice);
+      }
+      
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
+          let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
+          row.cells[2].textContent = updatedFinished.toLocaleString();
+          
+          let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          let updatedTotal = currentTotal - (numTrades * contractWeightLbs);
+          row.cells[3].textContent = updatedTotal.toLocaleString();
+        }
+      }
+      
+      updateActiveContractsTable();
+      updatePurchaseValues();
+      
+      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+    }
+    
+    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
+    
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+  </script>
+  <!-- End of Added Trade Functions -->
+  
   <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1073,217 +1292,6 @@
         materialSelect.appendChild(opt);
       });
       updateTradeOptions(); // Update trade options after populating
-    }
-    
-    // Modified updateTradeOptions (grade selection removed)
-    function updateTradeOptions() {
-      const material = document.getElementById('create-material').value;
-      // Get computed base price per ton using our helper function
-      const basePricePerTon = getComputedBasePrice(material);
-      
-      // Update available contracts based on finished goods
-      const data = getCommodityData(material);
-      const availableContracts = Math.floor(data.finishedGoods / 20000);
-      const contractsSelect = document.getElementById('create-contracts');
-      contractsSelect.innerHTML = '';
-      if(availableContracts < 1){
-        let opt = document.createElement('option');
-        opt.value = 0;
-        opt.textContent = "0";
-        contractsSelect.appendChild(opt);
-      } else {
-        for(let i = 1; i <= availableContracts; i++){
-          let opt = document.createElement('option');
-          opt.value = i;
-          opt.textContent = i;
-          contractsSelect.appendChild(opt);
-        }
-      }
-      
-      // Update price options with multipliers
-      const priceSelect = document.getElementById('create-price');
-      priceSelect.innerHTML = '';
-      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
-      multipliers.forEach(mult => {
-        let opt = document.createElement('option');
-        let price = basePricePerTon * mult;
-        opt.value = price.toFixed(2);
-        opt.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        priceSelect.appendChild(opt);
-      });
-      
-      // Update cost to create
-      const costSelect = document.getElementById('create-cost');
-      costSelect.innerHTML = '';
-      let costToCreate = basePricePerTon * 0.001;
-      let costOpt = document.createElement('option');
-      costOpt.value = costToCreate.toFixed(2);
-      costOpt.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      costSelect.appendChild(costOpt);
-      
-      // Update expiration dates (next 5 months)
-      const expirationSelect = document.getElementById('create-expiration');
-      expirationSelect.innerHTML = '';
-      const today = new Date();
-      for(let i = 1; i <= 5; i++){
-        let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
-        let month = (expDate.getMonth()+1).toString().padStart(2, '0');
-        let day = expDate.getDate().toString().padStart(2, '0');
-        let dateStr = month + '/' + day + '/' + expDate.getFullYear();
-        let opt = document.createElement('option');
-        opt.value = dateStr;
-        opt.textContent = dateStr;
-        expirationSelect.appendChild(opt);
-      }
-    }
-    
-    // Append a trade log entry
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
-      const tradeTime = new Date().toLocaleTimeString();
-      let newRow = document.createElement('tr');
-      newRow.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td><td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
-      tableBody.appendChild(newRow);
-    }
-    
-    // Add an active contract entry
-    function addActiveContract(commodity, expiration, salePrice) {
-      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-      const priceDiff = salePrice - snapshotPrice;
-      const contractSize = 10;
-      const totalContractValue = contractSize * snapshotPrice;
-      const marginRequirement = totalContractValue * 0.07;
-      const expDate = new Date(expiration);
-      const expFormatted = expDate.toLocaleString('default', { month: 'short' }) + " '" + expDate.getFullYear().toString().slice(-2);
-      const ticker = tickerMapping[commodity] || '';
-      let newRow = document.createElement('tr');
-      newRow.dataset.commodity = commodity;
-      newRow.dataset.salePrice = salePrice;
-      newRow.innerHTML = `<td>${ticker}</td><td>${commodity} (${expFormatted})</td><td>${salePrice.toFixed(2)}</td><td>${priceDiff>=0?'+':''}${priceDiff.toFixed(2)}</td><td>${expiration}</td><td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td>
-        <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
-        <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
-      </td>`;
-      tableBody.appendChild(newRow);
-    }
-    
-    // Update active contracts table totals and chart
-    function updateActiveContractsTable() {
-      const table = document.getElementById('active-contracts-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let totalContracts = rows.length;
-      let totalMargin = 0, totalChange = 0;
-      const contractSize = 10;
-      rows.forEach(row => {
-        const commodity = row.dataset.commodity;
-        const salePrice = parseFloat(row.dataset.salePrice);
-        const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-        const diff = salePrice - snapshotPrice;
-        totalChange += diff;
-        row.cells[3].textContent = (diff>=0?'+':'') + diff.toFixed(2);
-        const margin = (contractSize * snapshotPrice) * 0.07;
-        row.cells[5].textContent = '$' + margin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-        totalMargin += margin;
-      });
-      document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent = '$' + totalMargin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
-      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMargin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-      const totalChangeText = (totalChange>=0?'+':'') + totalChange.toFixed(2);
-      document.getElementById('total-change').textContent = totalChangeText;
-      document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
-      
-      const now = new Date();
-      activeContractsChangeHistory.push(totalChange);
-      activeContractsChartLabels.push(now.toLocaleTimeString());
-      if(activeContractsChangeHistory.length > 10) {
-        activeContractsChangeHistory.shift();
-        activeContractsChartLabels.shift();
-      }
-      if(activeContractsChart) activeContractsChart.update();
-    }
-    
-    // Simulate a trade execution
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const chosenPrice = parseFloat(document.getElementById('create-price').value);
-      const chosenCost = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      const contractWeight = 20000;
-      
-      for(let i=0; i<numTrades; i++){
-        const quantity = 10;
-        const totalCost = quantity * chosenPrice;
-        appendTradeLogEntry(material + ' (Trade #' + (i+1) + ')', quantity, chosenPrice, totalCost);
-        addActiveContract(material, expiration, chosenPrice);
-      }
-      
-      // Update finished goods inventory for the traded material
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      rows.forEach(row => {
-        if(row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()){
-          let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          row.cells[2].textContent = (currentFinished - numTrades * contractWeight).toLocaleString();
-          let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
-          row.cells[3].textContent = (currentTotal - numTrades * contractWeight).toLocaleString();
-        }
-      });
-      
-      updateActiveContractsTable();
-      updatePurchaseValues();
-      
-      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
-    }
-    
-    // Dummy functions for Roll and Close
-    function rollContract() { alert('Roll contract function to be implemented.'); }
-    function closeContract() { alert('Close contract function to be implemented.'); }
-    
-    function logout() { alert('Logging out...'); }
-    function cardClicked(cardName) {
-      if(cardName === "Active Contracts"){
-        alert(cardName + " card clicked!\n" + document.getElementById('activeContractsCount').textContent + " Secured\nMargin: " + document.getElementById('activeContractsMarginTotal').textContent);
-      } else {
-        alert(cardName + " card clicked!");
-      }
-    }
-    function rowClicked(itemName) { alert('Row for ' + itemName + ' clicked!'); }
-    function createFuturesContract(material, contractName) { alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')'); }
-    
-    // Dummy commodity and ticker mappings (retain your original mappings)
-    const baseMarketSnapshotPrices = {
-      "Copper": 9500, "Busheling Steel": 700, "Brass": 7500, "Aluminum": 2200,
-      "Electric Motors": 900, "Insulated Copper Wire": 3600, "Lead": 1500,
-      "HMS Steel #2": 500, "Cu Radiator (50Cu/50Brass)": 5600, "Carbide": 20000, "Stainless Steel": 1600
-    };
-    let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
-    const commodityMapping = {
-      "Copper": "COPPER", "Busheling Steel": "BUSHELING STEEL", "Brass": "BRASS",
-      "Aluminum": "ALUMINUM", "Electric Motors": "ELECTRIC MOTORS", "Insulated Copper Wire": "INSULATED COPPER WIRE",
-      "Lead": "LEAD", "HMS Steel #2": "HMS STEEL #2", "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
-      "Carbide": "CARBIDE", "Stainless Steel": "STAINLESS STEEL"
-    };
-    const tickerMapping = {
-      "Aluminum": "ALUM25", "Electric Motors": "EMOT25", "Insulated Copper Wire": "ICWR25",
-      "Lead": "LEAD25", "HMS Steel #2": "HMS225", "Cu Radiator (50Cu/50Brass)": "CRAD25",
-      "Copper": "COPR25", "Brass": "BRSS25", "Carbide": "CARB25", "Stainless Steel": "STLS25",
-      "Busheling Steel": "BSTE25"
-    };
-    
-    // Dummy function for commodity data lookup
-    function getCommodityData(material) {
-      const target = commodityMapping[material];
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      for (let row of rows) {
-        if (row.cells[0].textContent.trim().toUpperCase() === target.toUpperCase()){
-          const finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          return { finishedGoods };
-        }
-      }
-      return { finishedGoods: 0 };
     }
     
     // Populate material dropdown on DOMContentLoaded
