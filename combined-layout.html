@@ -580,13 +580,15 @@
       // If the material string includes a category in parentheses, extract it.
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
-        const category = material.split(" (")[1].replace(")","").trim();
+        const category = material.split(" (")[1].replace(")", "").trim();
         let price = getMarketSnapshotPrice(category);
         if (price > 0) {
-          return price;
+          return price; // already per ton from snapshot
         }
         if (computedCategoriesMapping[category]) {
-          return computedCategoriesMapping[category].pricingFunc(baseMaterial) || 0;
+          let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
+          // Multiply by 2000 to convert from per pound to per ton
+          return computedPrice ? computedPrice * 2000 : 0;
         }
       }
       // Try direct market snapshot lookup.
@@ -595,7 +597,9 @@
       // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
-          return computedCategoriesMapping[cat].pricingFunc(material) || 0;
+          let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
+          // Multiply by 2000 to convert to per ton value
+          return computedPrice ? computedPrice * 2000 : 0;
         }
       }
       return 0;
@@ -809,8 +813,8 @@
       <div class="user-info">
         <span>User: John Doe</span>
         <button onclick="logout()">Logout</button>
-        <button onclick="startGuidedTour()">Start Tour</button>
-        <button onclick="showArchOverview()">View Architecture</button>
+        <button onclick="startGuidedTour()">Greenspark</button>
+        <button onclick="showArchOverview()">ThinkorSwim</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
@@ -865,7 +869,7 @@
         <tbody>
           <!-- Static sample rows -->
             <tr onclick="rowClicked('Busheling STEEL')">
-            <td>Busheling STEEL</td>
+            <td>Busheling Steel</td>
             <td>128,763</td>
             <td>134,678</td>
             <td>263,442</td>
