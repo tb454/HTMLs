@@ -482,7 +482,7 @@
         materials.forEach(material => {
           const computedPrice = pricingFunc(material);
           if (computedPrice !== null) {
-            // Simulated inventory values (you can adjust these as needed)
+            // Simulated inventory values (adjust as needed)
             const wip = Math.floor(Math.random() * 10000) + 5000;        
             const finished = Math.floor(Math.random() * 20000) + 10000;    
             const total = wip + finished;
@@ -512,22 +512,44 @@
     function toggleGroup(category) {
       const subRows = document.querySelectorAll(`tr.group-sub[data-group='${category}']`);
       subRows.forEach(row => {
-        if (row.style.display === 'none') {
-          row.style.display = 'table-row';
-        } else {
-          row.style.display = 'none';
-        }
+        row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
       });
     }
     
     // ----------------------------
-    // Other Helper Functions (for Simulated Trade, etc.)
+    // Helper Functions for Simulated Trade Section
     // ----------------------------
-    // Helper: Look up commodity data from the Greenspark table (by matching material name)
+    // Populate the "Material" dropdown in Simulated Trade from all materials in Greenspark table.
+    function populateTradeMaterialDropdown() {
+      const dropdown = document.getElementById('create-material');
+      dropdown.innerHTML = '';
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      const materialsSet = new Set();
+      rows.forEach(row => {
+        // Skip group header rows
+        if (row.classList.contains('group-header')) return;
+        const materialText = row.cells[0].textContent.trim();
+        if (materialText) {
+          materialsSet.add(materialText);
+        }
+      });
+      const materials = Array.from(materialsSet).sort();
+      materials.forEach(material => {
+        const option = document.createElement('option');
+        option.value = material;
+        option.textContent = material;
+        dropdown.appendChild(option);
+      });
+    }
+    
+    // Get commodity data from the Greenspark table (by matching material name)
     function getCommodityData(material) {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
+        // Ignore group header rows
+        if (row.classList.contains('group-header')) continue;
         const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
         if (cellMaterial.includes(material.toLowerCase())) {
           const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
@@ -540,27 +562,56 @@
       return { finishedGoods: 0, avgCost: 0 };
     }
     
-    // Helper: Get the Market Snapshot price for the selected material
-    function getMarketSnapshotPrice(material) {
+    // Get the Market Snapshot price for a given key (e.g., "Copper", "Brass", etc.)
+    function getMarketSnapshotPrice(key) {
       const snapshot = {
         "Copper": 9500,
         "Brass": 7500,
         "Steel": 500,
         "Aluminum": 2200
       };
-      return snapshot[material] || 0;
+      return snapshot[key] || 0;
     }
     
-    // Updated Trade Options function for the Simulated Trade section
+    // Determine the base price per ton for a given material.
+    // First try: if the material (or its category) has a market snapshot price.
+    // Otherwise, use the corresponding pricing function.
+    function getBasePrice(material) {
+      let baseMaterial = material;
+      // If the material has a category (e.g., "Barley (Copper)"), extract it.
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        const category = material.split(" (")[1].replace(")","").trim();
+        let price = getMarketSnapshotPrice(category);
+        if (price > 0) {
+          return price;
+        }
+        if (computedCategoriesMapping[category]) {
+          return computedCategoriesMapping[category].pricingFunc(baseMaterial) || 0;
+        }
+      }
+      // Try direct market snapshot lookup.
+      let price = getMarketSnapshotPrice(material);
+      if (price > 0) return price;
+      // If not found, search through computed categories.
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(material)) {
+          return computedCategoriesMapping[cat].pricingFunc(material) || 0;
+        }
+      }
+      return 0;
+    }
+    
+    // Update Trade Options in Simulated Trade section
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
+      
+      // Get commodity data for contracts
       const data = getCommodityData(material);
-      // Assume contract size is 10 tons = 20,000 lbs.
-      const contractSize = 20000;
+      const contractSize = 20000; // 10 tons = 20,000 lbs.
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
-      // Update "Creatable Contracts" dropdown
       const contractsSelect = document.getElementById('create-contracts');
       contractsSelect.innerHTML = '';
       for (let i = 1; i <= availableContracts; i++) {
@@ -570,10 +621,10 @@
         contractsSelect.appendChild(option);
       }
       
-      // Get the base price per ton from the market snapshot
-      const basePricePerTon = getMarketSnapshotPrice(material);
+      // Determine base price per ton from Market Snapshot or Pricing Functions
+      const basePricePerTon = getBasePrice(material);
       
-      // Update "Price/ton" dropdown: 6 options using multipliers
+      // Update Price/ton dropdown with 6 multiplier options
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -585,7 +636,7 @@
         priceSelect.appendChild(option);
       });
       
-      // Update "Cost to Create" dropdown: single option = 0.1% of base price per ton
+      // Update Cost to Create: 0.1% of base price per ton
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
       const costToCreate = basePricePerTon * 0.001;
@@ -594,7 +645,7 @@
       costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
       
-      // Update "Expiration Date" dropdown: 5 future dates in 1-month increments
+      // Update Expiration Date dropdown: 5 future dates (1-month increments)
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
@@ -621,10 +672,38 @@
       alert(`${numTrades} simulated trade(s) for ${material}: Price/ton: $${tradePrice.toFixed(2)}, Cost to Create: $${costToCreate.toFixed(2)}, Expiration: ${expiration}`);
     }
     
+    // ----------------------------
+    // Other Helper Functions
+    // ----------------------------
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options, and update computed inventory groups.
     document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
+      // Update purchase values for static rows.
+      updatePurchaseValues();
     });
+    
+    // (Other functions such as updateActiveContractsTable() can be called here as needed.)
   </script>
 </head>
 <body>
@@ -690,7 +769,39 @@
         </thead>
         <tbody>
           <!-- Static sample rows -->
-            <tr onclick="rowClicked('Busheling STEEL')">
+          <tr onclick="rowClicked('Aluminum')">
+            <td>Aluminum</td>
+            <td>32,105</td>
+            <td>64,351</td>
+            <td>96,456</td>
+            <td>$0.50</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Electric Motors')">
+            <td>Electric Motors</td>
+            <td>11,052</td>
+            <td>30,844</td>
+            <td>41,897</td>
+            <td>$0.30</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Insulated copper wire')">
+            <td>Insulated copper wire</td>
+            <td>71,649</td>
+            <td>50,673</td>
+            <td>122,322</td>
+            <td>$1.20</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('LEAD')">
+            <td>LEAD</td>
+            <td>5,802</td>
+            <td>1,640</td>
+            <td>7,443</td>
+            <td>$0.40</td>
+            <td>$0.00</td>
+          </tr>
+          <tr onclick="rowClicked('Busheling STEEL')">
             <td>Busheling STEEL</td>
             <td>128,763</td>
             <td>134,678</td>
@@ -713,16 +824,13 @@
       </table>
     </section>
     
-    <!-- Updated Simulated Trade Section -->
+    <!-- Simulated Trade Section -->
     <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
       <div class="mb-3">
         <label for="create-material">Material:</label>
         <select id="create-material" onchange="updateTradeOptions()">
-          <option value="Copper">Copper</option>
-          <option value="Brass">Brass</option>
-          <option value="Steel">Steel</option>
-          <option value="Aluminum">Aluminum</option>
+          <!-- Options populated dynamically from the Greenspark table -->
         </select>
         <label for="create-contracts">Creatable Contracts:</label>
         <select id="create-contracts"></select>
@@ -971,28 +1079,6 @@
     </div>
   </div>
   
-  <!-- Added Trade Functions -->
-  <script>
-    function logout() {
-      alert('Logging out...');
-    }
-    function cardClicked(cardName) {
-      if (cardName === "Active Contracts") {
-        const contracts = document.getElementById('activeContractsCount').textContent;
-        const margin = document.getElementById('activeContractsMarginTotal').textContent;
-        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
-      } else {
-        alert(cardName + " card clicked!");
-      }
-    }
-    function rowClicked(itemName) {
-      alert('Row for ' + itemName + ' clicked!');
-    }
-    function createFuturesContract(material, contractName) {
-      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
-  </script>
-  
   <!-- Bootstrap Bundle JS and Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1118,12 +1204,6 @@
         }
       }
     }
-    
-    // Call update functions on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', () => {
-      updatePurchaseValues();
-      // Other functions such as updateActiveContractsTable() can be called here
-    });
   </script>
 </body>
 </html>
