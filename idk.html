@@ -606,31 +606,6 @@
     }
     
     // ----------------------------
-    // New Helper: Convert Expiration Date to Futures Ticker Suffix
-    // ----------------------------
-    function convertExpirationToTicker(expiration) {
-      const parts = expiration.split('/');
-      const month = parseInt(parts[0], 10);
-      const year = parts[2].slice(-2);
-      // Standard futures month codes: Jan: F, Feb: G, Mar: H, Apr: J, May: K, Jun: M, Jul: N, Aug: Q, Sep: U, Oct: V, Nov: X, Dec: Z
-      const monthCodes = {
-        1: 'F',
-        2: 'G',
-        3: 'H',
-        4: 'J',
-        5: 'K',
-        6: 'M',
-        7: 'N',
-        8: 'Q',
-        9: 'U',
-        10: 'V',
-        11: 'X',
-        12: 'Z'
-      };
-      return monthCodes[month] + year;
-    }
-    
-    // ----------------------------
     // Trade Log, Active Contracts & Inventory Update Functions
     // ----------------------------
     // Append a new entry to the Trade Log table.
@@ -645,13 +620,8 @@
     // Add a new active contract entry.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Get the base ticker from your existing function.
-      const baseTicker = getTickerFromReference(material);
-      // Convert the expiration date into the ticker suffix.
-      const expirationTicker = convertExpirationToTicker(expiration);
-      // Combine them to form the complete ticker.
-      const ticker = baseTicker + expirationTicker;
-      
+      // Generate ticker using the updated ticker generator
+      const ticker = getTickerFromReference(material);
       // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
@@ -897,16 +867,7 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Static sample rows -->
-          <tr onclick="rowClicked('Busheling STEEL')">
-            <td>Busheling Steel</td>
-            <td>128,763</td>
-            <td>134,678</td>
-            <td>263,442</td>
-            <td>$0.14</td>
-            <td>$0.00</td>
-          </tr>
-          <!-- Grouped computed material rows will be appended here by JavaScript -->
+     <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1131,23 +1092,6 @@
       </div>
       <button class="action-btn mt-3" onclick="showKPIDetails()">View KPI Details</button>
     </section>
-    
-    <!-- Scrap Material Codes Section -->
-    <section class="section">
-      <div class="section-title">Scrap Material Codes</div>
-      <table id="scrap-material-codes-table" class="table table-bordered">
-        <thead>
-          <tr>
-            <th>Category</th>
-            <th>Code</th>
-            <th>Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Table rows will be dynamically populated -->
-        </tbody>
-      </table>
-    </section>
   </div>
   
   <!-- KPI Detail Modal -->
@@ -1319,7 +1263,80 @@
       }
     }
     
-    // Hidden reference object for ticker generation
+    // ----------------------------
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    // Append a new entry to the Trade Log table.
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      // For a 10-ton load, total quantity is 10 * numTrades (tons)
+      const totalQuantity = 10 * numTrades;
+      // Total contract value = tradePrice per ton * 10 tons * number of contracts
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      // Record in Trade Log
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      // Add Active Contract entry
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
+      reduceInventory(material, numTrades * 20000);
+      // Update purchase values to reflect inventory changes
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
+    }
+    
+    // ----------------------------
+    // Other Helper Functions
+    // ----------------------------
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
+    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
+    // update computed inventory groups, and update purchase values.
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
+  
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
+  <script>
+    // Hidden reference object (not rendered) to be used for ticker generation
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -1433,29 +1450,6 @@
       // Fallback if no match is found.
       return material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
-    
-    // Function to populate the Scrap Material Codes table
-    function populateScrapMaterialCodes() {
-      const codes = scrapMaterialCodes;
-      const tbody = document.getElementById('scrap-material-codes-table').getElementsByTagName('tbody')[0];
-      for (const category in codes) {
-        for (const code in codes[category]) {
-          const row = document.createElement('tr');
-          const tdCategory = document.createElement('td');
-          tdCategory.textContent = category.charAt(0).toUpperCase() + category.slice(1);
-          row.appendChild(tdCategory);
-          const tdCode = document.createElement('td');
-          tdCode.textContent = code;
-          row.appendChild(tdCode);
-          const tdDescription = document.createElement('td');
-          tdDescription.textContent = codes[category][code];
-          row.appendChild(tdDescription);
-          tbody.appendChild(row);
-        }
-      }
-    }
-    
-    document.addEventListener('DOMContentLoaded', populateScrapMaterialCodes);
   </script>
 </body>
 </html>
