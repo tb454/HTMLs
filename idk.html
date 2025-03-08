@@ -617,6 +617,49 @@
       tableBody.appendChild(row);
     }
     
+    // Updated Ticker Generator: now takes an expiration date to form a futures-style ticker.
+    // For example: if the base ticker is "GC", an expiration in April 2025 produces "GCJ25".
+    function getTickerFromReference(material, expiration) {
+      let tickerBase = "";
+      // Loop through computedCategoriesMapping to find the category for the material.
+      for (let category in computedCategoriesMapping) {
+        if (computedCategoriesMapping[category].materials.includes(material)) {
+          let catLower = category.toLowerCase();
+          if (scrapMaterialCodes[catLower]) {
+            // Check each code in the hidden scrap material codes reference.
+            for (const code in scrapMaterialCodes[catLower]) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(material))) {
+                tickerBase = code;
+                break;
+              }
+            }
+          }
+          if (tickerBase) break;
+        }
+      }
+      // Fallback if no match is found.
+      if (!tickerBase) {
+        tickerBase = material.slice(0, 3).toUpperCase();
+      }
+      
+      // Futures month codes (common for commodities):
+      // January: F, February: G, March: H, April: J, May: K, June: M,
+      // July: N, August: Q, September: U, October: V, November: X, December: Z.
+      const monthCodes = { 
+        "01": "F", "02": "G", "03": "H", "04": "J", 
+        "05": "K", "06": "M", "07": "N", "08": "Q", 
+        "09": "U", "10": "V", "11": "X", "12": "Z" 
+      };
+      
+      // Assuming expiration is provided in "MM/DD/YYYY" format.
+      const [month, , year] = expiration.split("/");
+      const monthCode = monthCodes[month] || "";
+      const yearCode = year.slice(-2); // Last two digits of the year
+      
+      // Return the ticker as the base code plus the month letter and year.
+      return tickerBase + monthCode + yearCode;
+    }
+    
     // Add a new active contract entry.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
@@ -795,12 +838,112 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
+    // ----------------------------
+    // Hidden Scrap Material Codes Reference and Updated Ticker Generator
+    // ----------------------------
+    const scrapMaterialCodes = {
+      copper: {
+        "CUB": "Barley (Cu BB)",
+        "CU1": "#1 (Berry & Candy)",
+        "CU2": "#2 (Birch & Cliff)",
+        "CU3": "#3 (Sheet Copper)"
+      },
+      aluminum: {
+        "AL61-NBE": "AL6061 New Bare Extrusion",
+        "AL61-CPP": "AL6061 Clip Plate Pipe",
+        "AL63-SEC": "AL6063 Secondary",
+        "AL63-OE": "AL6063 Old Extrusion",
+        "AL63-E10": "AL6063 Extrusion 10/10",
+        "AL-PAS": "AL PAS Baled",
+        "AL-C": "AL Cast Clean",
+        "AL-RS-CB": "AL RADS Clean Baled",
+        "AL-RS-DB": "AL RADS Dirty Baled",
+        "AL-ST": "AL Sheet Clean Baled",
+        "AL-AUTO": "AL Wheel Auto Clean",
+        "AL-WH-CH": "AL Wheel Chrome Clean",
+        "AL-TRUCKWH": "Truck Wheel Clean",
+        "AL-WIRE-CATV": "AL Wire Bare CATV",
+        "AL-WIRE-NEO": "AL Wire Neoprene ACSR",
+        "AL-WIRE-EC": "AL Wire EC Prepared",
+        "AL-MLC": "AL MLC Prepared"
+      },
+      brass: {
+        "BR-H": "Brass Hard",
+        "BR-R": "Brass Red Ebony",
+        "BR-RS": "Brass Red Semi",
+        "BR-SH-AL": "Brass Shaving Al Bronze",
+        "BR-SH-R": "Brass Shaving Brass Red",
+        "BR-SHELL": "Brass Shell",
+        "BR-SPEC": "Brass Special (Al Bronze Solid)",
+        "BR-YLW": "Brass Yellow Regular"
+      },
+      lead: {
+        "PB-C": "Lead Clean",
+        "PB-R": "Lead Range"
+      },
+      stainless: {
+        "SS304": "Stainless Steel 304",
+        "SS316": "Stainless Steel 316"
+      },
+      eScrap: {
+        "ES-BOARD": "E-Scrap Board"
+      },
+      insulatedWire: {
+        "IWLG-XL": "ICW Low Grade Christmas Lights",
+        "IWLG-25-": "ICW Low Grade Computer Wire 25%",
+        "IWLG-CATV": "ICW Low Grade Cu CATV",
+        "IWLG-35-": "ICW Low Grade Ext Cords 35%+",
+        "IWLG-40-": "ICW Low Grade Mixed Wire 40%+",
+        "IW-HX": "ICW1 Heliax 57 Open Eye Baled",
+        "IW-MCM85": "ICW1 MCM 85HG",
+        "IW-R65": "ICW1 Romex 65 No Weatherproof",
+        "IW-THHN": "ICW1 THHN 80",
+        "IW-CAT5": "ICW2 50Cat5 Tel Wire",
+        "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
+        "IW-BX-AL": "ICW2 BX Cable AL",
+        "IW-BX-FE": "ICW2 BX Cable FE24"
+      },
+      miscellaneous: {
+        "BAL-E": "Ballast Electronic",
+        "BAL-R": "Ballast Regular",
+        "BAT-PB": "Battery Auto Pb Acid",
+        "BAT-ST": "Battery Steel Case Industrial",
+        "COMP": "Compressor Sealed Unit No Cast Iron",
+        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
+        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
+        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
+        "TR-AL": "Transformer Alu Large Only",
+        "TR-CU-AL": "Transformer Cu AlCu",
+        "TR-CU-SM": "Transformer Cu Small Palm Size",
+        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
+        "TR-CU-LG": "Transformer Cu Large",
+        "ZN-CAST": "Zinc Die Cast"
+      },
+      radiator: {
+        "AC-RADB": "AC Reefer Clean Talk Baled",
+        "AC-RADU": "AC Reefer Clean Unbaled",
+        "AC-RADDB": "AC Reefer Dirty Talk Baled",
+        "AC-RADDU": "AC Reefer Dirty Unbaled",
+        "AL-RADCC": "Radiator Clean Car",
+        "RAD-ENDS": "Cu Bkg AC Reefer End"
+      }
+    };
+
+    // Helper function to normalize strings: removes spaces and underscores and converts to lowercase.
+    function normalizeString(str) {
+      return str.toLowerCase().replace(/[\s_]+/g, "");
+    }
+    
+    // ----------------------------
+    // Revised Initialization: Ensure the Greenspark table is updated before populating trade options.
+    // ----------------------------
     document.addEventListener('DOMContentLoaded', () => {
+      // First, update the inventory table so that dropdowns can read from it.
+      updateGroupedComputedMaterialsInventory();
+      // Then, populate the material dropdown and update trade options.
       populateTradeMaterialDropdown();
       updateTradeOptions();
-      updateGroupedComputedMaterialsInventory();
+      // Finally, update purchase values.
       updatePurchaseValues();
     });
   </script>
@@ -1141,7 +1284,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
-  <!-- Main Application Script -->
+  <!-- Main Application Script for Charts -->
   <script>
     // Accent color for charts
     const accentColor = '#3498db';
@@ -1223,183 +1366,6 @@
         });
       }
     });
-    
-    // Update Finished Goods Inventory Purchase Values
-    function updatePurchaseValues() {
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-      
-      rows.forEach(row => {
-        const cells = row.getElementsByTagName('td');
-        if(cells.length >= 6) {
-          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
-          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
-          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
-          const purchaseValue = totalLbs * avgCost;
-          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
-          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-      });
-      
-      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
-      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
-      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      
-      // Update Finished Goods Card
-      if(document.getElementById('finishedGoodsInfo')){
-        const contractsAvailable = Math.floor(sumFinished / 20000);
-        const totalTons = sumTotal / 20000;
-        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
-        if (finishedGoodsChart) {
-          const now = new Date().toLocaleTimeString();
-          finishedGoodsChartLabels.push(now);
-          finishedGoodsChartData.push(totalTons);
-          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
-          finishedGoodsChart.update();
-        }
-      }
-    }
-    
-    // ----------------------------
-    // Hidden Scrap Material Codes Reference and Updated Ticker Generator
-    // ----------------------------
-    const scrapMaterialCodes = {
-      copper: {
-        "CUB": "Barley (Cu BB)",
-        "CU1": "#1 (Berry & Candy)",
-        "CU2": "#2 (Birch & Cliff)",
-        "CU3": "#3 (Sheet Copper)"
-      },
-      aluminum: {
-        "AL61-NBE": "AL6061 New Bare Extrusion",
-        "AL61-CPP": "AL6061 Clip Plate Pipe",
-        "AL63-SEC": "AL6063 Secondary",
-        "AL63-OE": "AL6063 Old Extrusion",
-        "AL63-E10": "AL6063 Extrusion 10/10",
-        "AL-PAS": "AL PAS Baled",
-        "AL-C": "AL Cast Clean",
-        "AL-RS-CB": "AL RADS Clean Baled",
-        "AL-RS-DB": "AL RADS Dirty Baled",
-        "AL-ST": "AL Sheet Clean Baled",
-        "AL-AUTO": "AL Wheel Auto Clean",
-        "AL-WH-CH": "AL Wheel Chrome Clean",
-        "AL-TRUCKWH": "Truck Wheel Clean",
-        "AL-WIRE-CATV": "AL Wire Bare CATV",
-        "AL-WIRE-NEO": "AL Wire Neoprene ACSR",
-        "AL-WIRE-EC": "AL Wire EC Prepared",
-        "AL-MLC": "AL MLC Prepared"
-      },
-      brass: {
-        "BR-H": "Brass Hard",
-        "BR-R": "Brass Red Ebony",
-        "BR-RS": "Brass Red Semi",
-        "BR-SH-AL": "Brass Shaving Al Bronze",
-        "BR-SH-R": "Brass Shaving Brass Red",
-        "BR-SHELL": "Brass Shell",
-        "BR-SPEC": "Brass Special (Al Bronze Solid)",
-        "BR-YLW": "Brass Yellow Regular"
-      },
-      lead: {
-        "PB-C": "Lead Clean",
-        "PB-R": "Lead Range"
-      },
-      stainless: {
-        "SS304": "Stainless Steel 304",
-        "SS316": "Stainless Steel 316"
-      },
-      eScrap: {
-        "ES-BOARD": "E-Scrap Board"
-      },
-      insulatedWire: {
-        "IWLG-XL": "ICW Low Grade Christmas Lights",
-        "IWLG-25-": "ICW Low Grade Computer Wire 25%",
-        "IWLG-CATV": "ICW Low Grade Cu CATV",
-        "IWLG-35-": "ICW Low Grade Ext Cords 35%+",
-        "IWLG-40-": "ICW Low Grade Mixed Wire 40%+",
-        "IW-HX": "ICW1 Heliax 57 Open Eye Baled",
-        "IW-MCM85": "ICW1 MCM 85HG",
-        "IW-R65": "ICW1 Romex 65 No Weatherproof",
-        "IW-THHN": "ICW1 THHN 80",
-        "IW-CAT5": "ICW2 50Cat5 Tel Wire",
-        "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
-        "IW-BX-AL": "ICW2 BX Cable AL",
-        "IW-BX-FE": "ICW2 BX Cable FE24"
-      },
-      miscellaneous: {
-        "BAL-E": "Ballast Electronic",
-        "BAL-R": "Ballast Regular",
-        "BAT-PB": "Battery Auto Pb Acid",
-        "BAT-ST": "Battery Steel Case Industrial",
-        "COMP": "Compressor Sealed Unit No Cast Iron",
-        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
-        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
-        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
-        "TR-AL": "Transformer Alu Large Only",
-        "TR-CU-AL": "Transformer Cu AlCu",
-        "TR-CU-SM": "Transformer Cu Small Palm Size",
-        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
-        "TR-CU-LG": "Transformer Cu Large",
-        "ZN-CAST": "Zinc Die Cast"
-      },
-      radiator: {
-        "AC-RADB": "AC Reefer Clean Talk Baled",
-        "AC-RADU": "AC Reefer Clean Unbaled",
-        "AC-RADDB": "AC Reefer Dirty Talk Baled",
-        "AC-RADDU": "AC Reefer Dirty Unbaled",
-        "AL-RADCC": "Radiator Clean Car",
-        "RAD-ENDS": "Cu Bkg AC Reefer End"
-      }
-    };
-
-    // Helper function to normalize strings: removes spaces and underscores and converts to lowercase.
-    function normalizeString(str) {
-      return str.toLowerCase().replace(/[\s_]+/g, "");
-    }
-
-    // Updated helper function to generate a ticker based on the material name and expiration date.
-    function getTickerFromReference(material, expiration) {
-      let tickerBase = "";
-      // Loop through computedCategoriesMapping to find the category for the material.
-      for (let category in computedCategoriesMapping) {
-        if (computedCategoriesMapping[category].materials.includes(material)) {
-          let catLower = category.toLowerCase();
-          if (scrapMaterialCodes[catLower]) {
-            // Check each code in the hidden scrap material codes reference.
-            for (const code in scrapMaterialCodes[catLower]) {
-              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(material))) {
-                tickerBase = code;
-                break;
-              }
-            }
-          }
-          if (tickerBase) break;
-        }
-      }
-      // Fallback if no match is found.
-      if (!tickerBase) {
-        tickerBase = material.slice(0, 3).toUpperCase();
-      }
-      
-      // Futures month codes (common for commodities):
-      // January: F, February: G, March: H, April: J, May: K, June: M,
-      // July: N, August: Q, September: U, October: V, November: X, December: Z.
-      const monthCodes = { 
-        "01": "F", "02": "G", "03": "H", "04": "J", 
-        "05": "K", "06": "M", "07": "N", "08": "Q", 
-        "09": "U", "10": "V", "11": "X", "12": "Z" 
-      };
-      
-      // Assuming expiration is provided in "MM/DD/YYYY" format.
-      const [month, , year] = expiration.split("/");
-      const monthCode = monthCodes[month] || "";
-      const yearCode = year.slice(-2); // Last two digits of the year
-      
-      // Return the ticker as the base code plus the month letter and year.
-      return tickerBase + monthCode + yearCode;
-    }
   </script>
 </body>
 </html>
