@@ -1,4 +1,4 @@
-<!DOCTYPE html>  
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -635,11 +635,10 @@
       updateActiveContractsOverview();
     }
     
-    // Update the Active Contracts overview card and table footer totals
+    // Function to update the Active Contracts overview card
     function updateActiveContractsOverview() {
       let totalContracts = 0;
       let totalMargin = 0;
-      let totalChange = 0;
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
 
       rows.forEach(row => {
@@ -651,31 +650,11 @@
         const marginText = row.cells[5].textContent;
         const margin = parseFloat(marginText.replace(/[^0-9.]/g, '')) || 0;
         totalMargin += margin;
-
-        // Extract change value from the 4th cell (allowing negative values)
-        const changeText = row.cells[3].textContent;
-        const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
-        totalChange += change;
       });
 
-      // Update the overview card elements (if present)
-      if(document.getElementById("active-contracts-secured")) {
-        document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
-      }
-      if(document.getElementById("active-contracts-margin")) {
-        document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
-      }
-      
-      // Update the table footer elements
-      if(document.getElementById("activeContractsCount")) {
-        document.getElementById("activeContractsCount").textContent = totalContracts;
-      }
-      if(document.getElementById("activeContractsMarginTotal")) {
-        document.getElementById("activeContractsMarginTotal").textContent = "$" + totalMargin.toFixed(2);
-      }
-      if(document.getElementById("total-change")) {
-        document.getElementById("total-change").textContent = "$" + totalChange.toFixed(2);
-      }
+      // Update the overview card elements
+      document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
+      document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
     }
     
     // Reduce inventory in the Greenspark table for the given material.
@@ -1219,19 +1198,46 @@
         });
       }
       
-      // KPI Chart
+      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
       const kpiCanvas = document.getElementById('kpiChart');
-      if(kpiCanvas) {
+      if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
+        // Example labels for months
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        kpiChartData = [500, 700, 650, 800, 750, 900];
+        
+        // Example data arrays for each main category (replace with your actual data)
+        const copperData = [100, 120, 130, 110, 140, 150];
+        const brassData = [50, 60, 55, 70, 65, 80];
+        const aluminumData = [80, 90, 85, 95, 100, 105];
+
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
           data: {
             labels: kpiChartLabels,
-            datasets: [{ label: 'Monthly Trade Volume', data: kpiChartData, backgroundColor: accentColor }]
+            datasets: [
+              {
+                label: 'Copper',
+                data: copperData,
+                backgroundColor: 'rgba(52,152,219,0.6)'
+              },
+              {
+                label: 'Brass',
+                data: brassData,
+                backgroundColor: 'rgba(46,204,113,0.6)'
+              },
+              {
+                label: 'Aluminum',
+                data: aluminumData,
+                backgroundColor: 'rgba(231,76,60,0.6)'
+              }
+            ]
           },
-          options: { scales: { y: { beginAtZero: true } } }
+          options: {
+            scales: {
+              x: { stacked: true },
+              y: { stacked: true, beginAtZero: true }
+            }
+          }
         });
       }
     });
@@ -1287,9 +1293,7 @@
       tableBody.appendChild(row);
     }
     
-    // ----------------------------
     // Simulated Trade Execution
-    // ----------------------------
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -1314,9 +1318,7 @@
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // ----------------------------
     // Other Helper Functions
-    // ----------------------------
     function logout() {
       alert('Logging out...');
     }
