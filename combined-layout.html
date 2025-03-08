@@ -617,7 +617,7 @@
       tableBody.appendChild(row);
     }
     
-    // Add a new active contract entry.
+    // Add a new active contract entry with updated change calculation.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       // Generate ticker using the updated ticker generator
@@ -625,12 +625,29 @@
       // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
+      
+      // Get the current market price per ton for this material.
+      const currentMarketPrice = getBasePrice(material);
+      // Calculate the change: (market price per ton - salePrice) * contract size (10 tons) * quantity.
+      const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
+      
       const row = document.createElement('tr');
       // Store the quantity as a data attribute for future reference.
       row.dataset.quantity = quantity;
-      row.innerHTML = `<td>${ticker}</td><td>${material} (${expiration})</td><td>$${salePrice.toFixed(2)}</td><td>$0.00</td><td>${expiration}</td><td>$${marginRequirement.toFixed(2)}</td><td><button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button><button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button></td>`;
+      row.innerHTML = `
+        <td>${ticker}</td>
+        <td>${material} (${expiration})</td>
+        <td>$${salePrice.toFixed(2)}</td>
+        <td>$${changeValue.toFixed(2)}</td>
+        <td>${expiration}</td>
+        <td>$${marginRequirement.toFixed(2)}</td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+        </td>
+      `;
       tableBody.appendChild(row);
-
+  
       // Update the overview card for active contracts after adding a new contract.
       updateActiveContractsOverview();
     }
@@ -641,23 +658,23 @@
       let totalMargin = 0;
       let totalChange = 0;
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
-
+  
       rows.forEach(row => {
         // Retrieve the quantity stored in the data attribute (default to 1 if not set)
         const quantity = parseInt(row.dataset.quantity, 10) || 1;
         totalContracts += quantity;
-
+  
         // Extract margin value from the 6th cell (removing the '$' symbol)
         const marginText = row.cells[5].textContent;
         const margin = parseFloat(marginText.replace(/[^0-9.]/g, '')) || 0;
         totalMargin += margin;
-
+  
         // Extract change value from the 4th cell (allowing negative values)
         const changeText = row.cells[3].textContent;
         const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
         totalChange += change;
       });
-
+  
       // Update the overview card elements (if present)
       if(document.getElementById("active-contracts-secured")) {
         document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
@@ -1445,9 +1462,7 @@
       tableBody.appendChild(row);
     }
     
-    // ----------------------------
     // Simulated Trade Execution
-    // ----------------------------
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -1472,9 +1487,7 @@
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // ----------------------------
     // Other Helper Functions
-    // ----------------------------
     function logout() {
       alert('Logging out...');
     }
