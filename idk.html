@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+coffee we want the planar and coffee so wait till<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -1432,24 +1432,41 @@
 
     // Updated helper function to generate a ticker based on the material name.
     function getTickerFromReference(material) {
-      // Loop through computedCategoriesMapping to find the category for the material.
-      for (let category in computedCategoriesMapping) {
-        if (computedCategoriesMapping[category].materials.includes(material)) {
-          // Use the lower-case category to reference the scrapMaterialCodes object.
-          let catLower = category.toLowerCase();
+      // If material includes a category, extract the base material and the category.
+      let baseMaterial = material;
+      let category = null;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        category = material.split(" (")[1].replace(")", "").trim();
+      }
+      
+      // If we have a category, use it (in lowercase) to look up in scrapMaterialCodes.
+      if (category && scrapMaterialCodes[category.toLowerCase()]) {
+        for (const code in scrapMaterialCodes[category.toLowerCase()]) {
+          if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
+            return code;
+          }
+        }
+      }
+      
+      // Alternatively, try all categories if needed
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          let catLower = cat.toLowerCase();
           if (scrapMaterialCodes[catLower]) {
-            // Check each code to see if its description (normalized) contains the normalized material name.
             for (const code in scrapMaterialCodes[catLower]) {
-              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(material))) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(baseMaterial))) {
                 return code;
               }
             }
           }
         }
       }
+      
       // Fallback if no match is found.
-      return material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+      return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
 </body>
 </html>
+ I can be definitely
