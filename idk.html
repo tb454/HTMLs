@@ -527,7 +527,6 @@
       const rows = table.querySelectorAll('tbody tr');
       const materialsSet = new Set();
       rows.forEach(row => {
-        // Skip group header rows
         if (row.classList.contains('group-header')) return;
         const materialText = row.cells[0].textContent.trim();
         if (materialText) {
@@ -548,7 +547,6 @@
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
-        // Ignore group header rows
         if (row.classList.contains('group-header')) continue;
         const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
         if (cellMaterial.includes(material.toLowerCase())) {
@@ -581,7 +579,6 @@
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")", "").trim();
-        // First, try to get updated price from the Market Snapshot element
         const priceElem = document.getElementById(`price-${category}`);
         if (priceElem) {
           let text = priceElem.textContent;
@@ -590,17 +587,15 @@
             let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
             let updatedPrice = parseFloat(priceStr);
             if (!isNaN(updatedPrice)) {
-              return updatedPrice; // Return the updated price per ton
+              return updatedPrice;
             }
           }
         }
-        // Otherwise, fallback to computed price
         if (computedCategoriesMapping[category]) {
           let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
           return computedPrice ? computedPrice * 2000 : 0;
         }
       }
-      // Try direct lookup from Market Snapshot element if available
       const directElem = document.getElementById(`price-${material}`);
       if (directElem) {
         let text = directElem.textContent;
@@ -613,10 +608,8 @@
           }
         }
       }
-      // Fallback to static snapshot
       let price = getMarketSnapshotPrice(material);
       if (price > 0) return price;
-      // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
           let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
@@ -743,10 +736,9 @@
         contractsSelect.appendChild(option);
       }
       
-      // Get base price updated with fluctuations
+      // Get updated base price from fluctuations
       const basePricePerTon = getBasePrice(material);
       
-      // Update Price/ton dropdown with multiplier options
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -758,7 +750,6 @@
         priceSelect.appendChild(option);
       });
       
-      // Update Cost to Create: 0.1% of base price per ton
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
       const costToCreate = basePricePerTon * 0.001;
@@ -767,7 +758,6 @@
       costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
       
-      // Update Expiration Date dropdown: 5 future dates (1-month increments)
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
@@ -1024,7 +1014,7 @@
           </tr>
         </thead>
         <tbody>
-     <!-- Grouped computed material rows will be appended here by JavaScript -->
+          <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1228,7 +1218,6 @@
             <td>02/21/25</td>
           </tr>
         </tbody>
-        </tfoot>
       </table>
     </section>
             
@@ -1355,14 +1344,15 @@
         });
       }
       
-      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
+      // KPI Chart - Expanded to 12 Months
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
-        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        const copperData = [100, 120, 130, 110, 140, 150];
-        const brassData = [50, 60, 55, 70, 65, 80];
-        const aluminumData = [80, 90, 85, 95, 100, 105];
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        // Sample data arrays for each main category (replace with your actual data)
+        const copperData = [100, 120, 130, 110, 140, 150, 160, 155, 150, 145, 140, 135];
+        const brassData = [50, 60, 55, 70, 65, 80, 75, 70, 68, 66, 64, 62];
+        const aluminumData = [80, 90, 85, 95, 100, 105, 110, 115, 112, 108, 104, 100];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
           data: {
@@ -1490,25 +1480,18 @@
   <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // Update Greenspark inventory every 5 minutes (300000 ms)
-      setInterval(updateInventoryIncrementally, 300000);
-      
-      // Update pricing fluctuations every 5 seconds (5000 ms)
-      setInterval(simulatePricingFluctuations, 5000);
-      
-      // Update Metals Market Overview every 5 seconds (5000 ms)
-      setInterval(updateMetalsMarketOverview, 5000);
-      
-      // Also update simulated trade options when pricing changes
-      setInterval(updateTradeOptions, 5000);
+      setInterval(updateInventoryIncrementally, 300000); // every 5 minutes
+      setInterval(simulatePricingFluctuations, 5000); // every 5 seconds
+      setInterval(updateMetalsMarketOverview, 5000); // every 5 seconds
+      setInterval(updateTradeOptions, 5000); // refresh trade options when pricing changes
     });
     
     function updateInventoryIncrementally() {
       const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
       rows.forEach(row => {
-        if (Math.random() < 0.4) { // update ~40% of rows
+        if (Math.random() < 0.4) {
           let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          let changePercent = Math.random() * 0.05; // up to 5% increase
+          let changePercent = Math.random() * 0.05;
           finished += finished * changePercent;
           row.cells[2].textContent = finished.toLocaleString();
           
@@ -1538,22 +1521,18 @@
       });
     }
     
-    // New function to update Metals Market Overview table
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
       const rows = table.querySelectorAll('tbody tr');
       rows.forEach(row => {
-        // Update "Last" price (column index 2) with ±5% fluctuation
         let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
         let currentPrice = parseFloat(lastPriceStr);
         if (!isNaN(currentPrice)) {
           let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
           let newPrice = currentPrice + fluctuation;
-          // Calculate change (newPrice - oldPrice) and format with sign
           let changeVal = newPrice - currentPrice;
           let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
           row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          // Update the "Change" column (column index 3)
           row.cells[3].textContent = changeText;
         }
       });

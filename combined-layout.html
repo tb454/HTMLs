@@ -573,32 +573,53 @@
       return snapshot[key] || 0;
     }
     
-    // Determine the base price per ton for a given material.
-    // First, try using the Market Snapshot price. If not available, fall back to the pricing function.
+    // ----------------------------
+    // Modified getBasePrice to reflect updated Market Snapshot fluctuations
+    // ----------------------------
     function getBasePrice(material) {
       let baseMaterial = material;
-      // If the material string includes a category in parentheses, extract it.
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")", "").trim();
-        let price = getMarketSnapshotPrice(category);
-        if (price > 0) {
-          return price; // already per ton from snapshot
+        // First, try to get updated price from the Market Snapshot element
+        const priceElem = document.getElementById(`price-${category}`);
+        if (priceElem) {
+          let text = priceElem.textContent;
+          let parts = text.split(':');
+          if (parts.length >= 2) {
+            let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+            let updatedPrice = parseFloat(priceStr);
+            if (!isNaN(updatedPrice)) {
+              return updatedPrice; // Return the updated price per ton
+            }
+          }
         }
+        // Otherwise, fallback to computed price
         if (computedCategoriesMapping[category]) {
           let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
-          // Multiply by 2000 to convert from per pound to per ton
           return computedPrice ? computedPrice * 2000 : 0;
         }
       }
-      // Try direct market snapshot lookup.
+      // Try direct lookup from Market Snapshot element if available
+      const directElem = document.getElementById(`price-${material}`);
+      if (directElem) {
+        let text = directElem.textContent;
+        let parts = text.split(':');
+        if (parts.length >= 2) {
+          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+          let updatedPrice = parseFloat(priceStr);
+          if (!isNaN(updatedPrice)) {
+            return updatedPrice;
+          }
+        }
+      }
+      // Fallback to static snapshot
       let price = getMarketSnapshotPrice(material);
       if (price > 0) return price;
       // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
           let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
-          // Multiply by 2000 to convert to per ton value
           return computedPrice ? computedPrice * 2000 : 0;
         }
       }
@@ -608,7 +629,6 @@
     // ----------------------------
     // Trade Log, Active Contracts & Inventory Update Functions
     // ----------------------------
-    // Append a new entry to the Trade Log table.
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
@@ -617,22 +637,15 @@
       tableBody.appendChild(row);
     }
     
-    // Add a new active contract entry with updated change calculation.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Generate ticker using the updated ticker generator
       const ticker = getTickerFromReference(material);
-      // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
-      
-      // Get the current market price per ton for this material.
       const currentMarketPrice = getBasePrice(material);
-      // Calculate the change: (market price per ton - salePrice) * contract size (10 tons) * quantity.
       const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
       
       const row = document.createElement('tr');
-      // Store the quantity as a data attribute for future reference.
       row.dataset.quantity = quantity;
       row.innerHTML = `
         <td>${ticker}</td>
@@ -647,12 +660,9 @@
         </td>
       `;
       tableBody.appendChild(row);
-  
-      // Update the overview card for active contracts after adding a new contract.
       updateActiveContractsOverview();
     }
     
-    // Update the Active Contracts overview card and table footer totals
     function updateActiveContractsOverview() {
       let totalContracts = 0;
       let totalMargin = 0;
@@ -660,22 +670,16 @@
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
   
       rows.forEach(row => {
-        // Retrieve the quantity stored in the data attribute (default to 1 if not set)
         const quantity = parseInt(row.dataset.quantity, 10) || 1;
         totalContracts += quantity;
-  
-        // Extract margin value from the 6th cell (removing the '$' symbol)
         const marginText = row.cells[5].textContent;
         const margin = parseFloat(marginText.replace(/[^0-9.]/g, '')) || 0;
         totalMargin += margin;
-  
-        // Extract change value from the 4th cell (allowing negative values)
         const changeText = row.cells[3].textContent;
         const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
         totalChange += change;
       });
   
-      // Update the overview card elements (if present)
       if(document.getElementById("active-contracts-secured")) {
         document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
       }
@@ -683,7 +687,6 @@
         document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
       }
       
-      // Update the table footer elements
       if(document.getElementById("activeContractsCount")) {
         document.getElementById("activeContractsCount").textContent = totalContracts;
       }
@@ -695,7 +698,6 @@
       }
     }
     
-    // Reduce inventory in the Greenspark table for the given material.
     function reduceInventory(material, reduction) {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -714,7 +716,6 @@
       }
     }
     
-    // Stub functions for contract actions
     function rollContract() {
       alert("Roll contract functionality not implemented.");
     }
@@ -729,7 +730,6 @@
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
       
-      // Get commodity data for contracts
       const data = getCommodityData(material);
       const contractSize = 20000; // 10 tons = 20,000 lbs.
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
@@ -743,10 +743,10 @@
         contractsSelect.appendChild(option);
       }
       
-      // Determine base price per ton from Market Snapshot or Pricing Functions
+      // Get base price updated with fluctuations
       const basePricePerTon = getBasePrice(material);
       
-      // Update Price/ton dropdown with 6 multiplier options
+      // Update Price/ton dropdown with multiplier options
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -794,18 +794,12 @@
       const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
       const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
       const totalContractValue = tradePrice * 10 * numTrades;
       
-      // Record in Trade Log
       appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
       addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
       reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
       updatePurchaseValues();
       
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
@@ -833,8 +827,6 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
@@ -845,7 +837,6 @@
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
   <script>
-    // Hidden reference object (not rendered) to be used for ticker generation
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -934,14 +925,11 @@
       }
     };
 
-    // Helper function to normalize strings: removes spaces and underscores and converts to lowercase.
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
 
-    // Updated helper function to generate a ticker based on the material name.
     function getTickerFromReference(material) {
-      // If material includes a category, extract the base material and the category.
       let baseMaterial = material;
       let category = null;
       if (material.indexOf('(') !== -1) {
@@ -949,7 +937,6 @@
         category = material.split(" (")[1].replace(")", "").trim();
       }
       
-      // If we have a category, use it (in lowercase) to look up in scrapMaterialCodes.
       if (category && scrapMaterialCodes[category.toLowerCase()]) {
         for (const code in scrapMaterialCodes[category.toLowerCase()]) {
           if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
@@ -958,7 +945,6 @@
         }
       }
       
-      // Alternatively, try all categories if needed
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
           let catLower = cat.toLowerCase();
@@ -972,7 +958,6 @@
         }
       }
       
-      // Fallback if no match is found.
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
@@ -1243,6 +1228,7 @@
             <td>02/21/25</td>
           </tr>
         </tbody>
+        </tfoot>
       </table>
     </section>
             
@@ -1374,7 +1360,6 @@
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        // Sample data arrays for each main category (replace with your actual data)
         const copperData = [100, 120, 130, 110, 140, 150];
         const brassData = [50, 60, 55, 70, 65, 80];
         const aluminumData = [80, 90, 85, 95, 100, 105];
@@ -1434,7 +1419,6 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card
       if(document.getElementById('finishedGoodsInfo')){
         const contractsAvailable = Math.floor(sumFinished / 20000);
         const totalTons = sumTotal / 20000;
@@ -1503,7 +1487,7 @@
     });
   </script>
   
-  <!-- New Script: Automated Updates for Inventory and Pricing -->
+  <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       // Update Greenspark inventory every 5 minutes (300000 ms)
@@ -1511,33 +1495,34 @@
       
       // Update pricing fluctuations every 5 seconds (5000 ms)
       setInterval(simulatePricingFluctuations, 5000);
+      
+      // Update Metals Market Overview every 5 seconds (5000 ms)
+      setInterval(updateMetalsMarketOverview, 5000);
+      
+      // Also update simulated trade options when pricing changes
+      setInterval(updateTradeOptions, 5000);
     });
     
     function updateInventoryIncrementally() {
-      // Select all inventory rows (excluding group headers)
       const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
       rows.forEach(row => {
-        if (Math.random() < 0.4) { // update about 40% of rows
-          // Update Finished Goods (column index 2)
+        if (Math.random() < 0.4) { // update ~40% of rows
           let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
           let changePercent = Math.random() * 0.05; // up to 5% increase
           finished += finished * changePercent;
           row.cells[2].textContent = finished.toLocaleString();
           
-          // Update Total (lbs) (column index 3)
           let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
           let total = wip + finished;
           row.cells[3].textContent = total.toLocaleString();
         }
       });
-      updatePurchaseValues(); // Recalculate totals after inventory update
+      updatePurchaseValues();
     }
     
     function simulatePricingFluctuations() {
-      // For each pricing element (IDs starting with 'price-')
       const pricingElements = document.querySelectorAll('[id^="price-"]');
       pricingElements.forEach(elem => {
-        // Expect text format "Commodity: $Price"
         let text = elem.textContent;
         let parts = text.split(':');
         if (parts.length >= 2) {
@@ -1545,7 +1530,6 @@
           let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
           let currentPrice = parseFloat(priceStr);
           if (!isNaN(currentPrice)) {
-            // Random fluctuation between -5% and +5%
             let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
             let newPrice = currentPrice + fluctuation;
             elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1553,11 +1537,31 @@
         }
       });
     }
+    
+    // New function to update Metals Market Overview table
+    function updateMetalsMarketOverview() {
+      const table = document.getElementById('metals-market-table');
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+        // Update "Last" price (column index 2) with ±5% fluctuation
+        let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
+        let currentPrice = parseFloat(lastPriceStr);
+        if (!isNaN(currentPrice)) {
+          let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+          let newPrice = currentPrice + fluctuation;
+          // Calculate change (newPrice - oldPrice) and format with sign
+          let changeVal = newPrice - currentPrice;
+          let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
+          row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          // Update the "Change" column (column index 3)
+          row.cells[3].textContent = changeText;
+        }
+      });
+    }
   </script>
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
   <script>
-    // (Repeated code as above, if needed)
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
