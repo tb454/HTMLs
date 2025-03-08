@@ -620,25 +620,23 @@
     // Add a new active contract entry with updated change calculation.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Generate ticker using the updated ticker generator
       const ticker = getTickerFromReference(material);
-      // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
       
-      // Get the current market price per ton for this material.
       const currentMarketPrice = getBasePrice(material);
-      // Calculate the change: (market price per ton - salePrice) * contract size (10 tons) * quantity.
       const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
+      const formattedChange = changeValue < 0 
+        ? `(${Math.abs(changeValue).toFixed(2)})` 
+        : changeValue.toFixed(2);
       
       const row = document.createElement('tr');
-      // Store the quantity as a data attribute for future reference.
       row.dataset.quantity = quantity;
       row.innerHTML = `
         <td>${ticker}</td>
         <td>${material} (${expiration})</td>
         <td>$${salePrice.toFixed(2)}</td>
-        <td>$${changeValue.toFixed(2)}</td>
+        <td>$${formattedChange}</td>
         <td>${expiration}</td>
         <td>$${marginRequirement.toFixed(2)}</td>
         <td>
@@ -647,8 +645,6 @@
         </td>
       `;
       tableBody.appendChild(row);
-  
-      // Update the overview card for active contracts after adding a new contract.
       updateActiveContractsOverview();
     }
     
@@ -660,22 +656,18 @@
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
   
       rows.forEach(row => {
-        // Retrieve the quantity stored in the data attribute (default to 1 if not set)
         const quantity = parseInt(row.dataset.quantity, 10) || 1;
         totalContracts += quantity;
   
-        // Extract margin value from the 6th cell (removing the '$' symbol)
         const marginText = row.cells[5].textContent;
         const margin = parseFloat(marginText.replace(/[^0-9.]/g, '')) || 0;
         totalMargin += margin;
   
-        // Extract change value from the 4th cell (allowing negative values)
         const changeText = row.cells[3].textContent;
         const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
         totalChange += change;
       });
   
-      // Update the overview card elements (if present)
       if(document.getElementById("active-contracts-secured")) {
         document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
       }
@@ -683,7 +675,6 @@
         document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
       }
       
-      // Update the table footer elements
       if(document.getElementById("activeContractsCount")) {
         document.getElementById("activeContractsCount").textContent = totalContracts;
       }
@@ -729,9 +720,8 @@
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
       
-      // Get commodity data for contracts
       const data = getCommodityData(material);
-      const contractSize = 20000; // 10 tons = 20,000 lbs.
+      const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
       
       const contractsSelect = document.getElementById('create-contracts');
@@ -743,10 +733,8 @@
         contractsSelect.appendChild(option);
       }
       
-      // Determine base price per ton from Market Snapshot or Pricing Functions
       const basePricePerTon = getBasePrice(material);
       
-      // Update Price/ton dropdown with 6 multiplier options
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -758,7 +746,6 @@
         priceSelect.appendChild(option);
       });
       
-      // Update Cost to Create: 0.1% of base price per ton
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
       const costToCreate = basePricePerTon * 0.001;
@@ -767,7 +754,6 @@
       costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
       
-      // Update Expiration Date dropdown: 5 future dates (1-month increments)
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
@@ -794,18 +780,12 @@
       const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
       const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
       const totalContractValue = tradePrice * 10 * numTrades;
       
-      // Record in Trade Log
       appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
       addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
       reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
       updatePurchaseValues();
       
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
@@ -833,8 +813,6 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
@@ -845,7 +823,6 @@
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
   <script>
-    // Hidden reference object (not rendered) to be used for ticker generation
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -934,14 +911,11 @@
       }
     };
 
-    // Helper function to normalize strings: removes spaces and underscores and converts to lowercase.
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
 
-    // Updated helper function to generate a ticker based on the material name.
     function getTickerFromReference(material) {
-      // If material includes a category, extract the base material and the category.
       let baseMaterial = material;
       let category = null;
       if (material.indexOf('(') !== -1) {
@@ -949,7 +923,6 @@
         category = material.split(" (")[1].replace(")", "").trim();
       }
       
-      // If we have a category, use it (in lowercase) to look up in scrapMaterialCodes.
       if (category && scrapMaterialCodes[category.toLowerCase()]) {
         for (const code in scrapMaterialCodes[category.toLowerCase()]) {
           if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
@@ -958,7 +931,6 @@
         }
       }
       
-      // Alternatively, try all categories if needed
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
           let catLower = cat.toLowerCase();
@@ -972,7 +944,6 @@
         }
       }
       
-      // Fallback if no match is found.
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
@@ -1039,7 +1010,7 @@
           </tr>
         </thead>
         <tbody>
-     <!-- Grouped computed material rows will be appended here by JavaScript -->
+          <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1306,14 +1277,12 @@
   
   <!-- Main Application Script -->
   <script>
-    // Accent color for charts
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
     
-    // Global variables for charts
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
@@ -1324,9 +1293,7 @@
     let kpiChartLabels = [];
     let kpiChartData = [];
   
-    // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
-      // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
         const ctxActive = activeContractsCanvas.getContext('2d');
@@ -1349,7 +1316,6 @@
         });
       }
       
-      // Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
       if(finishedCanvas) {
         const ctxFinished = finishedCanvas.getContext('2d');
@@ -1370,12 +1336,10 @@
         });
       }
       
-      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        // Sample data arrays for each main category (replace with your actual data)
         const copperData = [100, 120, 130, 110, 140, 150];
         const brassData = [50, 60, 55, 70, 65, 80];
         const aluminumData = [80, 90, 85, 95, 100, 105];
@@ -1411,7 +1375,6 @@
       }
     });
     
-    // Update Finished Goods Inventory Purchase Values
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -1435,7 +1398,6 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card
       if(document.getElementById('finishedGoodsInfo')){
         const contractsAvailable = Math.floor(sumFinished / 20000);
         const totalTons = sumTotal / 20000;
@@ -1450,10 +1412,6 @@
       }
     }
     
-    // ----------------------------
-    // Trade Log, Active Contracts & Inventory Update Functions
-    // ----------------------------
-    // Append a new entry to the Trade Log table.
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
@@ -1462,7 +1420,6 @@
       tableBody.appendChild(row);
     }
     
-    // Simulated Trade Execution
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
@@ -1470,24 +1427,17 @@
       const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
       const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
       const totalContractValue = tradePrice * 10 * numTrades;
       
-      // Record in Trade Log
       appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
       addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
       reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
       updatePurchaseValues();
       
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // Other Helper Functions
     function logout() {
       alert('Logging out...');
     }
@@ -1507,8 +1457,6 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
     document.addEventListener('DOMContentLoaded', () => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
@@ -1517,9 +1465,7 @@
     });
   </script>
   
-  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
   <script>
-    // Hidden reference object (not rendered) to be used for ticker generation
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -1608,14 +1554,11 @@
       }
     };
 
-    // Helper function to normalize strings: removes spaces and underscores and converts to lowercase.
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
 
-    // Updated helper function to generate a ticker based on the material name.
     function getTickerFromReference(material) {
-      // If material includes a category, extract the base material and the category.
       let baseMaterial = material;
       let category = null;
       if (material.indexOf('(') !== -1) {
@@ -1623,7 +1566,6 @@
         category = material.split(" (")[1].replace(")", "").trim();
       }
       
-      // If we have a category, use it (in lowercase) to look up in scrapMaterialCodes.
       if (category && scrapMaterialCodes[category.toLowerCase()]) {
         for (const code in scrapMaterialCodes[category.toLowerCase()]) {
           if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
@@ -1632,7 +1574,6 @@
         }
       }
       
-      // Alternatively, try all categories if needed
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
           let catLower = cat.toLowerCase();
@@ -1646,7 +1587,6 @@
         }
       }
       
-      // Fallback if no match is found.
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
