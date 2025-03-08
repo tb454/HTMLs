@@ -620,8 +620,8 @@
     // Add a new active contract entry.
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      // Generate ticker using the updated ticker generator
-      const ticker = getTickerFromReference(material);
+      // Generate ticker using the updated ticker generator with expiration
+      const ticker = getTickerFromReference(material, expiration);
       // Each contract is 10 tons; total contract value is salePrice per ton * 10 * quantity.
       const totalContractValue = salePrice * 10 * quantity;
       const marginRequirement = totalContractValue * 0.07;
@@ -763,7 +763,7 @@
       
       // Record in Trade Log
       appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
+      // Add Active Contract entry (expiration is passed here)
       addActiveContract(material, expiration, tradePrice, numTrades);
       // Reduce inventory: each contract uses 20,000 lbs (10 tons)
       reduceInventory(material, numTrades * 20000);
@@ -1264,79 +1264,8 @@
     }
     
     // ----------------------------
-    // Trade Log, Active Contracts & Inventory Update Functions
+    // Hidden Scrap Material Codes Reference and Updated Ticker Generator
     // ----------------------------
-    // Append a new entry to the Trade Log table.
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
-      const tradeTime = new Date().toLocaleTimeString();
-      const row = document.createElement('tr');
-      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
-      tableBody.appendChild(row);
-    }
-    
-    // ----------------------------
-    // Simulated Trade Execution
-    // ----------------------------
-    function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const tradePrice = parseFloat(document.getElementById('create-price').value);
-      const costToCreate = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
-      // For a 10-ton load, total quantity is 10 * numTrades (tons)
-      const totalQuantity = 10 * numTrades;
-      // Total contract value = tradePrice per ton * 10 tons * number of contracts
-      const totalContractValue = tradePrice * 10 * numTrades;
-      
-      // Record in Trade Log
-      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
-      // Add Active Contract entry
-      addActiveContract(material, expiration, tradePrice, numTrades);
-      // Reduce inventory: each contract uses 20,000 lbs (10 tons)
-      reduceInventory(material, numTrades * 20000);
-      // Update purchase values to reflect inventory changes
-      updatePurchaseValues();
-      
-      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
-    }
-    
-    // ----------------------------
-    // Other Helper Functions
-    // ----------------------------
-    function logout() {
-      alert('Logging out...');
-    }
-    function cardClicked(cardName) {
-      if (cardName === "Active Contracts") {
-        const contracts = document.getElementById('activeContractsCount').textContent;
-        const margin = document.getElementById('activeContractsMarginTotal').textContent;
-        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
-      } else {
-        alert(cardName + " card clicked!");
-      }
-    }
-    function rowClicked(itemName) {
-      alert('Row for ' + itemName + ' clicked!');
-    }
-    function createFuturesContract(material, contractName) {
-      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
-    }
-    
-    // On DOMContentLoaded, populate the trade materials dropdown, update trade options,
-    // update computed inventory groups, and update purchase values.
-    document.addEventListener('DOMContentLoaded', () => {
-      populateTradeMaterialDropdown();
-      updateTradeOptions();
-      updateGroupedComputedMaterialsInventory();
-      updatePurchaseValues();
-    });
-  </script>
-  
-  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
-  <script>
-    // Hidden reference object (not rendered) to be used for ticker generation
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -1430,25 +1359,46 @@
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
 
-    // Updated helper function to generate a ticker based on the material name.
-    function getTickerFromReference(material) {
+    // Updated helper function to generate a ticker based on the material name and expiration date.
+    function getTickerFromReference(material, expiration) {
+      let tickerBase = "";
       // Loop through computedCategoriesMapping to find the category for the material.
       for (let category in computedCategoriesMapping) {
         if (computedCategoriesMapping[category].materials.includes(material)) {
-          // Use the lower-case category to reference the scrapMaterialCodes object.
           let catLower = category.toLowerCase();
           if (scrapMaterialCodes[catLower]) {
-            // Check each code to see if its description (normalized) contains the normalized material name.
+            // Check each code in the hidden scrap material codes reference.
             for (const code in scrapMaterialCodes[catLower]) {
               if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(material))) {
-                return code;
+                tickerBase = code;
+                break;
               }
             }
           }
+          if (tickerBase) break;
         }
       }
       // Fallback if no match is found.
-      return material.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+      if (!tickerBase) {
+        tickerBase = material.slice(0, 3).toUpperCase();
+      }
+      
+      // Futures month codes (common for commodities):
+      // January: F, February: G, March: H, April: J, May: K, June: M,
+      // July: N, August: Q, September: U, October: V, November: X, December: Z.
+      const monthCodes = { 
+        "01": "F", "02": "G", "03": "H", "04": "J", 
+        "05": "K", "06": "M", "07": "N", "08": "Q", 
+        "09": "U", "10": "V", "11": "X", "12": "Z" 
+      };
+      
+      // Assuming expiration is provided in "MM/DD/YYYY" format.
+      const [month, , year] = expiration.split("/");
+      const monthCode = monthCodes[month] || "";
+      const yearCode = year.slice(-2); // Last two digits of the year
+      
+      // Return the ticker as the base code plus the month letter and year.
+      return tickerBase + monthCode + yearCode;
     }
   </script>
 </body>
