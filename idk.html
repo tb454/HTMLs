@@ -1325,6 +1325,12 @@
   
     // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
+  updateGroupedComputedMaterialsInventory(); // Build the Greenspark table first
+  populateTradeMaterialDropdown();            // Then populate the dropdown
+  updateTradeOptions();                         // Finally update trade options
+});
+
+
       // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
