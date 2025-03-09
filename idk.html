@@ -1442,27 +1442,13 @@
       tableBody.appendChild(row);
     }
     
-    <script>
     function simulateTrade() {
-        const material = document.getElementById('create-material').value;
-        const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-        const tradePrice = parseFloat(document.getElementById('create-price').value);
-
-        fetch('/api/execute-trade', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ material, numTrades, tradePrice })
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Trade executed:', data);
-            alert(`Trade executed: ${numTrades} contracts of ${material} at $${tradePrice}`);
-            fetchMarketData(); // Refresh market data after the trade
-        })
-        .catch(error => console.error('Trade execution failed:', error));
-    }
-</script>
-
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
       const totalQuantity = 10 * numTrades;
       const totalContractValue = tradePrice * 10 * numTrades;
       
@@ -1610,65 +1596,6 @@
       
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
-    <script>
-    function updateMarketPrices(data) {
-        document.getElementById('price-Copper').textContent = `Copper: $${data.copper}`;
-        document.getElementById('price-Aluminum').textContent = `Aluminum: $${data.aluminum}`;
-        document.getElementById('price-Brass').textContent = `Brass: $${data.brass}`;
-    }
-
-    function fetchMarketData() {
-        fetch('/api/market-data')
-            .then(response => response.json())
-            .then(data => updateMarketPrices(data))
-            .catch(error => console.error('Error fetching market data:', error));
-    }
-
-    // Fetch market data every 5 seconds
-    setInterval(fetchMarketData, 5000);
-
-    // Initial fetch when the page loads
-    document.addEventListener('DOMContentLoaded', fetchMarketData);
-    <script>
-    function fetchActiveContracts() {
-        fetch('/api/active-contracts')
-            .then(response => response.json())
-            .then(data => updateActiveContractsTable(data))
-            .catch(error => console.error('Error fetching active contracts:', error));
-    }
-
-    function updateActiveContractsTable(contracts) {
-        const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-        tableBody.innerHTML = ''; // Clear existing rows
-
-        contracts.forEach(contract => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${contract.ticker}</td>
-                <td>${contract.material} (${contract.expiration})</td>
-                <td>$${contract.salePrice.toFixed(2)}</td>
-                <td>$${contract.change.toFixed(2)}</td>
-                <td>${contract.expiration}</td>
-                <td>$${contract.marginRequirement.toFixed(2)}</td>
-                <td>
-                    <button class="secondary-btn" onclick="rollContract('${contract.id}')">Roll</button>
-                    <button class="danger-btn" onclick="closeContract('${contract.id}')">Close</button>
-                </td>
-            `;
-            tableBody.appendChild(row);
-        });
-
-        // Update contract overview cards
-        document.getElementById("activeContractsCount").textContent = contracts.length;
-    }
-
-    // Fetch active contracts every 10 seconds
-    setInterval(fetchActiveContracts, 10000);
-
-    // Initial fetch
-    document.addEventListener('DOMContentLoaded', fetchActiveContracts);
-</script>
-
-
+  </script>
 </body>
 </html>
