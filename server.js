@@ -5,6 +5,10 @@ const axios = require('axios'); // use for real API calls
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const marketApiKey = process.env.MARKET_API_KEY;
+const inventoryApiKey = process.env.INVENTORY_API_KEY;
+const port = process.env.PORT || 3000;
+
 // Middleware to parse JSON requests
 app.use(express.json());
 
