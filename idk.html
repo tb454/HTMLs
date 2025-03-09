@@ -1596,6 +1596,26 @@
       
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
-  </script>
+    <script>
+    function updateMarketPrices(data) {
+        document.getElementById('price-Copper').textContent = `Copper: $${data.copper}`;
+        document.getElementById('price-Aluminum').textContent = `Aluminum: $${data.aluminum}`;
+        document.getElementById('price-Brass').textContent = `Brass: $${data.brass}`;
+    }
+
+    function fetchMarketData() {
+        fetch('/api/market-data')
+            .then(response => response.json())
+            .then(data => updateMarketPrices(data))
+            .catch(error => console.error('Error fetching market data:', error));
+    }
+
+    // Fetch market data every 5 seconds
+    setInterval(fetchMarketData, 5000);
+
+    // Initial fetch when the page loads
+    document.addEventListener('DOMContentLoaded', fetchMarketData);
+</script>
+
 </body>
 </html>
