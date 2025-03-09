@@ -1442,13 +1442,27 @@
       tableBody.appendChild(row);
     }
     
+    <script>
     function simulateTrade() {
-      const material = document.getElementById('create-material').value;
-      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const tradePrice = parseFloat(document.getElementById('create-price').value);
-      const costToCreate = parseFloat(document.getElementById('create-cost').value);
-      const expiration = document.getElementById('create-expiration').value;
-      
+        const material = document.getElementById('create-material').value;
+        const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+        const tradePrice = parseFloat(document.getElementById('create-price').value);
+
+        fetch('/api/execute-trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ material, numTrades, tradePrice })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Trade executed:', data);
+            alert(`Trade executed: ${numTrades} contracts of ${material} at $${tradePrice}`);
+            fetchMarketData(); // Refresh market data after the trade
+        })
+        .catch(error => console.error('Trade execution failed:', error));
+    }
+</script>
+
       const totalQuantity = 10 * numTrades;
       const totalContractValue = tradePrice * 10 * numTrades;
       
