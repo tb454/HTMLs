@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html>   
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -231,7 +231,7 @@
   <!-- Material Arrays and Pricing Formulas -->
   <script>
     // ----------------------------
-    // Material Name Arrays & Pricing Functions
+    // Material Name Arrays
     // ----------------------------
     // 1) Copper
     const copperMaterials = [
@@ -240,15 +240,6 @@
       "#2",          // Birch & Cliff
       "#3"           // Sheet Copper
     ];
-    function copperPrice(grade) {
-      switch(grade) {
-        case 'Barley': return 4.19 * 0.94;
-        case '#1': return 4.19 * 0.91;
-        case '#2': return 4.19 * 0.85;
-        case '#3': return 4.19 * 0.83;
-        default: return null;
-      }
-    }
     // 2) Aluminum
     const aluminumMaterials = [
       "AL6061_NewBareExtrusion",
@@ -269,6 +260,86 @@
       "AL_Wire_ECPrepared",
       "AL_MLC_Prepared"
     ];
+    // 3) Brass
+    const brassMaterials = [
+      "Brass_Hard",
+      "Brass_Red_Ebony",
+      "Brass_Red_Semi",
+      "Brass_Shaving_AlBronze",
+      "Brass_Shaving_BrassRed",
+      "Brass_Shell",
+      "Brass_Special",
+      "Brass_YellowRegular"
+    ];
+    // 4) Lead
+    const leadMaterials = [
+      "Lead_Clean",
+      "Lead_Range"
+    ];
+    // 5) Stainless
+    const stainlessMaterials = [
+      "SS304",
+      "SS316"
+    ];
+    // 6) E-Scrap (generic placeholder)
+    const eScrapMaterials = [
+      "E_Scrap_Board"
+    ];
+    // 7) Insulated Wire
+    const insulatedWireMaterials = [
+      "ICW_LowGrade_ChristmasLights",
+      "ICW_LowGrade_ComputerWire25",
+      "ICW_LowGrade_CuCATV",
+      "ICW_LowGrade_ExtCords35Up",
+      "ICW_LowGrade_MixedWire40Up",
+      "ICW1_Heliax57_OpenEyeBaled",
+      "ICW1_MCM85HG",
+      "ICW1_Romex65_NoWeatherProof",
+      "ICW1_THHN80",
+      "ICW2_50Cat5TelWire",
+      "ICW2_HarnessWireNoFuseBoxes",
+      "ICW2_BX_Cable_AL",
+      "ICW2_BX_Cable_FE24"
+    ];
+    // 8) Misc Product
+    const miscProductMaterials = [
+      "Ballast_Electronic",
+      "Ballast_Regular",
+      "BatteryAuto_PbAcid",
+      "BatterySteelCase_Industrial",
+      "Compressor_SealedUnitNoCastIron",
+      "EMotorLowGrade_CeilingFanMotors",
+      "EMotorMix_NoPumpsPowerToolsFans",
+      "EMotorLarge_LessThan1000lbs",
+      "Transformer_AluLargeOnly",
+      "TransformerCu_AlCu",
+      "TransformerCu_SmallPalmSize",
+      "TransformerCu_MediumOver200lbs",
+      "TransformerCu_Large",
+      "Zinc_DieCast"
+    ];
+    // 9) Radiator Product
+    const radiatorProductMaterials = [
+      "ACReefer_CleanTalkBaled",
+      "ACReefer_CleanUnbaled",
+      "ACReefer_DirtyTalkBaled",
+      "ACReefer_DirtyUnbaled",
+      "Radiator_CleanCar",
+      "CuBkg_ACReeferEnd"
+    ];
+    
+    // ----------------------------
+    // Pricing Functions
+    // ----------------------------
+    function copperPrice(grade) {
+      switch(grade) {
+        case 'Barley': return 4.19 * 0.94;
+        case '#1': return 4.19 * 0.91;
+        case '#2': return 4.19 * 0.85;
+        case '#3': return 4.19 * 0.83;
+        default: return null;
+      }
+    }
     function aluminumPrice(product) {
       switch(product) {
         case 'AL6061_NewBareExtrusion': return 1.25 * 0.84;
@@ -291,17 +362,6 @@
         default: return null;
       }
     }
-    // 3) Brass
-    const brassMaterials = [
-      "Brass_Hard",
-      "Brass_Red_Ebony",
-      "Brass_Red_Semi",
-      "Brass_Shaving_AlBronze",
-      "Brass_Shaving_BrassRed",
-      "Brass_Shell",
-      "Brass_Special",
-      "Brass_YellowRegular"
-    ];
     function brassPrice(product) {
       switch(product) {
         case 'Brass_Hard': return 4.19 * 0.81;
@@ -315,11 +375,6 @@
         default: return null;
       }
     }
-    // 4) Lead
-    const leadMaterials = [
-      "Lead_Clean",
-      "Lead_Range"
-    ];
     function leadPrice(product) {
       switch(product) {
         case 'Lead_Clean': return (2034/2000) * 0.718;
@@ -327,11 +382,6 @@
         default: return null;
       }
     }
-    // 5) Stainless
-    const stainlessMaterials = [
-      "SS304",
-      "SS316"
-    ];
     function stainlessPrice(product) {
       switch(product) {
         case 'SS304': return (15675/2000) * 0.0638;
@@ -339,29 +389,10 @@
         default: return null;
       }
     }
-    // 6) E-Scrap (generic placeholder)
-    const eScrapMaterials = [
-      "E_Scrap_Board"
-    ];
+    // For E-Scrap we use a placeholder pricing function.
     function eScrapPrice(product) {
       return 0.5;
     }
-    // 7) Insulated Wire
-    const insulatedWireMaterials = [
-      "ICW_LowGrade_ChristmasLights",
-      "ICW_LowGrade_ComputerWire25",
-      "ICW_LowGrade_CuCATV",
-      "ICW_LowGrade_ExtCords35Up",
-      "ICW_LowGrade_MixedWire40Up",
-      "ICW1_Heliax57_OpenEyeBaled",
-      "ICW1_MCM85HG",
-      "ICW1_Romex65_NoWeatherProof",
-      "ICW1_THHN80",
-      "ICW2_50Cat5TelWire",
-      "ICW2_HarnessWireNoFuseBoxes",
-      "ICW2_BX_Cable_AL",
-      "ICW2_BX_Cable_FE24"
-    ];
     function insulatedWirePrice(product) {
       switch(product) {
         case 'ICW_LowGrade_ChristmasLights': return 1.25 * 0.528;
@@ -380,23 +411,6 @@
         default: return null;
       }
     }
-    // 8) Misc Product
-    const miscProductMaterials = [
-      "Ballast_Electronic",
-      "Ballast_Regular",
-      "BatteryAuto_PbAcid",
-      "BatterySteelCase_Industrial",
-      "Compressor_SealedUnitNoCastIron",
-      "EMotorLowGrade_CeilingFanMotors",
-      "EMotorMix_NoPumpsPowerToolsFans",
-      "EMotorLarge_LessThan1000lbs",
-      "Transformer_AluLargeOnly",
-      "TransformerCu_AlCu",
-      "TransformerCu_SmallPalmSize",
-      "TransformerCu_MediumOver200lbs",
-      "TransformerCu_Large",
-      "Zinc_DieCast"
-    ];
     function miscProductPrice(product) {
       switch(product) {
         case 'Ballast_Electronic': return 1.25 * 0.12;
@@ -416,15 +430,6 @@
         default: return null;
       }
     }
-    // 9) Radiator Product
-    const radiatorProductMaterials = [
-      "ACReefer_CleanTalkBaled",
-      "ACReefer_CleanUnbaled",
-      "ACReefer_DirtyTalkBaled",
-      "ACReefer_DirtyUnbaled",
-      "Radiator_CleanCar",
-      "CuBkg_ACReeferEnd"
-    ];
     function radiatorProductPrice(product) {
       switch(product) {
         case 'ACReefer_CleanTalkBaled': return 1.25 * 1.608;
@@ -438,7 +443,7 @@
     }
     
     // ----------------------------
-    // Global Mapping for Computed Categories
+    // Global mapping for computed categories
     // ----------------------------
     const computedCategoriesMapping = {
       "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
@@ -477,7 +482,7 @@
         materials.forEach(material => {
           const computedPrice = pricingFunc(material);
           if (computedPrice !== null) {
-            // Simulated inventory values
+            // Simulated inventory values (adjust as needed)
             const wip = Math.floor(Math.random() * 10000) + 5000;        
             const finished = Math.floor(Math.random() * 20000) + 10000;    
             const total = wip + finished;
@@ -503,7 +508,7 @@
       }
     }
     
-    // Toggle sub-rows for each group
+    // Toggle the display of sub-rows in a group
     function toggleGroup(category) {
       const subRows = document.querySelectorAll(`tr.group-sub[data-group='${category}']`);
       subRows.forEach(row => {
@@ -512,8 +517,9 @@
     }
     
     // ----------------------------
-    // Helper Functions for Trade Section
+    // Helper Functions for Simulated Trade Section
     // ----------------------------
+    // Populate the "Material" dropdown in Simulated Trade from all materials in Greenspark table.
     function populateTradeMaterialDropdown() {
       const dropdown = document.getElementById('create-material');
       dropdown.innerHTML = '';
@@ -521,6 +527,7 @@
       const rows = table.querySelectorAll('tbody tr');
       const materialsSet = new Set();
       rows.forEach(row => {
+        // Skip group header rows
         if (row.classList.contains('group-header')) return;
         const materialText = row.cells[0].textContent.trim();
         if (materialText) {
@@ -536,10 +543,12 @@
       });
     }
     
+    // Get commodity data from the Greenspark table (by matching material name)
     function getCommodityData(material) {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
+        // Ignore group header rows
         if (row.classList.contains('group-header')) continue;
         const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
         if (cellMaterial.includes(material.toLowerCase())) {
@@ -553,6 +562,7 @@
       return { finishedGoods: 0, avgCost: 0 };
     }
     
+    // Get the Market Snapshot price for a given key (e.g., "Copper", "Brass", etc.)
     function getMarketSnapshotPrice(key) {
       const snapshot = {
         "Copper": 9500,
@@ -563,11 +573,15 @@
       return snapshot[key] || 0;
     }
     
+    // ----------------------------
+    // Modified getBasePrice to reflect updated Market Snapshot fluctuations
+    // ----------------------------
     function getBasePrice(material) {
       let baseMaterial = material;
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")", "").trim();
+        // First, try to get updated price from the Market Snapshot element
         const priceElem = document.getElementById(`price-${category}`);
         if (priceElem) {
           let text = priceElem.textContent;
@@ -576,15 +590,17 @@
             let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
             let updatedPrice = parseFloat(priceStr);
             if (!isNaN(updatedPrice)) {
-              return updatedPrice;
+              return updatedPrice; // Return the updated price per ton
             }
           }
         }
+        // Otherwise, fallback to computed price
         if (computedCategoriesMapping[category]) {
           let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
           return computedPrice ? computedPrice * 2000 : 0;
         }
       }
+      // Try direct lookup from Market Snapshot element if available
       const directElem = document.getElementById(`price-${material}`);
       if (directElem) {
         let text = directElem.textContent;
@@ -597,8 +613,10 @@
           }
         }
       }
+      // Fallback to static snapshot
       let price = getMarketSnapshotPrice(material);
       if (price > 0) return price;
+      // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
           let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
@@ -650,6 +668,7 @@
       let totalMargin = 0;
       let totalChange = 0;
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
+  
       rows.forEach(row => {
         const quantity = parseInt(row.dataset.quantity, 10) || 1;
         totalContracts += quantity;
@@ -660,12 +679,14 @@
         const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
         totalChange += change;
       });
+  
       if(document.getElementById("active-contracts-secured")) {
         document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
       }
       if(document.getElementById("active-contracts-margin")) {
         document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
       }
+      
       if(document.getElementById("activeContractsCount")) {
         document.getElementById("activeContractsCount").textContent = totalContracts;
       }
@@ -703,7 +724,68 @@
     }
     
     // ----------------------------
-    // Simulated Trade Execution
+    // Update Trade Options in Simulated Trade Section
+    // ----------------------------
+    function updateTradeOptions() {
+      const materialSelect = document.getElementById('create-material');
+      const material = materialSelect.value;
+      
+      const data = getCommodityData(material);
+      const contractSize = 20000; // 10 tons = 20,000 lbs.
+      const availableContracts = Math.floor(data.finishedGoods / contractSize);
+      
+      const contractsSelect = document.getElementById('create-contracts');
+      contractsSelect.innerHTML = '';
+      for (let i = 1; i <= availableContracts; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i;
+        contractsSelect.appendChild(option);
+      }
+      
+      // Get base price updated with fluctuations
+      const basePricePerTon = getBasePrice(material);
+      
+      // Update Price/ton dropdown with multiplier options
+      const priceSelect = document.getElementById('create-price');
+      priceSelect.innerHTML = '';
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
+      });
+      
+      // Update Cost to Create: 0.1% of base price per ton
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const costToCreate = basePricePerTon * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOption);
+      
+      // Update Expiration Date dropdown: 5 future dates (1-month increments)
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        let day = expDate.getDate().toString().padStart(2, '0');
+        let year = expDate.getFullYear();
+        const dateStr = `${month}/${day}/${year}`;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution - Modified for Real API Call
     // ----------------------------
     async function simulateTrade() {
       const material = document.getElementById('create-material').value;
@@ -727,6 +809,7 @@
         const result = await response.json();
         if (result.success) {
           alert(`${numTrades} trade(s) for ${material} executed successfully.`);
+          // Refresh inventory and trade log as needed
           updateInventory();
           appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
         } else {
@@ -739,8 +822,36 @@
     }
     
     // ----------------------------
-    // Scrap Material Codes Reference & Ticker Generator
+    // Other Helper Functions
     // ----------------------------
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+    });
+  </script>
+  
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
+  <script>
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -802,11 +913,37 @@
         "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
         "IW-BX-AL": "ICW2 BX Cable AL",
         "IW-BX-FE": "ICW2 BX Cable FE24"
+      },
+      miscellaneous: {
+        "BAL-E": "Ballast Electronic",
+        "BAL-R": "Ballast Regular",
+        "BAT-PB": "Battery Auto Pb Acid",
+        "BAT-ST": "Battery Steel Case Industrial",
+        "COMP": "Compressor Sealed Unit No Cast Iron",
+        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
+        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
+        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
+        "TR-AL": "Transformer Alu Large Only",
+        "TR-CU-AL": "Transformer Cu AlCu",
+        "TR-CU-SM": "Transformer Cu Small Palm Size",
+        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
+        "TR-CU-LG": "Transformer Cu Large",
+        "ZN-CAST": "Zinc Die Cast"
+      },
+      radiator: {
+        "AC-RADB": "AC Reefer Clean Talk Baled",
+        "AC-RADU": "AC Reefer Clean Unbaled",
+        "AC-RADDB": "AC Reefer Dirty Talk Baled",
+        "AC-RADDU": "AC Reefer Dirty Unbaled",
+        "AL-RADCC": "Radiator Clean Car",
+        "RAD-ENDS": "Cu Bkg AC Reefer End"
       }
     };
+
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
+
     function getTickerFromReference(material) {
       let baseMaterial = material;
       let category = null;
@@ -814,6 +951,7 @@
         baseMaterial = material.split(" (")[0].trim();
         category = material.split(" (")[1].replace(")", "").trim();
       }
+      
       if (category && scrapMaterialCodes[category.toLowerCase()]) {
         for (const code in scrapMaterialCodes[category.toLowerCase()]) {
           if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
@@ -821,6 +959,7 @@
           }
         }
       }
+      
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
           let catLower = cat.toLowerCase();
@@ -833,6 +972,7 @@
           }
         }
       }
+      
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
@@ -1102,6 +1242,7 @@
             <td>02/21/25</td>
           </tr>
         </tbody>
+        </tfoot>
       </table>
     </section>
             
@@ -1162,9 +1303,9 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
-  <!-- Consolidated Initialization and Chart Setup Script -->
+  <!-- Main Application Script -->
   <script>
-    // Set accent color for charts and section titles
+    // Accent color for charts
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
       el.style.borderColor = accentColor;
@@ -1182,113 +1323,232 @@
     let kpiChartLabels = [];
     let kpiChartData = [];
   
-    // Consolidated DOMContentLoaded event: initialize UI and set up auto-updates
+    // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
-      // 1. Build the Greenspark table with computed materials
-      updateGroupedComputedMaterialsInventory();
+  updateGroupedComputedMaterialsInventory(); // Build the Greenspark table first
+  populateTradeMaterialDropdown();            // Then populate the dropdown
+  updateTradeOptions();                         // Finally update trade options
+});
+
+
+      // Active Contracts Chart
+      const activeContractsCanvas = document.getElementById('activeContractsChart');
+      if(activeContractsCanvas) {
+        const ctxActive = activeContractsCanvas.getContext('2d');
+        activeContractsChart = new Chart(ctxActive, {
+          type: 'line',
+          data: {
+            labels: activeContractsChartLabels,
+            datasets: [{
+              label: 'Total Change',
+              data: activeContractsChangeHistory,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true, max: 10000, ticks: { stepSize: 2000 } } }
+          }
+        });
+      }
       
-      // 2. Populate the trade material dropdown from the Greenspark table
-      populateTradeMaterialDropdown();
+      // Finished Goods Chart
+      const finishedCanvas = document.getElementById('finishedGoodsChart');
+      if(finishedCanvas) {
+        const ctxFinished = finishedCanvas.getContext('2d');
+        finishedGoodsChart = new Chart(ctxFinished, {
+          type: 'line',
+          data: {
+            labels: finishedGoodsChartLabels,
+            datasets: [{
+              label: 'Total Tons',
+              data: finishedGoodsChartData,
+              borderColor: accentColor,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              fill: true,
+              tension: 0.1
+            }]
+          },
+          options: { scales: { y: { beginAtZero: true, max: 300 } } }
+        });
+      }
       
-      // 3. Update the trade options based on the dropdown selection
-      updateTradeOptions();
+      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
+      const kpiCanvas = document.getElementById('kpiChart');
+      if (kpiCanvas) {
+        const ctxKPI = kpiCanvas.getContext('2d');
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        const copperData = [100, 120, 130, 110, 140, 150];
+        const brassData = [50, 60, 55, 70, 65, 80];
+        const aluminumData = [80, 90, 85, 95, 100, 105];
+        kpiChart = new Chart(ctxKPI, {
+          type: 'bar',
+          data: {
+            labels: kpiChartLabels,
+            datasets: [
+              {
+                label: 'Copper',
+                data: copperData,
+                backgroundColor: 'rgba(52,152,219,0.6)'
+              },
+              {
+                label: 'Brass',
+                data: brassData,
+                backgroundColor: 'rgba(46,204,113,0.6)'
+              },
+              {
+                label: 'Aluminum',
+                data: aluminumData,
+                backgroundColor: 'rgba(231,76,60,0.6)'
+              }
+            ]
+          },
+          options: {
+            scales: {
+              x: { stacked: true },
+              y: { stacked: true, beginAtZero: true }
+            }
+          }
+        });
+      }
+    });
+    
+    // Update Finished Goods Inventory Purchase Values based on live inventory data
+    async function updateInventory() {
+      try {
+        const response = await fetch('/api/inventory');
+        const inventoryData = await response.json();
+        
+        // Update the table body with real inventory details
+        const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
+        tableBody.innerHTML = ''; // Clear current rows
+        
+        inventoryData.details.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${item.commodity}</td>
+            <td>${item.wip.toLocaleString()}</td>
+            <td>${item.finished.toLocaleString()}</td>
+            <td>${item.total.toLocaleString()}</td>
+            <td>$${item.avgCost.toFixed(2)}</td>
+            <td>$${item.totalPurchaseValue.toFixed(2)}</td>
+          `;
+          tableBody.appendChild(row);
+        });
+        
+        // Update totals in the table footer
+        document.getElementById('total-wip').textContent = inventoryData.totalWIP.toLocaleString();
+        document.getElementById('total-finished').textContent = inventoryData.totalFinished.toLocaleString();
+        document.getElementById('total-total').textContent = inventoryData.total.toLocaleString();
+        
+        let totalPurchase = inventoryData.details.reduce((acc, item) => acc + item.totalPurchaseValue, 0);
+        document.getElementById('total-purchase').textContent = '$' + totalPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+      } catch (error) {
+        console.error('Error updating inventory:', error);
+      }
+    }
+    
+    // NEW: Fetch live market data and update market snapshot cards
+    async function updateMarketSnapshot() {
+      try {
+        const response = await fetch('/api/market');
+        const marketData = await response.json();
+        
+        if (marketData.copper) {
+          document.getElementById('price-Copper').textContent = `Copper: $${marketData.copper.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (marketData.brass) {
+          document.getElementById('price-Brass').textContent = `Brass: $${marketData.brass.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (marketData.aluminum) {
+          document.getElementById('price-Aluminum').textContent = `Aluminum: $${marketData.aluminum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        // Add additional commodity updates here if needed...
+      } catch (error) {
+        console.error('Error updating market snapshot:', error);
+      }
+    }
+    
+    // NEW: Execute a trade by posting data to the back end
+    async function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const expiration = document.getElementById('create-expiration').value;
       
-      // 4. Set up automated updates:
-      setInterval(updateInventory, 300000);          // Update inventory every 5 minutes
-      setInterval(updateMarketSnapshot, 5000);         // Update market snapshot every 5 seconds
-      setInterval(updateMetalsMarketOverview, 5000);     // Update Metals Market Overview every 5 seconds
-      setInterval(updateTradeOptions, 5000);           // Update trade options if necessary
+      const tradeData = {
+        material,
+        quantity: numTrades * 10,  // Assuming 10-ton loads
+        tradePrice,
+        expiration
+      };
       
-      // 5. Initial live data fetch
+      try {
+        const response = await fetch('/api/trades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tradeData)
+        });
+        const result = await response.json();
+        if (result.success) {
+          alert(`${numTrades} trade(s) for ${material} executed successfully.`);
+          // Refresh inventory and trade log as needed
+          updateInventory();
+          appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
+        } else {
+          alert('Trade execution failed: ' + result.message);
+        }
+      } catch (error) {
+        console.error('Error executing trade:', error);
+        alert('Error executing trade');
+      }
+    }
+    
+    // Automated Updates for Inventory, Pricing, and Metals Market Overview
+    document.addEventListener('DOMContentLoaded', () => {
+      // Update inventory every 5 minutes (300000 ms)
+      setInterval(updateInventory, 300000);
+      
+      // Update market snapshot every 5 seconds
+      setInterval(updateMarketSnapshot, 5000);
+      
+      // Update Metals Market Overview every 5 seconds
+      setInterval(updateMetalsMarketOverview, 5000);
+      
+      // Update trade options if necessary
+      setInterval(updateTradeOptions, 5000);
+      
+      // Initial fetch of live data
       updateInventory();
       updateMarketSnapshot();
     });
     
-    // Active Contracts Chart
-    const activeContractsCanvas = document.getElementById('activeContractsChart');
-    if(activeContractsCanvas) {
-      const ctxActive = activeContractsCanvas.getContext('2d');
-      activeContractsChart = new Chart(ctxActive, {
-        type: 'line',
-        data: {
-          labels: activeContractsChartLabels,
-          datasets: [{
-            label: 'Total Change',
-            data: activeContractsChangeHistory,
-            borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
-            fill: true,
-            tension: 0.1
-          }]
-        },
-        options: {
-          scales: { y: { beginAtZero: true, max: 10000, ticks: { stepSize: 2000 } } }
-        }
-      });
-    }
-    
-    // Finished Goods Chart
-    const finishedCanvas = document.getElementById('finishedGoodsChart');
-    if(finishedCanvas) {
-      const ctxFinished = finishedCanvas.getContext('2d');
-      finishedGoodsChart = new Chart(ctxFinished, {
-        type: 'line',
-        data: {
-          labels: finishedGoodsChartLabels,
-          datasets: [{
-            label: 'Total Tons',
-            data: finishedGoodsChartData,
-            borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
-            fill: true,
-            tension: 0.1
-          }]
-        },
-        options: { scales: { y: { beginAtZero: true, max: 300 } } }
-      });
-    }
-    
-    // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
-    const kpiCanvas = document.getElementById('kpiChart');
-    if (kpiCanvas) {
-      const ctxKPI = kpiCanvas.getContext('2d');
-      kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-      const copperData = [100, 120, 130, 110, 140, 150];
-      const brassData = [50, 60, 55, 70, 65, 80];
-      const aluminumData = [80, 90, 85, 95, 100, 105];
-      kpiChart = new Chart(ctxKPI, {
-        type: 'bar',
-        data: {
-          labels: kpiChartLabels,
-          datasets: [
-            {
-              label: 'Copper',
-              data: copperData,
-              backgroundColor: 'rgba(52,152,219,0.6)'
-            },
-            {
-              label: 'Brass',
-              data: brassData,
-              backgroundColor: 'rgba(46,204,113,0.6)'
-            },
-            {
-              label: 'Aluminum',
-              data: aluminumData,
-              backgroundColor: 'rgba(231,76,60,0.6)'
-            }
-          ]
-        },
-        options: {
-          scales: {
-            x: { stacked: true },
-            y: { stacked: true, beginAtZero: true }
-          }
+    // New function to update Metals Market Overview table (simulation-based)
+    function updateMetalsMarketOverview() {
+      const table = document.getElementById('metals-market-table');
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+        // Update "Last" price (column index 2) with ±5% fluctuation
+        let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
+        let currentPrice = parseFloat(lastPriceStr);
+        if (!isNaN(currentPrice)) {
+          let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+          let newPrice = currentPrice + fluctuation;
+          // Calculate change (newPrice - oldPrice) and format with sign
+          let changeVal = newPrice - currentPrice;
+          let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
+          row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          // Update the "Change" column (column index 3)
+          row.cells[3].textContent = changeText;
         }
       });
     }
   </script>
   
-  <!-- Additional Helper Functions (if needed) -->
+  <!-- New Script: Additional Functions (if needed) -->
   <script>
     // You can add further helper functions here as required.
   </script>
