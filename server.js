@@ -1,10 +1,22 @@
 // server.js
 const express = require('express');
+const helmet = require('helmet'); // Helps secure your app by setting various HTTP headers
+const rateLimit = require('express-rate-limit'); // Middleware for rate limiting
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Load environment variables (if using a .env file)
+// Load environment variables
 require('dotenv').config();
+
+// Security Middleware
+app.use(helmet());
+
+// Apply rate limiting to all requests (customize as needed)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minute window
+  max: 100, // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
 
 // Use JSON parser middleware
 app.use(express.json());
