@@ -785,40 +785,24 @@
     }
     
     // ----------------------------
-    // Simulated Trade Execution - Modified for Real API Call
+    // Simulated Trade Execution
     // ----------------------------
-    async function simulateTrade() {
+    function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      const tradeData = {
-        material,
-        quantity: numTrades * 10,  // Assuming 10-ton loads
-        tradePrice,
-        expiration
-      };
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
       
-      try {
-        const response = await fetch('/api/trades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tradeData)
-        });
-        const result = await response.json();
-        if (result.success) {
-          alert(`${numTrades} trade(s) for ${material} executed successfully.`);
-          // Refresh inventory and trade log as needed
-          updateInventory();
-          appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
-        } else {
-          alert('Trade execution failed: ' + result.message);
-        }
-      } catch (error) {
-        console.error('Error executing trade:', error);
-        alert('Error executing trade');
-      }
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
     // ----------------------------
@@ -847,6 +831,7 @@
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
     });
   </script>
   
@@ -1010,6 +995,7 @@
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
           <div id="price-Copper">Copper: $9,500.00</div>
+          <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
           <div id="price-Brass">Brass: $7,500.00</div>
           <div id="price-Aluminum">Aluminum: $2,200.00</div>
           <div id="price-ElectricMotors">Electric Motors: $900.00</div>
@@ -1038,7 +1024,7 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Grouped computed material rows will be appended here by JavaScript -->
+     <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1285,7 +1271,7 @@
         <div class="modal-body">
           <p>This solution is designed with scalability and security in mind. Key features include:</p>
           <ul>
-            <li><strong>Live Data Integration:</strong> Data is fetched via API calls for real-time market updates.</li>
+            <li><strong>Live Data Integration:</strong> Data is fetched via yfinance for real-time market updates.</li>
             <li><strong>Data Analytics & KPIs:</strong> Interactive charts provide actionable insights.</li>
             <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems.</li>
             <li><strong>Security Measures:</strong> Secure API endpoints and data encryption.</li>
@@ -1325,12 +1311,6 @@
   
     // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
-  updateGroupedComputedMaterialsInventory(); // Build the Greenspark table first
-  populateTradeMaterialDropdown();            // Then populate the dropdown
-  updateTradeOptions();                         // Finally update trade options
-});
-
-
       // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
@@ -1415,118 +1395,150 @@
       }
     });
     
-    // Update Finished Goods Inventory Purchase Values based on live inventory data
-    async function updateInventory() {
-      try {
-        const response = await fetch('/api/inventory');
-        const inventoryData = await response.json();
-        
-        // Update the table body with real inventory details
-        const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
-        tableBody.innerHTML = ''; // Clear current rows
-        
-        inventoryData.details.forEach(item => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${item.commodity}</td>
-            <td>${item.wip.toLocaleString()}</td>
-            <td>${item.finished.toLocaleString()}</td>
-            <td>${item.total.toLocaleString()}</td>
-            <td>$${item.avgCost.toFixed(2)}</td>
-            <td>$${item.totalPurchaseValue.toFixed(2)}</td>
-          `;
-          tableBody.appendChild(row);
-        });
-        
-        // Update totals in the table footer
-        document.getElementById('total-wip').textContent = inventoryData.totalWIP.toLocaleString();
-        document.getElementById('total-finished').textContent = inventoryData.totalFinished.toLocaleString();
-        document.getElementById('total-total').textContent = inventoryData.total.toLocaleString();
-        
-        let totalPurchase = inventoryData.details.reduce((acc, item) => acc + item.totalPurchaseValue, 0);
-        document.getElementById('total-purchase').textContent = '$' + totalPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-      } catch (error) {
-        console.error('Error updating inventory:', error);
+    // Update Finished Goods Inventory Purchase Values
+    function updatePurchaseValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
+      rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        if(cells.length >= 6) {
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+      });
+      
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      if(document.getElementById('finishedGoodsInfo')){
+        const contractsAvailable = Math.floor(sumFinished / 20000);
+        const totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
+        if (finishedGoodsChart) {
+          const now = new Date().toLocaleTimeString();
+          finishedGoodsChartLabels.push(now);
+          finishedGoodsChartData.push(totalTons);
+          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
+          finishedGoodsChart.update();
+        }
       }
     }
     
-    // NEW: Fetch live market data and update market snapshot cards
-    async function updateMarketSnapshot() {
-      try {
-        const response = await fetch('/api/market');
-        const marketData = await response.json();
-        
-        if (marketData.copper) {
-          document.getElementById('price-Copper').textContent = `Copper: $${marketData.copper.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        if (marketData.brass) {
-          document.getElementById('price-Brass').textContent = `Brass: $${marketData.brass.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        if (marketData.aluminum) {
-          document.getElementById('price-Aluminum').textContent = `Aluminum: $${marketData.aluminum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        // Add additional commodity updates here if needed...
-      } catch (error) {
-        console.error('Error updating market snapshot:', error);
-      }
+    // Trade Log, Active Contracts & Inventory Update Functions (repeat)
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
     }
     
-    // NEW: Execute a trade by posting data to the back end
-    async function simulateTrade() {
+    function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      const tradeData = {
-        material,
-        quantity: numTrades * 10,  // Assuming 10-ton loads
-        tradePrice,
-        expiration
-      };
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
       
-      try {
-        const response = await fetch('/api/trades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tradeData)
-        });
-        const result = await response.json();
-        if (result.success) {
-          alert(`${numTrades} trade(s) for ${material} executed successfully.`);
-          // Refresh inventory and trade log as needed
-          updateInventory();
-          appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
-        } else {
-          alert('Trade execution failed: ' + result.message);
-        }
-      } catch (error) {
-        console.error('Error executing trade:', error);
-        alert('Error executing trade');
-      }
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // Automated Updates for Inventory, Pricing, and Metals Market Overview
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
     document.addEventListener('DOMContentLoaded', () => {
-      // Update inventory every 5 minutes (300000 ms)
-      setInterval(updateInventory, 300000);
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
+  
+  <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Update Greenspark inventory every 5 minutes (300000 ms)
+      setInterval(updateInventoryIncrementally, 300000);
       
-      // Update market snapshot every 5 seconds
-      setInterval(updateMarketSnapshot, 5000);
+      // Update pricing fluctuations every 5 seconds (5000 ms)
+      setInterval(simulatePricingFluctuations, 5000);
       
-      // Update Metals Market Overview every 5 seconds
+      // Update Metals Market Overview every 5 seconds (5000 ms)
       setInterval(updateMetalsMarketOverview, 5000);
       
-      // Update trade options if necessary
+      // Also update simulated trade options when pricing changes
       setInterval(updateTradeOptions, 5000);
-      
-      // Initial fetch of live data
-      updateInventory();
-      updateMarketSnapshot();
     });
     
-    // New function to update Metals Market Overview table (simulation-based)
+    function updateInventoryIncrementally() {
+      const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
+      rows.forEach(row => {
+        if (Math.random() < 0.4) { // update ~40% of rows
+          let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let changePercent = Math.random() * 0.05; // up to 5% increase
+          finished += finished * changePercent;
+          row.cells[2].textContent = finished.toLocaleString();
+          
+          let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
+          let total = wip + finished;
+          row.cells[3].textContent = total.toLocaleString();
+        }
+      });
+      updatePurchaseValues();
+    }
+    
+    function simulatePricingFluctuations() {
+      const pricingElements = document.querySelectorAll('[id^="price-"]');
+      pricingElements.forEach(elem => {
+        let text = elem.textContent;
+        let parts = text.split(':');
+        if (parts.length >= 2) {
+          let commodity = parts[0].trim();
+          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+          let currentPrice = parseFloat(priceStr);
+          if (!isNaN(currentPrice)) {
+            let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+            let newPrice = currentPrice + fluctuation;
+            elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          }
+        }
+      });
+    }
+    
+    // New function to update Metals Market Overview table
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -1548,9 +1560,42 @@
     }
   </script>
   
-  <!-- New Script: Additional Functions (if needed) -->
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
   <script>
-    // You can add further helper functions here as required.
+    function normalizeString(str) {
+      return str.toLowerCase().replace(/[\s_]+/g, "");
+    }
+    function getTickerFromReference(material) {
+      let baseMaterial = material;
+      let category = null;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        category = material.split(" (")[1].replace(")", "").trim();
+      }
+      
+      if (category && scrapMaterialCodes[category.toLowerCase()]) {
+        for (const code in scrapMaterialCodes[category.toLowerCase()]) {
+          if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
+            return code;
+          }
+        }
+      }
+      
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          let catLower = cat.toLowerCase();
+          if (scrapMaterialCodes[catLower]) {
+            for (const code in scrapMaterialCodes[catLower]) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(baseMaterial))) {
+                return code;
+              }
+            }
+          }
+        }
+      }
+      
+      return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+    }
   </script>
 </body>
 </html>
