@@ -1,7 +1,7 @@
 // server.js
 const express = require('express');
-const helmet = require('helmet'); // Helps secure your app by setting various HTTP headers
-const rateLimit = require('express-rate-limit'); // Middleware for rate limiting
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -10,16 +10,19 @@ require('dotenv').config();
 
 // Security Middleware
 app.use(helmet());
-
-// Apply rate limiting to all requests (customize as needed)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minute window
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
 });
 app.use(limiter);
 
 // Use JSON parser middleware
 app.use(express.json());
+
+// Home route
+app.get('/', (req, res) => {
+  res.send('Welcome to Bridge Dashboard!');
+});
 
 // Simulated Market Data
 let marketData = {
@@ -60,21 +63,18 @@ app.post('/api/trade', async (req, res, next) => {
   try {
     const { material, contracts, tradePrice } = req.body;
     
-    // Basic validation for required fields
     if (!material || !contracts) {
       const err = new Error('Missing required trade information.');
       err.status = 400;
       throw err;
     }
     
-    // For simulation: Update finished goods inventory
     if (!inventoryData[material]) {
       const err = new Error('Invalid material');
       err.status = 400;
       throw err;
     }
     
-    // Assume each contract reduces finished inventory by 20,000 lbs.
     const reduction = contracts * 20000;
     inventoryData[material].finished = Math.max(inventoryData[material].finished - reduction, 0);
     
@@ -97,15 +97,11 @@ app.use((req, res, next) => {
 
 // Global error-handling middleware
 app.use((err, req, res, next) => {
-  // Log the error (consider using a logging library like Winston in production)
   console.error(err);
-  
-  // Set the status code and send a JSON error response
   res.status(err.status || 500).json({
     success: false,
     error: {
       message: err.message,
-      // Only include the stack trace in development mode for security
       ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     }
   });
@@ -114,5 +110,3 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
 });
-
-app.use(express.static('public'));
