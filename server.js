@@ -23,8 +23,6 @@ app.use(express.json());
 // (Optional) Serve static assets from the bridge-dashboard folder if needed
 app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
 
-const path = require('path');
-
 // Serve the complete dashboard as the home page
 app.get('/', (req, res, next) => {
   const filePath = path.join(__dirname, "combined-layout.html");
