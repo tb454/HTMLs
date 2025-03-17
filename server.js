@@ -2,6 +2,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path'); // Move this to the top with your other requires
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -19,9 +20,12 @@ app.use(limiter);
 // Use JSON parser middleware
 app.use(express.json());
 
-// Home route
+// (Optional) Serve static assets from the bridge-dashboard folder, if needed
+app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
+
+// Home route: Serve your complete dashboard instead of a welcome message
 app.get('/', (req, res) => {
-  res.send('Welcome to Bridge Dashboard!');
+  res.sendFile(path.join(__dirname, 'bridge-dashboard', 'combined-layout.html'));
 });
 
 // Simulated Market Data
@@ -109,11 +113,4 @@ app.use((err, req, res, next) => {
 
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
-});
-const path = require('path');
-
-// Route to serve combined-layout.html
-app.get('/combined-layout', (req, res) => {
-  res.sendFile(path.join(__dirname, 'bridge-dashboard', 'combined-layout.html'));
-
 });
