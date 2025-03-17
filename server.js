@@ -2,7 +2,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const path = require('path'); // Move this to the top with your other requires
+const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -20,12 +20,19 @@ app.use(limiter);
 // Use JSON parser middleware
 app.use(express.json());
 
-// (Optional) Serve static assets from the bridge-dashboard folder, if needed
+// (Optional) Serve static assets from the bridge-dashboard folder if needed
 app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
 
-// Home route: Serve your complete dashboard instead of a welcome message
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'bridge-dashboard', 'combined-layout.html'));
+// Home route: Serve the complete dashboard HTML file
+app.get('/', (req, res, next) => {
+  const filePath = path.join(__dirname, 'bridge-dashboard', 'combined-layout.html');
+  console.log('Serving file from:', filePath);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('Error sending file:', err);
+      next(err);
+    }
+  });
 });
 
 // Simulated Market Data
@@ -66,22 +73,18 @@ app.get('/api/inventory', (req, res, next) => {
 app.post('/api/trade', async (req, res, next) => {
   try {
     const { material, contracts, tradePrice } = req.body;
-    
     if (!material || !contracts) {
       const err = new Error('Missing required trade information.');
       err.status = 400;
       throw err;
     }
-    
     if (!inventoryData[material]) {
       const err = new Error('Invalid material');
       err.status = 400;
       throw err;
     }
-    
     const reduction = contracts * 20000;
     inventoryData[material].finished = Math.max(inventoryData[material].finished - reduction, 0);
-    
     res.json({
       success: true,
       message: `Trade executed for ${contracts} contract(s) of ${material}.`,
