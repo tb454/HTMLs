@@ -20,11 +20,13 @@ app.use(limiter);
 // Use JSON parser middleware
 app.use(express.json());
 
-// (Optional) Serve static assets from the bridge-dashboard folder if needed
+// (Optional) Serve static assets from the "bridge-dashboard" folder if needed
+// Remove or adjust this if your static assets are located elsewhere
 app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
 
 // Serve the complete dashboard as the home page
 app.get('/', (req, res, next) => {
+  // Use the file from the repository root since combined-layout.html is located there
   const filePath = path.join(__dirname, "combined-layout.html");
   console.log("Resolved file path:", filePath);
   res.sendFile(filePath, (err) => {
