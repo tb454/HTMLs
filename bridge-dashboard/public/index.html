@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html>   
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -124,6 +124,14 @@
       background-color: #f9f9f9;
       cursor: pointer;
     }
+    /* Group Header Row */
+    tr.group-header {
+      background-color: #e9ecef;
+      cursor: pointer;
+    }
+    tr.group-header td {
+      font-weight: bold;
+    }
     /* Buttons */
     .action-btn {
       padding: 10px 20px;
@@ -219,6 +227,740 @@
       100% { transform: translateX(-50%); }
     }
   </style>
+  
+  <!-- Material Arrays and Pricing Formulas -->
+  <script>
+    // ----------------------------
+    // Material Name Arrays
+    // ----------------------------
+    // 1) Copper
+    const copperMaterials = [
+      "Barley",      // Cu BB
+      "#1",          // Berry & Candy
+      "#2",          // Birch & Cliff
+      "#3"           // Sheet Copper
+    ];
+    // 2) Aluminum
+    const aluminumMaterials = [
+      "AL6061_NewBareExtrusion",
+      "AL6061_ClipPlatePipe",
+      "AL6063_Secondary",
+      "AL6063_OldExtrusion",
+      "AL6063_Extrusion10/10",
+      "AL_PAS_Baled",
+      "AL_Cast_Clean",
+      "AL_RADS_CleanBaled",
+      "AL_RADS_DirtyBaled",
+      "AL_Sheet_CleanBaled",
+      "AL_WheelAuto_Clean",
+      "AL_WheelChrome_Clean",
+      "TruckWheel_Clean",
+      "AL_Wire_BareCATV",
+      "AL_Wire_NeopreneACSR",
+      "AL_Wire_ECPrepared",
+      "AL_MLC_Prepared"
+    ];
+    // 3) Brass
+    const brassMaterials = [
+      "Brass_Hard",
+      "Brass_Red_Ebony",
+      "Brass_Red_Semi",
+      "Brass_Shaving_AlBronze",
+      "Brass_Shaving_BrassRed",
+      "Brass_Shell",
+      "Brass_Special",
+      "Brass_YellowRegular"
+    ];
+    // 4) Lead
+    const leadMaterials = [
+      "Lead_Clean",
+      "Lead_Range"
+    ];
+    // 5) Stainless
+    const stainlessMaterials = [
+      "SS304",
+      "SS316"
+    ];
+    // 6) E-Scrap (generic placeholder)
+    const eScrapMaterials = [
+      "E_Scrap_Board"
+    ];
+    // 7) Insulated Wire
+    const insulatedWireMaterials = [
+      "ICW_LowGrade_ChristmasLights",
+      "ICW_LowGrade_ComputerWire25",
+      "ICW_LowGrade_CuCATV",
+      "ICW_LowGrade_ExtCords35Up",
+      "ICW_LowGrade_MixedWire40Up",
+      "ICW1_Heliax57_OpenEyeBaled",
+      "ICW1_MCM85HG",
+      "ICW1_Romex65_NoWeatherProof",
+      "ICW1_THHN80",
+      "ICW2_50Cat5TelWire",
+      "ICW2_HarnessWireNoFuseBoxes",
+      "ICW2_BX_Cable_AL",
+      "ICW2_BX_Cable_FE24"
+    ];
+    // 8) Misc Product
+    const miscProductMaterials = [
+      "Ballast_Electronic",
+      "Ballast_Regular",
+      "BatteryAuto_PbAcid",
+      "BatterySteelCase_Industrial",
+      "Compressor_SealedUnitNoCastIron",
+      "EMotorLowGrade_CeilingFanMotors",
+      "EMotorMix_NoPumpsPowerToolsFans",
+      "EMotorLarge_LessThan1000lbs",
+      "Transformer_AluLargeOnly",
+      "TransformerCu_AlCu",
+      "TransformerCu_SmallPalmSize",
+      "TransformerCu_MediumOver200lbs",
+      "TransformerCu_Large",
+      "Zinc_DieCast"
+    ];
+    // 9) Radiator Product
+    const radiatorProductMaterials = [
+      "ACReefer_CleanTalkBaled",
+      "ACReefer_CleanUnbaled",
+      "ACReefer_DirtyTalkBaled",
+      "ACReefer_DirtyUnbaled",
+      "Radiator_CleanCar",
+      "CuBkg_ACReeferEnd"
+    ];
+    
+    // ----------------------------
+    // Pricing Functions
+    // ----------------------------
+    function copperPrice(grade) {
+      switch(grade) {
+        case 'Barley': return 4.19 * 0.94;
+        case '#1': return 4.19 * 0.91;
+        case '#2': return 4.19 * 0.85;
+        case '#3': return 4.19 * 0.83;
+        default: return null;
+      }
+    }
+    function aluminumPrice(product) {
+      switch(product) {
+        case 'AL6061_NewBareExtrusion': return 1.25 * 0.84;
+        case 'AL6061_ClipPlatePipe': return 1.25 * 0.78;
+        case 'AL6063_Secondary': return 1.25 * 0.78;
+        case 'AL6063_OldExtrusion': return 1.25 * 0.95;
+        case 'AL6063_Extrusion10/10': return 1.25 * 0.85;
+        case 'AL_PAS_Baled': return 1.25 * 0.82;
+        case 'AL_Cast_Clean': return 1.25 * 0.72;
+        case 'AL_RADS_CleanBaled': return 1.25 * 0.67;
+        case 'AL_RADS_DirtyBaled': return 1.25 * 0.46;
+        case 'AL_Sheet_CleanBaled': return 1.25 * 0.75;
+        case 'AL_WheelAuto_Clean': return 1.25 * 0.93;
+        case 'AL_WheelChrome_Clean': return 1.25 * 0.80;
+        case 'TruckWheel_Clean': return 1.25 * 0.72;
+        case 'AL_Wire_BareCATV': return 1.25 * 0.43;
+        case 'AL_Wire_NeopreneACSR': return 1.25 * 0.54;
+        case 'AL_Wire_ECPrepared': return 1.25 * 1.03;
+        case 'AL_MLC_Prepared': return 1.25 * 0.84;
+        default: return null;
+      }
+    }
+    function brassPrice(product) {
+      switch(product) {
+        case 'Brass_Hard': return 4.19 * 0.81;
+        case 'Brass_Red_Ebony': return 4.19 * 0.77;
+        case 'Brass_Red_Semi': return 4.19 * 0.72;
+        case 'Brass_Shaving_AlBronze': return 4.19 * 0.57;
+        case 'Brass_Shaving_BrassRed': return 4.19 * 0.61;
+        case 'Brass_Shell': return 4.19 * 0.60;
+        case 'Brass_Special': return 4.19 * 0.64;
+        case 'Brass_YellowRegular': return 4.19 * 0.61;
+        default: return null;
+      }
+    }
+    function leadPrice(product) {
+      switch(product) {
+        case 'Lead_Clean': return (2034/2000) * 0.718;
+        case 'Lead_Range': return (2034/2000) * 0.728;
+        default: return null;
+      }
+    }
+    function stainlessPrice(product) {
+      switch(product) {
+        case 'SS304': return (15675/2000) * 0.0638;
+        case 'SS316': return (15675/2000) * 0.1174;
+        default: return null;
+      }
+    }
+    // For E-Scrap we use a placeholder pricing function.
+    function eScrapPrice(product) {
+      return 0.5;
+    }
+    function insulatedWirePrice(product) {
+      switch(product) {
+        case 'ICW_LowGrade_ChristmasLights': return 1.25 * 0.528;
+        case 'ICW_LowGrade_ComputerWire25': return 1.25 * 0.448;
+        case 'ICW_LowGrade_CuCATV': return 1.25 * 1.008;
+        case 'ICW_LowGrade_ExtCords35Up': return 1.25 * 0.92;
+        case 'ICW_LowGrade_MixedWire40Up': return 1.25 * 1.08;
+        case 'ICW1_Heliax57_OpenEyeBaled': return 1.25 * 1.536;
+        case 'ICW1_MCM85HG': return 1.25 * 2.536;
+        case 'ICW1_Romex65_NoWeatherProof': return 1.25 * 1.904;
+        case 'ICW1_THHN80': return 1.25 * 2.36;
+        case 'ICW2_50Cat5TelWire': return 1.25 * 1.384;
+        case 'ICW2_HarnessWireNoFuseBoxes': return 1.25 * 1.408;
+        case 'ICW2_BX_Cable_AL': return 1.25 * 1.648;
+        case 'ICW2_BX_Cable_FE24': return 1.25 * 0.6;
+        default: return null;
+      }
+    }
+    function miscProductPrice(product) {
+      switch(product) {
+        case 'Ballast_Electronic': return 1.25 * 0.12;
+        case 'Ballast_Regular': return 1.25 * 0.216;
+        case 'BatteryAuto_PbAcid': return 1.25 * 0.216;
+        case 'BatterySteelCase_Industrial': return 1.25 * 0.192;
+        case 'Compressor_SealedUnitNoCastIron': return 1.25 * 0.264;
+        case 'EMotorLowGrade_CeilingFanMotors': return 1.25 * 0.144;
+        case 'EMotorMix_NoPumpsPowerToolsFans': return 1.25 * 0.344;
+        case 'EMotorLarge_LessThan1000lbs': return 1.25 * 0.312;
+        case 'Transformer_AluLargeOnly': return 1.25 * 0.176;
+        case 'TransformerCu_AlCu': return 1.25 * 0.28;
+        case 'TransformerCu_SmallPalmSize': return 1.25 * 0.56;
+        case 'TransformerCu_MediumOver200lbs': return 1.25 * 0.592;
+        case 'TransformerCu_Large': return 1.25 * 0.624;
+        case 'Zinc_DieCast': return (2879/2000) * 0.5903;
+        default: return null;
+      }
+    }
+    function radiatorProductPrice(product) {
+      switch(product) {
+        case 'ACReefer_CleanTalkBaled': return 1.25 * 1.608;
+        case 'ACReefer_CleanUnbaled': return 1.25 * 1.592;
+        case 'ACReefer_DirtyTalkBaled': return 1.25 * 1.496;
+        case 'ACReefer_DirtyUnbaled': return 1.25 * 1.48;
+        case 'Radiator_CleanCar': return 1.25 * 1.984;
+        case 'CuBkg_ACReeferEnd': return 1.25 * 1.008;
+        default: return null;
+      }
+    }
+    
+    // ----------------------------
+    // Global mapping for computed categories
+    // ----------------------------
+    const computedCategoriesMapping = {
+      "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
+      "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
+      "Brass": { materials: brassMaterials, pricingFunc: brassPrice },
+      "Lead": { materials: leadMaterials, pricingFunc: leadPrice },
+      "Stainless": { materials: stainlessMaterials, pricingFunc: stainlessPrice },
+      "E-Scrap": { materials: eScrapMaterials, pricingFunc: eScrapPrice },
+      "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
+      "Misc Product": { materials: miscProductMaterials, pricingFunc: miscProductPrice },
+      "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
+    };
+    
+    // ----------------------------
+    // Finished Goods Inventory: Grouped Computed Materials
+    // ----------------------------
+    function updateGroupedComputedMaterialsInventory() {
+      const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
+      // Remove any previously added group rows (they have a data-group attribute)
+      const previousGroupRows = tableBody.querySelectorAll('tr[data-group]');
+      previousGroupRows.forEach(row => row.remove());
+      
+      // Iterate over each category in computedCategoriesMapping
+      for (let category in computedCategoriesMapping) {
+        const { materials, pricingFunc } = computedCategoriesMapping[category];
+        
+        // Create a group header row with a toggle icon
+        const groupRow = document.createElement('tr');
+        groupRow.setAttribute('data-group', category);
+        groupRow.classList.add('group-header');
+        groupRow.onclick = () => toggleGroup(category);
+        groupRow.innerHTML = `<td colspan="6">${category} <span style="float:right;">&#9660;</span></td>`;
+        tableBody.appendChild(groupRow);
+        
+        // For each material, create a sub-row (initially hidden)
+        materials.forEach(material => {
+          const computedPrice = pricingFunc(material);
+          if (computedPrice !== null) {
+            // Simulated inventory values (adjust as needed)
+            const wip = Math.floor(Math.random() * 10000) + 5000;        
+            const finished = Math.floor(Math.random() * 20000) + 10000;    
+            const total = wip + finished;
+            const avgCost = (computedPrice * 0.8).toFixed(2);
+            const totalPurchaseValue = (total * computedPrice).toFixed(2);
+            
+            const subRow = document.createElement('tr');
+            subRow.setAttribute('data-group', category);
+            subRow.classList.add('group-sub');
+            subRow.style.display = 'none'; // Initially hidden
+            subRow.onclick = (e) => { e.stopPropagation(); rowClicked(material); };
+            subRow.innerHTML = `
+              <td>${material} (${category})</td>
+              <td>${wip.toLocaleString()}</td>
+              <td>${finished.toLocaleString()}</td>
+              <td>${total.toLocaleString()}</td>
+              <td>$${avgCost}</td>
+              <td>$${Number(totalPurchaseValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            `;
+            tableBody.appendChild(subRow);
+          }
+        });
+      }
+    }
+    
+    // Toggle the display of sub-rows in a group
+    function toggleGroup(category) {
+      const subRows = document.querySelectorAll(`tr.group-sub[data-group='${category}']`);
+      subRows.forEach(row => {
+        row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
+      });
+    }
+    
+    // ----------------------------
+    // Helper Functions for Simulated Trade Section
+    // ----------------------------
+    // Populate the "Material" dropdown in Simulated Trade from all materials in Greenspark table.
+    function populateTradeMaterialDropdown() {
+      const dropdown = document.getElementById('create-material');
+      dropdown.innerHTML = '';
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      const materialsSet = new Set();
+      rows.forEach(row => {
+        // Skip group header rows
+        if (row.classList.contains('group-header')) return;
+        const materialText = row.cells[0].textContent.trim();
+        if (materialText) {
+          materialsSet.add(materialText);
+        }
+      });
+      const materials = Array.from(materialsSet).sort();
+      materials.forEach(material => {
+        const option = document.createElement('option');
+        option.value = material;
+        option.textContent = material;
+        dropdown.appendChild(option);
+      });
+    }
+    
+    // Get commodity data from the Greenspark table (by matching material name)
+    function getCommodityData(material) {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        // Ignore group header rows
+        if (row.classList.contains('group-header')) continue;
+        const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+        if (cellMaterial.includes(material.toLowerCase())) {
+          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
+          const finishedGoods = parseFloat(finishedGoodsText) || 0;
+          const avgCostText = row.cells[4].textContent.replace(/[^0-9.]/g, '').trim();
+          const avgCost = parseFloat(avgCostText) || 0;
+          return { finishedGoods, avgCost };
+        }
+      }
+      return { finishedGoods: 0, avgCost: 0 };
+    }
+    
+    // Get the Market Snapshot price for a given key (e.g., "Copper", "Brass", etc.)
+    function getMarketSnapshotPrice(key) {
+      const snapshot = {
+        "Copper": 9500,
+        "Brass": 7500,
+        "Steel": 500,
+        "Aluminum": 2200
+      };
+      return snapshot[key] || 0;
+    }
+    
+    // ----------------------------
+    // Modified getBasePrice to reflect updated Market Snapshot fluctuations
+    // ----------------------------
+    function getBasePrice(material) {
+      let baseMaterial = material;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        const category = material.split(" (")[1].replace(")", "").trim();
+        // First, try to get updated price from the Market Snapshot element
+        const priceElem = document.getElementById(`price-${category}`);
+        if (priceElem) {
+          let text = priceElem.textContent;
+          let parts = text.split(':');
+          if (parts.length >= 2) {
+            let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+            let updatedPrice = parseFloat(priceStr);
+            if (!isNaN(updatedPrice)) {
+              return updatedPrice; // Return the updated price per ton
+            }
+          }
+        }
+        // Otherwise, fallback to computed price
+        if (computedCategoriesMapping[category]) {
+          let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
+          return computedPrice ? computedPrice * 2000 : 0;
+        }
+      }
+      // Try direct lookup from Market Snapshot element if available
+      const directElem = document.getElementById(`price-${material}`);
+      if (directElem) {
+        let text = directElem.textContent;
+        let parts = text.split(':');
+        if (parts.length >= 2) {
+          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+          let updatedPrice = parseFloat(priceStr);
+          if (!isNaN(updatedPrice)) {
+            return updatedPrice;
+          }
+        }
+      }
+      // Fallback to static snapshot
+      let price = getMarketSnapshotPrice(material);
+      if (price > 0) return price;
+      // Otherwise, search through computed categories.
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(material)) {
+          let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
+          return computedPrice ? computedPrice * 2000 : 0;
+        }
+      }
+      return 0;
+    }
+    
+    // ----------------------------
+    // Trade Log, Active Contracts & Inventory Update Functions
+    // ----------------------------
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
+    }
+    
+    function addActiveContract(material, expiration, salePrice, quantity) {
+      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
+      const ticker = getTickerFromReference(material);
+      const totalContractValue = salePrice * 10 * quantity;
+      const marginRequirement = totalContractValue * 0.07;
+      const currentMarketPrice = getBasePrice(material);
+      const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
+      
+      const row = document.createElement('tr');
+      row.dataset.quantity = quantity;
+      row.innerHTML = `
+        <td>${ticker}</td>
+        <td>${material} (${expiration})</td>
+        <td>$${salePrice.toFixed(2)}</td>
+        <td>$${changeValue.toFixed(2)}</td>
+        <td>${expiration}</td>
+        <td>$${marginRequirement.toFixed(2)}</td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+        </td>
+      `;
+      tableBody.appendChild(row);
+      updateActiveContractsOverview();
+    }
+    
+    function updateActiveContractsOverview() {
+      let totalContracts = 0;
+      let totalMargin = 0;
+      let totalChange = 0;
+      const rows = document.querySelectorAll("#active-contracts-table tbody tr");
+  
+      rows.forEach(row => {
+        const quantity = parseInt(row.dataset.quantity, 10) || 1;
+        totalContracts += quantity;
+        const marginText = row.cells[5].textContent;
+        const margin = parseFloat(marginText.replace(/[^0-9.]/g, '')) || 0;
+        totalMargin += margin;
+        const changeText = row.cells[3].textContent;
+        const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
+        totalChange += change;
+      });
+  
+      if(document.getElementById("active-contracts-secured")) {
+        document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
+      }
+      if(document.getElementById("active-contracts-margin")) {
+        document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
+      }
+      
+      if(document.getElementById("activeContractsCount")) {
+        document.getElementById("activeContractsCount").textContent = totalContracts;
+      }
+      if(document.getElementById("activeContractsMarginTotal")) {
+        document.getElementById("activeContractsMarginTotal").textContent = "$" + totalMargin.toFixed(2);
+      }
+      if(document.getElementById("total-change")) {
+        document.getElementById("total-change").textContent = "$" + totalChange.toFixed(2);
+      }
+    }
+    
+    function reduceInventory(material, reduction) {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      for (let row of rows) {
+        if (row.classList.contains('group-header')) continue;
+        const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
+        if (cellMaterial.includes(material.toLowerCase())) {
+          let finishedGoods = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
+          finishedGoods = Math.max(finishedGoods - reduction, 0);
+          total = Math.max(total - reduction, 0);
+          row.cells[2].textContent = finishedGoods.toLocaleString();
+          row.cells[3].textContent = total.toLocaleString();
+          break;
+        }
+      }
+    }
+    
+    function rollContract() {
+      alert("Roll contract functionality not implemented.");
+    }
+    function closeContract() {
+      alert("Close contract functionality not implemented.");
+    }
+    
+    // ----------------------------
+    // Update Trade Options in Simulated Trade Section
+    // ----------------------------
+    function updateTradeOptions() {
+      const materialSelect = document.getElementById('create-material');
+      const material = materialSelect.value;
+      
+      const data = getCommodityData(material);
+      const contractSize = 20000; // 10 tons = 20,000 lbs.
+      const availableContracts = Math.floor(data.finishedGoods / contractSize);
+      
+      const contractsSelect = document.getElementById('create-contracts');
+      contractsSelect.innerHTML = '';
+      for (let i = 1; i <= availableContracts; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i;
+        contractsSelect.appendChild(option);
+      }
+      
+      // Get base price updated with fluctuations
+      const basePricePerTon = getBasePrice(material);
+      
+      // Update Price/ton dropdown with multiplier options
+      const priceSelect = document.getElementById('create-price');
+      priceSelect.innerHTML = '';
+      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
+      multipliers.forEach(mult => {
+        const option = document.createElement('option');
+        const price = basePricePerTon * mult;
+        option.value = price.toFixed(2);
+        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceSelect.appendChild(option);
+      });
+      
+      // Update Cost to Create: 0.1% of base price per ton
+      const costSelect = document.getElementById('create-cost');
+      costSelect.innerHTML = '';
+      const costToCreate = basePricePerTon * 0.001;
+      const costOption = document.createElement('option');
+      costOption.value = costToCreate.toFixed(2);
+      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      costSelect.appendChild(costOption);
+      
+      // Update Expiration Date dropdown: 5 future dates (1-month increments)
+      const expirationSelect = document.getElementById('create-expiration');
+      expirationSelect.innerHTML = '';
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        let expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
+        let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
+        let day = expDate.getDate().toString().padStart(2, '0');
+        let year = expDate.getFullYear();
+        const dateStr = `${month}/${day}/${year}`;
+        const option = document.createElement('option');
+        option.value = dateStr;
+        option.textContent = dateStr;
+        expirationSelect.appendChild(option);
+      }
+    }
+    
+    // ----------------------------
+    // Simulated Trade Execution
+    // ----------------------------
+    function simulateTrade() {
+      const material = document.getElementById('create-material').value;
+      const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
+      const expiration = document.getElementById('create-expiration').value;
+      
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
+      
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
+    }
+    
+    // ----------------------------
+    // Other Helper Functions
+    // ----------------------------
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
+  
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
+  <script>
+    const scrapMaterialCodes = {
+      copper: {
+        "CUB": "Barley (Cu BB)",
+        "CU1": "#1 (Berry & Candy)",
+        "CU2": "#2 (Birch & Cliff)",
+        "CU3": "#3 (Sheet Copper)"
+      },
+      aluminum: {
+        "AL61-NBE": "AL6061 New Bare Extrusion",
+        "AL61-CPP": "AL6061 Clip Plate Pipe",
+        "AL63-SEC": "AL6063 Secondary",
+        "AL63-OE": "AL6063 Old Extrusion",
+        "AL63-E10": "AL6063 Extrusion 10/10",
+        "AL-PAS": "AL PAS Baled",
+        "AL-C": "AL Cast Clean",
+        "AL-RS-CB": "AL RADS Clean Baled",
+        "AL-RS-DB": "AL RADS Dirty Baled",
+        "AL-ST": "AL Sheet Clean Baled",
+        "AL-AUTO": "AL Wheel Auto Clean",
+        "AL-WH-CH": "AL Wheel Chrome Clean",
+        "AL-TRUCKWH": "Truck Wheel Clean",
+        "AL-WIRE-CATV": "AL Wire Bare CATV",
+        "AL-WIRE-NEO": "AL Wire Neoprene ACSR",
+        "AL-WIRE-EC": "AL Wire EC Prepared",
+        "AL-MLC": "AL MLC Prepared"
+      },
+      brass: {
+        "BR-H": "Brass Hard",
+        "BR-R": "Brass Red Ebony",
+        "BR-RS": "Brass Red Semi",
+        "BR-SH-AL": "Brass Shaving Al Bronze",
+        "BR-SH-R": "Brass Shaving Brass Red",
+        "BR-SHELL": "Brass Shell",
+        "BR-SPEC": "Brass Special (Al Bronze Solid)",
+        "BR-YLW": "Brass Yellow Regular"
+      },
+      lead: {
+        "PB-C": "Lead Clean",
+        "PB-R": "Lead Range"
+      },
+      stainless: {
+        "SS304": "Stainless Steel 304",
+        "SS316": "Stainless Steel 316"
+      },
+      eScrap: {
+        "ES-BOARD": "E-Scrap Board"
+      },
+      insulatedWire: {
+        "IWLG-XL": "ICW Low Grade Christmas Lights",
+        "IWLG-25-": "ICW Low Grade Computer Wire 25%",
+        "IWLG-CATV": "ICW Low Grade Cu CATV",
+        "IWLG-35-": "ICW Low Grade Ext Cords 35%+",
+        "IWLG-40-": "ICW Low Grade Mixed Wire 40%+",
+        "IW-HX": "ICW1 Heliax 57 Open Eye Baled",
+        "IW-MCM85": "ICW1 MCM 85HG",
+        "IW-R65": "ICW1 Romex 65 No Weatherproof",
+        "IW-THHN": "ICW1 THHN 80",
+        "IW-CAT5": "ICW2 50Cat5 Tel Wire",
+        "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
+        "IW-BX-AL": "ICW2 BX Cable AL",
+        "IW-BX-FE": "ICW2 BX Cable FE24"
+      },
+      miscellaneous: {
+        "BAL-E": "Ballast Electronic",
+        "BAL-R": "Ballast Regular",
+        "BAT-PB": "Battery Auto Pb Acid",
+        "BAT-ST": "Battery Steel Case Industrial",
+        "COMP": "Compressor Sealed Unit No Cast Iron",
+        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
+        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
+        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
+        "TR-AL": "Transformer Alu Large Only",
+        "TR-CU-AL": "Transformer Cu AlCu",
+        "TR-CU-SM": "Transformer Cu Small Palm Size",
+        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
+        "TR-CU-LG": "Transformer Cu Large",
+        "ZN-CAST": "Zinc Die Cast"
+      },
+      radiator: {
+        "AC-RADB": "AC Reefer Clean Talk Baled",
+        "AC-RADU": "AC Reefer Clean Unbaled",
+        "AC-RADDB": "AC Reefer Dirty Talk Baled",
+        "AC-RADDU": "AC Reefer Dirty Unbaled",
+        "AL-RADCC": "Radiator Clean Car",
+        "RAD-ENDS": "Cu Bkg AC Reefer End"
+      }
+    };
+
+    function normalizeString(str) {
+      return str.toLowerCase().replace(/[\s_]+/g, "");
+    }
+
+    function getTickerFromReference(material) {
+      let baseMaterial = material;
+      let category = null;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        category = material.split(" (")[1].replace(")", "").trim();
+      }
+      
+      if (category && scrapMaterialCodes[category.toLowerCase()]) {
+        for (const code in scrapMaterialCodes[category.toLowerCase()]) {
+          if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
+            return code;
+          }
+        }
+      }
+      
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          let catLower = cat.toLowerCase();
+          if (scrapMaterialCodes[catLower]) {
+            for (const code in scrapMaterialCodes[catLower]) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(baseMaterial))) {
+                return code;
+              }
+            }
+          }
+        }
+      }
+      
+      return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+    }
+  </script>
 </head>
 <body>
   <div class="container">
@@ -228,8 +970,8 @@
       <div class="user-info">
         <span>User: John Doe</span>
         <button onclick="logout()">Logout</button>
-        <button onclick="startGuidedTour()">Start Tour</button>
-        <button onclick="showArchOverview()">View Architecture</button>
+        <button onclick="startGuidedTour()">Greenspark</button>
+        <button onclick="showArchOverview()">ThinkorSwim</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
@@ -282,94 +1024,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr onclick="rowClicked('ALUMINUM')">
-            <td>Aluminum</td>
-            <td>32,105</td>
-            <td>64,351</td>
-            <td>96,456</td>
-            <td>$0.50</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Electric Motors')">
-            <td>Electric Motors</td>
-            <td>11,052</td>
-            <td>30,844</td>
-            <td>41,897</td>
-            <td>$0.30</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Insulated copper wire')">
-            <td>Insulated copper wire</td>
-            <td>71,649</td>
-            <td>50,673</td>
-            <td>122,322</td>
-            <td>$1.20</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('LEAD')">
-            <td>LEAD</td>
-            <td>5,802</td>
-            <td>1,640</td>
-            <td>7,443</td>
-            <td>$0.40</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('FERROUS')">
-            <td>HMS Steel #2</td>
-            <td>124,380</td>
-            <td>190,048</td>
-            <td>314,429</td>
-            <td>$0.09</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('RADIATOR PRODUCT')">
-            <td>Cu Radiator (50Cu/50Brass)</td>
-            <td>15,677</td>
-            <td>324</td>
-            <td>16,001</td>
-            <td>$1.40</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('COPPER PRODUCT')">
-            <td>COPPER</td>
-            <td>32,373</td>
-            <td>73,560</td>
-            <td>105,934</td>
-            <td>$2.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('BRASS PRODUCT')">
-            <td>BRASS</td>
-            <td>15,633</td>
-            <td>20,246</td>
-            <td>35,879</td>
-            <td>$1.20</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('Carbide')">
-            <td>Carbide</td>
-            <td>468</td>
-            <td>287</td>
-            <td>755</td>
-            <td>$8.80</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STAINLESS STEEL')">
-            <td>STAINLESS STEEL</td>
-            <td>13,482</td>
-            <td>15,671</td>
-            <td>29,153</td>
-            <td>$0.60</td>
-            <td>$0.00</td>
-          </tr>
-          <tr onclick="rowClicked('STEEL')">
-            <td>Busheling STEEL</td>
-            <td>128,763</td>
-            <td>134,678</td>
-            <td>263,442</td>
-            <td>$0.14</td>
-            <td>$0.00</td>
-          </tr>
+     <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -384,46 +1039,24 @@
       </table>
     </section>
     
-    <!-- Simulated Trade Section (One Line) -->
+    <!-- Simulated Trade Section -->
     <section class="section">
       <div class="section-title">Simulated Trade (10-ton loads)</div>
-      <div class="d-flex align-items-center flex-wrap gap-3">
-        <div class="d-flex align-items-center">
-          <label for="create-material" class="me-2">Material:</label>
-          <select id="create-material" onchange="updateTradeOptions()">
-            <option value="Copper">Copper</option>
-            <option value="Busheling Steel">Busheling Steel</option>
-            <option value="Brass">Brass</option>
-            <option value="Aluminum">Aluminum</option>
-            <option value="Electric Motors">Electric Motors</option>
-            <option value="Insulated Copper Wire">Insulated Copper Wire</option>
-            <option value="Lead">Lead</option>
-            <option value="HMS Steel #2">HMS Steel #2</option>
-            <option value="Cu Radiator (50Cu/50Brass)">Cu Radiator (50Cu/50Brass)</option>
-            <option value="Carbide">Carbide</option>
-            <option value="Stainless Steel">Stainless Steel</option>
-          </select>
-        </div>
-        <div class="d-flex align-items-center">
-          <label for="create-contracts" class="me-2">Creatable Contracts:</label>
-          <select id="create-contracts"></select>
-        </div>
-        <div class="d-flex align-items-center">
-          <label for="create-price" class="me-2">Price/ton:</label>
-          <select id="create-price"></select>
-        </div>
-        <div class="d-flex align-items-center">
-          <label for="create-cost" class="me-2">Cost to Create:</label>
-          <select id="create-cost"></select>
-        </div>
-        <div class="d-flex align-items-center">
-          <label for="create-expiration" class="me-2">Expiration Date:</label>
-          <select id="create-expiration"></select>
-        </div>
-        <div>
-          <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
-        </div>
+      <div class="mb-3">
+        <label for="create-material">Material:</label>
+        <select id="create-material" onchange="updateTradeOptions()">
+          <!-- Options populated dynamically from the Finished Goods Inventory -->
+        </select>
+        <label for="create-contracts">Creatable Contracts:</label>
+        <select id="create-contracts"></select>
+        <label for="create-price">Price/ton:</label>
+        <select id="create-price"></select>
+        <label for="create-cost">Cost to Create:</label>
+        <select id="create-cost"></select>
+        <label for="create-expiration">Expiration Date:</label>
+        <select id="create-expiration"></select>
       </div>
+      <button class="action-btn" onclick="simulateTrade()">Execute Trade</button>
     </section>
     
     <!-- Trade Log Section -->
@@ -595,20 +1228,11 @@
             <td>02/21/25</td>
           </tr>
         </tbody>
+        </tfoot>
       </table>
     </section>
-    
-    <!-- Trade Alerts Ticker Section -->
-    <section class="section">
-      <div class="section-title">Trade Alerts</div>
-      <div class="ticker-wrapper">
-        <div id="trade-alerts-ticker" class="ticker">
-          <!-- Ticker content will be rendered here by JavaScript -->
-        </div>
-      </div>
-    </section>
-    
-    <!-- Key Performance Indicators (KPIs) Section -->
+            
+    <!-- KPI Section -->
     <section class="section">
       <div class="section-title">Key Performance Indicators (KPIs)</div>
       <div class="kpi-content">
@@ -627,8 +1251,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <!-- Detailed KPI info goes here -->
-          <p>This section provides a detailed analysis of key performance indicators such as monthly revenue, cost savings, and trade volume trends. Customize with your own data insights.</p>
+          <p>This section provides a detailed analysis of KPIs such as monthly revenue, cost savings, and trade volume trends.</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -648,10 +1271,10 @@
         <div class="modal-body">
           <p>This solution is designed with scalability and security in mind. Key features include:</p>
           <ul>
-            <li><strong>Live Data Integration:</strong> Simulated API calls and WebSocket integration for real-time market data.</li>
-            <li><strong>Data Analytics & KPIs:</strong> Dedicated sections and interactive charts provide actionable insights.</li>
-            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems, ensuring robust performance under high data loads.</li>
-            <li><strong>Security Measures:</strong> Token-based authentication, secure API endpoints, and data encryption ensure protection of sensitive information.</li>
+            <li><strong>Live Data Integration:</strong> Data is fetched via yfinance for real-time market updates.</li>
+            <li><strong>Data Analytics & KPIs:</strong> Interactive charts provide actionable insights.</li>
+            <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems.</li>
+            <li><strong>Security Measures:</strong> Secure API endpoints and data encryption.</li>
           </ul>
           <p>Further details can be discussed during the presentation.</p>
         </div>
@@ -666,55 +1289,31 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
+  <!-- Main Application Script -->
   <script>
-    // Accent color for charts and highlights
+    // Accent color for charts
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
       el.style.borderColor = accentColor;
       el.style.color = accentColor;
     });
     
-    // Global variables for Active Contracts Chart
+    // Global variables for charts
     let activeContractsChart;
     const activeContractsChangeHistory = [];
     const activeContractsChartLabels = [];
-    
-    // Global variables for Finished Goods Chart
     let finishedGoodsChart;
     let finishedGoodsChartLabels = [];
     let finishedGoodsChartData = [];
-    
-    // Global variables for KPI Chart
     let kpiChart;
     let kpiChartLabels = [];
     let kpiChartData = [];
   
-    // Initialize Trading Graph using Chart.js (if chart exists)
-    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
-    if(ctx){
-      const tradingChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-          datasets: [{
-            label: 'Trading Data',
-            data: [100, 150, 130, 170, 160, 180],
-            borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
-            fill: true,
-            tension: 0.1
-          }]
-        },
-        options: {
-          scales: { y: { beginAtZero: true } }
-        }
-      });
-    }
-    
-    // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
+    // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
+      // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
-      if(activeContractsCanvas){
+      if(activeContractsCanvas) {
         const ctxActive = activeContractsCanvas.getContext('2d');
         activeContractsChart = new Chart(ctxActive, {
           type: 'line',
@@ -730,20 +1329,14 @@
             }]
           },
           options: {
-            scales: {
-              y: { 
-                beginAtZero: true,
-                max: 10000,
-                ticks: { stepSize: 2000 }
-              }
-            }
+            scales: { y: { beginAtZero: true, max: 10000, ticks: { stepSize: 2000 } } }
           }
         });
       }
       
-      // Initialize Finished Goods Chart
+      // Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
-      if(finishedCanvas){
+      if(finishedCanvas) {
         const ctxFinished = finishedCanvas.getContext('2d');
         finishedGoodsChart = new Chart(ctxFinished, {
           type: 'line',
@@ -758,41 +1351,51 @@
               tension: 0.1
             }]
           },
-          options: {
-            scales: {
-              y: { beginAtZero: true, max: 300 }
-            }
-          }
+          options: { scales: { y: { beginAtZero: true, max: 300 } } }
         });
       }
       
-      // Initialize KPI Chart with simulated data
+      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
       const kpiCanvas = document.getElementById('kpiChart');
-      if(kpiCanvas){
+      if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
-        // Initialize with sample KPI data (e.g., trade volume trends)
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        kpiChartData = [500, 700, 650, 800, 750, 900];
+        const copperData = [100, 120, 130, 110, 140, 150];
+        const brassData = [50, 60, 55, 70, 65, 80];
+        const aluminumData = [80, 90, 85, 95, 100, 105];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
           data: {
             labels: kpiChartLabels,
-            datasets: [{
-              label: 'Monthly Trade Volume',
-              data: kpiChartData,
-              backgroundColor: accentColor
-            }]
+            datasets: [
+              {
+                label: 'Copper',
+                data: copperData,
+                backgroundColor: 'rgba(52,152,219,0.6)'
+              },
+              {
+                label: 'Brass',
+                data: brassData,
+                backgroundColor: 'rgba(46,204,113,0.6)'
+              },
+              {
+                label: 'Aluminum',
+                data: aluminumData,
+                backgroundColor: 'rgba(231,76,60,0.6)'
+              }
+            ]
           },
           options: {
-            scales: { y: { beginAtZero: true } }
+            scales: {
+              x: { stacked: true },
+              y: { stacked: true, beginAtZero: true }
+            }
           }
         });
       }
     });
-  
-    /***************************************
-     * Update Total Purchase Value for Finished Goods Inventory
-     ***************************************/
+    
+    // Update Finished Goods Inventory Purchase Values
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -800,18 +1403,15 @@
       
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
-        const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
-        const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
-        const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
-        const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
-        const purchaseValue = totalLbs * avgCost;
-        
-        sumWIP += wip;
-        sumFinished += finished;
-        sumTotal += totalLbs;
-        sumPurchase += purchaseValue;
-        
-        cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if(cells.length >= 6) {
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
       });
       
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
@@ -819,292 +1419,46 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card Info and Chart
       if(document.getElementById('finishedGoodsInfo')){
-        let contractsAvailable = Math.floor(sumFinished / 20000);
-        let totalTons = sumTotal / 20000;
-        document.getElementById('finishedGoodsInfo').innerHTML = `
-          <div>${contractsAvailable} Contracts Available</div>
-          <div>~${totalTons.toFixed(1)} Total Tons</div>
-        `;
-        
+        const contractsAvailable = Math.floor(sumFinished / 20000);
+        const totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
         if (finishedGoodsChart) {
           const now = new Date().toLocaleTimeString();
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
-          
-          // Limit history to last 10 data points
-          if (finishedGoodsChartData.length > 10) {
-            finishedGoodsChartLabels.shift();
-            finishedGoodsChartData.shift();
-          }
-          
+          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
           finishedGoodsChart.update();
         }
       }
     }
-    document.addEventListener('DOMContentLoaded', updatePurchaseValues);
-  
-    /***************************************
-     * Simulated Trade Section and Functions
-     ***************************************/
-    const baseMarketSnapshotPrices = {
-      "Copper": 9500,
-      "Busheling Steel": 700,
-      "Brass": 7500,
-      "Aluminum": 2200,
-      "Electric Motors": 900,
-      "Insulated Copper Wire": 3600,
-      "Lead": 1500,
-      "HMS Steel #2": 500,
-      "Cu Radiator (50Cu/50Brass)": 5600,
-      "Carbide": 20000,
-      "Stainless Steel": 1600
-    };
-  
-    let marketSnapshotPrices = Object.assign({}, baseMarketSnapshotPrices);
-  
-    function getCommodityId(commodity) {
-      return 'price-' + commodity.replace(/[^a-zA-Z0-9]/g, '');
-    }
-  
-    const commodityMapping = {
-      "Copper": "COPPER",
-      "Busheling Steel": "BUSHELING STEEL",
-      "Brass": "BRASS",
-      "Aluminum": "ALUMINUM",
-      "Electric Motors": "ELECTRIC MOTORS",
-      "Insulated Copper Wire": "INSULATED COPPER WIRE",
-      "Lead": "LEAD",
-      "HMS Steel #2": "HMS STEEL #2",
-      "Cu Radiator (50Cu/50Brass)": "CU RADIATOR (50CU/50BRASS)",
-      "Carbide": "CARBIDE",
-      "Stainless Steel": "STAINLESS STEEL"
-    };
-
-    const tickerMapping = {
-      "Aluminum": "ALUM25",
-      "Electric Motors": "EMOT25",
-      "Insulated Copper Wire": "ICWR25",
-      "Lead": "LEAD25",
-      "HMS Steel #2": "HMS225",
-      "Cu Radiator (50Cu/50Brass)": "CRAD25",
-      "Copper": "COPR25",
-      "Brass": "BRSS25",
-      "Carbide": "CARB25",
-      "Stainless Steel": "STLS25",
-      "Busheling Steel": "BSTE25"
-    };
-  
-    function getCommodityData(material) {
-      const target = commodityMapping[material];
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      for (let row of rows) {
-        const rowMaterial = row.cells[0].textContent.trim().toUpperCase();
-        if (rowMaterial === target.toUpperCase()) {
-          const finishedGoodsText = row.cells[2].textContent.replace(/,/g, '').trim();
-          const finishedGoods = parseFloat(finishedGoodsText) || 0;
-          return { finishedGoods };
-        }
-      }
-      return { finishedGoods: 0 };
-    }
-  
-    function updateTradeOptions() {
-      const materialSelect = document.getElementById('create-material');
-      const material = materialSelect.value;
-      const data = getCommodityData(material);
-      
-      // Assume contract size is 10 tons = 20,000 lbs.
-      const contractSize = 20000;
-      const availableContracts = Math.floor(data.finishedGoods / contractSize);
-      
-      const contractsSelect = document.getElementById('create-contracts');
-      contractsSelect.innerHTML = '';
-      if (availableContracts < 1) {
-        const option = document.createElement('option');
-        option.value = 0;
-        option.textContent = "0";
-        contractsSelect.appendChild(option);
-      } else {
-        for (let i = 1; i <= availableContracts; i++) {
-          const option = document.createElement('option');
-          option.value = i;
-          option.textContent = i;
-          contractsSelect.appendChild(option);
-        }
-      }
-      
-      const basePricePerTon = marketSnapshotPrices[material] || 0;
-      
-      const priceSelect = document.getElementById('create-price');
-      priceSelect.innerHTML = '';
-      const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
-      multipliers.forEach(mult => {
-        const option = document.createElement('option');
-        const price = basePricePerTon * mult;
-        option.value = price.toFixed(2);
-        option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        priceSelect.appendChild(option);
-      });
-      
-      const costSelect = document.getElementById('create-cost');
-      costSelect.innerHTML = '';
-      const costToCreate = basePricePerTon * 0.001;
-      const costOption = document.createElement('option');
-      costOption.value = costToCreate.toFixed(2);
-      costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      costSelect.appendChild(costOption);
-      
-      const expirationSelect = document.getElementById('create-expiration');
-      expirationSelect.innerHTML = '';
-      const today = new Date();
-      for (let i = 1; i <= 5; i++) {
-        const expDate = new Date(today.getFullYear(), today.getMonth() + i, today.getDate());
-        const month = (expDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = expDate.getDate().toString().padStart(2, '0');
-        const year = expDate.getFullYear();
-        const dateStr = month + '/' + day + '/' + year;
-        const option = document.createElement('option');
-        option.value = dateStr;
-        option.textContent = dateStr;
-        expirationSelect.appendChild(option);
-      }
-    }
     
-    document.addEventListener('DOMContentLoaded', updateTradeOptions);
-    
+    // Trade Log, Active Contracts & Inventory Update Functions (repeat)
     function appendTradeLogEntry(material, quantity, price, totalCost) {
-      const tableBody = document.getElementById('trade-log-table').getElementsByTagName('tbody')[0];
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = 
-        `<td>${tradeTime}</td>
-         <td>${material}</td>
-         <td>${quantity}</td>
-         <td>$${Number(price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-         <td>$${Number(totalCost).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>`;
-      tableBody.appendChild(newRow);
-    }
-    
-    function addActiveContract(commodity, expiration, salePrice) {
-      const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
-      const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-      const priceDifference = salePrice - snapshotPrice;
-      const contractSize = 10;
-      const totalContractValue = contractSize * snapshotPrice;
-      const marginRequirement = totalContractValue * 0.07;
-      
-      const expDate = new Date(expiration);
-      const expFormatted = new Date(expiration).toLocaleString('default', { month: 'short' }) +
-                           " '" + expDate.getFullYear().toString().slice(-2);
-      
-      const ticker = tickerMapping[commodity] || '';
-      
-      const newRow = document.createElement('tr');
-      newRow.dataset.commodity = commodity;
-      newRow.dataset.salePrice = salePrice;
-      
-      newRow.innerHTML = 
-        `<td>${ticker}</td>
-         <td>${commodity} (${expFormatted})</td>
-         <td>${salePrice.toFixed(2)}</td>
-         <td>${priceDifference >= 0 ? '+' : ''}${priceDifference.toFixed(2)}</td>
-         <td>${expiration}</td>
-         <td class="margin-cell">$${marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-         <td>
-           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
-           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
-         </td>`;
-      tableBody.appendChild(newRow);
-    }
-    
-    function updateActiveContractsTable() {
-      const table = document.getElementById('active-contracts-table');
-      const rows = table.querySelectorAll('tbody tr');
-      let totalContracts = rows.length;
-      let totalMarginRequirement = 0;
-      let totalChange = 0;
-      const contractSize = 10;
-      
-      rows.forEach(row => {
-        const commodity = row.dataset.commodity;
-        const salePrice = parseFloat(row.dataset.salePrice);
-        const snapshotPrice = marketSnapshotPrices[commodity] || 0;
-        const priceDifference = salePrice - snapshotPrice;
-        totalChange += priceDifference;
-        
-        row.cells[3].textContent = (priceDifference >= 0 ? '+' : '') + priceDifference.toFixed(2);
-        
-        const totalContractValue = contractSize * snapshotPrice;
-        const marginRequirement = totalContractValue * 0.07;
-        row.cells[5].textContent = '$' + marginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        totalMarginRequirement += marginRequirement;
-      });
-      
-      document.getElementById('activeContractsCount').textContent = totalContracts;
-      document.getElementById('activeContractsMarginTotal').textContent =
-        '$' + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      document.getElementById('active-contracts-secured').textContent = totalContracts + " Secured";
-      document.getElementById('active-contracts-margin').textContent = "Margin: $" + totalMarginRequirement.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      
-      const totalChangeText = (totalChange >= 0 ? '+' : '') + totalChange.toFixed(2);
-      document.getElementById('total-change').textContent = totalChangeText;
-      document.getElementById('active-contracts-change').textContent = "Total Change: " + totalChangeText;
-      
-      const now = new Date();
-      const label = now.toLocaleTimeString();
-      activeContractsChangeHistory.push(totalChange);
-      activeContractsChartLabels.push(label);
-      
-      if (activeContractsChangeHistory.length > 10) {
-        activeContractsChangeHistory.shift();
-        activeContractsChartLabels.shift();
-      }
-      
-      if (activeContractsChart) {
-        activeContractsChart.update();
-      }
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
     }
     
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
-      const chosenPrice = parseFloat(document.getElementById('create-price').value);
-      const chosenCost = parseFloat(document.getElementById('create-cost').value);
+      const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
-      const contractWeightLbs = 20000;
       
-      for (let i = 0; i < numTrades; i++) {
-        const quantity = 10;
-        const totalCost = quantity * chosenPrice;
-        appendTradeLogEntry(material + ' (Trade #' + (i + 1) + ')', quantity, chosenPrice, totalCost);
-        addActiveContract(material, expiration, chosenPrice);
-      }
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
       
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
-      for (let row of rows) {
-        if (row.cells[0].textContent.trim().toUpperCase() === commodityMapping[material].toUpperCase()) {
-          let currentFinished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          let updatedFinished = currentFinished - (numTrades * contractWeightLbs);
-          row.cells[2].textContent = updatedFinished.toLocaleString();
-          
-          let currentTotal = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
-          let updatedTotal = currentTotal - (numTrades * contractWeightLbs);
-          row.cells[3].textContent = updatedTotal.toLocaleString();
-        }
-      }
-      
-      updateActiveContractsTable();
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
       updatePurchaseValues();
       
-      alert(numTrades + ' simulated trade(s) for ' + material + ' executed.\nCost to create each position: $' + chosenCost.toFixed(2));
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
-    
-    document.addEventListener('DOMContentLoaded', updateActiveContractsTable);
     
     function logout() {
       alert('Logging out...');
@@ -1125,244 +1479,122 @@
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    /***************************************
-     * Update Market Snapshot Prices Every Minute (±10% fluctuation)
-     ***************************************/
-    function updateMarketSnapshot() {
-      for (let commodity in baseMarketSnapshotPrices) {
-        const basePrice = baseMarketSnapshotPrices[commodity];
-        const randomFactor = (Math.random() * 0.2) - 0.1;
-        const newPrice = basePrice * (1 + randomFactor);
-        marketSnapshotPrices[commodity] = newPrice;
-        
-        const priceElement = document.getElementById(getCommodityId(commodity));
-        if (priceElement) {
-          priceElement.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-      }
+    document.addEventListener('DOMContentLoaded', () => {
+      populateTradeMaterialDropdown();
       updateTradeOptions();
-      updateActiveContractsTable();
-    }
-    
-    setInterval(updateMarketSnapshot, 15000);
-    
-    /***************************************
-     * Increase Table Values Every Minute by 10%
-     ***************************************/
-    function increaseTableValues() {
-      const table = document.getElementById('greenspark-table');
-      const rows = table.querySelectorAll('tbody tr');
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
   
+  <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Update Greenspark inventory every 5 minutes (300000 ms)
+      setInterval(updateInventoryIncrementally, 300000);
+      
+      // Update pricing fluctuations every 5 seconds (5000 ms)
+      setInterval(simulatePricingFluctuations, 5000);
+      
+      // Update Metals Market Overview every 5 seconds (5000 ms)
+      setInterval(updateMetalsMarketOverview, 5000);
+      
+      // Also update simulated trade options when pricing changes
+      setInterval(updateTradeOptions, 5000);
+    });
+    
+    function updateInventoryIncrementally() {
+      const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
       rows.forEach(row => {
-        let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
-        let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-        let total = parseFloat(row.cells[3].textContent.replace(/,/g, '')) || 0;
-  
-        wip *= 1.1;
-        finished *= 1.1;
-        total *= 1.1;
-  
-        row.cells[1].textContent = Math.round(wip).toLocaleString();
-        row.cells[2].textContent = Math.round(finished).toLocaleString();
-        row.cells[3].textContent = Math.round(total).toLocaleString();
+        if (Math.random() < 0.4) { // update ~40% of rows
+          let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let changePercent = Math.random() * 0.05; // up to 5% increase
+          finished += finished * changePercent;
+          row.cells[2].textContent = finished.toLocaleString();
+          
+          let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
+          let total = wip + finished;
+          row.cells[3].textContent = total.toLocaleString();
+        }
       });
-  
       updatePurchaseValues();
     }
-  
-    setInterval(increaseTableValues, 300000);
     
-    /***************************************
-     * Update Metals Market Overview Every Minute
-     ***************************************/
+    function simulatePricingFluctuations() {
+      const pricingElements = document.querySelectorAll('[id^="price-"]');
+      pricingElements.forEach(elem => {
+        let text = elem.textContent;
+        let parts = text.split(':');
+        if (parts.length >= 2) {
+          let commodity = parts[0].trim();
+          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+          let currentPrice = parseFloat(priceStr);
+          if (!isNaN(currentPrice)) {
+            let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+            let newPrice = currentPrice + fluctuation;
+            elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          }
+        }
+      });
+    }
+    
+    // New function to update Metals Market Overview table
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
-      if (!table) return;
       const rows = table.querySelectorAll('tbody tr');
-      
       rows.forEach(row => {
-        let ticker = row.cells[0].textContent.trim();
-        if (ticker === 'ICWR25' || ticker === 'EMOT25' || ticker === 'BRSS25') {
-          let commodity = "";
-          if (ticker === 'ICWR25') {
-            commodity = "Insulated Copper Wire";
-          } else if (ticker === 'EMOT25') {
-            commodity = "Electric Motors";
-          } else if (ticker === 'BRSS25') {
-            commodity = "Brass";
+        // Update "Last" price (column index 2) with ±5% fluctuation
+        let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
+        let currentPrice = parseFloat(lastPriceStr);
+        if (!isNaN(currentPrice)) {
+          let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+          let newPrice = currentPrice + fluctuation;
+          // Calculate change (newPrice - oldPrice) and format with sign
+          let changeVal = newPrice - currentPrice;
+          let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
+          row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          // Update the "Change" column (column index 3)
+          row.cells[3].textContent = changeText;
+        }
+      });
+    }
+  </script>
+  
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
+  <script>
+    function normalizeString(str) {
+      return str.toLowerCase().replace(/[\s_]+/g, "");
+    }
+    function getTickerFromReference(material) {
+      let baseMaterial = material;
+      let category = null;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        category = material.split(" (")[1].replace(")", "").trim();
+      }
+      
+      if (category && scrapMaterialCodes[category.toLowerCase()]) {
+        for (const code in scrapMaterialCodes[category.toLowerCase()]) {
+          if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
+            return code;
           }
-          let elementId = "price-" + commodity.replace(/\s/g, '');
-          let snapshotElem = document.getElementById(elementId);
-          if (snapshotElem) {
-            let priceText = snapshotElem.textContent;
-            let match = priceText.match(/\$\s*([\d,]+\.\d{2})/);
-            if (match) {
-              let snapshotPrice = parseFloat(match[1].replace(/,/g, ''));
-              row.cells[2].textContent = snapshotPrice.toFixed(2);
-              if (!row.dataset.initialSnapshotPrice || row.dataset.initialSnapshotPrice === "") {
-                row.dataset.initialSnapshotPrice = snapshotPrice;
+        }
+      }
+      
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          let catLower = cat.toLowerCase();
+          if (scrapMaterialCodes[catLower]) {
+            for (const code in scrapMaterialCodes[catLower]) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(baseMaterial))) {
+                return code;
               }
-              let initialPrice = parseFloat(row.dataset.initialSnapshotPrice);
-              let change = snapshotPrice - initialPrice;
-              row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
             }
           }
-        } else {
-          let openPrice = parseFloat(row.cells[4].textContent.replace(/,/g, '')) || 0;
-          if (openPrice <= 0) return;
-  
-          let randomFactor = (Math.random() * 0.2) - 0.1;
-          let newLast = openPrice * (1 + randomFactor);
-          newLast = parseFloat(newLast.toFixed(2));
-  
-          row.cells[2].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
-          let change = newLast - openPrice;
-          row.cells[3].textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
-  
-          let currentHigh = parseFloat(row.cells[5].textContent.replace(/,/g, '')) || openPrice;
-          if (newLast > currentHigh) {
-            row.cells[5].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }
-  
-          let currentLow = parseFloat(row.cells[6].textContent.replace(/,/g, '')) || openPrice;
-          if (newLast < currentLow) {
-            row.cells[6].textContent = newLast.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          }
-  
-          let currentVolume = parseInt(row.cells[7].textContent.replace(/,/g, ''), 10) || 0;
-          let newVolume = Math.ceil(currentVolume * 1.001);
-          row.cells[7].textContent = newVolume.toLocaleString();
         }
-      });
-    }
-    setInterval(updateMetalsMarketOverview, 7000);
-    
-    /***************************************
-     * FUTURES TICKER LOGIC
-     ***************************************/
-    let futuresData = [
-      { contractName: "ALUM25", last: 220.0, change: 1.25, high: 222.0, low: 217.5, volume: 75200, time: "14:47 CT" },
-      { contractName: "EMOT25", last: 89.0, change: 0.75, high: 90.0, low: 88.0, volume: 19845, time: "14:47 CT" },
-      { contractName: "ICWR25", last: 310.0, change: 2.0, high: 315.0, low: 305.0, volume: 42312, time: "14:47 CT" },
-      { contractName: "LEAD25", last: 45.2, change: -0.2, high: 46.0, low: 44.8, volume: 13890, time: "14:47 CT" },
-      { contractName: "HMS225", last: 502.0, change: 1.5, high: 505.0, low: 498.0, volume: 28176, time: "14:47 CT" },
-      { contractName: "CRAD25", last: 128.0, change: 0.75, high: 129.5, low: 126.0, volume: 8625, time: "14:47 CT" },
-      { contractName: "COPR25", last: 955.0, change: 3.5, high: 960.0, low: 940.0, volume: 15500, time: "14:47 CT" },
-      { contractName: "BRSS25", last: 780.0, change: -2.0, high: 785.0, low: 775.0, volume: 11240, time: "14:47 CT" },
-      { contractName: "CARB25", last: 410.0, change: 1.0, high: 415.0, low: 405.0, volume: 12990, time: "14:47 CT" },
-      { contractName: "STLS25", last: 215.0, change: 0.50, high: 217.0, low: 211.0, volume: 8450, time: "14:47 CT" },
-      { contractName: "BSTE25", last: 32.0, change: -0.25, high: 32.5, low: 31.5, volume: 3210, time: "14:47 CT" }
-    ];
-    
-    let futuresGuide = [];
-    
-    function generateTradingGuide() {
-      const signals = ["BUY", "SELL"];
-      const strengths = ["Weak", "Moderate", "Strong", "Very Strong", "Uncertain"];
-      const horizons = ["1 week", "2 weeks", "1 month", "3 months"];
+      }
       
-      futuresGuide = futuresData.map(item => {
-        let sig = signals[Math.floor(Math.random() * signals.length)];
-        let entryPct = (Math.random() * 2 + 1) / 100;
-        if (sig === "SELL") entryPct *= -1;
-        let entryPrice = item.last * (1 + entryPct);
-        let stopDiff = Math.abs(entryPrice * 0.05);
-        let profitDiff = Math.abs(entryPrice * 0.1);
-        let stop, takeProfit;
-        if (sig === "BUY") {
-          stop = entryPrice - stopDiff;
-          takeProfit = entryPrice + profitDiff;
-        } else {
-          stop = entryPrice + stopDiff;
-          takeProfit = entryPrice - profitDiff;
-        }
-        let strength = strengths[Math.floor(Math.random() * strengths.length)];
-        let horizon = horizons[Math.floor(Math.random() * horizons.length)];
-    
-        return {
-          contractName: item.contractName,
-          signal: sig,
-          entryDate: "02/20/25",
-          entryPrice: parseFloat(entryPrice.toFixed(2)),
-          stopLoss: parseFloat(stop.toFixed(2)),
-          takeProfit: parseFloat(takeProfit.toFixed(2)),
-          timeHorizon: horizon,
-          strength: strength
-        };
-      });
-    }
-    
-    function renderGuideTicker() {
-      const ticker = document.getElementById("trade-alerts-ticker");
-      let content = "";
-      futuresGuide.forEach(trade => {
-        const signalClass = trade.signal === "BUY" ? "signal-buy" : "signal-sell";
-        const strengthClass = trade.strength.toLowerCase().replace(/\s+/g, '-');
-        content += `<span class="ticker-item">
-                      ${trade.contractName} 
-                      <span class="signal ${signalClass}">${trade.signal}</span> 
-                      ${trade.entryDate} ${trade.entryPrice.toFixed(2)} 
-                      ${trade.stopLoss.toFixed(2)} ${trade.takeProfit.toFixed(2)} 
-                      ${trade.timeHorizon} 
-                      <span class="strength ${strengthClass}">${trade.strength}</span>
-                    </span>`;
-        content += `<span class="ticker-separator"> ---- </span>`;
-      });
-      ticker.innerHTML = content + content;
-    }
-    
-    function updateHiddenJSON() {
-      // Placeholder for any JSON updates if needed.
-    }
-    
-    function fluctuateData() {
-      futuresData.forEach(item => {
-        let pct = (Math.random() * 5 - 2.5) / 100;
-        let oldLast = item.last;
-        let newLast = oldLast * (1 + pct);
-        item.last = parseFloat(newLast.toFixed(2));
-        let diff = item.last - oldLast;
-        item.change = parseFloat(diff.toFixed(2));
-        let highPct = (Math.random() * 3) / 100;
-        let lowPct = (Math.random() * 3) / 100;
-        item.high = parseFloat((item.last * (1 + highPct)).toFixed(2));
-        item.low = parseFloat((item.last * (1 - lowPct)).toFixed(2));
-        let volPct = (Math.random() * 20 - 10) / 100;
-        item.volume = Math.max(0, Math.round(item.volume * (1 + volPct)));
-      });
-      generateTradingGuide();
-    }
-    
-    function initTicker() {
-      generateTradingGuide();
-      renderGuideTicker();
-      updateHiddenJSON();
-      setInterval(() => {
-        fluctuateData();
-        renderGuideTicker();
-        updateHiddenJSON();
-      }, 5 * 60 * 1000);
-    }
-    
-    window.addEventListener("DOMContentLoaded", initTicker);
-    
-    /***************************************
-     * Modal and Guided Tour Functions
-     ***************************************/
-    function showKPIDetails() {
-      var kpiModal = new bootstrap.Modal(document.getElementById('kpiDetailModal'));
-      kpiModal.show();
-    }
-    
-    function showArchOverview() {
-      var archModal = new bootstrap.Modal(document.getElementById('archModal'));
-      archModal.show();
-    }
-    
-    function startGuidedTour() {
-      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
-      alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
+      return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
 </body>
