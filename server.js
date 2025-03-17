@@ -25,7 +25,8 @@ app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
 
 // Home route: Serve the complete dashboard HTML file
 app.get('/', (req, res, next) => {
-  const filePath = path.join(__dirname, 'bridge-dashboard', 'combined-layout.html');
+  const filePath = path.join(C:\Users\tbyer\BRidge\bridge-dashboard\combined-layout.html
+  );
   console.log('Serving file from:', filePath);
   res.sendFile(filePath, (err) => {
     if (err) {
