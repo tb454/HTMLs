@@ -114,5 +114,6 @@ const path = require('path');
 
 // Route to serve combined-layout.html
 app.get('/combined-layout', (req, res) => {
-  res.sendFile(path.join(__dirname, 'combined-layout.html'));
+  res.sendFile(path.join(__dirname, 'bridge-dashboard', 'combined-layout.html'));
+
 });
