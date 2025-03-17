@@ -23,14 +23,15 @@ app.use(express.json());
 // (Optional) Serve static assets from the bridge-dashboard folder if needed
 app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
 
-// Home route: Serve the complete dashboard HTML file
-app.get('/', (req, res, next) => {
-  const filePath = path.join("C:\\Users\\tbyer\\BRidge", "bridge-dashboard", "combined-layout.html");
-console.log(filePath);
+/const path = require('path');
 
+// Serve the complete dashboard as the home page
+app.get('/', (req, res, next) => {
+  const filePath = path.join(__dirname, "combined-layout.html");
+  console.log("Resolved file path:", filePath);
   res.sendFile(filePath, (err) => {
     if (err) {
-      console.error('Error sending file:', err);
+      console.error("Error sending file:", err);
       next(err);
     }
   });
