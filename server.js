@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const app = express();
 const logger = require('./logger');
+const { fetchExternalData } = require('./apiClient');
 const port = process.env.PORT || 3000;
 
 // Load environment variables
@@ -115,6 +116,15 @@ app.use((err, req, res, next) => {
       ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     }
   });
+});
+// Example endpoint that uses the configured Axios instance
+app.get('/api/external', async (req, res, next) => {
+  try {
+    const data = await fetchExternalData('https://api.example.com/data');
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.listen(port, () => {
