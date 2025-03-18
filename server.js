@@ -6,6 +6,7 @@ const path = require('path');
 const app = express();
 const logger = require('./logger');
 const { fetchExternalData } = require('./apiClient');
+const axiosRetry = require('axios-retry').default;
 const port = process.env.PORT || 3000;
 
 // Load environment variables
