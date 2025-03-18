@@ -27,7 +27,8 @@ app.use(express.json());
 
 // (Optional) Serve static assets from the "bridge-dashboard" folder if needed
 // Remove or adjust this if your static assets are located elsewhere
-app.use(express.static(path.join(__dirname, 'bridge-dashboard')));
+app.use(express.static(path.join(__dirname, 'bridge-dashboard'), { maxAge: '1d' }));
+
 
 // Serve the complete dashboard as the home page
 app.get('/', (req, res, next) => {
