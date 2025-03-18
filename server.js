@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const app = express();
+const logger = require('./logger');
 const port = process.env.PORT || 3000;
 
 // Load environment variables
