@@ -1596,6 +1596,41 @@
       
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
-  </script>
+    <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/inventory')
+      .then(response => response.json())
+      .then(data => {
+        console.log("Inventory data:", data);
+        // Select the tbody of your Finished Goods Inventory table
+        const tableBody = document.querySelector('#greenspark-table tbody');
+        // Clear any existing rows if necessary
+        tableBody.innerHTML = "";
+        // Iterate over each commodity in the returned data
+        for (const commodity in data) {
+          if (data.hasOwnProperty(commodity)) {
+            const wip = data[commodity].wip;
+            const finished = data[commodity].finished;
+            const total = wip + finished;
+            // For now, we'll assume avgCost and total purchase value are placeholders (set to 0)
+            const avgCost = 0;
+            const totalPurchaseValue = 0;
+            // Create a new row and populate it with data
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${commodity}</td>
+              <td>${wip.toLocaleString()}</td>
+              <td>${finished.toLocaleString()}</td>
+              <td>${total.toLocaleString()}</td>
+              <td>$${avgCost}</td>
+              <td>$${totalPurchaseValue}</td>
+            `;
+            tableBody.appendChild(row);
+          }
+        }
+      })
+      .catch(error => console.error("Error fetching inventory:", error));
+  });
+</script>
 </body>
 </html>
