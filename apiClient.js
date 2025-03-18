@@ -2,6 +2,8 @@
 const axios = require('axios');
 const axiosRetry = require('axios-retry');
 
+console.log("Type of axiosRetry:", typeof axiosRetry);
+
 // Configure axios-retry with desired options
 axiosRetry(axios, {
   retries: 3, // Number of retry attempts
