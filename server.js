@@ -5,6 +5,8 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const app = express();
 const logger = require('./logger');
+const compression = require('compression');
+app.use(compression());
 const { fetchExternalData } = require('./apiClient');
 const axiosRetry = require('axios-retry').default;
 const port = process.env.PORT || 3000;
