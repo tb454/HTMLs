@@ -1,7 +1,8 @@
-// apiClient.js
 const axios = require('axios');
-const axiosRetry = require('axios-retry');
+const axiosRetryModule = require('axios-retry');
+const axiosRetry = axiosRetryModule.default || axiosRetryModule;
 
+// Log to verify the type
 console.log("Type of axiosRetry:", typeof axiosRetry);
 
 // Configure axios-retry with desired options
