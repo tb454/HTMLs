@@ -3,10 +3,10 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const { body, validationResult } = require('express-validator');
 const app = express();
-const logger = require('./logger');
+const logger = require('./logger'); // Ensure you have a logger.js that sets up Winston
 const compression = require('compression');
-app.use(compression());
 const { fetchExternalData } = require('./apiClient');
 const axiosRetry = require('axios-retry').default;
 const port = process.env.PORT || 3000;
@@ -14,25 +14,39 @@ const port = process.env.PORT || 3000;
 // Load environment variables
 require('dotenv').config();
 
-// Security Middleware
+// --- Basic Authentication Middleware ---
+const basicAuth = (req, res, next) => {
+  const auth = { username: 'betaUser', password: 'betaPass' };
+  const authHeader = req.headers.authorization || '';
+  const b64auth = authHeader.split(' ')[1] || '';
+  const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+  if (login && password && login === auth.username && password === auth.password) {
+    return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Beta Access"');
+  return res.status(401).send('Authentication required.');
+};
+
+// Apply basic auth to all routes (for beta deployment)
+app.use(basicAuth);
+
+// --- Security and Performance Middleware ---
 app.use(helmet());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
 });
-app.use(limiter);
-
-// Use JSON parser middleware
+app.use(limiter());
 app.use(express.json());
+app.use(compression());
 
-// (Optional) Serve static assets from the "bridge-dashboard" folder if needed
-// Remove or adjust this if your static assets are located elsewhere
+// Serve static assets from the "bridge-dashboard" folder with caching for 1 day
 app.use(express.static(path.join(__dirname, 'bridge-dashboard'), { maxAge: '1d' }));
 
+// --- Routes ---
 
-// Serve the complete dashboard as the home page
+// Home route: Serve the complete dashboard as the home page
 app.get('/', (req, res, next) => {
-  // Use the file from the repository root since combined-layout.html is located there
   const filePath = path.join(__dirname, "combined-layout.html");
   console.log("Resolved file path:", filePath);
   res.sendFile(filePath, (err) => {
@@ -77,22 +91,30 @@ app.get('/api/inventory', (req, res, next) => {
   }
 });
 
-// POST endpoint to simulate a trade
-app.post('/api/trade', async (req, res, next) => {
+// POST endpoint to simulate a trade with input validation
+app.post('/api/trade', [
+  body('material').isString().withMessage('Material must be a string'),
+  body('contracts').isInt({ gt: 0 }).withMessage('Contracts must be a positive integer'),
+  // Optionally, add validation for tradePrice if required:
+  // body('tradePrice').isFloat({ gt: 0 }).withMessage('Trade price must be a positive number')
+], async (req, res, next) => {
   try {
-    const { material, contracts, tradePrice } = req.body;
-    if (!material || !contracts) {
-      const err = new Error('Missing required trade information.');
-      err.status = 400;
-      throw err;
+    // Check validation results
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
     }
+    
+    const { material, contracts, tradePrice } = req.body;
     if (!inventoryData[material]) {
       const err = new Error('Invalid material');
       err.status = 400;
       throw err;
     }
+    
     const reduction = contracts * 20000;
     inventoryData[material].finished = Math.max(inventoryData[material].finished - reduction, 0);
+    
     res.json({
       success: true,
       message: `Trade executed for ${contracts} contract(s) of ${material}.`,
@@ -112,7 +134,7 @@ app.use((req, res, next) => {
 
 // Global error-handling middleware
 app.use((err, req, res, next) => {
-  console.error(err);
+  logger.error(err.message);
   res.status(err.status || 500).json({
     success: false,
     error: {
@@ -121,6 +143,25 @@ app.use((err, req, res, next) => {
     }
   });
 });
+
+// --- Graceful Shutdown ---
+const server = app.listen(port, () => {
+  logger.info(`Server listening on port ${port}`);
+});
+
+const shutdown = () => {
+  logger.info('Received shutdown signal, closing server...');
+  server.close(() => {
+    logger.info('HTTP server closed.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+module.exports = app;
+
 // Example endpoint that uses the configured Axios instance
 app.get('/api/external', async (req, res, next) => {
   try {
