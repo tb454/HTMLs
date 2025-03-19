@@ -2,6 +2,8 @@
 const request = require('supertest');
 const app = require('../server');
 
+request(app).get('/api/market').then;
+
 describe('API Endpoints', () => {
   // Test the GET /api/market endpoint
   it('should return market data', async () => {
