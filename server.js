@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { body, validationResult } = require('express-validator');
 const app = express();
-const logger = require('./logger'); // Ensure you have a logger.js that sets up Winston
+const logger = require('./logger'); // Ensure you have logger.js that sets up Winston
 const compression = require('compression');
 const { fetchExternalData } = require('./apiClient');
 const axiosRetry = require('axios-retry').default;
@@ -36,7 +36,7 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
 });
-app.use(limiter());
+app.use(limiter);
 app.use(express.json());
 app.use(compression());
 
@@ -95,31 +95,37 @@ app.get('/api/inventory', (req, res, next) => {
 app.post('/api/trade', [
   body('material').isString().withMessage('Material must be a string'),
   body('contracts').isInt({ gt: 0 }).withMessage('Contracts must be a positive integer'),
-  // Optionally, add validation for tradePrice if required:
+  // Optional: Validate tradePrice if needed
   // body('tradePrice').isFloat({ gt: 0 }).withMessage('Trade price must be a positive number')
 ], async (req, res, next) => {
   try {
-    // Check validation results
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
-    
     const { material, contracts, tradePrice } = req.body;
     if (!inventoryData[material]) {
       const err = new Error('Invalid material');
       err.status = 400;
       throw err;
     }
-    
     const reduction = contracts * 20000;
     inventoryData[material].finished = Math.max(inventoryData[material].finished - reduction, 0);
-    
     res.json({
       success: true,
       message: `Trade executed for ${contracts} contract(s) of ${material}.`,
       updatedInventory: inventoryData[material]
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Example endpoint that uses the configured Axios instance
+app.get('/api/external', async (req, res, next) => {
+  try {
+    const data = await fetchExternalData('https://api.example.com/data');
+    res.json(data);
   } catch (error) {
     next(error);
   }
@@ -144,34 +150,24 @@ app.use((err, req, res, next) => {
   });
 });
 
-// --- Graceful Shutdown ---
-const server = app.listen(port, () => {
-  logger.info(`Server listening on port ${port}`);
-});
-
-const shutdown = () => {
-  logger.info('Received shutdown signal, closing server...');
-  server.close(() => {
-    logger.info('HTTP server closed.');
-    process.exit(0);
+// --- Conditional Server Start ---
+// Only call app.listen() if this file is run directly
+if (require.main === module) {
+  const server = app.listen(port, () => {
+    logger.info(`Server listening on port ${port}`);
   });
-};
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+  // Graceful shutdown
+  const shutdown = () => {
+    logger.info('Received shutdown signal, closing server...');
+    server.close(() => {
+      logger.info('HTTP server closed.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
 
 module.exports = app;
-
-// Example endpoint that uses the configured Axios instance
-app.get('/api/external', async (req, res, next) => {
-  try {
-    const data = await fetchExternalData('https://api.example.com/data');
-    res.json(data);
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
