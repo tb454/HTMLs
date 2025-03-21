@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: ./
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - backend
+    # env_file: ./.env  # Uncomment if .env file exists
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    init: true
+    # env_file: ./backend/.env  # Uncomment if .env file exists
+networks:
+  default:
+    driver: bridge
