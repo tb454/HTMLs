@@ -1552,5 +1552,49 @@
   <script>
     // You can add further helper functions here as required.
   </script>
+  
+<script>
+  // Example: Fetch analytics data from your backend
+  fetch("http://localhost:8000/analytics", {
+      method: "GET",
+      headers: {
+          "Content-Type": "application/json"
+          // Add "Authorization": "Bearer YOUR_TOKEN" if needed
+      }
+  })
+  .then(response => response.json())
+  .then(data => {
+      console.log("Analytics Data:", data);
+      // You can now update your dashboard UI with the fetched data
+      // For example, update an element's innerHTML:
+      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data);
+  })
+  .catch(error => {
+      console.error("Error fetching analytics:", error);
+  });
+
+  // Example: Connect to the WebSocket for real-time updates
+  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+
+  socket.onopen = function() {
+      console.log("WebSocket connection established");
+  };
+
+  socket.onmessage = function(event) {
+      const message = JSON.parse(event.data);
+      console.log("Received WebSocket message:", message);
+      // Update your dashboard elements with the new data here
+  };
+
+  socket.onerror = function(error) {
+      console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = function(event) {
+      console.log("WebSocket connection closed:", event);
+      // Optionally add reconnection logic here
+  };
+</script>
+
 </body>
 </html>
