@@ -1,3 +1,6 @@
+pandas
+scikit-learn
+joblib
 fastapi
 uvicorn
 celery
@@ -5,7 +8,6 @@ pydantic
 sqlalchemy
 passlib[bcrypt]
 pyjwt
-joblib
 requests
 aiokafka
 prometheus-fastapi-instrumentator
