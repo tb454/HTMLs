@@ -5,8 +5,9 @@ pydantic
 sqlalchemy
 passlib[bcrypt]
 pyjwt
+joblib
+requests
 aiokafka
 prometheus-fastapi-instrumentator
 web3
-joblib
-requests
+numpy
