@@ -7,8 +7,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:///./trading_bridge.db
       - SECRET_KEY=your-secret-key
-    volumes:
-      - ./backend:/app  
+     
   dashboard:
     build:
       context: ./dashboard
