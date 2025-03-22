@@ -3,7 +3,7 @@ import io
 
 # Read the CSV text from the converted Excel file.
 # (Here 'content' is the complete CSV text read from your file.)
-with open('/mnt/data/Pro_Metal_Quotation_Chicago_as_12-3-2024_CMX_4.19.csv', 'r') as f:
+with open('/mnt/data/scrap_prices.csv', 'r') as f:
     content = f.read()
 
 # Prepare an output list with a consistent header.
