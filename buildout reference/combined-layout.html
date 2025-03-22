@@ -1597,5 +1597,30 @@
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
+  <script>
+    async function fetchAnalytics() {
+      try {
+        // Call your analytics endpoint on your backend
+        const response = await fetch("http://localhost:8000/analytics");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log("Analytics Data:", data);
+        // Update a specific element to display this data
+        // For example, if you have a div with id "analyticsDisplay":
+        document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+      } catch (error) {
+        console.error("Error fetching analytics:", error);
+        document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+      }
+    }
+  
+    // Call fetchAnalytics when the DOM is fully loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      fetchAnalytics();
+    });
+  </script>
+  
 </body>
 </html>
