@@ -287,3 +287,64 @@ INFO:main:Futures prices updated in DB.
 INFO:main:Futures prices updated in DB.
 INFO:main:Futures prices updated in DB.
 INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:WebSocket client connected.
+INFO:main:Incoming request: GET http://localhost:8000/analytics
+INFO:main:Completed response: 200
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Incoming request: POST http://localhost:8000/scrap-metal
+ERROR:main:HTTPException: Not authenticated
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Incoming request: POST http://localhost:8000/users/register
+ERROR:main:HTTPException: Username already registered
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Incoming request: POST http://localhost:8000/users/register
+ERROR:main:HTTPException: Username already registered
+INFO:main:Futures prices updated in DB.
+INFO:main:Incoming request: POST http://localhost:8000/users/register
+INFO:main:Completed response: 422
+INFO:main:Futures prices updated in DB.
+INFO:main:Incoming request: POST http://localhost:8000/users/register
+ERROR:main:HTTPException: Username already registered
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
