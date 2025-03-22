@@ -1,0 +1,7 @@
+ERROR:main:Error loading ML model: [Errno 2] No such file or directory: 'price_prediction_model.pkl'
+INFO:main:Futures prices updated in DB.
+ERROR:fastapi:Form data requires "python-multipart" to be installed. 
+You can install "python-multipart" with: 
+
+pip install python-multipart
+
