@@ -5,6 +5,7 @@ fastapi
 uvicorn
 celery
 pydantic
+pydantic-settings
 sqlalchemy
 passlib[bcrypt]
 pyjwt
