@@ -1631,6 +1631,37 @@
       fetchAnalytics();
     });
   </script>
-  
+ <script>
+  // Establish a WebSocket connection to the FastAPI backend.
+  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+
+  socket.onopen = function() {
+    console.log("WebSocket connection established.");
+    // Optionally send an initial message.
+    socket.send("Hello from dashboard!");
+  };
+
+  socket.onmessage = function(event) {
+    // Parse and handle incoming WebSocket messages.
+    try {
+      const message = JSON.parse(event.data);
+      console.log("WebSocket message received:", message);
+      // Update an element on your dashboard with this real-time data.
+      document.getElementById("realtimeData").innerText = JSON.stringify(message, null, 2);
+    } catch (e) {
+      console.error("Error parsing WebSocket message:", e);
+    }
+  };
+
+  socket.onerror = function(error) {
+    console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = function(event) {
+    console.log("WebSocket connection closed:", event);
+    // Optionally implement reconnection logic here.
+  };
+</script>
+ 
 </body>
 </html>
