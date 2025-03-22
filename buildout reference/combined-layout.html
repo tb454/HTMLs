@@ -968,13 +968,15 @@
     <header class="header">
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
-        <span>User: John Doe</span>
+        <span id="current-user">User: Guest</span>
+        <button onclick="showLoginModal()">Login</button>
         <button onclick="logout()">Logout</button>
         <button onclick="startGuidedTour()">Greenspark</button>
         <button onclick="showArchOverview()">ThinkorSwim</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
+    
     
     <!-- Overview Cards -->
     <section class="section">
