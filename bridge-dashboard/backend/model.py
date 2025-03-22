@@ -4,7 +4,7 @@ from sklearn.linear_model import LinearRegression
 import joblib
 
 
-data = pd.read_csv('C:/Users/tbyer/BRidge-html/HTMLs/bridge-dashboard/data/cleaned_scrap_prices.csv')
+data = pd.read_csv('C:/Users/tbyer/BRidge-html/HTMLs/bridge-dashboard/data/scrap_prices.csv')
 
 
 # Define features and target variable (assume 'price' is the target)
