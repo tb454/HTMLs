@@ -1663,6 +1663,52 @@
     // Optionally implement reconnection logic here.
   };
 </script>
- 
+<script>
+  // Function to open the login modal
+  function showLoginModal() {
+    // Using Bootstrap's modal API
+    const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+    loginModal.show();
+  }
+
+  // Function to process the login form submission
+  async function loginUser(username, password) {
+    try {
+      const formData = new URLSearchParams();
+      formData.append("username", username);
+      formData.append("password", password);
+      const response = await fetch("http://localhost:8000/token", {
+        method: "POST",
+        body: formData
+      });
+      if (!response.ok) {
+        throw new Error("Login failed");
+      }
+      const tokenData = await response.json();
+      console.log("Token Data:", tokenData);
+      // Save the token in localStorage for subsequent API calls
+      localStorage.setItem("access_token", tokenData.access_token);
+      document.getElementById("login-error").innerText = "";
+      alert("Login successful!");
+      // Optionally update the current user display
+      document.getElementById("current-user").innerText = `User: ${username}`;
+      // Hide the modal
+      const loginModal = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+      loginModal.hide();
+    } catch (error) {
+      console.error("Error logging in:", error);
+      document.getElementById("login-error").innerText = error.message;
+    }
+  }
+
+  // Attach event listener to the login form
+  document.getElementById("login-form").addEventListener("submit", function(e) {
+    e.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    loginUser(username, password);
+  });
+</script>
+
 </body>
 </html>
