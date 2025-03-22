@@ -3,8 +3,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 import joblib
 
-# Load your dataset (replace 'your_data.csv' with your actual data file)
-data = pd.read_csv('your_data.csv')
+
+data = pd.read_csv('scrap_prices.csv')
 
 # Define features and target variable (assume 'price' is the target)
 X = data.drop('price', axis=1)
