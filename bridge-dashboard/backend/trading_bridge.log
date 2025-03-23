@@ -803,3 +803,4 @@ INFO:main:Incoming request: GET http://localhost:8000/openapi.json
 INFO:main:Completed response: 200
 INFO:main:Futures prices updated in DB.
 INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
