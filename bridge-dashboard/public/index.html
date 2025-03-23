@@ -1704,6 +1704,301 @@ document.addEventListener("DOMContentLoaded", () => {
     // Optionally implement reconnection logic here.
   };
 </script>
- 
+<script>
+  // Helper function to set up headers for authenticated requests
+  function getAuthHeaders() {
+    const token = localStorage.getItem("access_token");
+    return token 
+      ? { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
+      : { "Content-Type": "application/json" };
+  }
+
+  // 1. Fetch Analytics Data from GET /analytics
+  async function fetchAnalytics() {
+    try {
+      const response = await fetch("http://localhost:8000/analytics", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch analytics");
+      }
+      const data = await response.json();
+      console.log("Analytics Data:", data);
+      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+    }
+  }
+
+  // 2. Create a new Scrap Metal record via POST /scrap-metal
+  async function createScrapMetal(newMetalData) {
+    try {
+      const response = await fetch("http://localhost:8000/scrap-metal", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newMetalData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to create scrap metal record");
+      }
+      const data = await response.json();
+      console.log("Created Scrap Metal:", data);
+      // Optionally refresh your inventory table here.
+    } catch (error) {
+      console.error("Error creating scrap metal record:", error);
+    }
+  }
+
+  // 3. Fetch all Scrap Metal records from GET /scrap-metal
+  async function fetchScrapMetals() {
+    try {
+      const response = await fetch("http://localhost:8000/scrap-metal", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch scrap metal records");
+      }
+      const data = await response.json();
+      console.log("Scrap Metal Records:", data);
+      // Update your inventory table using data from the API.
+    } catch (error) {
+      console.error("Error fetching scrap metals:", error);
+    }
+  }
+
+  // 4. Fetch Futures Data from GET /futures
+  async function fetchFutures() {
+    try {
+      const response = await fetch("http://localhost:8000/futures", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch futures data");
+      }
+      const data = await response.json();
+      console.log("Futures Data:", data);
+      // Update futures chart or UI here.
+    } catch (error) {
+      console.error("Error fetching futures:", error);
+    }
+  }
+
+  // 5. Update or Create Futures Data via POST /futures
+  async function updateOrCreateFutures(newFuturesData) {
+    try {
+      const response = await fetch("http://localhost:8000/futures", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newFuturesData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to update or create futures data");
+      }
+      const data = await response.json();
+      console.log("Updated/Created Futures Data:", data);
+      // Optionally update your UI.
+    } catch (error) {
+      console.error("Error updating/creating futures:", error);
+    }
+  }
+
+  // 6. Fetch External Futures Data via GET /external/futures/{symbol}
+  async function fetchExternalFutures(symbol) {
+    try {
+      const response = await fetch(`http://localhost:8000/external/futures/${symbol}`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch external futures data");
+      }
+      const data = await response.json();
+      console.log(`External Futures Data for ${symbol}:`, data);
+      // Update external futures UI as needed.
+    } catch (error) {
+      console.error(`Error fetching external futures for ${symbol}:`, error);
+    }
+  }
+
+  // 7. Fetch Orders from GET /orders
+  async function fetchOrders() {
+    try {
+      const response = await fetch("http://localhost:8000/orders", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch orders");
+      }
+      const data = await response.json();
+      console.log("Orders:", data);
+      // Update your orders table UI.
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+    }
+  }
+
+  // 8. Create a new Order via POST /orders
+  async function createOrder(newOrderData) {
+    try {
+      const response = await fetch("http://localhost:8000/orders", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newOrderData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to create order");
+      }
+      const data = await response.json();
+      console.log("Created Order:", data);
+      // Update your orders UI.
+    } catch (error) {
+      console.error("Error creating order:", error);
+    }
+  }
+
+  // 9. Fetch Order Matches from GET /order-matches
+  async function fetchOrderMatches() {
+    try {
+      const response = await fetch("http://localhost:8000/order-matches", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch order matches");
+      }
+      const data = await response.json();
+      console.log("Order Matches:", data);
+      // Update order matches UI.
+    } catch (error) {
+      console.error("Error fetching order matches:", error);
+    }
+  }
+
+  // 10. Fetch Risk Report from GET /risk-report
+  async function fetchRiskReport() {
+    try {
+      const response = await fetch("http://localhost:8000/risk-report", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch risk report");
+      }
+      const data = await response.json();
+      console.log("Risk Report:", data);
+      // Update risk report UI.
+    } catch (error) {
+      console.error("Error fetching risk report:", error);
+    }
+  }
+
+  // 11. Fetch Analytics Data from GET /analytics
+  async function fetchAnalytics() {
+    try {
+      const response = await fetch("http://localhost:8000/analytics", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch analytics");
+      }
+      const data = await response.json();
+      console.log("Analytics Data:", data);
+      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+    }
+  }
+
+  // 12. Predict Price via POST /predict-price
+  async function predictPrice(scrapMetalData) {
+    try {
+      const response = await fetch("http://localhost:8000/predict-price", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(scrapMetalData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to predict price");
+      }
+      const data = await response.json();
+      console.log("Predicted Price:", data);
+      // Update your UI with the predicted price.
+    } catch (error) {
+      console.error("Error predicting price:", error);
+    }
+  }
+
+  // 13. Trigger Futures Update via POST /update-futures
+  async function triggerFuturesUpdate() {
+    try {
+      const response = await fetch("http://localhost:8000/update-futures", {
+        method: "POST",
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to trigger futures update");
+      }
+      const data = await response.json();
+      console.log("Futures Update Response:", data);
+      // Optionally update your UI to reflect the update.
+    } catch (error) {
+      console.error("Error triggering futures update:", error);
+    }
+  }
+
+  // 14. Fetch Admin Health via GET /admin/health
+  async function fetchAdminHealth() {
+    try {
+      const response = await fetch("http://localhost:8000/admin/health", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch admin health");
+      }
+      const data = await response.json();
+      console.log("Admin Health:", data);
+      // Update UI with health metrics.
+    } catch (error) {
+      console.error("Error fetching admin health:", error);
+    }
+  }
+
+  // 15. WebSocket Connection for Real-Time Futures Updates
+  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+
+  socket.onopen = function() {
+    console.log("WebSocket connection established.");
+    socket.send("Hello from Dashboard!");
+  };
+
+  socket.onmessage = function(event) {
+    try {
+      const message = JSON.parse(event.data);
+      console.log("WebSocket message received:", message);
+      document.getElementById("realtimeData").innerText = JSON.stringify(message, null, 2);
+    } catch (e) {
+      console.error("Error parsing WebSocket message:", e);
+    }
+  };
+
+  socket.onerror = function(error) {
+    console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = function(event) {
+    console.log("WebSocket connection closed:", event);
+  };
+
+  // Example: Automatically call some functions on page load
+  document.addEventListener("DOMContentLoaded", () => {
+    fetchAnalytics();
+    fetchScrapMetals();
+    fetchFutures();
+    fetchOrders();
+    fetchOrderMatches();
+    fetchRiskReport();
+    fetchAdminHealth();
+  });
+</script>
+
 </body>
 </html>
