@@ -2030,6 +2030,54 @@ document.addEventListener("DOMContentLoaded", () => {
 <!-- In your <head> -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  
+</script>
+<script>
+  // Function to show the login modal (using Bootstrap)
+  function showLoginModal() {
+    const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+    loginModal.show();
+  }
+
+  // Function to log in the user and store the token
+  async function loginUser(username, password) {
+    try {
+      const formData = new URLSearchParams();
+      formData.append("username", username);
+      formData.append("password", password);
+      
+      // Call the /token endpoint
+      const response = await fetch("http://localhost:8000/token", {
+        method: "POST",
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error("Login failed");
+      }
+      
+      const tokenData = await response.json();
+      // Save the token in localStorage
+      localStorage.setItem("access_token", tokenData.access_token);
+      // Optionally update UI to reflect the logged-in user
+      document.getElementById("current-user").innerText = `User: ${username}`;
+      // Hide the modal
+      const loginModalInstance = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+      loginModalInstance.hide();
+      alert("Login successful!");
+    } catch (error) {
+      console.error("Error logging in:", error);
+      document.getElementById("login-error").innerText = error.message;
+    }
+  }
+
+  // Attach event listener to the login form submission
+  document.getElementById("login-form").addEventListener("submit", function(e) {
+    e.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    loginUser(username, password);
+  });
+</script>
+
 </body>
 </html>
