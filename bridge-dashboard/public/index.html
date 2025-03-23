@@ -1999,6 +1999,34 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchAdminHealth();
   });
 </script>
+<!-- Login Modal (using Bootstrap) -->
+<div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="login-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="loginModalLabel">Login</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="username" class="form-label">Username:</label>
+            <input type="text" id="username" name="username" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label">Password:</label>
+            <input type="password" id="password" name="password" class="form-control" required>
+          </div>
+          <div id="login-error" style="color: red;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="action-btn">Login</button>
+          <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
