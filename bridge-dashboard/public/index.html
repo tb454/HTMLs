@@ -1013,7 +1013,7 @@
         <div><strong>Analytics Data</strong></div>
         <div id="analyticsDisplay">Loading analytics data...</div>
             <!-- You could include a chart canvas if desired -->
-      <canvas id="analyticsChart" width="250" height="90"></canvas>
+      <canvas id="analyticsChart" width="250" height="75"></canvas>
     </div>
   </div>
 </section>
@@ -1530,7 +1530,48 @@
       });
       updatePurchaseValues();
     }
-    
+    // Function to fetch live scrap-metal data from the backend API
+async function updateInventoryFromAPI() {
+  try {
+    const token = localStorage.getItem("access_token"); // if authentication is required
+    const response = await fetch("http://localhost:8000/scrap-metal", {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": token ? `Bearer ${token}` : ""
+      }
+    });
+    if (!response.ok) {
+      throw new Error("Failed to fetch live inventory data.");
+    }
+    const liveData = await response.json();
+    // Update the table with live data without necessarily removing your static content.
+    // For example, clear and repopulate the table (if you decide to fully replace static data):
+    const tableBody = document.getElementById("greenspark-table").querySelector("tbody");
+    tableBody.innerHTML = ""; // Remove existing rows
+    liveData.forEach(item => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.metal_type}</td>
+        <td>${item.quantity.toLocaleString()}</td>
+        <td>${item.quality}</td>
+        <td>${item.location}</td>
+        <td>$${item.price}</td>
+      `;
+      tableBody.appendChild(row);
+    });
+  } catch (error) {
+    console.error("Error fetching live inventory data:", error);
+    // If the API call fails, you can keep or re-display your static data.
+  }
+}
+
+// Optionally call this function periodically or on demand
+document.addEventListener("DOMContentLoaded", () => {
+  // For example, update live inventory every 60 seconds:
+  updateInventoryFromAPI();
+  setInterval(updateInventoryFromAPI, 60000);
+});
+
     function simulatePricingFluctuations() {
       const pricingElements = document.querySelectorAll('[id^="price-"]');
       pricingElements.forEach(elem => {
