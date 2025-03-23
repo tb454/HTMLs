@@ -5912,3 +5912,5 @@ INFO:main:Completed response: 200
 INFO:main:Incoming request: GET http://localhost:8000/scrap-metal
 INFO:main:Completed response: 200
 INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
+INFO:main:Futures prices updated in DB.
