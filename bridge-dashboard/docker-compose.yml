@@ -1,17 +1,28 @@
 services:
   backend:
-    build:
-      context: .HTMLs/backend
+    build: ./HTMLs/backend
     ports:
-      - "8000:8000"
+      - "8100:8000"
     environment:
-      - DATABASE_URL=sqlite:///./trading_bridge.db
-      - SECRET_KEY=your-secret-key
-     
-  dashboard:
-    build:
-      context: ./dashboard
+      - ENV=sandbox
+    volumes:
+      - ./HTMLs/data/demo-data:/app/data
+
+  frontend:
+    build: ./HTMLs/frontend
     ports:
-      - "3000:80"
-    depends_on:
-      - backend
+      - "3100:80"
+    environment:
+      - API_URL=http://localhost:8100
+
+  db:
+    image: postgres
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: scrap_demo
+    volumes:
+      - demo_db:/var/lib/postgresql/data
+
+volumes:
+  demo_db:
