@@ -1,6 +1,6 @@
 services:
   backend:
-    build: ./HTMLs/backend
+    build: ./HTMLs/bridge-dashboard/backend
     ports:
       - "8100:8000"
     environment:
@@ -9,7 +9,7 @@ services:
       - ./HTMLs/data/demo-data:/app/data
 
   frontend:
-    build: ./HTMLs/frontend
+    build: ./HTMLs/bridge-dashboard/frontend
     ports:
       - "3100:80"
     environment:
