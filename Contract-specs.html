@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contract Specs</title>
+  <style>
+    details {
+      margin-bottom: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    summary {
+      padding: 20px;
+      background-color: #f7f7f7;
+      cursor: pointer;
+      outline: none;
+    }
+    .spec-content {
+      padding: 20px;
+    }
+    h2 {
+      color: #2c3e50;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Commodity Spec Sheets</h1>
+
+  <!-- Container where the spec sheets will appear -->
+  <div id="spec-sheets-container"></div>
+
+  <script>
+    /*********************************************************
+     * 1) All Material Name Arrays
+     *********************************************************/
+    // 1) Copper
+    const copperMaterials = [
+      "Barley",      // Cu BB
+      "#1",          // Berry & Candy
+      "#2",          // Birch & Cliff
+      "#3"           // Sheet Copper
+    ];
+    // 2) Aluminum
+    const aluminumMaterials = [
+      "AL6061_NewBareExtrusion",
+      "AL6061_ClipPlatePipe",
+      "AL6063_Secondary",
+      "AL6063_OldExtrusion",
+      "AL6063_Extrusion10/10",
+      "AL_PAS_Baled",
+      "AL_Cast_Clean",
+      "AL_RADS_CleanBaled",
+      "AL_RADS_DirtyBaled",
+      "AL_Sheet_CleanBaled",
+      "AL_WheelAuto_Clean",
+      "AL_WheelChrome_Clean",
+      "TruckWheel_Clean",
+      "AL_Wire_BareCATV",
+      "AL_Wire_NeopreneACSR",
+      "AL_Wire_ECPrepared",
+      "AL_MLC_Prepared"
+    ];
+    // 3) Brass
+    const brassMaterials = [
+      "Brass_Hard",
+      "Brass_Red_Ebony",
+      "Brass_Red_Semi",
+      "Brass_Shaving_AlBronze",
+      "Brass_Shaving_BrassRed",
+      "Brass_Shell",
+      "Brass_Special",
+      "Brass_YellowRegular"
+    ];
+    // 4) Lead
+    const leadMaterials = [
+      "Lead_Clean",
+      "Lead_Range"
+    ];
+    // 5) Stainless
+    const stainlessMaterials = [
+      "SS304",
+      "SS316"
+    ];
+    // 6) E-Scrap (generic placeholder)
+    const eScrapMaterials = [
+      "E_Scrap_Board"
+    ];
+    // 7) Insulated Wire
+    const insulatedWireMaterials = [
+      "ICW_LowGrade_ChristmasLights",
+      "ICW_LowGrade_ComputerWire25",
+      "ICW_LowGrade_CuCATV",
+      "ICW_LowGrade_ExtCords35Up",
+      "ICW_LowGrade_MixedWire40Up",
+      "ICW1_Heliax57_OpenEyeBaled",
+      "ICW1_MCM85HG",
+      "ICW1_Romex65_NoWeatherProof",
+      "ICW1_THHN80",
+      "ICW2_50Cat5TelWire",
+      "ICW2_HarnessWireNoFuseBoxes",
+      "ICW2_BX_Cable_AL",
+      "ICW2_BX_Cable_FE24"
+    ];
+    // 8) Misc Product
+    const miscProductMaterials = [
+      "Ballast_Electronic",
+      "Ballast_Regular",
+      "BatteryAuto_PbAcid",
+      "BatterySteelCase_Industrial",
+      "Compressor_SealedUnitNoCastIron",
+      "EMotorLowGrade_CeilingFanMotors",
+      "EMotorMix_NoPumpsPowerToolsFans",
+      "EMotorLarge_LessThan1000lbs",
+      "Transformer_AluLargeOnly",
+      "TransformerCu_AlCu",
+      "TransformerCu_SmallPalmSize",
+      "TransformerCu_MediumOver200lbs",
+      "TransformerCu_Large",
+      "Zinc_DieCast"
+    ];
+    // 9) Radiator Product
+    const radiatorProductMaterials = [
+      "ACReefer_CleanTalkBaled",
+      "ACReefer_CleanUnbaled",
+      "ACReefer_DirtyTalkBaled",
+      "ACReefer_DirtyUnbaled",
+      "Radiator_CleanCar",
+      "CuBkg_ACReeferEnd"
+    ];
+
+    /*********************************************************
+     * 2) Pricing Functions (unchanged from your original code)
+     *********************************************************/
+    function copperPrice(grade) {
+      switch(grade) {
+        case 'Barley': return 4.19 * 0.94;
+        case '#1': return 4.19 * 0.91;
+        case '#2': return 4.19 * 0.85;
+        case '#3': return 4.19 * 0.83;
+        default: return null;
+      }
+    }
+    function aluminumPrice(product) {
+      switch(product) {
+        case 'AL6061_NewBareExtrusion': return 1.25 * 0.84;
+        case 'AL6061_ClipPlatePipe': return 1.25 * 0.78;
+        case 'AL6063_Secondary': return 1.25 * 0.78;
+        case 'AL6063_OldExtrusion': return 1.25 * 0.95;
+        case 'AL6063_Extrusion10/10': return 1.25 * 0.85;
+        case 'AL_PAS_Baled': return 1.25 * 0.82;
+        case 'AL_Cast_Clean': return 1.25 * 0.72;
+        case 'AL_RADS_CleanBaled': return 1.25 * 0.67;
+        case 'AL_RADS_DirtyBaled': return 1.25 * 0.46;
+        case 'AL_Sheet_CleanBaled': return 1.25 * 0.75;
+        case 'AL_WheelAuto_Clean': return 1.25 * 0.93;
+        case 'AL_WheelChrome_Clean': return 1.25 * 0.80;
+        case 'TruckWheel_Clean': return 1.25 * 0.72;
+        case 'AL_Wire_BareCATV': return 1.25 * 0.43;
+        case 'AL_Wire_NeopreneACSR': return 1.25 * 0.54;
+        case 'AL_Wire_ECPrepared': return 1.25 * 1.03;
+        case 'AL_MLC_Prepared': return 1.25 * 0.84;
+        default: return null;
+      }
+    }
+    function brassPrice(product) {
+      switch(product) {
+        case 'Brass_Hard': return 4.19 * 0.81;
+        case 'Brass_Red_Ebony': return 4.19 * 0.77;
+        case 'Brass_Red_Semi': return 4.19 * 0.72;
+        case 'Brass_Shaving_AlBronze': return 4.19 * 0.57;
+        case 'Brass_Shaving_BrassRed': return 4.19 * 0.61;
+        case 'Brass_Shell': return 4.19 * 0.60;
+        case 'Brass_Special': return 4.19 * 0.64;
+        case 'Brass_YellowRegular': return 4.19 * 0.61;
+        default: return null;
+      }
+    }
+    function leadPrice(product) {
+      switch(product) {
+        case 'Lead_Clean': return (2034/2000) * 0.718;
+        case 'Lead_Range': return (2034/2000) * 0.728;
+        default: return null;
+      }
+    }
+    function stainlessPrice(product) {
+      switch(product) {
+        case 'SS304': return (15675/2000) * 0.0638;
+        case 'SS316': return (15675/2000) * 0.1174;
+        default: return null;
+      }
+    }
+    function eScrapPrice(product) {
+      // Placeholder
+      return 0.5;
+    }
+    function insulatedWirePrice(product) {
+      switch(product) {
+        case 'ICW_LowGrade_ChristmasLights': return 1.25 * 0.528;
+        case 'ICW_LowGrade_ComputerWire25': return 1.25 * 0.448;
+        case 'ICW_LowGrade_CuCATV': return 1.25 * 1.008;
+        case 'ICW_LowGrade_ExtCords35Up': return 1.25 * 0.92;
+        case 'ICW_LowGrade_MixedWire40Up': return 1.25 * 1.08;
+        case 'ICW1_Heliax57_OpenEyeBaled': return 1.25 * 1.536;
+        case 'ICW1_MCM85HG': return 1.25 * 2.536;
+        case 'ICW1_Romex65_NoWeatherProof': return 1.25 * 1.904;
+        case 'ICW1_THHN80': return 1.25 * 2.36;
+        case 'ICW2_50Cat5TelWire': return 1.25 * 1.384;
+        case 'ICW2_HarnessWireNoFuseBoxes': return 1.25 * 1.408;
+        case 'ICW2_BX_Cable_AL': return 1.25 * 1.648;
+        case 'ICW2_BX_Cable_FE24': return 1.25 * 0.6;
+        default: return null;
+      }
+    }
+    function miscProductPrice(product) {
+      switch(product) {
+        case 'Ballast_Electronic': return 1.25 * 0.12;
+        case 'Ballast_Regular': return 1.25 * 0.216;
+        case 'BatteryAuto_PbAcid': return 1.25 * 0.216;
+        case 'BatterySteelCase_Industrial': return 1.25 * 0.192;
+        case 'Compressor_SealedUnitNoCastIron': return 1.25 * 0.264;
+        case 'EMotorLowGrade_CeilingFanMotors': return 1.25 * 0.144;
+        case 'EMotorMix_NoPumpsPowerToolsFans': return 1.25 * 0.344;
+        case 'EMotorLarge_LessThan1000lbs': return 1.25 * 0.312;
+        case 'Transformer_AluLargeOnly': return 1.25 * 0.176;
+        case 'TransformerCu_AlCu': return 1.25 * 0.28;
+        case 'TransformerCu_SmallPalmSize': return 1.25 * 0.56;
+        case 'TransformerCu_MediumOver200lbs': return 1.25 * 0.592;
+        case 'TransformerCu_Large': return 1.25 * 0.624;
+        case 'Zinc_DieCast': return (2879/2000) * 0.5903;
+        default: return null;
+      }
+    }
+    function radiatorProductPrice(product) {
+      switch(product) {
+        case 'ACReefer_CleanTalkBaled': return 1.25 * 1.608;
+        case 'ACReefer_CleanUnbaled': return 1.25 * 1.592;
+        case 'ACReefer_DirtyTalkBaled': return 1.25 * 1.496;
+        case 'ACReefer_DirtyUnbaled': return 1.25 * 1.48;
+        case 'Radiator_CleanCar': return 1.25 * 1.984;
+        case 'CuBkg_ACReeferEnd': return 1.25 * 1.008;
+        default: return null;
+      }
+    }
+
+    /*********************************************************
+     * 3) scrapMaterialCodes Dictionary
+     *********************************************************/
+    const scrapMaterialCodes = {
+      copper: {
+        "CUB": "Barley (Cu BB)",
+        "CU1": "#1 (Berry & Candy)",
+        "CU2": "#2 (Birch & Cliff)",
+        "CU3": "#3 (Sheet Copper)"
+      },
+      aluminum: {
+        "AL61-NBE": "AL6061 New Bare Extrusion",
+        "AL61-CPP": "AL6061 Clip Plate Pipe",
+        "AL63-SEC": "AL6063 Secondary",
+        "AL63-OE": "AL6063 Old Extrusion",
+        "AL63-E10": "AL6063 Extrusion 10/10",
+        "AL-PAS": "AL PAS Baled",
+        "AL-C": "AL Cast Clean",
+        "AL-RS-CB": "AL RADS Clean Baled",
+        "AL-RS-DB": "AL RADS Dirty Baled",
+        "AL-ST": "AL Sheet Clean Baled",
+        "AL-AUTO": "AL Wheel Auto Clean",
+        "AL-WH-CH": "AL Wheel Chrome Clean",
+        "AL-TRUCKWH": "Truck Wheel Clean",
+        "AL-WIRE-CATV": "AL Wire Bare CATV",
+        "AL-WIRE-NEO": "AL Wire Neoprene ACSR",
+        "AL-WIRE-EC": "AL Wire EC Prepared",
+        "AL-MLC": "AL MLC Prepared"
+      },
+      brass: {
+        "BR-H": "Brass Hard",
+        "BR-R": "Brass Red Ebony",
+        "BR-RS": "Brass Red Semi",
+        "BR-SH-AL": "Brass Shaving Al Bronze",
+        "BR-SH-R": "Brass Shaving Brass Red",
+        "BR-SHELL": "Brass Shell",
+        "BR-SPEC": "Brass Special",
+        "BR-YLW": "Brass Yellow Regular"
+      },
+      lead: {
+        "PB-C": "Lead Clean",
+        "PB-R": "Lead Range"
+      },
+      stainless: {
+        "SS304": "Stainless Steel 304",
+        "SS316": "Stainless Steel 316"
+      },
+      eScrap: {
+        "ES-BOARD": "E-Scrap Board"
+      },
+      insulatedWire: {
+        "IWLG-XL": "ICW Low Grade Christmas Lights",
+        "IWLG-25-": "ICW Low Grade Computer Wire 25%",
+        "IWLG-CATV": "ICW Low Grade Cu CATV",
+        "IWLG-35-": "ICW Low Grade Ext Cords 35%+",
+        "IWLG-40-": "ICW Low Grade Mixed Wire 40%+",
+        "IW-HX": "ICW1 Heliax 57 Open Eye Baled",
+        "IW-MCM85": "ICW1 MCM 85HG",
+        "IW-R65": "ICW1 Romex 65 No Weatherproof",
+        "IW-THHN": "ICW1 THHN 80",
+        "IW-CAT5": "ICW2 50Cat5 Tel Wire",
+        "IW-HARN": "ICW2 Harness Wire No Fuse Boxes",
+        "IW-BX-AL": "ICW2 BX Cable AL",
+        "IW-BX-FE": "ICW2 BX Cable FE24"
+      },
+      miscellaneous: {
+        "BAL-E": "Ballast Electronic",
+        "BAL-R": "Ballast Regular",
+        "BAT-PB": "Battery Auto Pb Acid",
+        "BAT-ST": "Battery Steel Case Industrial",
+        "COMP": "Compressor Sealed Unit No Cast Iron",
+        "EM-LG": "E-Motor Low Grade Ceiling Fan Motors",
+        "EM-MIX": "E-Motor Mix No Pumps, Power Tools, Fans",
+        "EM-LG1000": "E-Motor Large Less Than 1000 lbs",
+        "TR-AL": "Transformer Alu Large Only",
+        "TR-CU-AL": "Transformer Cu AlCu",
+        "TR-CU-SM": "Transformer Cu Small Palm Size",
+        "TR-CU-MED": "Transformer Cu Medium Over 200 lbs",
+        "TR-CU-LG": "Transformer Cu Large",
+        "ZN-CAST": "Zinc Die Cast"
+      },
+      radiator: {
+        "AC-RADB": "AC Reefer Clean Talk Baled",
+        "AC-RADU": "AC Reefer Clean Unbaled",
+        "AC-RADDB": "AC Reefer Dirty Talk Baled",
+        "AC-RADDU": "AC Reefer Dirty Unbaled",
+        "AL-RADCC": "Radiator Clean Car",
+        "RAD-ENDS": "Cu Bkg AC Reefer End"
+      }
+    };
+
+    /*********************************************************
+     * 4) Spec Sheet–Generation Logic
+     *********************************************************/
+
+    // (a) categoriesConfig ties categories to arrays, pricing functions, and code dictionaries
+    const categoriesConfig = {
+      "Copper": {
+        materials: copperMaterials,
+        priceFunction: copperPrice,
+        codeDictionary: scrapMaterialCodes.copper
+      },
+      "Aluminum": {
+        materials: aluminumMaterials,
+        priceFunction: aluminumPrice,
+        codeDictionary: scrapMaterialCodes.aluminum
+      },
+      "Brass": {
+        materials: brassMaterials,
+        priceFunction: brassPrice,
+        codeDictionary: scrapMaterialCodes.brass
+      },
+      "Lead": {
+        materials: leadMaterials,
+        priceFunction: leadPrice,
+        codeDictionary: scrapMaterialCodes.lead
+      },
+      "Stainless": {
+        materials: stainlessMaterials,
+        priceFunction: stainlessPrice,
+        codeDictionary: scrapMaterialCodes.stainless
+      },
+      "E-Scrap": {
+        materials: eScrapMaterials,
+        priceFunction: eScrapPrice,
+        codeDictionary: scrapMaterialCodes.eScrap
+      },
+      "Insulated Wire": {
+        materials: insulatedWireMaterials,
+        priceFunction: insulatedWirePrice,
+        codeDictionary: scrapMaterialCodes.insulatedWire
+      },
+      "Misc Product": {
+        materials: miscProductMaterials,
+        priceFunction: miscProductPrice,
+        codeDictionary: scrapMaterialCodes.miscellaneous
+      },
+      "Radiator Product": {
+        materials: radiatorProductMaterials,
+        priceFunction: radiatorProductPrice,
+        codeDictionary: scrapMaterialCodes.radiator
+      }
+    };
+
+    // (b) Function to find a code inside codeDictionary by partial name
+    function findScrapCode(materialName, codeDict) {
+      const cleanName = materialName.toLowerCase().replace(/[\s_]+/g, "");
+      for (let code in codeDict) {
+        const dictValueClean = codeDict[code].toLowerCase().replace(/[\s_]+/g, "");
+        if (dictValueClean.includes(cleanName)) {
+          return code;
+        }
+      }
+      // fallback if no code found
+      return materialName.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+    }
+
+    // (c) Build HTML for a single material's spec sheet, using <details> for collapsible dropdown
+    function buildSpecSheetHtml(category, materialName, code, price) {
+      const displayPrice = (price && !isNaN(price)) ? price.toFixed(3) : "N/A";
+      return `
+        <details id="${materialName.replace(/\\s+/g, '_')}-futures-specs">
+          <summary>
+            <h2>${materialName} Futures - Contract Specifications</h2>
+          </summary>
+          <div class="spec-content">
+            <h3>Contract Details</h3>
+            <ul>
+              <li><strong>Contract Unit:</strong> 25,000 pounds</li>
+              <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound</li>
+              <li>
+                <strong>Trading Hours:</strong>
+                <ul>
+                  <li><em>CME Globex:</em> Sunday - Friday 6:00 p.m. - 5:00 p.m. (5:00 p.m. - 4:00 p.m. CT) with a 60-minute break each day beginning at 5:00 p.m. (4:00 p.m. CT)</li>
+                  <li><em>TAS:</em> Sunday - Friday 6:00 p.m. - 1:00 p.m. (5:00 p.m. - Noon CT)</li>
+                  <li><em>TAM:</em> Sunday - Friday 6:00 p.m. ET - 12:35 p.m. London time</li>
+                  <li><em>CME ClearPort:</em> Sunday 5:00 p.m. - Friday 4:00 p.m. CT with no reporting Monday - Thursday from 4:00 p.m. - 5:00 p.m. CT</li>
+                </ul>
+              </li>
+              <li><strong>Minimum Price Fluctuation:</strong> 0.0005 per pound = $12.50  
+                <br><em>(TAS/TAM: Zero or ±10 ticks in the minimum tick increment of the outright; Spot TAS: Zero)</em>
+              </li>
+              <li>
+                <strong>Product Code:</strong>
+                <ul>
+                  <li><em>CME Globex:</em> ${code}</li>
+                  <li><em>CME ClearPort:</em> ${code}Clearing</li>
+                  <li><em>TAS:</em> "HGT","HG0"</li>
+                  <li><em>TAM:</em> ${code.slice(0,2)}F</li>
+                </ul>
+              </li>
+            </ul>
+          
+            <h3>Listed Contracts</h3>
+            <ul>
+              <li>Monthly contracts listed for 24 consecutive months and any Mar, May, Jul, Sep, and Dec in the nearest 63 months.</li>
+            </ul>
+          
+            <h3>Settlement & Termination</h3>
+            <ul>
+              <li><strong>Settlement Method:</strong> Deliverable</li>
+              <li>
+                <strong>Termination of Trading:</strong>
+                <ul>
+                  <li>Trading terminates at 12:00 Noon CT on the third last business day of the contract month.</li>
+                  <li>TAM trading terminates at 12:35 p.m. London time on the third last business day of the month prior to the contract month.</li>
+                </ul>
+              </li>
+              <li>
+                <strong>TAS/TAM Rules:</strong> 
+                <br>Trading at Settlement (TAS) is subject to Rule 524.A. TAS trades off a "Base Price" of zero (equal to the daily settlement price) to create a differential versus the daily settlement price of the underlying futures contract month. The TAS clearing price equals the daily settlement price plus or minus the TAS transaction price.
+                <br>Trading at Marker (TAM) works similarly, using a marker price to create a differential.
+              </li>
+            </ul>
+          
+            <h3>Other Specifications</h3>
+            <ul>
+              <li><strong>Settlement Procedures:</strong> ${materialName} Futures Settlement Procedures</li>
+              <li><strong>Position Limits:</strong> COMEX Position Limits</li>
+              <li><strong>Exchange Rulebook:</strong> COMEX 111</li>
+              <li><strong>Block Minimum:</strong> Block Minimum Thresholds</li>
+              <li><strong>Price Limits or Circuit Breakers:</strong> Price Limits</li>
+              <li><strong>Vendor Codes:</strong> Quote Vendor Symbols Listing</li>
+              <li>
+                <strong>Delivery Period:</strong>
+                <br>Delivery may take place on any business day beginning on the first business day of the delivery month or any subsequent business day, but not later than the last business day of the current delivery month.
+              </li>
+              <li>
+                <strong>Grade and Quality:</strong>
+                <br>The contract grade for Grade 1 ${materialName} shall be according to standard industry specifications. Refer to relevant ASTM or exchange guidelines.
+              </li>
+            </ul>
+          </div>
+        </details>
+      `;
+    }
+
+    // (d) Main function: loop categories & materials, generate, insert
+    function generateAllSpecSheets() {
+      const container = document.getElementById("spec-sheets-container");
+      for (let categoryName in categoriesConfig) {
+        const { materials, priceFunction, codeDictionary } = categoriesConfig[categoryName];
+        materials.forEach(material => {
+          const price = priceFunction(material);
+          const code = findScrapCode(material, codeDictionary);
+          const specSheetHtml = buildSpecSheetHtml(categoryName, material, code, price);
+          container.insertAdjacentHTML("beforeend", specSheetHtml);
+        });
+      }
+    }
+
+    // 5) Generate on page load
+    window.onload = generateAllSpecSheets;
+  </script>
+</body>
+</html>
