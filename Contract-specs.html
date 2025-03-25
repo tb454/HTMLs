@@ -380,16 +380,28 @@
       return materialName.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
 
-    // (c) Build HTML for a single material's spec sheet
+    // (c) Build HTML for a single material's spec sheet (UPGRADED)
     function buildSpecSheetHtml(category, materialName, code, price) {
       const displayPrice = (price && !isNaN(price)) ? price.toFixed(3) : "N/A";
       return `
         <section style="border:1px solid #ddd; border-radius:8px; padding:16px; margin-bottom:16px;">
-          <h2 style="color:#2c3e50; margin-top:0;">${materialName}</h2>
-          <ul style="list-style-type:none; padding-left:0;">
+          <h2 style="color:#2c3e50;">${materialName} - Contract Specifications</h2>
+
+          <h3>Contract Details</h3>
+          <ul>
             <li><strong>Category:</strong> ${category}</li>
             <li><strong>Reference Code:</strong> ${code}</li>
-            <li><strong>Current Price (USD/lb):</strong> $${displayPrice}</li>
+            <li><strong>Contract Unit:</strong> 2,000 lbs (typical)</li>
+            <li><strong>Price Quotation:</strong> U.S. dollars per pound</li>
+            <li><strong>Current Price:</strong> $${displayPrice}</li>
+            <li><strong>Minimum Price Fluctuation:</strong> $0.0005 = $1.00</li>
+          </ul>
+
+          <h3>Settlement & Delivery</h3>
+          <ul>
+            <li><strong>Settlement Method:</strong> Cash or Physical</li>
+            <li><strong>Delivery Period:</strong> Within calendar month unless otherwise specified</li>
+            <li><strong>Grade & Quality:</strong> Standard industry specification for ${materialName}</li>
           </ul>
         </section>
       `;
@@ -416,3 +428,4 @@
   </script>
 </body>
 </html>
+
