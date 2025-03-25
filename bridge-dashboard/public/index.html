@@ -475,7 +475,7 @@
         groupRow.setAttribute('data-group', category);
         groupRow.classList.add('group-header');
         groupRow.onclick = () => toggleGroup(category);
-        groupRow.innerHTML = <td colspan="6">${category} <span style="float:right;">&#9660;</span></td>;
+        groupRow.innerHTML = `<td colspan="6">${category} <span style="float:right;">&#9660;</span></td>`;
         tableBody.appendChild(groupRow);
         
         // For each material, create a sub-row (initially hidden)
@@ -494,14 +494,14 @@
             subRow.classList.add('group-sub');
             subRow.style.display = 'none'; // Initially hidden
             subRow.onclick = (e) => { e.stopPropagation(); rowClicked(material); };
-            subRow.innerHTML = 
+            subRow.innerHTML = `
               <td>${material} (${category})</td>
               <td>${wip.toLocaleString()}</td>
               <td>${finished.toLocaleString()}</td>
               <td>${total.toLocaleString()}</td>
               <td>$${avgCost}</td>
               <td>$${Number(totalPurchaseValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            ;
+            `;
             tableBody.appendChild(subRow);
           }
         });
@@ -510,7 +510,7 @@
     
     // Toggle the display of sub-rows in a group
     function toggleGroup(category) {
-      const subRows = document.querySelectorAll(tr.group-sub[data-group='${category}']);
+      const subRows = document.querySelectorAll(`tr.group-sub[data-group='${category}']`);
       subRows.forEach(row => {
         row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
       });
@@ -582,7 +582,7 @@
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")", "").trim();
         // First, try to get updated price from the Market Snapshot element
-        const priceElem = document.getElementById(price-${category});
+        const priceElem = document.getElementById(`price-${category}`);
         if (priceElem) {
           let text = priceElem.textContent;
           let parts = text.split(':');
@@ -601,7 +601,7 @@
         }
       }
       // Try direct lookup from Market Snapshot element if available
-      const directElem = document.getElementById(price-${material});
+      const directElem = document.getElementById(`price-${material}`);
       if (directElem) {
         let text = directElem.textContent;
         let parts = text.split(':');
@@ -633,7 +633,7 @@
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
       const row = document.createElement('tr');
-      row.innerHTML = <td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>;
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
       tableBody.appendChild(row);
     }
     
@@ -647,7 +647,7 @@
       
       const row = document.createElement('tr');
       row.dataset.quantity = quantity;
-      row.innerHTML = 
+      row.innerHTML = `
         <td>${ticker}</td>
         <td>${material} (${expiration})</td>
         <td>$${salePrice.toFixed(2)}</td>
@@ -658,7 +658,7 @@
           <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
           <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
         </td>
-      ;
+      `;
       tableBody.appendChild(row);
       updateActiveContractsOverview();
     }
@@ -776,7 +776,7 @@
         let month = (expDate.getMonth() + 1).toString().padStart(2, '0');
         let day = expDate.getDate().toString().padStart(2, '0');
         let year = expDate.getFullYear();
-        const dateStr = ${month}/${day}/${year};
+        const dateStr = `${month}/${day}/${year}`;
         const option = document.createElement('option');
         option.value = dateStr;
         option.textContent = dateStr;
@@ -802,7 +802,7 @@
       reduceInventory(material, numTrades * 20000);
       updatePurchaseValues();
       
-      alert(${numTrades} simulated trade(s) for ${material} executed.);
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
     // ----------------------------
@@ -1434,7 +1434,7 @@
       if(document.getElementById('finishedGoodsInfo')){
         const contractsAvailable = Math.floor(sumFinished / 20000);
         const totalTons = sumTotal / 20000;
-        document.getElementById('finishedGoodsInfo').innerHTML = <div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
         if (finishedGoodsChart) {
           const now = new Date().toLocaleTimeString();
           finishedGoodsChartLabels.push(now);
@@ -1450,7 +1450,7 @@
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
       const row = document.createElement('tr');
-      row.innerHTML = <td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>;
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
       tableBody.appendChild(row);
     }
     
@@ -1469,7 +1469,7 @@
       reduceInventory(material, numTrades * 20000);
       updatePurchaseValues();
       
-      alert(${numTrades} simulated trade(s) for ${material} executed.);
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
     function logout() {
@@ -1538,7 +1538,7 @@ async function updateInventoryFromAPI() {
     const response = await fetch("http://localhost:8000/scrap-metal", {
       headers: {
         "Content-Type": "application/json",
-        "Authorization": token ? Bearer ${token} : ""
+        "Authorization": token ? `Bearer ${token}` : ""
       }
     });
     if (!response.ok) {
@@ -1551,13 +1551,13 @@ async function updateInventoryFromAPI() {
     tableBody.innerHTML = ""; // Remove existing rows
     liveData.forEach(item => {
       const row = document.createElement("tr");
-      row.innerHTML = 
+      row.innerHTML = `
         <td>${item.metal_type}</td>
         <td>${item.quantity.toLocaleString()}</td>
         <td>${item.quality}</td>
         <td>${item.location}</td>
         <td>$${item.price}</td>
-      ;
+      `;
       tableBody.appendChild(row);
     });
   } catch (error) {
@@ -1585,7 +1585,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (!isNaN(currentPrice)) {
             let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
             let newPrice = currentPrice + fluctuation;
-            elem.textContent = ${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })};
+            elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           }
         }
       });
@@ -1656,7 +1656,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Call your analytics endpoint on your backend
         const response = await fetch("http://localhost:8000/analytics");
         if (!response.ok) {
-          throw new Error(HTTP error! status: ${response.status});
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
         console.log("Analytics Data:", data);
@@ -1710,7 +1710,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function getAuthHeaders() {
     const token = localStorage.getItem("access_token");
     return token 
-      ? { "Content-Type": "application/json", "Authorization": Bearer ${token} }
+      ? { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
       : { "Content-Type": "application/json" };
   }
 
@@ -1807,17 +1807,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // 6. Fetch External Futures Data via GET /external/futures/{symbol}
   async function fetchExternalFutures(symbol) {
     try {
-      const response = await fetch(http://localhost:8000/external/futures/${symbol}, {
+      const response = await fetch(`http://localhost:8000/external/futures/${symbol}`, {
         headers: getAuthHeaders()
       });
       if (!response.ok) {
         throw new Error("Failed to fetch external futures data");
       }
       const data = await response.json();
-      console.log(External Futures Data for ${symbol}:, data);
+      console.log(`External Futures Data for ${symbol}:`, data);
       // Update external futures UI as needed.
     } catch (error) {
-      console.error(Error fetching external futures for ${symbol}:, error);
+      console.error(`Error fetching external futures for ${symbol}:`, error);
     }
   }
 
@@ -2069,7 +2069,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Save the token in localStorage
       localStorage.setItem("access_token", tokenData.access_token);
       // Optionally update UI to reflect the logged-in user
-      document.getElementById("current-user").innerText = User: ${username};
+      document.getElementById("current-user").innerText = `User: ${username}`;
       // Hide the modal
       const loginModalInstance = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
       loginModalInstance.hide();
