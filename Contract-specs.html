@@ -4,6 +4,30 @@
   <meta charset="UTF-8" />
   <title>Contract Specifications Sheets</title>
   <style>
+    /* Category index styles */
+    #category-index {
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: #eef;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    #category-index ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+    }
+    #category-index li {
+      margin-right: 15px;
+    }
+    #category-index a {
+      text-decoration: none;
+      font-weight: bold;
+      color: #2c3e50;
+    }
+    /* Spec sheet details */
     details {
       margin-bottom: 20px;
       border: 1px solid #ddd;
@@ -22,12 +46,21 @@
       color: #2c3e50;
       margin: 0;
     }
+    .category-header {
+      background-color: #ddd;
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 40px;
+    }
   </style>
 </head>
 <body>
   <h1>Commodity Spec Sheets</h1>
 
-  <!-- Container where the spec sheets will appear -->
+  <!-- Category Index will be injected here -->
+  <div id="category-index"></div>
+
+  <!-- Container where the grouped spec sheets will appear -->
   <div id="spec-sheets-container"></div>
 
   <script>
@@ -416,88 +449,19 @@
               <li>
                 <strong>Trading Hours:</strong>
                 <ul>
-                  <li><em> BRidge:</em> Sunday - Friday 6:00 p.m. - 3:00 p.m. (7:00 p.m. - 4:00 p.m. CT)  
-                  <li><em>CME Globex:</em> Sunday - Friday 6:00 p.m. - 5:00 p.m. (5:00 p.m. - 4:00 p.m. CT) with a 60-minute break each day beginning at 5:00 p.m. (4:00 p.m. CT)</li>
+                  <li><em>BRidge:</em> Sunday - Friday 6:00 p.m. - 3:00 p.m. (7:00 p.m. - 4:00 p.m. CT)</li>
+                  <li><em>CME Globex:</em> Sunday - Friday 6:00 p.m. - 5:00 p.m. (5:00 p.m. - 4:00 p.m. CT) with a 60-minute break beginning at 5:00 p.m.</li>
                   <li><em>TAS:</em> Sunday - Friday 6:00 p.m. - 1:00 p.m. (5:00 p.m. - Noon CT)</li>
                   <li><em>TAM:</em> Sunday - Friday 6:00 p.m. ET - 12:35 p.m. London time</li>
-                  <li><em>CME ClearPort:</em> Sunday 5:00 p.m. - Friday 4:00 p.m. CT with no reporting Monday - Thursday from 4:00 p.m. - 5:00 p.m. CT</li>
+                  <li><em>CME ClearPort:</em> Sunday 5:00 p.m. - Friday 4:00 p.m. CT (no reporting Monday-Thursday from 4:00 p.m. to 5:00 p.m. CT)</li>
                 </ul>
               </li>
               <li><strong>Minimum Price Fluctuation:</strong> 0.0005 per pound = $10.0  
-                <br><em>(TAS/TAM: Zero or ±10 ticks in the minimum tick increment of the outright; Spot TAS: Zero)</em>
+                <br><em>(TAS/TAM: Zero or ±10 ticks in the minimum tick increment; Spot TAS: Zero)</em>
               </li>
               <li>
                 <strong>Product Code:</strong>
                 <ul>
-                  <li><em> BRidge:</em> ${code}</li>
+                  <li><em>BRidge:</em> ${code}</li>
                   <li><em>CME Globex:</em> ${code}</li>
-                  <li><em>CME ClearPort:</em> ${code}Clearing</li>
-                  <li><em>TAS:</em> "HGT","HG0"</li>
-                  <li><em>TAM:</em> ${code.slice(0,2)}F</li>
-                </ul>
-              </li>
-            </ul>
-          
-            <h3>Listed Contracts</h3>
-            <ul>
-              <li>Monthly contracts listed for 56 consecutive months.</li>
-            </ul>
-          
-            <h3>Settlement & Termination</h3>
-            <ul>
-              <li><strong>Settlement Method:</strong>Physically Delivered in 15 Days or Cash Settled at Closing</li>
-              <li>
-                <strong>Termination of Trading:</strong>
-                <ul>
-                  <li>Trading terminates at 12:00 Noon CT on the third last business day of the contract month.</li>
-                  <li>TAM trading terminates at 12:35 p.m. London time on the third last business day of the month prior to the contract month.</li>
-                </ul>
-              </li>
-              <li>
-                <strong>TAS/TAM Rules:</strong> 
-                <br>Trading at Settlement (TAS) is subject to Rule 524.A. TAS trades off a "Base Price" of zero (equal to the daily settlement price) to create a differential versus the daily settlement price of the underlying futures contract month. The TAS clearing price equals the daily settlement price plus or minus the TAS transaction price.
-                <br>Trading at Marker (TAM) works similarly, using a marker price to create a differential.
-              </li>
-            </ul>
-          
-            <h3>Other Specifications</h3>
-            <ul>
-              <li><strong>Settlement Procedures:</strong> ${materialName} Futures Settlement Procedures</li>
-              <li><strong>Position Limits:</strong> COMEX Position Limits</li>
-              <li><strong>Exchange Rulebook:</strong> COMEX 111</li>
-              <li><strong>Block Minimum:</strong> Block Minimum Thresholds</li>
-              <li><strong>Price Limits or Circuit Breakers:</strong> Price Limits</li>
-              <li><strong>Vendor Codes:</strong> Quote Vendor Symbols Listing</li>
-              <li>
-                <strong>Delivery Period:</strong>
-                <br>Delivery may take place on any business day beginning on the first business day of the delivery month or any subsequent business day, but not later than the last business day of the current delivery month.
-              </li>
-              <li>
-                <strong>Grade and Quality:</strong>
-                <br>The contract grade for Grade 1 ${materialName} shall be according to standard industry specifications. Refer to relevant ASTM or exchange guidelines.
-              </li>
-            </ul>
-          </div>
-        </details>
-      `;
-    }
-
-    // (d) Main function: loop categories & materials, generate, insert
-    function generateAllSpecSheets() {
-      const container = document.getElementById("spec-sheets-container");
-      for (let categoryName in categoriesConfig) {
-        const { materials, priceFunction, codeDictionary } = categoriesConfig[categoryName];
-        materials.forEach(material => {
-          const price = priceFunction(material);
-          const code = findScrapCode(material, codeDictionary);
-          const specSheetHtml = buildSpecSheetHtml(categoryName, material, code, price);
-          container.insertAdjacentHTML("beforeend", specSheetHtml);
-        });
-      }
-    }
-
-    // 5) Generate on page load
-    window.onload = generateAllSpecSheets;
-  </script>
-</body>
-</html>
+                  <li
