@@ -584,6 +584,197 @@ def admin_health(db: Session = Depends(get_db), current_user: User = Depends(get
 def custom_http_exception_handler(request: Request, exc: HTTPException):
     logger.error(f"HTTPException: {exc.detail}")
     return {"error": exc.detail}
+import requests
+
+def fetch_alpha_vantage_data(symbol: str) -> dict:
+    # Ensure you've set your API key in your settings or .env file
+    api_key = settings.alpha_vantage_api_key  # e.g., "YOUR_ALPHA_VANTAGE_API_KEY"
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "TIME_SERIES_DAILY",  # Adjust function based on your needs
+        "symbol": symbol,
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch data from Alpha Vantage")
+    return response.json()
+
+@app.get("/external/futures/alphavantage/{symbol}")
+def get_alpha_vantage_futures(symbol: str):
+    try:
+        data = fetch_alpha_vantage_data(symbol)
+        # Optionally transform data here to match your schema
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_weekly_data(symbol: str) -> dict:
+    api_key = settings.alpha_vantage_api_key  # Your API key from the .env file
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "TIME_SERIES_WEEKLY",
+        "symbol": symbol,
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch weekly data from Alpha Vantage")
+    return response.json()
+@app.get("/external/futures/alphavantage/weekly/{symbol}")
+def get_weekly_data(symbol: str):
+    try:
+        data = fetch_weekly_data(symbol)
+        # Optionally transform the data to match your needs
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_monthly_data(symbol: str) -> dict:
+    api_key = settings.alpha_vantage_api_key  # Your API key from your .env file
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "TIME_SERIES_MONTHLY",
+        "symbol": symbol,
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch monthly data from Alpha Vantage")
+    return response.json()
+@app.get("/external/futures/alphavantage/monthly/{symbol}")
+def get_monthly_data(symbol: str):
+    try:
+        data = fetch_monthly_data(symbol)
+        # Optionally, transform the data to match your internal schema if needed
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_historical_options_data(symbol: str) -> dict:
+    api_key = settings.alpha_vantage_api_key  # This pulls your API key from .env via your Settings class
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "HISTORICAL_OPTIONS",  # The function for historical options data
+        "symbol": symbol,
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch historical options data from Alpha Vantage")
+    return response.json()
+@app.get("/external/options/historical/{symbol}")
+def get_historical_options(symbol: str):
+    try:
+        data = fetch_historical_options_data(symbol)
+        # Optionally, transform the data to match your schema
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_news_sentiment_data(tickers: str) -> dict:
+    api_key = settings.alpha_vantage_api_key  # Your API key from .env via Settings
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "NEWS_SENTIMENT",
+        "tickers": tickers,  # Pass a comma-separated list if needed
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch news sentiment data from Alpha Vantage")
+    return response.json()
+@app.get("/external/news-sentiment/{tickers}")
+def get_news_sentiment(tickers: str):
+    try:
+        data = fetch_news_sentiment_data(tickers)
+        # Optionally, transform or filter the data here if needed
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_advanced_analytics(symbols: str, start_date: str, end_date: str, 
+                             interval: str = "DAILY", ohlc: str = "close", 
+                             calculations: str = "MEAN,STDDEV,CORRELATION") -> dict:
+    api_key = settings.alpha_vantage_api_key  # Your API key from .env via Settings
+    base_url = "https://alphavantageapi.co/timeseries/analytics"
+    params = {
+        "SYMBOLS": symbols,  # e.g., "AAPL,MSFT,IBM"
+        "RANGE": [start_date, end_date],  # Pass both dates as a list
+        "INTERVAL": interval,
+        "OHLC": ohlc,
+        "CALCULATIONS": calculations,
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch advanced analytics data from Alpha Vantage")
+    return response.json()
+@app.get("/external/analytics/advanced")
+def get_advanced_analytics(symbols: str, start_date: str, end_date: str, 
+                           interval: str = "DAILY", ohlc: str = "close", 
+                           calculations: str = "MEAN,STDDEV,CORRELATION"):
+    try:
+        data = fetch_advanced_analytics(symbols, start_date, end_date, interval, ohlc, calculations)
+        # Optionally, transform data here to match your internal schema
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_global_copper_price() -> dict:
+    api_key = settings.alpha_vantage_api_key  # Your API key from .env via Settings
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "COPPER",      # Function to get global copper price
+        "interval": "monthly",     # Using monthly interval
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch global copper price from Alpha Vantage")
+    return response.json()
+@app.get("/external/copper/global")
+def get_global_copper_price():
+    try:
+        data = fetch_global_copper_price()
+        # Optionally, transform the data to fit your schema if needed.
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_global_aluminum_price() -> dict:
+    api_key = settings.alpha_vantage_api_key  # This value is loaded from your .env via Settings
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "ALUMINUM",   # Requesting global aluminum data
+        "interval": "monthly",    # Monthly interval data
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch global aluminum price from Alpha Vantage")
+    return response.json()
+@app.get("/external/aluminum/global")
+def get_global_aluminum_price():
+    try:
+        data = fetch_global_aluminum_price()
+        # Optionally, transform data here to fit your internal schema if needed.
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def fetch_all_commodities_data() -> dict:
+    api_key = settings.alpha_vantage_api_key  # Loaded from your .env via your Settings class
+    base_url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "ALL_COMMODITIES",  # Request all commodities data
+        "interval": "monthly",          # Monthly data aggregation
+        "apikey": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch global commodities data from Alpha Vantage")
+    return response.json()
+@app.get("/external/commodities/global")
+def get_global_commodities_data():
+    try:
+        data = fetch_all_commodities_data()
+        # Optionally, transform data to match your schema here
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --------------------------
 # Run the Application
