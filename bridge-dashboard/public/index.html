@@ -1998,7 +1998,16 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchOrderMatches();
     fetchRiskReport();
     fetchAdminHealth();
-  });
+    setInterval(() => {
+    fetchAnalytics();
+    fetchScrapMetals();
+    fetchFutures();
+    fetchOrders();
+    fetchOrderMatches();
+    fetchRiskReport();
+    fetchAdminHealth();
+  }, 30000); // 30,000 milliseconds = 30 seconds
+});
 </script>
 <!-- Login Modal (using Bootstrap) -->
 <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
