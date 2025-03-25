@@ -3,7 +3,7 @@
     
     <h3>Contract Details</h3>
     <ul>
-      <li><strong>Contract Unit:</strong> 20,000 pounds</li>
+      <li><strong>Contract Unit:</strong> 25,000 pounds</li>
       <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound</li>
       <li>
         <strong>Trading Hours:</strong>
@@ -68,58 +68,4 @@
       </li>
     </ul>
   </section>
-  <!-- Add this container somewhere in your HTML where you want the specs to appear -->
-
-<script>
-  // Function to generate a contract spec section for a commodity category
-  function generateContractSpec(category, materials, pricingFunc) {
-    let specHtml = `<section class="contract-spec" style="margin-bottom:20px; padding:15px; border:1px solid #ccc; border-radius:8px;">
-      <h3 style="color:#2c3e50;">${category} Futures - Contract Specifications</h3>
-      <ul>
-        <li><strong>Contract Unit:</strong> 25,000 pounds</li>
-        <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound</li>
-        <li><strong>Trading Hours:</strong> (example details)</li>
-        <li><strong>Minimum Price Fluctuation:</strong> 0.0005 per pound = $12.50</li>
-        <!-- Add other static specs as needed -->
-      </ul>
-      <h4>Materials & Computed Prices</h4>
-      <table style="width:100%; border-collapse: collapse;">
-        <thead>
-          <tr>
-            <th style="border: 1px solid #ddd; padding: 8px;">Material</th>
-            <th style="border: 1px solid #ddd; padding: 8px;">Computed Price</th>
-          </tr>
-        </thead>
-        <tbody>`;
-    materials.forEach(material => {
-      let computed = pricingFunc(material);
-      specHtml += `<tr>
-        <td style="border: 1px solid #ddd; padding: 8px;">${material}</td>
-        <td style="border: 1px solid #ddd; padding: 8px;">${computed ? computed.toFixed(2) : "N/A"}</td>
-      </tr>`;
-    });
-    specHtml += `</tbody>
-      </table>
-    </section>`;
-    return specHtml;
-  }
-</script>
-<div id="contract-specs-container"></div>
-  // When the document is ready, generate specs for each commodity
-  document.addEventListener("DOMContentLoaded", function() {
-    // Make sure you have a container to place the generated specs
-    const container = document.getElementById("contract-specs-container");
-    
-    // Generate and append specs for each category
-    container.innerHTML += generateContractSpec("Copper", copperMaterials, copperPrice);
-    container.innerHTML += generateContractSpec("Aluminum", aluminumMaterials, aluminumPrice);
-    container.innerHTML += generateContractSpec("Brass", brassMaterials, brassPrice);
-    container.innerHTML += generateContractSpec("Lead", leadMaterials, leadPrice);
-    container.innerHTML += generateContractSpec("Stainless", stainlessMaterials, stainlessPrice);
-    container.innerHTML += generateContractSpec("E-Scrap", eScrapMaterials, eScrapPrice);
-    container.innerHTML += generateContractSpec("Insulated Wire", insulatedWireMaterials, insulatedWirePrice);
-    container.innerHTML += generateContractSpec("Misc Product", miscProductMaterials, miscProductPrice);
-    container.innerHTML += generateContractSpec("Radiator Product", radiatorProductMaterials, radiatorProductPrice);
-  });
-</script>
-<div id="contract-specs-container"></div>
+  
