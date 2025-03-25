@@ -637,7 +637,6 @@
       tableBody.appendChild(row);
     }
     
-    // Updated addActiveContract with data attributes for future updates
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const ticker = getTickerFromReference(material);
@@ -647,11 +646,7 @@
       const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
       
       const row = document.createElement('tr');
-      // Store original data for recalculating changes
       row.dataset.quantity = quantity;
-      row.dataset.salePrice = salePrice;
-      row.dataset.material = material;
-      
       row.innerHTML = `
         <td>${ticker}</td>
         <td>${material} (${expiration})</td>
@@ -665,23 +660,6 @@
         </td>
       `;
       tableBody.appendChild(row);
-      updateActiveContractsOverview();
-    }
-    
-    // New function to update the change column based on current market prices
-    function updateActiveContractsChange() {
-      const rows = document.querySelectorAll("#active-contracts-table tbody tr");
-      rows.forEach(row => {
-        // Retrieve stored salePrice, quantity, and material
-        const salePrice = parseFloat(row.dataset.salePrice);
-        const quantity = parseInt(row.dataset.quantity, 10);
-        const material = row.dataset.material;
-        if (!isNaN(salePrice) && !isNaN(quantity) && material) {
-          const currentMarketPrice = getBasePrice(material);
-          const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
-          row.cells[3].textContent = "$" + changeValue.toFixed(2);
-        }
-      });
       updateActiveContractsOverview();
     }
     
@@ -1031,6 +1009,8 @@
           <div id="price-Carbide">Carbide: $20,000.00</div>
           <div id="price-StainlessSteel">Stainless Steel: $1,600.00</div>
         </div>
+      </div>
+</section>
       </div>
     </section>
     
@@ -1609,8 +1589,6 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
       });
-      // Update the active contracts change column after pricing changes
-      updateActiveContractsChange();
     }
     
     // New function to update Metals Market Overview table
@@ -1635,35 +1613,431 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   </script>
   
-  <!-- Login Modal (using Bootstrap) -->
-  <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <form id="login-form">
-          <div class="modal-header">
-            <h5 class="modal-title" id="loginModalLabel">Login</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
+  <script>
+    function normalizeString(str) {
+      return str.toLowerCase().replace(/[\s_]+/g, "");
+    }
+    function getTickerFromReference(material) {
+      let baseMaterial = material;
+      let category = null;
+      if (material.indexOf('(') !== -1) {
+        baseMaterial = material.split(" (")[0].trim();
+        category = material.split(" (")[1].replace(")", "").trim();
+      }
+      
+      if (category && scrapMaterialCodes[category.toLowerCase()]) {
+        for (const code in scrapMaterialCodes[category.toLowerCase()]) {
+          if (normalizeString(scrapMaterialCodes[category.toLowerCase()][code]).includes(normalizeString(baseMaterial))) {
+            return code;
+          }
+        }
+      }
+      
+      for (let cat in computedCategoriesMapping) {
+        if (computedCategoriesMapping[cat].materials.includes(baseMaterial)) {
+          let catLower = cat.toLowerCase();
+          if (scrapMaterialCodes[catLower]) {
+            for (const code in scrapMaterialCodes[catLower]) {
+              if (normalizeString(scrapMaterialCodes[catLower][code]).includes(normalizeString(baseMaterial))) {
+                return code;
+              }
+            }
+          }
+        }
+      }
+      
+      return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
+    }
+  </script>
+  <script>
+    async function fetchAnalytics() {
+      try {
+        // Call your analytics endpoint on your backend
+        const response = await fetch("http://localhost:8000/analytics");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log("Analytics Data:", data);
+        // Update a specific element to display this data
+        // For example, if you have a div with id "analyticsDisplay":
+        document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+      } catch (error) {
+        console.error("Error fetching analytics:", error);
+        document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+      }
+    }
+  
+    // Call fetchAnalytics when the DOM is fully loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      fetchAnalytics();
+    });
+  </script>
+ <script>
+  // Establish a WebSocket connection to the FastAPI backend.
+  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+
+  socket.onopen = function() {
+    console.log("WebSocket connection established.");
+    // Optionally send an initial message.
+    socket.send("Hello from Bridge!");
+  };
+
+  socket.onmessage = function(event) {
+    // Parse and handle incoming WebSocket messages.
+    try {
+      const message = JSON.parse(event.data);
+      console.log("WebSocket message received:", message);
+      // Update an element on your dashboard with this real-time data.
+      document.getElementById("realtimeData").innerText = JSON.stringify(message, null, 2);
+    } catch (e) {
+      console.error("Error parsing WebSocket message:", e);
+    }
+  };
+
+  socket.onerror = function(error) {
+    console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = function(event) {
+    console.log("WebSocket connection closed:", event);
+    // Optionally implement reconnection logic here.
+  };
+</script>
+<script>
+  // Helper function to set up headers for authenticated requests
+  function getAuthHeaders() {
+    const token = localStorage.getItem("access_token");
+    return token 
+      ? { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
+      : { "Content-Type": "application/json" };
+  }
+
+  // 1. Fetch Analytics Data from GET /analytics
+  async function fetchAnalytics() {
+    try {
+      const response = await fetch("http://localhost:8000/analytics", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch analytics");
+      }
+      const data = await response.json();
+      console.log("Analytics Data:", data);
+      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+    }
+  }
+
+  // 2. Create a new Scrap Metal record via POST /scrap-metal
+  async function createScrapMetal(newMetalData) {
+    try {
+      const response = await fetch("http://localhost:8000/scrap-metal", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newMetalData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to create scrap metal record");
+      }
+      const data = await response.json();
+      console.log("Created Scrap Metal:", data);
+      // Optionally refresh your inventory table here.
+    } catch (error) {
+      console.error("Error creating scrap metal record:", error);
+    }
+  }
+
+  // 3. Fetch all Scrap Metal records from GET /scrap-metal
+  async function fetchScrapMetals() {
+    try {
+      const response = await fetch("http://localhost:8000/scrap-metal", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch scrap metal records");
+      }
+      const data = await response.json();
+      console.log("Scrap Metal Records:", data);
+      // Update your inventory table using data from the API.
+    } catch (error) {
+      console.error("Error fetching scrap metals:", error);
+    }
+  }
+
+  // 4. Fetch Futures Data from GET /futures
+  async function fetchFutures() {
+    try {
+      const response = await fetch("http://localhost:8000/futures", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch futures data");
+      }
+      const data = await response.json();
+      console.log("Futures Data:", data);
+      // Update futures chart or UI here.
+    } catch (error) {
+      console.error("Error fetching futures:", error);
+    }
+  }
+
+  // 5. Update or Create Futures Data via POST /futures
+  async function updateOrCreateFutures(newFuturesData) {
+    try {
+      const response = await fetch("http://localhost:8000/futures", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newFuturesData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to update or create futures data");
+      }
+      const data = await response.json();
+      console.log("Updated/Created Futures Data:", data);
+      // Optionally update your UI.
+    } catch (error) {
+      console.error("Error updating/creating futures:", error);
+    }
+  }
+
+  // 6. Fetch External Futures Data via GET /external/futures/{symbol}
+  async function fetchExternalFutures(symbol) {
+    try {
+      const response = await fetch(`http://localhost:8000/external/futures/${symbol}`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch external futures data");
+      }
+      const data = await response.json();
+      console.log(`External Futures Data for ${symbol}:`, data);
+      // Update external futures UI as needed.
+    } catch (error) {
+      console.error(`Error fetching external futures for ${symbol}:`, error);
+    }
+  }
+
+  // 7. Fetch Orders from GET /orders
+  async function fetchOrders() {
+    try {
+      const response = await fetch("http://localhost:8000/orders", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch orders");
+      }
+      const data = await response.json();
+      console.log("Orders:", data);
+      // Update your orders table UI.
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+    }
+  }
+
+  // 8. Create a new Order via POST /orders
+  async function createOrder(newOrderData) {
+    try {
+      const response = await fetch("http://localhost:8000/orders", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newOrderData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to create order");
+      }
+      const data = await response.json();
+      console.log("Created Order:", data);
+      // Update your orders UI.
+    } catch (error) {
+      console.error("Error creating order:", error);
+    }
+  }
+
+  // 9. Fetch Order Matches from GET /order-matches
+  async function fetchOrderMatches() {
+    try {
+      const response = await fetch("http://localhost:8000/order-matches", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch order matches");
+      }
+      const data = await response.json();
+      console.log("Order Matches:", data);
+      // Update order matches UI.
+    } catch (error) {
+      console.error("Error fetching order matches:", error);
+    }
+  }
+
+  // 10. Fetch Risk Report from GET /risk-report
+  async function fetchRiskReport() {
+    try {
+      const response = await fetch("http://localhost:8000/risk-report", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch risk report");
+      }
+      const data = await response.json();
+      console.log("Risk Report:", data);
+      // Update risk report UI.
+    } catch (error) {
+      console.error("Error fetching risk report:", error);
+    }
+  }
+
+  // 11. Fetch Analytics Data from GET /analytics
+  async function fetchAnalytics() {
+    try {
+      const response = await fetch("http://localhost:8000/analytics", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch analytics");
+      }
+      const data = await response.json();
+      console.log("Analytics Data:", data);
+      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
+    }
+  }
+
+  // 12. Predict Price via POST /predict-price
+  async function predictPrice(scrapMetalData) {
+    try {
+      const response = await fetch("http://localhost:8000/predict-price", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(scrapMetalData)
+      });
+      if (!response.ok) {
+        throw new Error("Failed to predict price");
+      }
+      const data = await response.json();
+      console.log("Predicted Price:", data);
+      // Update your UI with the predicted price.
+    } catch (error) {
+      console.error("Error predicting price:", error);
+    }
+  }
+
+  // 13. Trigger Futures Update via POST /update-futures
+  async function triggerFuturesUpdate() {
+    try {
+      const response = await fetch("http://localhost:8000/update-futures", {
+        method: "POST",
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to trigger futures update");
+      }
+      const data = await response.json();
+      console.log("Futures Update Response:", data);
+      // Optionally update your UI to reflect the update.
+    } catch (error) {
+      console.error("Error triggering futures update:", error);
+    }
+  }
+
+  // 14. Fetch Admin Health via GET /admin/health
+  async function fetchAdminHealth() {
+    try {
+      const response = await fetch("http://localhost:8000/admin/health", {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch admin health");
+      }
+      const data = await response.json();
+      console.log("Admin Health:", data);
+      // Update UI with health metrics.
+    } catch (error) {
+      console.error("Error fetching admin health:", error);
+    }
+  }
+
+  // 15. WebSocket Connection for Real-Time Futures Updates
+  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+
+  socket.onopen = function() {
+    console.log("WebSocket connection established.");
+    socket.send("Hello from Dashboard!");
+  };
+
+  socket.onmessage = function(event) {
+    try {
+      const message = JSON.parse(event.data);
+      console.log("WebSocket message received:", message);
+      document.getElementById("realtimeData").innerText = JSON.stringify(message, null, 2);
+    } catch (e) {
+      console.error("Error parsing WebSocket message:", e);
+    }
+  };
+
+  socket.onerror = function(error) {
+    console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = function(event) {
+    console.log("WebSocket connection closed:", event);
+  };
+
+  // Example: Automatically call some functions on page load
+  document.addEventListener("DOMContentLoaded", () => {
+    fetchAnalytics();
+    fetchScrapMetals();
+    fetchFutures();
+    fetchOrders();
+    fetchOrderMatches();
+    fetchRiskReport();
+    fetchAdminHealth();
+    setInterval(() => {
+    fetchAnalytics();
+    fetchScrapMetals();
+    fetchFutures();
+    fetchOrders();
+    fetchOrderMatches();
+    fetchRiskReport();
+    fetchAdminHealth();
+  }, 30000); // 30,000 milliseconds = 30 seconds
+});
+</script>
+<!-- Login Modal (using Bootstrap) -->
+<div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="login-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="loginModalLabel">Login</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="username" class="form-label">Username:</label>
+            <input type="text" id="username" name="username" class="form-control" required>
           </div>
-          <div class="modal-body">
-            <div class="mb-3">
-              <label for="username" class="form-label">Username:</label>
-              <input type="text" id="username" name="username" class="form-control" required>
-            </div>
-            <div class="mb-3">
-              <label for="password" class="form-label">Password:</label>
-              <input type="password" id="password" name="password" class="form-control" required>
-            </div>
-            <div id="login-error" style="color: red;"></div>
+          <div class="mb-3">
+            <label for="password" class="form-label">Password:</label>
+            <input type="password" id="password" name="password" class="form-control" required>
           </div>
-          <div class="modal-footer">
-            <button type="submit" class="action-btn">Login</button>
-            <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
-          </div>
-        </form>
-      </div>
+          <div id="login-error" style="color: red;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="action-btn">Login</button>
+          <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </form>
     </div>
   </div>
-  <!-- In your <head> -->
+</div>
+<!-- In your <head> -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </script>
