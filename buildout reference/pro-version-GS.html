@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -689,28 +689,6 @@
     let kpiChartLabels = [];
     let kpiChartData = [];
   
-    // Initialize Trading Graph using Chart.js (if chart exists)
-    const ctx = document.getElementById('tradingChart') ? document.getElementById('tradingChart').getContext('2d') : null;
-    if(ctx){
-      const tradingChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'],
-          datasets: [{
-            label: 'Trading Data',
-            data: [100, 150, 130, 170, 160, 180],
-            borderColor: accentColor,
-            backgroundColor: 'rgba(52,152,219,0.2)',
-            fill: true,
-            tension: 0.1
-          }]
-        },
-        options: {
-          scales: { y: { beginAtZero: true } }
-        }
-      });
-    }
-    
     // Initialize Active Contracts, Finished Goods, and KPI Charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
       const activeContractsCanvas = document.getElementById('activeContractsChart');
@@ -741,7 +719,6 @@
         });
       }
       
-      // Initialize Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
       if(finishedCanvas){
         const ctxFinished = finishedCanvas.getContext('2d');
@@ -766,7 +743,6 @@
         });
       }
       
-      // Initialize KPI Chart with simulated data
       const kpiCanvas = document.getElementById('kpiChart');
       if(kpiCanvas){
         const ctxKPI = kpiCanvas.getContext('2d');
@@ -819,7 +795,6 @@
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
-      // Update Finished Goods Card Info and Chart
       if(document.getElementById('finishedGoodsInfo')){
         let contractsAvailable = Math.floor(sumFinished / 20000);
         let totalTons = sumTotal / 20000;
@@ -832,13 +807,10 @@
           const now = new Date().toLocaleTimeString();
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
-          
-          // Limit history to last 10 data points
           if (finishedGoodsChartData.length > 10) {
             finishedGoodsChartLabels.shift();
             finishedGoodsChartData.shift();
           }
-          
           finishedGoodsChart.update();
         }
       }
@@ -988,6 +960,7 @@
       tableBody.appendChild(newRow);
     }
     
+    // Active Contracts functions as per your working example
     function addActiveContract(commodity, expiration, salePrice) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const snapshotPrice = marketSnapshotPrices[commodity] || 0;
@@ -1361,7 +1334,6 @@
     }
     
     function startGuidedTour() {
-      // For simplicity, we simulate a guided tour. In production, integrate a library like Intro.js.
       alert('Starting guided tour... (This is a simulation. In a full implementation, interactive tooltips would guide you through the dashboard.)');
     }
   </script>

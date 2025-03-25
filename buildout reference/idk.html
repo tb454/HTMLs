@@ -637,6 +637,7 @@
       tableBody.appendChild(row);
     }
     
+    // Updated addActiveContract with data attributes for future updates
     function addActiveContract(material, expiration, salePrice, quantity) {
       const tableBody = document.getElementById('active-contracts-table').querySelector('tbody');
       const ticker = getTickerFromReference(material);
@@ -646,7 +647,11 @@
       const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
       
       const row = document.createElement('tr');
+      // Store original data for recalculating changes
       row.dataset.quantity = quantity;
+      row.dataset.salePrice = salePrice;
+      row.dataset.material = material;
+      
       row.innerHTML = `
         <td>${ticker}</td>
         <td>${material} (${expiration})</td>
@@ -660,6 +665,23 @@
         </td>
       `;
       tableBody.appendChild(row);
+      updateActiveContractsOverview();
+    }
+    
+    // New function to update the change column based on current market prices
+    function updateActiveContractsChange() {
+      const rows = document.querySelectorAll("#active-contracts-table tbody tr");
+      rows.forEach(row => {
+        // Retrieve stored salePrice, quantity, and material
+        const salePrice = parseFloat(row.dataset.salePrice);
+        const quantity = parseInt(row.dataset.quantity, 10);
+        const material = row.dataset.material;
+        if (!isNaN(salePrice) && !isNaN(quantity) && material) {
+          const currentMarketPrice = getBasePrice(material);
+          const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
+          row.cells[3].textContent = "$" + changeValue.toFixed(2);
+        }
+      });
       updateActiveContractsOverview();
     }
     
@@ -785,40 +807,24 @@
     }
     
     // ----------------------------
-    // Simulated Trade Execution - Modified for Real API Call
+    // Simulated Trade Execution
     // ----------------------------
-    async function simulateTrade() {
+    function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      const tradeData = {
-        material,
-        quantity: numTrades * 10,  // Assuming 10-ton loads
-        tradePrice,
-        expiration
-      };
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
       
-      try {
-        const response = await fetch('/api/trades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tradeData)
-        });
-        const result = await response.json();
-        if (result.success) {
-          alert(`${numTrades} trade(s) for ${material} executed successfully.`);
-          // Refresh inventory and trade log as needed
-          updateInventory();
-          appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
-        } else {
-          alert('Trade execution failed: ' + result.message);
-        }
-      } catch (error) {
-        console.error('Error executing trade:', error);
-        alert('Error executing trade');
-      }
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
     // ----------------------------
@@ -847,6 +853,7 @@
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
     });
   </script>
   
@@ -983,13 +990,16 @@
     <header class="header">
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
-        <span>User: John Doe</span>
+        <span id="current-user">User: Guest</span>
+        <button onclick="showLoginModal()">Login</button>
         <button onclick="logout()">Logout</button>
-        <button onclick="startGuidedTour()">Greenspark</button>
-        <button onclick="showArchOverview()">ThinkorSwim</button>
+        <button onclick="window.location.href='https://www.greensparksoftware.com/'">Greenspark</button>
+        <button onclick="window.location.href='https://trade.thinkorswim.com/'">ThinkorSwim</button>
+        <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Contract-specs.html'">Contract Specs</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
+    
     
     <!-- Overview Cards -->
     <section class="section">
@@ -1010,6 +1020,7 @@
         <div class="card-custom" onclick="cardClicked('Market Snapshot')">
           <div><strong>Market Snapshot</strong></div>
           <div id="price-Copper">Copper: $9,500.00</div>
+          <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
           <div id="price-Brass">Brass: $7,500.00</div>
           <div id="price-Aluminum">Aluminum: $2,200.00</div>
           <div id="price-ElectricMotors">Electric Motors: $900.00</div>
@@ -1038,7 +1049,7 @@
           </tr>
         </thead>
         <tbody>
-          <!-- Grouped computed material rows will be appended here by JavaScript -->
+     <!-- Grouped computed material rows will be appended here by JavaScript -->
         </tbody>
         <tfoot>
           <tr>
@@ -1245,6 +1256,13 @@
         </tfoot>
       </table>
     </section>
+    <div id="realtimeData">Waiting for real-time updates...</div>
+        <div class="card-custom" onclick="cardClicked('Analytics')">
+        <div><strong>Analytics Data</strong></div>
+        <div id="analyticsDisplay">Loading analytics data...</div>
+            <!-- You could include a chart canvas if desired -->
+      <canvas id="analyticsChart" width="250" height="75"></canvas>
+    </div>
             
     <!-- KPI Section -->
     <section class="section">
@@ -1285,7 +1303,7 @@
         <div class="modal-body">
           <p>This solution is designed with scalability and security in mind. Key features include:</p>
           <ul>
-            <li><strong>Live Data Integration:</strong> Data is fetched via API calls for real-time market updates.</li>
+            <li><strong>Live Data Integration:</strong> Data is fetched via yfinance for real-time market updates.</li>
             <li><strong>Data Analytics & KPIs:</strong> Interactive charts provide actionable insights.</li>
             <li><strong>Modular Architecture:</strong> Easily integrates with your back-end systems.</li>
             <li><strong>Security Measures:</strong> Secure API endpoints and data encryption.</li>
@@ -1325,12 +1343,6 @@
   
     // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
-  updateGroupedComputedMaterialsInventory(); // Build the Greenspark table first
-  populateTradeMaterialDropdown();            // Then populate the dropdown
-  updateTradeOptions();                         // Finally update trade options
-});
-
-
       // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
@@ -1415,118 +1427,193 @@
       }
     });
     
-    // Update Finished Goods Inventory Purchase Values based on live inventory data
-    async function updateInventory() {
-      try {
-        const response = await fetch('/api/inventory');
-        const inventoryData = await response.json();
-        
-        // Update the table body with real inventory details
-        const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
-        tableBody.innerHTML = ''; // Clear current rows
-        
-        inventoryData.details.forEach(item => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${item.commodity}</td>
-            <td>${item.wip.toLocaleString()}</td>
-            <td>${item.finished.toLocaleString()}</td>
-            <td>${item.total.toLocaleString()}</td>
-            <td>$${item.avgCost.toFixed(2)}</td>
-            <td>$${item.totalPurchaseValue.toFixed(2)}</td>
-          `;
-          tableBody.appendChild(row);
-        });
-        
-        // Update totals in the table footer
-        document.getElementById('total-wip').textContent = inventoryData.totalWIP.toLocaleString();
-        document.getElementById('total-finished').textContent = inventoryData.totalFinished.toLocaleString();
-        document.getElementById('total-total').textContent = inventoryData.total.toLocaleString();
-        
-        let totalPurchase = inventoryData.details.reduce((acc, item) => acc + item.totalPurchaseValue, 0);
-        document.getElementById('total-purchase').textContent = '$' + totalPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-      } catch (error) {
-        console.error('Error updating inventory:', error);
+    // Update Finished Goods Inventory Purchase Values
+    function updatePurchaseValues() {
+      const table = document.getElementById('greenspark-table');
+      const rows = table.querySelectorAll('tbody tr');
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+      
+      rows.forEach(row => {
+        const cells = row.getElementsByTagName('td');
+        if(cells.length >= 6) {
+          const wip = parseFloat(cells[1].textContent.replace(/,/g, '')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g, '')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g, '').trim()) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g, '').trim()) || 0;
+          const purchaseValue = totalLbs * avgCost;
+          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+      });
+      
+      document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
+      document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
+      document.getElementById('total-total').textContent = sumTotal.toLocaleString();
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      
+      if(document.getElementById('finishedGoodsInfo')){
+        const contractsAvailable = Math.floor(sumFinished / 20000);
+        const totalTons = sumTotal / 20000;
+        document.getElementById('finishedGoodsInfo').innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
+        if (finishedGoodsChart) {
+          const now = new Date().toLocaleTimeString();
+          finishedGoodsChartLabels.push(now);
+          finishedGoodsChartData.push(totalTons);
+          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
+          finishedGoodsChart.update();
+        }
       }
     }
     
-    // NEW: Fetch live market data and update market snapshot cards
-    async function updateMarketSnapshot() {
-      try {
-        const response = await fetch('/api/market');
-        const marketData = await response.json();
-        
-        if (marketData.copper) {
-          document.getElementById('price-Copper').textContent = `Copper: $${marketData.copper.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        if (marketData.brass) {
-          document.getElementById('price-Brass').textContent = `Brass: $${marketData.brass.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        if (marketData.aluminum) {
-          document.getElementById('price-Aluminum').textContent = `Aluminum: $${marketData.aluminum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        // Add additional commodity updates here if needed...
-      } catch (error) {
-        console.error('Error updating market snapshot:', error);
-      }
+    // Trade Log, Active Contracts & Inventory Update Functions (repeat)
+    function appendTradeLogEntry(material, quantity, price, totalCost) {
+      const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+      const tradeTime = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      tableBody.appendChild(row);
     }
     
-    // NEW: Execute a trade by posting data to the back end
-    async function simulateTrade() {
+    function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const tradePrice = parseFloat(document.getElementById('create-price').value);
+      const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
       
-      const tradeData = {
-        material,
-        quantity: numTrades * 10,  // Assuming 10-ton loads
-        tradePrice,
-        expiration
-      };
+      const totalQuantity = 10 * numTrades;
+      const totalContractValue = tradePrice * 10 * numTrades;
       
-      try {
-        const response = await fetch('/api/trades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tradeData)
-        });
-        const result = await response.json();
-        if (result.success) {
-          alert(`${numTrades} trade(s) for ${material} executed successfully.`);
-          // Refresh inventory and trade log as needed
-          updateInventory();
-          appendTradeLogEntry(material, numTrades * 10, tradePrice, tradePrice * 10 * numTrades);
-        } else {
-          alert('Trade execution failed: ' + result.message);
-        }
-      } catch (error) {
-        console.error('Error executing trade:', error);
-        alert('Error executing trade');
-      }
+      appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
+      addActiveContract(material, expiration, tradePrice, numTrades);
+      reduceInventory(material, numTrades * 20000);
+      updatePurchaseValues();
+      
+      alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // Automated Updates for Inventory, Pricing, and Metals Market Overview
+    function logout() {
+      alert('Logging out...');
+    }
+    function cardClicked(cardName) {
+      if (cardName === "Active Contracts") {
+        const contracts = document.getElementById('activeContractsCount').textContent;
+        const margin = document.getElementById('activeContractsMarginTotal').textContent;
+        alert(cardName + " card clicked!\n" + contracts + " Secured\nMargin: " + margin);
+      } else {
+        alert(cardName + " card clicked!");
+      }
+    }
+    function rowClicked(itemName) {
+      alert('Row for ' + itemName + ' clicked!');
+    }
+    function createFuturesContract(material, contractName) {
+      alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+    }
+    
     document.addEventListener('DOMContentLoaded', () => {
-      // Update inventory every 5 minutes (300000 ms)
-      setInterval(updateInventory, 300000);
+      populateTradeMaterialDropdown();
+      updateTradeOptions();
+      updateGroupedComputedMaterialsInventory();
+      updatePurchaseValues();
+    });
+  </script>
+  
+  <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Update Greenspark inventory every 5 minutes (300000 ms)
+      setInterval(updateInventoryIncrementally, 300000);
       
-      // Update market snapshot every 5 seconds
-      setInterval(updateMarketSnapshot, 5000);
+      // Update pricing fluctuations every 5 seconds (5000 ms)
+      setInterval(simulatePricingFluctuations, 5000);
       
-      // Update Metals Market Overview every 5 seconds
+      // Update Metals Market Overview every 5 seconds (5000 ms)
       setInterval(updateMetalsMarketOverview, 5000);
       
-      // Update trade options if necessary
+      // Also update simulated trade options when pricing changes
       setInterval(updateTradeOptions, 5000);
-      
-      // Initial fetch of live data
-      updateInventory();
-      updateMarketSnapshot();
     });
     
-    // New function to update Metals Market Overview table (simulation-based)
+    function updateInventoryIncrementally() {
+      const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
+      rows.forEach(row => {
+        if (Math.random() < 0.4) { // update ~40% of rows
+          let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
+          let changePercent = Math.random() * 0.05; // up to 5% increase
+          finished += finished * changePercent;
+          row.cells[2].textContent = finished.toLocaleString();
+          
+          let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
+          let total = wip + finished;
+          row.cells[3].textContent = total.toLocaleString();
+        }
+      });
+      updatePurchaseValues();
+    }
+    // Function to fetch live scrap-metal data from the backend API
+async function updateInventoryFromAPI() {
+  try {
+    const token = localStorage.getItem("access_token"); // if authentication is required
+    const response = await fetch("http://localhost:8000/scrap-metal", {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": token ? `Bearer ${token}` : ""
+      }
+    });
+    if (!response.ok) {
+      throw new Error("Failed to fetch live inventory data.");
+    }
+    const liveData = await response.json();
+    // Update the table with live data without necessarily removing your static content.
+    // For example, clear and repopulate the table (if you decide to fully replace static data):
+    const tableBody = document.getElementById("greenspark-table").querySelector("tbody");
+    tableBody.innerHTML = ""; // Remove existing rows
+    liveData.forEach(item => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.metal_type}</td>
+        <td>${item.quantity.toLocaleString()}</td>
+        <td>${item.quality}</td>
+        <td>${item.location}</td>
+        <td>$${item.price}</td>
+      `;
+      tableBody.appendChild(row);
+    });
+  } catch (error) {
+    console.error("Error fetching live inventory data:", error);
+    // If the API call fails, you can keep or re-display your static data.
+  }
+}
+
+// Optionally call this function periodically or on demand
+document.addEventListener("DOMContentLoaded", () => {
+  // For example, update live inventory every 60 seconds:
+  updateInventoryFromAPI();
+  setInterval(updateInventoryFromAPI, 60000);
+});
+
+    function simulatePricingFluctuations() {
+      const pricingElements = document.querySelectorAll('[id^="price-"]');
+      pricingElements.forEach(elem => {
+        let text = elem.textContent;
+        let parts = text.split(':');
+        if (parts.length >= 2) {
+          let commodity = parts[0].trim();
+          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
+          let currentPrice = parseFloat(priceStr);
+          if (!isNaN(currentPrice)) {
+            let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
+            let newPrice = currentPrice + fluctuation;
+            elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          }
+        }
+      });
+      // Update the active contracts change column after pricing changes
+      updateActiveContractsChange();
+    }
+    
+    // New function to update Metals Market Overview table
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
       const rows = table.querySelectorAll('tbody tr');
@@ -1548,52 +1635,84 @@
     }
   </script>
   
-  <!-- New Script: Additional Functions (if needed) -->
-  <script>
-    // You can add further helper functions here as required.
-  </script>
-  <div id="analyticsDisplay">Loading analytics data...</div>
+  <!-- Login Modal (using Bootstrap) -->
+  <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="login-form">
+          <div class="modal-header">
+            <h5 class="modal-title" id="loginModalLabel">Login</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="username" class="form-label">Username:</label>
+              <input type="text" id="username" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label for="password" class="form-label">Password:</label>
+              <input type="password" id="password" name="password" class="form-control" required>
+            </div>
+            <div id="login-error" style="color: red;"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="action-btn">Login</button>
+            <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <!-- In your <head> -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</script>
 <script>
-  // Example: Fetch analytics data from your backend
-  fetch("http://localhost:8000/analytics", {
-      method: "GET",
-      headers: {
-          "Content-Type": "application/json"
-          // Add "Authorization": "Bearer YOUR_TOKEN" if needed
+  // Function to show the login modal (using Bootstrap)
+  function showLoginModal() {
+    const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+    loginModal.show();
+  }
+
+  // Function to log in the user and store the token
+  async function loginUser(username, password) {
+    try {
+      const formData = new URLSearchParams();
+      formData.append("username", username);
+      formData.append("password", password);
+      
+      // Call the /token endpoint
+      const response = await fetch("http://localhost:8000/token", {
+        method: "POST",
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error("Login failed");
       }
-  })
-  .then(response => response.json())
-  .then(data => {
-      console.log("Analytics Data:", data);
-      // You can now update your dashboard UI with the fetched data
-      // For example, update an element's innerHTML:
-      document.getElementById("analyticsDisplay").innerText = JSON.stringify(data);
-  })
-  .catch(error => {
-      console.error("Error fetching analytics:", error);
+      
+      const tokenData = await response.json();
+      // Save the token in localStorage
+      localStorage.setItem("access_token", tokenData.access_token);
+      // Optionally update UI to reflect the logged-in user
+      document.getElementById("current-user").innerText = `User: ${username}`;
+      // Hide the modal
+      const loginModalInstance = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
+      loginModalInstance.hide();
+      alert("Login successful!");
+    } catch (error) {
+      console.error("Error logging in:", error);
+      document.getElementById("login-error").innerText = error.message;
+    }
+  }
+
+  // Attach event listener to the login form submission
+  document.getElementById("login-form").addEventListener("submit", function(e) {
+    e.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    loginUser(username, password);
   });
-
-  // Example: Connect to the WebSocket for real-time updates
-  const socket = new WebSocket("ws://localhost:8000/ws/futures");
-
-  socket.onopen = function() {
-      console.log("WebSocket connection established");
-  };
-
-  socket.onmessage = function(event) {
-      const message = JSON.parse(event.data);
-      console.log("Received WebSocket message:", message);
-      // Update your dashboard elements with the new data here
-  };
-
-  socket.onerror = function(error) {
-      console.error("WebSocket error:", error);
-  };
-
-  socket.onclose = function(event) {
-      console.log("WebSocket connection closed:", event);
-      // Optionally add reconnection logic here
-  };
 </script>
 
 </body>
