@@ -381,7 +381,7 @@
     }
 
     // (c) Build HTML for a single material's spec sheet (UPGRADED)
-    function buildSpecSheetHtml(category, materialName, code, price) {
+    function buildSpecSheetHtml(category, materialName, code) {
       const displayPrice = (price && !isNaN(price)) ? price.toFixed(3) : "N/A";
       return `
         <section style="border:1px solid #ddd; border-radius:8px; padding:16px; margin-bottom:16px;">
