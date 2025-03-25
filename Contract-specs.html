@@ -69,7 +69,6 @@
     </ul>
   </section>
   <!-- Add this container somewhere in your HTML where you want the specs to appear -->
-<div id="contract-specs-container"></div>
 
 <script>
   // Function to generate a contract spec section for a commodity category
@@ -104,7 +103,8 @@
     </section>`;
     return specHtml;
   }
-
+</script>
+<div id="contract-specs-container"></div>
   // When the document is ready, generate specs for each commodity
   document.addEventListener("DOMContentLoaded", function() {
     // Make sure you have a container to place the generated specs
