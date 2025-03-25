@@ -5,7 +5,7 @@
   <title>Contract Specs</title>
 </head>
 <body>
-  <h1>Commodity Specifications Sheets</h1>
+  <h1>Commodity Spec Sheets</h1>
 
   <!-- Container where the spec sheets will appear -->
   <div id="spec-sheets-container"></div>
@@ -16,10 +16,10 @@
      *********************************************************/
     // 1) Copper
     const copperMaterials = [
-      "Barley",  // Cu BB
-      "#1",      // Berry & Candy
-      "#2",      // Birch & Cliff
-      "#3"       // Sheet Copper
+      "Barley",      // Cu BB
+      "#1",          // Berry & Candy
+      "#2",          // Birch & Cliff
+      "#3"           // Sheet Copper
     ];
     // 2) Aluminum
     const aluminumMaterials = [
@@ -62,7 +62,7 @@
       "SS304",
       "SS316"
     ];
-    // 6) E-Scrap
+    // 6) E-Scrap (generic placeholder)
     const eScrapMaterials = [
       "E_Scrap_Board"
     ];
@@ -110,7 +110,7 @@
     ];
 
     /*********************************************************
-     * 2) Pricing Functions (same as your original code)
+     * 2) Pricing Functions (unchanged from your original code)
      *********************************************************/
     function copperPrice(grade) {
       switch(grade) {
@@ -259,7 +259,7 @@
         "BR-SH-AL": "Brass Shaving Al Bronze",
         "BR-SH-R": "Brass Shaving Brass Red",
         "BR-SHELL": "Brass Shell",
-        "BR-SPEC": "Brass Special (Al Bronze Solid)",
+        "BR-SPEC": "Brass Special",
         "BR-YLW": "Brass Yellow Regular"
       },
       lead: {
@@ -318,7 +318,7 @@
      * 4) Spec Sheet–Generation Logic
      *********************************************************/
 
-    // (a) categoriesConfig ties categories to arrays & functions
+    // (a) categoriesConfig ties categories to arrays, pricing functions, and code dictionaries
     const categoriesConfig = {
       "Copper": {
         materials: copperMaterials,
@@ -380,28 +380,78 @@
       return materialName.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
 
-    // (c) Build HTML for a single material's spec sheet (UPGRADED)
+    // (c) Build HTML for a single material's spec sheet, using the copper futures template style
     function buildSpecSheetHtml(category, materialName, code, price) {
       const displayPrice = (price && !isNaN(price)) ? price.toFixed(3) : "N/A";
       return `
-        <section style="border:1px solid #ddd; border-radius:8px; padding:16px; margin-bottom:16px;">
-          <h2 style="color:#2c3e50;">${materialName} - Contract Specifications</h2>
-
+        <section id="${materialName.replace(/\\s+/g, '_')}-futures-specs" style="padding:20px; border:1px solid #ddd; border-radius:8px; margin-bottom:20px;">
+          <h2 style="color:#2c3e50;">${materialName} Futures - Contract Specifications</h2>
+          
           <h3>Contract Details</h3>
           <ul>
-            <li><strong>Category:</strong> ${category}</li>
-            <li><strong>Reference Code:</strong> ${code}</li>
-            <li><strong>Contract Unit:</strong> 2,000 lbs (typical)</li>
-            <li><strong>Price Quotation:</strong> U.S. dollars per pound</li>
-            <li><strong>Current Price:</strong> $${displayPrice}</li>
-            <li><strong>Minimum Price Fluctuation:</strong> $0.0005 = $1.00</li>
+            <li><strong>Contract Unit:</strong> 25,000 pounds</li>
+            <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound</li>
+            <li>
+              <strong>Trading Hours:</strong>
+              <ul>
+                <li><em>CME Globex:</em> Sunday - Friday 6:00 p.m. - 5:00 p.m. (5:00 p.m. - 4:00 p.m. CT) with a 60-minute break each day beginning at 5:00 p.m. (4:00 p.m. CT)</li>
+                <li><em>TAS:</em> Sunday - Friday 6:00 p.m. - 1:00 p.m. (5:00 p.m. - Noon CT)</li>
+                <li><em>TAM:</em> Sunday - Friday 6:00 p.m. ET - 12:35 p.m. London time</li>
+                <li><em>CME ClearPort:</em> Sunday 5:00 p.m. - Friday 4:00 p.m. CT with no reporting Monday - Thursday from 4:00 p.m. - 5:00 p.m. CT</li>
+              </ul>
+            </li>
+            <li><strong>Minimum Price Fluctuation:</strong> 0.0005 per pound = $12.50  
+              <br><em>(TAS/TAM: Zero or ±10 ticks in the minimum tick increment of the outright; Spot TAS: Zero)</em>
+            </li>
+            <li>
+              <strong>Product Code:</strong>
+              <ul>
+                <li><em>CME Globex:</em> ${code}</li>
+                <li><em>CME ClearPort:</em> ${code}Clearing</li>
+                <li><em>TAS:</em> "HGT","HG0"</li>
+                <li><em>TAM:</em> ${code.slice(0,2)}F</li>
+              </ul>
+            </li>
           </ul>
-
-          <h3>Settlement & Delivery</h3>
+        
+          <h3>Listed Contracts</h3>
           <ul>
-            <li><strong>Settlement Method:</strong> Cash or Physical</li>
-            <li><strong>Delivery Period:</strong> Within calendar month unless otherwise specified</li>
-            <li><strong>Grade & Quality:</strong> Standard industry specification for ${materialName}</li>
+            <li>Monthly contracts listed for 24 consecutive months and any Mar, May, Jul, Sep, and Dec in the nearest 63 months.</li>
+          </ul>
+        
+          <h3>Settlement & Termination</h3>
+          <ul>
+            <li><strong>Settlement Method:</strong> Deliverable</li>
+            <li>
+              <strong>Termination of Trading:</strong>
+              <ul>
+                <li>Trading terminates at 12:00 Noon CT on the third last business day of the contract month.</li>
+                <li>TAM trading terminates at 12:35 p.m. London time on the third last business day of the month prior to the contract month.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>TAS/TAM Rules:</strong> 
+              <br>Trading at Settlement (TAS) is subject to Rule 524.A. TAS trades off a "Base Price" of zero (equal to the daily settlement price) to create a differential versus the daily settlement price of the underlying futures contract month. The TAS clearing price equals the daily settlement price plus or minus the TAS transaction price.
+              <br>Trading at Marker (TAM) works similarly, using a marker price to create a differential.
+            </li>
+          </ul>
+        
+          <h3>Other Specifications</h3>
+          <ul>
+            <li><strong>Settlement Procedures:</strong> ${materialName} Futures Settlement Procedures</li>
+            <li><strong>Position Limits:</strong> COMEX Position Limits</li>
+            <li><strong>Exchange Rulebook:</strong> COMEX 111</li>
+            <li><strong>Block Minimum:</strong> Block Minimum Thresholds</li>
+            <li><strong>Price Limits or Circuit Breakers:</strong> Price Limits</li>
+            <li><strong>Vendor Codes:</strong> Quote Vendor Symbols Listing</li>
+            <li>
+              <strong>Delivery Period:</strong>
+              <br>Delivery may take place on any business day beginning on the first business day of the delivery month or any subsequent business day, but not later than the last business day of the current delivery month.
+            </li>
+            <li>
+              <strong>Grade and Quality:</strong>
+              <br>The contract grade for Grade 1 ${materialName} shall be according to standard industry specifications. Refer to relevant ASTM or exchange guidelines.
+            </li>
           </ul>
         </section>
       `;
@@ -410,10 +460,8 @@
     // (d) Main function: loop categories & materials, generate, insert
     function generateAllSpecSheets() {
       const container = document.getElementById("spec-sheets-container");
-
       for (let categoryName in categoriesConfig) {
         const { materials, priceFunction, codeDictionary } = categoriesConfig[categoryName];
-
         materials.forEach(material => {
           const price = priceFunction(material);
           const code = findScrapCode(material, codeDictionary);
@@ -428,4 +476,3 @@
   </script>
 </body>
 </html>
-
