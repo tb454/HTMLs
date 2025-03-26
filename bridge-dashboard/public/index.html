@@ -715,7 +715,6 @@
         }
       }
     }
-    
     function rollContract() {
       alert("Roll contract functionality not implemented.");
     }
@@ -723,6 +722,8 @@
       alert("Close contract functionality not implemented.");
     }
     
+
+   
     // ----------------------------
     // Update Trade Options in Simulated Trade Section
     // ----------------------------
@@ -970,7 +971,7 @@
       <div class="user-info">
         <span id="current-user">User: Guest</span>
         <button onclick="showLoginModal()">Login</button>
-        <button onclick="logout()">Logout</button>
+        <button onclick="showLoginmodal()">Logout</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Spec-ferrous.html'">Spec Sheet Ferrous</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Shipping%20terms.html'">Shipping Terms</button>   
@@ -1076,6 +1077,7 @@
             <th>Quantity (tons)</th>
             <th>Price/ton</th>
             <th>Total Contract Value</th>
+            <th>Location</th>
           </tr>
         </thead>
         <tbody>
@@ -1372,17 +1374,17 @@
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
-        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-        const copperData = [100, 120, 130, 110, 140, 150];
-        const brassData = [50, 60, 55, 70, 65, 80];
-        const aluminumData = [80, 90, 85, 95, 100, 105];
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+        const copperData = [100, 120, 130, 110, 140, 150, 180, 200, 175, 185, 120, 100 ];
+        const brassData = [50, 60, 55, 70, 65, 80, 90, 110, 100, 70, 50, 50 ];
+        const aluminumData = [80, 90, 85, 95, 100, 105, 120, 140, 110, 75, 90, 80];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
           data: {
             labels: kpiChartLabels,
             datasets: [
               {
-                label: 'Copper',
+                label: 'Electric Motos',
                 data: copperData,
                 backgroundColor: 'rgba(52,152,219,0.6)'
               },
@@ -1392,7 +1394,7 @@
                 backgroundColor: 'rgba(46,204,113,0.6)'
               },
               {
-                label: 'Aluminum',
+                label: 'Insulated Wire',
                 data: aluminumData,
                 backgroundColor: 'rgba(231,76,60,0.6)'
               }
@@ -1447,11 +1449,11 @@
     }
     
     // Trade Log, Active Contracts & Inventory Update Functions (repeat)
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
+    function appendTradeLogEntry(material, quantity, price, totalCost, location) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
       const row = document.createElement('tr');
-      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td><td>$${Location.toFixed}`;
       tableBody.appendChild(row);
     }
     
@@ -1474,7 +1476,7 @@
     }
     
     function logout() {
-      alert('Logging out...');
+      alert('Good-Bye');
     }
     function cardClicked(cardName) {
       if (cardName === "Active Contracts") {
@@ -1490,6 +1492,7 @@
     }
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+      // Roll: prompt for a new expiration date and update the contract row.
     }
     
     document.addEventListener('DOMContentLoaded', () => {
