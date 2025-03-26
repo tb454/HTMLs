@@ -1374,9 +1374,9 @@
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
-        const copperData = [100, 120, 130, 110, 140, 150];
-        const brassData = [50, 60, 55, 70, 65, 80];
-        const aluminumData = [80, 90, 85, 95, 100, 105];
+        const copperData = [100, 120, 130, 110, 140, 150, 180, 200, 175, 185, 120, 100 ];
+        const brassData = [50, 60, 55, 70, 65, 80, 90, 110, 100, 70, 50, 50 ];
+        const aluminumData = [80, 90, 85, 95, 100, 105, 120, 140, 110, 75, 90, 80];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
           data: {
