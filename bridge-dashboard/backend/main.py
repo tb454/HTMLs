@@ -24,9 +24,13 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from sqlalchemy import Column, Integer, String, DateTime, Float, Index, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from passlib.context import CryptContext
+
+Base = declarative_base()
 
 # --------------------------
 # Configuration Using Pydantic Settings
@@ -168,16 +172,19 @@ Base.metadata.create_all(bind=engine)
 # --------------------------
 # Pydantic Schemas
 # --------------------------
-class ScrapMetalItem(BaseModel):
-    id: int
-    metal_type: str
-    quantity: float
-    quality: str
-    location: str
-    price: float
+class ScrapMetal(Base):
+    __tablename__ = "scrap_metal"
 
-    class Config:
-        orm_mode = True
+    id = Column(Integer, primary_key=True, index=True)
+    metal_type = Column(String, index=True)
+    quantity = Column(Float)
+    quality = Column(String)
+    location = Column(String, index=True)
+    price = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+# Composite index for filtering by type and location
+Index("idx_scrap_type_location", ScrapMetal.metal_type, ScrapMetal.location)
 
 class ScrapMetalCreate(BaseModel):
     metal_type: str
@@ -195,6 +202,8 @@ class Futures(Base):
     contract_price = Column(Float)
     created_at = Column(DateTime)
 
+Index("idx_symbol_expiry", Futures.symbol, Futures.expiry_date)
+
 # ✅ Composite index — placed OUTSIDE the class
 Index("idx_symbol_expiry", Futures.symbol, Futures.expiry_date)
 
@@ -202,16 +211,18 @@ class FuturesUpdate(BaseModel):
     symbol: str
     price: float
 
-class OrderItem(BaseModel):
-    id: int
-    metal_type: str
-    order_type: str
-    quantity: float
-    price: float
-    timestamp: datetime
+class Order(Base):
+    __tablename__ = "orders"
 
-    class Config:
-        orm_mode = True
+    id = Column(Integer, primary_key=True, index=True)
+    metal_type = Column(String, index=True)
+    order_type = Column(String, index=True)  # e.g., "buy" or "sell"
+    quantity = Column(Float)
+    price = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+# Composite index for querying orders by metal type and order type
+Index("idx_order_type_metal", Order.metal_type, Order.order_type)
 
 class OrderCreate(BaseModel):
     metal_type: str
