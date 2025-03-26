@@ -1448,11 +1448,11 @@
     }
     
     // Trade Log, Active Contracts & Inventory Update Functions (repeat)
-    function appendTradeLogEntry(material, quantity, price, totalCost) {
+    function appendTradeLogEntry(material, quantity, price, totalCost, location) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
       const row = document.createElement('tr');
-      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td>`;
+      row.innerHTML = `<td>${tradeTime}</td><td>${material}</td><td>${quantity}</td><td>$${price.toFixed(2)}</td><td>$${totalCost.toFixed(2)}</td><td>$${Location.toFixed}`;
       tableBody.appendChild(row);
     }
     
