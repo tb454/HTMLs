@@ -1475,7 +1475,7 @@
     }
     
     function logout() {
-      alert('Logging out...');
+      alert('Good-Bye');
     }
     function cardClicked(cardName) {
       if (cardName === "Active Contracts") {
@@ -1491,6 +1491,7 @@
     }
     function createFuturesContract(material, contractName) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
+      // Roll: prompt for a new expiration date and update the contract row.
     }
     
     document.addEventListener('DOMContentLoaded', () => {
