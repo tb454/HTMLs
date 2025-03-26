@@ -230,107 +230,48 @@
   
   <!-- Material Arrays and Pricing Formulas -->
   <script>
-    // ----------------------------
     // Material Name Arrays
-    // ----------------------------
-    // 1) Copper
-    const copperMaterials = [
-      "Barley",      // Cu BB
-      "#1",          // Berry & Candy
-      "#2",          // Birch & Cliff
-      "#3"           // Sheet Copper
-    ];
-    // 2) Aluminum
+    const copperMaterials = ["Barley", "#1", "#2", "#3"];
     const aluminumMaterials = [
-      "AL6061_NewBareExtrusion",
-      "AL6061_ClipPlatePipe",
-      "AL6063_Secondary",
-      "AL6063_OldExtrusion",
-      "AL6063_Extrusion10/10",
-      "AL_PAS_Baled",
-      "AL_Cast_Clean",
-      "AL_RADS_CleanBaled",
-      "AL_RADS_DirtyBaled",
-      "AL_Sheet_CleanBaled",
-      "AL_WheelAuto_Clean",
-      "AL_WheelChrome_Clean",
-      "TruckWheel_Clean",
-      "AL_Wire_BareCATV",
-      "AL_Wire_NeopreneACSR",
-      "AL_Wire_ECPrepared",
-      "AL_MLC_Prepared"
+      "AL6061_NewBareExtrusion", "AL6061_ClipPlatePipe", "AL6063_Secondary",
+      "AL6063_OldExtrusion", "AL6063_Extrusion10/10", "AL_PAS_Baled",
+      "AL_Cast_Clean", "AL_RADS_CleanBaled", "AL_RADS_DirtyBaled",
+      "AL_Sheet_CleanBaled", "AL_WheelAuto_Clean", "AL_WheelChrome_Clean",
+      "TruckWheel_Clean", "AL_Wire_BareCATV", "AL_Wire_NeopreneACSR",
+      "AL_Wire_ECPrepared", "AL_MLC_Prepared"
     ];
-    // 3) Brass
     const brassMaterials = [
-      "Brass_Hard",
-      "Brass_Red_Ebony",
-      "Brass_Red_Semi",
-      "Brass_Shaving_AlBronze",
-      "Brass_Shaving_BrassRed",
-      "Brass_Shell",
-      "Brass_Special",
-      "Brass_YellowRegular"
+      "Brass_Hard", "Brass_Red_Ebony", "Brass_Red_Semi",
+      "Brass_Shaving_AlBronze", "Brass_Shaving_BrassRed",
+      "Brass_Shell", "Brass_Special", "Brass_YellowRegular"
     ];
-    // 4) Lead
-    const leadMaterials = [
-      "Lead_Clean",
-      "Lead_Range"
-    ];
-    // 5) Stainless
-    const stainlessMaterials = [
-      "SS304",
-      "SS316"
-    ];
-    // 6) E-Scrap (generic placeholder)
-    const eScrapMaterials = [
-      "E_Scrap_Board"
-    ];
-    // 7) Insulated Wire
+    const leadMaterials = ["Lead_Clean", "Lead_Range"];
+    const stainlessMaterials = ["SS304", "SS316"];
+    const eScrapMaterials = ["E_Scrap_Board"];
     const insulatedWireMaterials = [
-      "ICW_LowGrade_ChristmasLights",
-      "ICW_LowGrade_ComputerWire25",
-      "ICW_LowGrade_CuCATV",
-      "ICW_LowGrade_ExtCords35Up",
-      "ICW_LowGrade_MixedWire40Up",
-      "ICW1_Heliax57_OpenEyeBaled",
-      "ICW1_MCM85HG",
-      "ICW1_Romex65_NoWeatherProof",
-      "ICW1_THHN80",
-      "ICW2_50Cat5TelWire",
-      "ICW2_HarnessWireNoFuseBoxes",
-      "ICW2_BX_Cable_AL",
-      "ICW2_BX_Cable_FE24"
+      "ICW_LowGrade_ChristmasLights", "ICW_LowGrade_ComputerWire25",
+      "ICW_LowGrade_CuCATV", "ICW_LowGrade_ExtCords35Up",
+      "ICW_LowGrade_MixedWire40Up", "ICW1_Heliax57_OpenEyeBaled",
+      "ICW1_MCM85HG", "ICW1_Romex65_NoWeatherProof",
+      "ICW1_THHN80", "ICW2_50Cat5TelWire", "ICW2_HarnessWireNoFuseBoxes",
+      "ICW2_BX_Cable_AL", "ICW2_BX_Cable_FE24"
     ];
-    // 8) Misc Product
     const miscProductMaterials = [
-      "Ballast_Electronic",
-      "Ballast_Regular",
-      "BatteryAuto_PbAcid",
-      "BatterySteelCase_Industrial",
-      "Compressor_SealedUnitNoCastIron",
-      "EMotorLowGrade_CeilingFanMotors",
-      "EMotorMix_NoPumpsPowerToolsFans",
-      "EMotorLarge_LessThan1000lbs",
-      "Transformer_AluLargeOnly",
-      "TransformerCu_AlCu",
-      "TransformerCu_SmallPalmSize",
-      "TransformerCu_MediumOver200lbs",
-      "TransformerCu_Large",
+      "Ballast_Electronic", "Ballast_Regular", "BatteryAuto_PbAcid",
+      "BatterySteelCase_Industrial", "Compressor_SealedUnitNoCastIron",
+      "EMotorLowGrade_CeilingFanMotors", "EMotorMix_NoPumpsPowerToolsFans",
+      "EMotorLarge_LessThan1000lbs", "Transformer_AluLargeOnly",
+      "TransformerCu_AlCu", "TransformerCu_SmallPalmSize",
+      "TransformerCu_MediumOver200lbs", "TransformerCu_Large",
       "Zinc_DieCast"
     ];
-    // 9) Radiator Product
     const radiatorProductMaterials = [
-      "ACReefer_CleanTalkBaled",
-      "ACReefer_CleanUnbaled",
-      "ACReefer_DirtyTalkBaled",
-      "ACReefer_DirtyUnbaled",
-      "Radiator_CleanCar",
-      "CuBkg_ACReeferEnd"
+      "ACReefer_CleanTalkBaled", "ACReefer_CleanUnbaled",
+      "ACReefer_DirtyTalkBaled", "ACReefer_DirtyUnbaled",
+      "Radiator_CleanCar", "CuBkg_ACReeferEnd"
     ];
     
-    // ----------------------------
-    // Pricing Functions
-    // ----------------------------
+    // Pricing Functions (for brevity, same as your original logic)
     function copperPrice(grade) {
       switch(grade) {
         case 'Barley': return 4.19 * 0.94;
@@ -389,7 +330,6 @@
         default: return null;
       }
     }
-    // For E-Scrap we use a placeholder pricing function.
     function eScrapPrice(product) {
       return 0.5;
     }
@@ -442,9 +382,7 @@
       }
     }
     
-    // ----------------------------
     // Global mapping for computed categories
-    // ----------------------------
     const computedCategoriesMapping = {
       "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
       "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
@@ -457,9 +395,7 @@
       "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
     };
     
-    // ----------------------------
     // Finished Goods Inventory: Grouped Computed Materials
-    // ----------------------------
     function updateGroupedComputedMaterialsInventory() {
       const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
       // Remove any previously added group rows (they have a data-group attribute)
@@ -516,10 +452,7 @@
       });
     }
     
-    // ----------------------------
     // Helper Functions for Simulated Trade Section
-    // ----------------------------
-    // Populate the "Material" dropdown in Simulated Trade from all materials in Greenspark table.
     function populateTradeMaterialDropdown() {
       const dropdown = document.getElementById('create-material');
       dropdown.innerHTML = '';
@@ -527,7 +460,6 @@
       const rows = table.querySelectorAll('tbody tr');
       const materialsSet = new Set();
       rows.forEach(row => {
-        // Skip group header rows
         if (row.classList.contains('group-header')) return;
         const materialText = row.cells[0].textContent.trim();
         if (materialText) {
@@ -543,12 +475,10 @@
       });
     }
     
-    // Get commodity data from the Greenspark table (by matching material name)
     function getCommodityData(material) {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       for (let row of rows) {
-        // Ignore group header rows
         if (row.classList.contains('group-header')) continue;
         const cellMaterial = row.cells[0].textContent.trim().toLowerCase();
         if (cellMaterial.includes(material.toLowerCase())) {
@@ -562,7 +492,6 @@
       return { finishedGoods: 0, avgCost: 0 };
     }
     
-    // Get the Market Snapshot price for a given key (e.g., "Copper", "Brass", etc.)
     function getMarketSnapshotPrice(key) {
       const snapshot = {
         "Copper": 9500,
@@ -573,15 +502,11 @@
       return snapshot[key] || 0;
     }
     
-    // ----------------------------
-    // Modified getBasePrice to reflect updated Market Snapshot fluctuations
-    // ----------------------------
     function getBasePrice(material) {
       let baseMaterial = material;
       if (material.indexOf('(') !== -1) {
         baseMaterial = material.split(" (")[0].trim();
         const category = material.split(" (")[1].replace(")", "").trim();
-        // First, try to get updated price from the Market Snapshot element
         const priceElem = document.getElementById(`price-${category}`);
         if (priceElem) {
           let text = priceElem.textContent;
@@ -590,17 +515,15 @@
             let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
             let updatedPrice = parseFloat(priceStr);
             if (!isNaN(updatedPrice)) {
-              return updatedPrice; // Return the updated price per ton
+              return updatedPrice;
             }
           }
         }
-        // Otherwise, fallback to computed price
         if (computedCategoriesMapping[category]) {
           let computedPrice = computedCategoriesMapping[category].pricingFunc(baseMaterial);
           return computedPrice ? computedPrice * 2000 : 0;
         }
       }
-      // Try direct lookup from Market Snapshot element if available
       const directElem = document.getElementById(`price-${material}`);
       if (directElem) {
         let text = directElem.textContent;
@@ -613,10 +536,8 @@
           }
         }
       }
-      // Fallback to static snapshot
       let price = getMarketSnapshotPrice(material);
       if (price > 0) return price;
-      // Otherwise, search through computed categories.
       for (let cat in computedCategoriesMapping) {
         if (computedCategoriesMapping[cat].materials.includes(material)) {
           let computedPrice = computedCategoriesMapping[cat].pricingFunc(material);
@@ -626,9 +547,7 @@
       return 0;
     }
     
-    // ----------------------------
     // Trade Log, Active Contracts & Inventory Update Functions
-    // ----------------------------
     function appendTradeLogEntry(material, quantity, price, totalCost) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
@@ -668,7 +587,6 @@
       let totalMargin = 0;
       let totalChange = 0;
       const rows = document.querySelectorAll("#active-contracts-table tbody tr");
-  
       rows.forEach(row => {
         const quantity = parseInt(row.dataset.quantity, 10) || 1;
         totalContracts += quantity;
@@ -679,14 +597,12 @@
         const change = parseFloat(changeText.replace(/[^0-9.-]/g, '')) || 0;
         totalChange += change;
       });
-  
       if(document.getElementById("active-contracts-secured")) {
         document.getElementById("active-contracts-secured").textContent = totalContracts + " Secured";
       }
       if(document.getElementById("active-contracts-margin")) {
         document.getElementById("active-contracts-margin").textContent = "Margin: $" + totalMargin.toFixed(2);
       }
-      
       if(document.getElementById("activeContractsCount")) {
         document.getElementById("activeContractsCount").textContent = totalContracts;
       }
@@ -716,17 +632,13 @@
       }
     }
     
-    // ----------------------------
     // Update Trade Options in Simulated Trade Section
-    // ----------------------------
     function updateTradeOptions() {
       const materialSelect = document.getElementById('create-material');
       const material = materialSelect.value;
-      
       const data = getCommodityData(material);
-      const contractSize = 20000; // 10 tons = 20,000 lbs.
+      const contractSize = 20000;
       const availableContracts = Math.floor(data.finishedGoods / contractSize);
-      
       const contractsSelect = document.getElementById('create-contracts');
       contractsSelect.innerHTML = '';
       for (let i = 1; i <= availableContracts; i++) {
@@ -735,11 +647,7 @@
         option.textContent = i;
         contractsSelect.appendChild(option);
       }
-      
-      // Get base price updated with fluctuations
       const basePricePerTon = getBasePrice(material);
-      
-      // Update Price/ton dropdown with multiplier options
       const priceSelect = document.getElementById('create-price');
       priceSelect.innerHTML = '';
       const multipliers = [0.95, 0.975, 1, 1.025, 1.05, 1.075];
@@ -750,8 +658,6 @@
         option.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         priceSelect.appendChild(option);
       });
-      
-      // Update Cost to Create: 0.1% of base price per ton
       const costSelect = document.getElementById('create-cost');
       costSelect.innerHTML = '';
       const costToCreate = basePricePerTon * 0.001;
@@ -759,8 +665,6 @@
       costOption.value = costToCreate.toFixed(2);
       costOption.textContent = '$' + costToCreate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       costSelect.appendChild(costOption);
-      
-      // Update Expiration Date dropdown: 5 future dates (1-month increments)
       const expirationSelect = document.getElementById('create-expiration');
       expirationSelect.innerHTML = '';
       const today = new Date();
@@ -777,30 +681,23 @@
       }
     }
     
-    // ----------------------------
     // Simulated Trade Execution
-    // ----------------------------
     function simulateTrade() {
       const material = document.getElementById('create-material').value;
       const numTrades = parseInt(document.getElementById('create-contracts').value, 10);
       const tradePrice = parseFloat(document.getElementById('create-price').value);
       const costToCreate = parseFloat(document.getElementById('create-cost').value);
       const expiration = document.getElementById('create-expiration').value;
-      
       const totalQuantity = 10 * numTrades;
       const totalContractValue = tradePrice * 10 * numTrades;
-      
       appendTradeLogEntry(material, totalQuantity, tradePrice, totalContractValue);
       addActiveContract(material, expiration, tradePrice, numTrades);
       reduceInventory(material, numTrades * 20000);
       updatePurchaseValues();
-      
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
-    // ----------------------------
     // Other Helper Functions
-    // ----------------------------
     function logout() {
       alert('Good-Bye');
     }
@@ -917,11 +814,11 @@
         "RAD-ENDS": "Cu Bkg AC Reefer End"
       }
     };
-
+    
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
-
+    
     function getTickerFromReference(material) {
       let baseMaterial = material;
       let category = null;
@@ -971,7 +868,6 @@
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
-    
     
     <!-- Overview Cards -->
     <section class="section">
@@ -1228,13 +1124,14 @@
         </tbody>
       </table>
     </section>
+    
     <div id="realtimeData">Waiting for real-time updates...</div>
     <div class="card-custom" onclick="cardClicked('Analytics')">
       <div><strong>Analytics Data</strong></div>
       <div id="analyticsDisplay">Loading analytics data...</div>
       <canvas id="analyticsChart" width="250" height="75"></canvas>
     </div>
-            
+    
     <!-- KPI Section -->
     <section class="section">
       <div class="section-title">Key Performance Indicators (KPIs)</div>
@@ -1314,7 +1211,6 @@
   
     // Initialize charts once DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
-      // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
         const ctxActive = activeContractsCanvas.getContext('2d');
@@ -1337,7 +1233,6 @@
         });
       }
       
-      // Finished Goods Chart
       const finishedCanvas = document.getElementById('finishedGoodsChart');
       if(finishedCanvas) {
         const ctxFinished = finishedCanvas.getContext('2d');
@@ -1358,13 +1253,12 @@
         });
       }
       
-      // KPI Chart - Stacked Bar Chart Breakdown by Main Categories
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
         kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
-        const copperData = [100, 120, 130, 110, 140, 150, 180, 200, 175, 185, 120, 100 ];
-        const brassData = [50, 60, 55, 70, 65, 80, 90, 110, 100, 70, 50, 50 ];
+        const copperData = [100, 120, 130, 110, 140, 150, 180, 200, 175, 185, 120, 100];
+        const brassData = [50, 60, 55, 70, 65, 80, 90, 110, 100, 70, 50, 50];
         const aluminumData = [80, 90, 85, 95, 100, 105, 120, 140, 110, 75, 90, 80];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
@@ -1398,12 +1292,10 @@
       }
     });
     
-    // Update Finished Goods Inventory Purchase Values
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr');
       let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
-      
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
         if(cells.length >= 6) {
@@ -1416,12 +1308,10 @@
           cells[5].textContent = '$' + purchaseValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
       });
-      
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
       document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
       document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      
       if(document.getElementById('finishedGoodsInfo')){
         const contractsAvailable = Math.floor(sumFinished / 20000);
         const totalTons = sumTotal / 20000;
@@ -1435,8 +1325,6 @@
         }
       }
     }
-    
-    // Trade Log, Active Contracts & Inventory Update Functions (repeat)
     
     function simulatePricingFluctuations() {
       const pricingElements = document.querySelectorAll('[id^="price-"]');
@@ -1456,29 +1344,25 @@
       });
     }
     
-    // New function to update Metals Market Overview table
     function updateMetalsMarketOverview() {
       const table = document.getElementById('metals-market-table');
       const rows = table.querySelectorAll('tbody tr');
       rows.forEach(row => {
-        // Update "Last" price (column index 2) with ±5% fluctuation
         let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
         let currentPrice = parseFloat(lastPriceStr);
         if (!isNaN(currentPrice)) {
           let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
           let newPrice = currentPrice + fluctuation;
-          // Calculate change (newPrice - oldPrice) and format with sign
           let changeVal = newPrice - currentPrice;
           let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
           row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          // Update the "Change" column (column index 3)
           row.cells[3].textContent = changeText;
         }
       });
     }
   </script>
   
-  <!-- Login Modal (using Bootstrap) -->
+  <!-- Login Modal -->
   <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -1507,40 +1391,32 @@
     </div>
   </div>
   
-  <!-- In your <head> -->
+  <!-- Bootstrap JS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   
   <script>
-    // Function to show the login modal (using Bootstrap)
+    // Show Login Modal
     function showLoginModal() {
       const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
       loginModal.show();
     }
-  
-    // Function to log in the user and store the token
+    
     async function loginUser(username, password) {
       try {
         const formData = new URLSearchParams();
         formData.append("username", username);
         formData.append("password", password);
-        
-        // Call the /token endpoint
         const response = await fetch("http://localhost:8000/token", {
           method: "POST",
           body: formData
         });
-        
         if (!response.ok) {
           throw new Error("Login failed");
         }
-        
         const tokenData = await response.json();
-        // Save the token in localStorage
         localStorage.setItem("access_token", tokenData.access_token);
-        // Optionally update UI to reflect the logged-in user
         document.getElementById("current-user").innerText = `User: ${username}`;
-        // Hide the modal
         const loginModalInstance = bootstrap.Modal.getInstance(document.getElementById('loginModal'));
         loginModalInstance.hide();
         alert("Login successful!");
@@ -1549,8 +1425,7 @@
         document.getElementById("login-error").innerText = error.message;
       }
     }
-  
-    // Attach event listener to the login form submission
+    
     document.getElementById("login-form").addEventListener("submit", function(e) {
       e.preventDefault();
       const username = document.getElementById("username").value;
@@ -1561,59 +1436,42 @@
   
   <script>
     function rollContract(button) {
-      // Get the row that contains the contract data.
       const row = button.closest("tr");
-      
-      // Assume the expiration date is in the 5th cell (index 4).
       const currentExpiration = row.cells[4].textContent;
-      
-      // Prompt the user for a new expiration date.
       const newExpiration = prompt("Enter new expiration date (MM/DD/YY):", currentExpiration);
       if (newExpiration && newExpiration.trim() !== "") {
-        // Update the expiration cell with the new date.
         row.cells[4].textContent = newExpiration.trim();
         alert("Contract rolled. New expiration: " + newExpiration);
       } else {
         alert("Roll cancelled or invalid date entered.");
       }
     }
-  
+    
     function closeContract(button) {
       const row = button.closest("tr");
-      
       if (confirm("Are you sure you want to call (close) this contract?")) {
-        // Remove the row from the active contracts table.
         row.remove();
-        
-        // Update your active contracts overview totals.
         updateActiveContractsOverview();
-        
         alert("Contract has been called (closed).");
       }
     }
   </script>
   
-  <!-- Additional Scripts for API calls and WebSocket connections -->
+  <!-- Additional API & WebSocket Scripts (if any) -->
   <script>
-    // Helper function to set up headers for authenticated requests
     function getAuthHeaders() {
       const token = localStorage.getItem("access_token");
       return token 
         ? { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
         : { "Content-Type": "application/json" };
     }
-  
-    // (The remaining API call functions and WebSocket connection code remain unchanged.)
-    // ...
-  
+    
     // Example: WebSocket Connection for Real-Time Futures Updates
     const socket = new WebSocket("ws://localhost:8000/ws/futures");
-  
     socket.onopen = function() {
       console.log("WebSocket connection established.");
       socket.send("Hello from Dashboard!");
     };
-  
     socket.onmessage = function(event) {
       try {
         const message = JSON.parse(event.data);
@@ -1623,11 +1481,9 @@
         console.error("Error parsing WebSocket message:", e);
       }
     };
-  
     socket.onerror = function(error) {
       console.error("WebSocket error:", error);
     };
-  
     socket.onclose = function(event) {
       console.log("WebSocket connection closed:", event);
     };
