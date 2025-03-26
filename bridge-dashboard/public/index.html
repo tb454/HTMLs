@@ -1969,7 +1969,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 15. WebSocket Connection for Real-Time Futures Updates
-  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+  const socket = new WebSocket("ws://localhost:8000/ws/futures?token=YOUR_JWT_TOKEN");
 
   socket.onopen = function() {
     console.log("WebSocket connection established.");

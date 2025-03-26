@@ -548,8 +548,17 @@ def predict_price(item: ScrapMetalCreate):
 # WebSocket Endpoint for Real-Time Futures Updates
 @app.websocket("/ws/futures")
 async def websocket_endpoint(websocket: WebSocket):
+    token = websocket.query_params.get("token")
     await manager.connect(websocket)
     try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = payload.get("sub")
+        # Optional: load user from DB and check if still active
+        await websocket.accept()
+    except Exception:
+        await websocket.close(code=1008)  # Policy Violation
+        return 
+    try: 
         while True:
             data = await websocket.receive_text()
             await websocket.send_text(f"Echo: {data}")
