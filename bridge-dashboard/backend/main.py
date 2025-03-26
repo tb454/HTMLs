@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from sqlalchemy import Column, DateTime, Float, Integer, String, create_engine
+from sqlalchemy import Column, Integer, String, DateTime, Float, Index, create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from passlib.context import CryptContext
@@ -186,14 +186,17 @@ class ScrapMetalCreate(BaseModel):
     location: str
     price: float
 
-class FuturesData(BaseModel):
-    id: int
-    symbol: str
-    price: float
-    timestamp: datetime
+class Futures(Base):
+    __tablename__ = "futures"
 
-    class Config:
-        orm_mode = True
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True)
+    expiry_date = Column(DateTime, index=True)
+    contract_price = Column(Float)
+    created_at = Column(DateTime)
+
+# ✅ Composite index — placed OUTSIDE the class
+Index("idx_symbol_expiry", Futures.symbol, Futures.expiry_date)
 
 class FuturesUpdate(BaseModel):
     symbol: str
