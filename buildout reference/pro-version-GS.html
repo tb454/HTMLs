@@ -970,7 +970,7 @@
       <div class="user-info">
         <span id="current-user">User: Guest</span>
         <button onclick="showLoginModal()">Login</button>
-        <button onclick="logout()">Logout</button>
+        <button onclick="showLoginmodal()">Logout</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Spec-ferrous.html'">Spec Sheet Ferrous</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
         <button onclick="window.location.href='file:///C:/Users/tbyer/BRidge-html/HTMLs/Shipping%20terms.html'">Shipping Terms</button>   
@@ -1076,6 +1076,7 @@
             <th>Quantity (tons)</th>
             <th>Price/ton</th>
             <th>Total Contract Value</th>
+            <th>Location</th>
           </tr>
         </thead>
         <tbody>
@@ -1372,7 +1373,7 @@
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
-        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        kpiChartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
         const copperData = [100, 120, 130, 110, 140, 150];
         const brassData = [50, 60, 55, 70, 65, 80];
         const aluminumData = [80, 90, 85, 95, 100, 105];
@@ -1382,7 +1383,7 @@
             labels: kpiChartLabels,
             datasets: [
               {
-                label: 'Copper',
+                label: 'Electric Motos',
                 data: copperData,
                 backgroundColor: 'rgba(52,152,219,0.6)'
               },
@@ -1392,7 +1393,7 @@
                 backgroundColor: 'rgba(46,204,113,0.6)'
               },
               {
-                label: 'Aluminum',
+                label: 'Insulated Wire',
                 data: aluminumData,
                 backgroundColor: 'rgba(231,76,60,0.6)'
               }
