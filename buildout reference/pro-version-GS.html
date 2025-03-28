@@ -714,21 +714,22 @@
           row.cells[3].textContent = total.toLocaleString();
           break;
         }
-      }
-      function rollContract(button) {
+        function rollContract(button) {
   const row = button.closest("tr");
   const ticker = row.cells[0].textContent.trim();
+
   fetch(`/orders/${ticker}/roll`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    }
+    headers: { "Content-Type": "application/json" }
   })
   .then(res => res.json())
   .then(data => {
     alert(`Contract ${ticker} rolled successfully.`);
-    row.cells[4].textContent = generateNewExpirationDate(); // optional
-    row.cells[6].innerHTML = `<span style="color:green;">Rolled</span>`;
+    // Optional: update expiration date or show a message near buttons
+    const statusSpan = document.createElement("span");
+    statusSpan.textContent = " Rolled";
+    statusSpan.style.color = "green";
+    button.parentNode.appendChild(statusSpan);
   })
   .catch(err => {
     console.error(err);
@@ -739,17 +740,25 @@
 function closeContract(button) {
   const row = button.closest("tr");
   const ticker = row.cells[0].textContent.trim();
+
   fetch(`/orders/${ticker}/close`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    }
+    headers: { "Content-Type": "application/json" }
   })
   .then(res => res.json())
   .then(data => {
     alert(`Contract ${ticker} closed successfully.`);
     row.style.opacity = "0.5";
-    row.cells[6].innerHTML = `<span style="color:red;">Closed</span>`;
+
+    // Disable buttons
+    const buttons = row.querySelectorAll("button");
+    buttons.forEach(btn => btn.disabled = true);
+
+    // Add visual cue
+    const statusSpan = document.createElement("span");
+    statusSpan.textContent = " Closed";
+    statusSpan.style.color = "red";
+    button.parentNode.appendChild(statusSpan);
   })
   .catch(err => {
     console.error(err);
