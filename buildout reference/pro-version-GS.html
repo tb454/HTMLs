@@ -654,10 +654,11 @@
         <td>$${changeValue.toFixed(2)}</td>
         <td>${expiration}</td>
         <td>$${marginRequirement.toFixed(2)}</td>
-        <td>
-          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
-          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
-        </td>
+       <td>
+  <button class="secondary-btn" onclick="rollContract(this); event.stopPropagation();">Roll</button>
+  <button class="danger-btn" onclick="closeContract(this); event.stopPropagation();">Close</button>
+</td>
+
       `;
       tableBody.appendChild(row);
       updateActiveContractsOverview();
