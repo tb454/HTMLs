@@ -1,112 +1,31 @@
-<!DOCTYPE html>
+<!DOCTYPE html>   
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Dashboard</title>
+  
+  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
+  
   <style>
-    /* Silver/Blue Finance Theme */
+    /* Base Styling */
     body {
       font-family: 'Roboto', sans-serif;
-      background-color: #1e1e2f;
-      color: #e0e0e0;
+      background-color: #f4f6f8;
+      margin: 0;
       padding: 20px;
+      color: #333;
     }
     .container {
-      max-width: 1300px;
+      max-width: 1200px;
       margin: auto;
     }
-    header.header {
-      background: linear-gradient(90deg, #223447, #2f4059);
-      color: #fff;
-      padding: 15px 20px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-    }
-    .section {
-      background-color: #2a2f3c;
-      border-radius: 10px;
-      box-shadow: 0 0 12px rgba(0, 0, 0, 0.25);
-      padding: 20px;
-      margin-bottom: 25px;
-    }
-    .section-title {
-      font-size: 18px;
-      color: #a6d1ff;
-      border-bottom: 2px solid #a6d1ff;
-      padding-bottom: 5px;
-      text-transform: uppercase;
-    }
-    .card-custom {
-      background: #2a2f3c;
-      border: 1px solid #4b5c7a;
-      color: #e0e0e0;
-      transition: all 0.3s ease;
-    }
-    .card-custom:hover {
-      box-shadow: 0 4px 16px rgba(166, 209, 255, 0.2);
-      transform: translateY(-3px);
-    }
-    .table {
-      background-color: #2a2f3c;
-      color: #e0e0e0;
-    }
-    th {
-      background-color: #344360;
-      color: #a6d1ff;
-    }
-    tr:hover {
-      background-color: #3a4a66;
-    }
-    .action-btn, .secondary-btn, .danger-btn {
-      font-size: 14px;
-      border-radius: 5px;
-      padding: 8px 16px;
-    }
-    .action-btn {
-      background-color: #3498db;
-      color: #fff;
-    }
-    .action-btn:hover {
-      background-color: #2874a6;
-    }
-    .secondary-btn {
-      background-color: #27ae60;
-    }
-    .secondary-btn:hover {
-      background-color: #1e8449;
-    }
-    .danger-btn {
-      background-color: #e74c3c;
-    }
-    .danger-btn:hover {
-      background-color: #c0392b;
-    }
-    .form-control, select {
-      background-color: #1e1e2f;
-      color: #e0e0e0;
-      border: 1px solid #4b5c7a;
-    }
-    .form-control:focus {
-      border-color: #a6d1ff;
-      box-shadow: 0 0 0 0.2rem rgba(166, 209, 255, 0.25);
-    }
-    .modal-content {
-      background-color: #2a2f3c;
-      color: #e0e0e0;
-    }
-    .modal-header, .modal-footer {
-      border-color: #444;
-    }
-  </style>
-</head>
-
     /* Header */
     header.header {
       background: linear-gradient(90deg, #2c3e50, #34495e);
@@ -2050,7 +1969,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 15. WebSocket Connection for Real-Time Futures Updates
-  const socket = new WebSocket("ws://localhost:8000/ws/futures");
+  const socket = new WebSocket("ws://localhost:8000/ws/futures?token=YOUR_JWT_TOKEN");
 
   socket.onopen = function() {
     console.log("WebSocket connection established.");
