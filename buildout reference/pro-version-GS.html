@@ -714,13 +714,48 @@
           break;
         }
       }
+      function rollContract(button) {
+  const row = button.closest("tr");
+  const ticker = row.cells[0].textContent.trim();
+  fetch(`/orders/${ticker}/roll`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
     }
-    function rollContract() {
-      alert("Roll contract functionality not implemented.");
+  })
+  .then(res => res.json())
+  .then(data => {
+    alert(`Contract ${ticker} rolled successfully.`);
+    row.cells[4].textContent = generateNewExpirationDate(); // optional
+    row.cells[6].innerHTML = `<span style="color:green;">Rolled</span>`;
+  })
+  .catch(err => {
+    console.error(err);
+    alert("Error rolling contract.");
+  });
+}
+
+function closeContract(button) {
+  const row = button.closest("tr");
+  const ticker = row.cells[0].textContent.trim();
+  fetch(`/orders/${ticker}/close`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
     }
-    function closeContract() {
-      alert("Close contract functionality not implemented.");
-    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    alert(`Contract ${ticker} closed successfully.`);
+    row.style.opacity = "0.5";
+    row.cells[6].innerHTML = `<span style="color:red;">Closed</span>`;
+  })
+  .catch(err => {
+    console.error(err);
+    alert("Error closing contract.");
+  });
+}
+
     
 
    
