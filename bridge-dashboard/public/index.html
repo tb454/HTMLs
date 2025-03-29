@@ -1490,7 +1490,8 @@ async function closeContract(contractId) {
       addActiveContract(material, expiration, tradePrice, numTrades);
       reduceInventory(material, numTrades * 20000);
       updatePurchaseValues();
-      
+      // Update totals row after a trade is added
+      updateTradeLogTotals();
       alert(`${numTrades} simulated trade(s) for ${material} executed.`);
     }
     
@@ -2153,6 +2154,46 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(updateInventoryFromAPI, 60000); // Update every 60 seconds
   });
 </script>
+<script>
+ function updateTradeLogTotals() {
+  const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
+  let totalQuantity = 0;
+  let totalContractValue = 0;
+
+  // Loop through each row in the tbody
+  tableBody.querySelectorAll('tr').forEach(row => {
+    // Skip the totals row if it exists (we assign it an id)
+    if (row.id === 'trade-log-totals') return;
+
+    // Assuming the columns are:
+    // 0: Time, 1: Material, 2: Quantity, 3: Price/ton, 4: Total Contract Value
+    const qty = parseFloat(row.cells[2].textContent) || 0;
+    const contractVal = parseFloat(row.cells[4].textContent.replace('$', '').replace(/,/g, '')) || 0;
+    totalQuantity += qty;
+    totalContractValue += contractVal;
+  });
+
+  // Check if a totals row already exists
+  let totalsRow = document.getElementById('trade-log-totals');
+  if (!totalsRow) {
+    // Create a new row if it doesn't exist
+    totalsRow = document.createElement('tr');
+    totalsRow.id = 'trade-log-totals';
+    totalsRow.innerHTML = `
+      <td colspan="2"><strong>Totals:</strong></td>
+      <td><strong>${totalQuantity.toFixed(2)}</strong></td>
+      <td></td>
+      <td><strong>$${totalContractValue.toFixed(2)}</strong></td>
+    `;
+    tableBody.appendChild(totalsRow);
+  } else {
+    // If it exists, just update the totals
+    totalsRow.cells[2].innerText = totalQuantity.toFixed(2);
+    totalsRow.cells[4].innerText = `$${totalContractValue.toFixed(2)}`;
+  }
+}
+ 
+<scrpit>
 <footer style="margin-top: 40px; padding: 20px; text-align: center; font-size: 14px; color: #777;">
   <hr style="margin-bottom: 15px;">
   <div><strong>BRidge Platform</strong> – Powered by ScrapFutures.com</div>
