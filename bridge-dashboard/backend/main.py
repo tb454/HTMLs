@@ -798,26 +798,7 @@ def get_global_commodities_data():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-# In-memory contract storage (for testing/demo purposes)
-contracts = {
-    101: {"status": "active"},
-    102: {"status": "active"},
-    103: {"status": "active"},
-}
 
-@app.post("/orders/{contract_id}/roll")
-def roll_contract(contract_id: int):
-    if contract_id in contracts:
-        contracts[contract_id]["status"] = "rolled"
-        return {"status": "rolled", "id": contract_id}
-    raise HTTPException(status_code=404, detail="Contract not found")
-
-@app.post("/orders/{contract_id}/close")
-def close_contract(contract_id: int):
-    if contract_id in contracts:
-        contracts[contract_id]["status"] = "closed"
-        return {"status": "closed", "id": contract_id}
-    raise HTTPException(status_code=404, detail="Contract not found")
 
 # --------------------------
 # Run the Application
