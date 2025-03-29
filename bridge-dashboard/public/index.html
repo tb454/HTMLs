@@ -646,20 +646,19 @@
       const changeValue = (currentMarketPrice - salePrice) * 10 * quantity;
       
       const row = document.createElement('tr');
-row.dataset.quantity = quantity;
-row.innerHTML = `
-  <td>${ticker}</td>
-  <td>${material} (${expiration})</td>
-  <td>$${salePrice.toFixed(2)}</td>
-  <td>$${changeValue.toFixed(2)}</td>
-  <td>${expiration}</td>
-  <td>$${marginRequirement.toFixed(2)}</td>
-  <td>
-    <button class="secondary-btn" onclick="rollContract(${Math.floor(Math.random()*10000)}); event.stopPropagation();">Roll</button>
-    <button class="danger-btn" onclick="closeContract(${Math.floor(Math.random()*10000)}); event.stopPropagation();">Close</button>
-  </td>
-`;
-
+      row.dataset.quantity = quantity;
+      row.innerHTML = `
+        <td>${ticker}</td>
+        <td>${material} (${expiration})</td>
+        <td>$${salePrice.toFixed(2)}</td>
+        <td>$${changeValue.toFixed(2)}</td>
+        <td>${expiration}</td>
+        <td>$${marginRequirement.toFixed(2)}</td>
+        <td>
+          <button class="secondary-btn" onclick="rollContract(); event.stopPropagation();">Roll</button>
+          <button class="danger-btn" onclick="closeContract(); event.stopPropagation();">Close</button>
+        </td>
+      `;
       tableBody.appendChild(row);
       updateActiveContractsOverview();
     }
@@ -716,36 +715,12 @@ row.innerHTML = `
         }
       }
     }
-    async function rollContract(contractId) {
-  try {
-    const response = await fetch(`http://localhost:8000/orders/${contractId}/roll`, {
-      method: "POST",
-      headers: getAuthHeaders()
-    });
-    const result = await response.json();
-    alert(`Contract ${contractId} rolled successfully.`);
-    // Optional: update UI, disable button, etc.
-  } catch (error) {
-    console.error("Error rolling contract:", error);
-    alert("Failed to roll contract.");
-  }
-}
-
-async function closeContract(contractId) {
-  try {
-    const response = await fetch(`http://localhost:8000/orders/${contractId}/close`, {
-      method: "POST",
-      headers: getAuthHeaders()
-    });
-    const result = await response.json();
-    alert(`Contract ${contractId} closed successfully.`);
-    // Optional: visually gray out the row or update status column
-  } catch (error) {
-    console.error("Error closing contract:", error);
-    alert("Failed to close contract.");
-  }
-}
-
+    function rollContract() {
+      alert("Roll contract functionality not implemented.");
+    }
+    function closeContract() {
+      alert("Close contract functionality not implemented.");
+    }
     
 
    
