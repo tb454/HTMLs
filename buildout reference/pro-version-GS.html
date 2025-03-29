@@ -715,12 +715,36 @@
         }
       }
     }
-    function rollContract() {
-      alert("Roll contract functionality not implemented.");
-    }
-    function closeContract() {
-      alert("Close contract functionality not implemented.");
-    }
+    async function rollContract(contractId) {
+  try {
+    const response = await fetch(`http://localhost:8000/orders/${contractId}/roll`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    const result = await response.json();
+    alert(`Contract ${contractId} rolled successfully.`);
+    // Optional: update UI, disable button, etc.
+  } catch (error) {
+    console.error("Error rolling contract:", error);
+    alert("Failed to roll contract.");
+  }
+}
+
+async function closeContract(contractId) {
+  try {
+    const response = await fetch(`http://localhost:8000/orders/${contractId}/close`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    const result = await response.json();
+    alert(`Contract ${contractId} closed successfully.`);
+    // Optional: visually gray out the row or update status column
+  } catch (error) {
+    console.error("Error closing contract:", error);
+    alert("Failed to close contract.");
+  }
+}
+
     
 
    
@@ -1239,13 +1263,7 @@
         </tfoot>
       </table>
     </section>
-    <div id="realtimeData">Waiting for real-time updates...</div>
-        <div class="card-custom" onclick="cardClicked('Analytics')">
-        <div><strong>Analytics Data</strong></div>
-        <div id="analyticsDisplay">Loading analytics data...</div>
-            <!-- You could include a chart canvas if desired -->
-      <canvas id="analyticsChart" width="250" height="75"></canvas>
-    </div>
+
             
     <!-- KPI Section -->
     <section class="section">
@@ -2091,6 +2109,48 @@ document.addEventListener("DOMContentLoaded", () => {
     const username = document.getElementById("username").value;
     const password = document.getElementById("password").value;
     loginUser(username, password);
+  });
+</script>
+<script>
+  async function updateInventoryFromAPI() {
+    try {
+      const token = localStorage.getItem("access_token");
+      const response = await fetch("http://localhost:8000/scrap-metal", {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        }
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch live inventory data.");
+      }
+      const liveData = await response.json();
+      // Only update if liveData is a non-empty array
+      if (Array.isArray(liveData) && liveData.length > 0) {
+        const tableBody = document.getElementById("greenspark-table").querySelector("tbody");
+        // Instead of clearing all static data, you can choose to append or merge new data
+        liveData.forEach(item => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${item.metal_type}</td>
+            <td>${item.quantity.toLocaleString()}</td>
+            <td>${item.quality}</td>
+            <td>${item.location}</td>
+            <td>$${item.price}</td>
+          `;
+          tableBody.appendChild(row);
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching live inventory data:", error);
+      // If the API call fails, your static data remains.
+    }
+  }
+
+  // Optionally, set it to update periodically:
+  document.addEventListener("DOMContentLoaded", () => {
+    updateInventoryFromAPI();
+    setInterval(updateInventoryFromAPI, 60000); // Update every 60 seconds
   });
 </script>
 
