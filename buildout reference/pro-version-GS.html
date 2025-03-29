@@ -726,7 +726,7 @@
     // Optional: update UI, disable button, etc.
   } catch (error) {
     console.error("Error rolling contract:", error);
-    alert("Failed to roll contract.");
+    alert("PLug-and-Play. Awaiting your API.");
   }
 }
 
@@ -741,7 +741,7 @@ async function closeContract(contractId) {
     // Optional: visually gray out the row or update status column
   } catch (error) {
     console.error("Error closing contract:", error);
-    alert("Failed to close contract.");
+    alert("PLug-and-Play. Awaiting your API.");
   }
 }
 
@@ -2153,6 +2153,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(updateInventoryFromAPI, 60000); // Update every 60 seconds
   });
 </script>
+<footer style="margin-top: 40px; padding: 20px; text-align: center; font-size: 14px; color: #777;">
+  <hr style="margin-bottom: 15px;">
+  <div><strong>BRidge Platform</strong> – Powered by ScrapFutures.com</div>
+  <div>For acquisition inquiries or product demos:</div>
+  <div><a href="mailto:your.email@example.com" style="color: #3498db;">anthony@priorityrecycling.com</a></div> 
+  <div style="margin-top: 10px;">&copy; 2025 BRidge Technologies. All rights reserved.</div>
+</footer>
 
 </body>
 </html>
