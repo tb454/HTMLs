@@ -2,90 +2,64 @@
     <h2 style="text-align:center; color: #003366;">BRidge Mixed-Material Futures Contract</h2>
     <hr>
   
-    <h3>Contract Details</h3>
-    <ul>
-      <li><strong>Contract Unit:</strong> 10,000 pounds</li>
-      <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound (blended based on recoverable materials)</li>
-      <li><strong>Minimum Price Fluctuation:</strong> $0.0005 per pound = $5.00 per contract</li>
-      <li><strong>Accepted Loss Range:</strong> ±2% variance tolerance on recovery estimate</li>
-      <li><strong>Margin Deduction:</strong> 5% yard margin</li>
-      <li><strong>Contract Fee:</strong> $50 system fee</li>
-    </ul>
-  
-    <h3>Material Composition</h3>
-    <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
+    <h3>Material Composition (Editable)</h3>
+    <table id="materialTable" style="width: 100%; border-collapse: collapse; margin-top: 12px;">
       <thead>
         <tr style="background-color: #e0e0e0;">
           <th style="padding: 8px; border: 1px solid #bbb;">Material</th>
           <th style="padding: 8px; border: 1px solid #bbb;">% of Load</th>
-          <th style="padding: 8px; border: 1px solid #bbb;">Recovered Weight</th>
-          <th style="padding: 8px; border: 1px solid #bbb;">Market Price/lb</th>
-          <th style="padding: 8px; border: 1px solid #bbb;">Total Value</th>
+          <th style="padding: 8px; border: 1px solid #bbb;">Recovered Weight (lbs)</th>
+          <th style="padding: 8px; border: 1px solid #bbb;">Market Price/lb ($)</th>
+          <th style="padding: 8px; border: 1px solid #bbb;">Total Value ($)</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td style="padding: 8px; border: 1px solid #ccc;">Aluminum</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">40%</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">4,000 lbs</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">$1.05</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">$4,200.00</td>
+          <td>Aluminum</td>
+          <td><input type="number" value="40" onchange="recalculate()" /></td>
+          <td><input type="number" value="4000" onchange="recalculate()" /></td>
+          <td><input type="number" step="0.01" value="1.05" onchange="recalculate()" /></td>
+          <td class="totalValue">$4,200.00</td>
         </tr>
         <tr>
-          <td style="padding: 8px; border: 1px solid #ccc;">Rubber</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">60%</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">6,000 lbs</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">$0.35</td>
-          <td style="padding: 8px; border: 1px solid #ccc;">$2,100.00</td>
+          <td>Rubber</td>
+          <td><input type="number" value="60" onchange="recalculate()" /></td>
+          <td><input type="number" value="6000" onchange="recalculate()" /></td>
+          <td><input type="number" step="0.01" value="0.35" onchange="recalculate()" /></td>
+          <td class="totalValue">$2,100.00</td>
         </tr>
       </tbody>
     </table>
   
-    <p><strong>Raw Total Value:</strong> $6,300.00</p>
-    <p><strong>After Yard Margin (5%):</strong> $5,985.00</p>
+    <br>
+    <h3>Contract Valuation</h3>
+    <p><strong>Raw Total Value:</strong> $<span id="rawValue">6300.00</span></p>
+    <p><strong>After Yard Margin (5%):</strong> $<span id="afterMargin">5985.00</span></p>
     <p><strong>+ Contract Fee:</strong> $50.00</p>
-    <p style="font-weight: bold; color: #004085;">→ Final Contract Value: $6,035.00</p>
-  
-    <hr>
-  
-    <h3>Trading Hours</h3>
-    <ul>
-      <li><strong>BRidge Platform:</strong> Sunday – Friday, 6:00 p.m. – 3:00 p.m. ET (7:00 p.m. – 4:00 p.m. CT)</li>
-      <li><strong>CME Globex Reference:</strong> Sunday – Friday, 6:00 p.m. – 5:00 p.m. ET (5:00 p.m. – 4:00 p.m. CT), with 60-minute break from 5:00 p.m. – 6:00 p.m. ET</li>
-      <li><strong>TAS Window:</strong> 6:00 p.m. – 1:00 p.m. ET</li>
-      <li><strong>TAM Window:</strong> 6:00 p.m. ET – 12:35 p.m. London Time</li>
-      <li><strong>CME ClearPort (Reference):</strong> Sunday 5:00 p.m. – Friday 4:00 p.m. CT</li>
-    </ul>
-  
-    <h3>Product Codes</h3>
-    <ul>
-      <li><strong>BRidge Internal Code:</strong> MIX-CUB</li>
-      <li><strong>CME Futures Reference:</strong> CUB</li>
-      <li><strong>Recovery Composite Code:</strong> CUB-RCL (Reclaim Blend)</li>
-    </ul>
-  
-    <h3>Listed Contracts</h3>
-    <ul>
-      <li>Monthly contracts listed for up to 36 months</li>
-      <li>Mixed material recovery futures are cash-settled or physically delivered within 15 days</li>
-    </ul>
-  
-    <h3>Settlement & Termination</h3>
-    <ul>
-      <li><strong>Settlement Method:</strong> Cash-settled based on verified market value OR physical delivery within 15 days</li>
-      <li><strong>Termination of Trading:</strong> 12:00 p.m. CT on the third last business day of the contract month</li>
-      <li><strong>Final Price Basis:</strong> BRidge composite index based on aluminum and rubber recovery pricing</li>
-      <li><strong>TAS/TAM (if applicable):</strong> Zero or ±10 ticks in minimum tick increment per Rule 524.A</li>
-    </ul>
-  
-    <h3>Other Specifications</h3>
-    <ul>
-      <li><strong>Position Limits:</strong> Governed by BRidge smart contract thresholds</li>
-      <li><strong>Circuit Breakers:</strong> Tiered BRidge halt bands by volatility range</li>
-      <li><strong>Compliance References:</strong> ASTM scrap specs, COMEX Rule 111</li>
-      <li><strong>Grade & Quality:</strong> Verified via manifest + scale + image log</li>
-      <li><strong>Delivery Period:</strong> Any business day in the contract month (no later than last business day)</li>
-      <li><strong>Disputes:</strong> Settled via BRidge arbitration engine</li>
-    </ul>
+    <p style="font-weight: bold; color: #004085;">→ Final Contract Value: $<span id="finalValue">6035.00</span></p>
   </div>
   
+  <script>
+  function recalculate() {
+    const rows = document.querySelectorAll("#materialTable tbody tr");
+    let rawTotal = 0;
+  
+    rows.forEach(row => {
+      const weight = parseFloat(row.cells[2].querySelector("input").value) || 0;
+      const price = parseFloat(row.cells[3].querySelector("input").value) || 0;
+      const total = weight * price;
+      row.querySelector(".totalValue").textContent = `$${total.toFixed(2)}`;
+      rawTotal += total;
+    });
+  
+    const margin = 0.05;
+    const afterMargin = rawTotal * (1 - margin);
+    const contractFee = 50;
+    const finalValue = afterMargin + contractFee;
+  
+    document.getElementById("rawValue").textContent = rawTotal.toFixed(2);
+    document.getElementById("afterMargin").textContent = afterMargin.toFixed(2);
+    document.getElementById("finalValue").textContent = finalValue.toFixed(2);
+  }
+  </script>
+
