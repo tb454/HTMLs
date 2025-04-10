@@ -1,5 +1,7 @@
 <div style="font-family: Arial, sans-serif; max-width: 1000px; margin: auto; padding: 24px; background-color: #fdfdfd; border: 1px solid #ccc; border-radius: 10px; line-height: 1.6;">
     <h2 style="text-align:center; color: #003366;">BRidge Mixed-Material Futures Contract (Editable)</h2>
+    <p style="text-align:center; color: red;" id="warning"></p>
+  
     <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
       <thead>
         <tr style="background-color: #e0e0e0;">
@@ -8,27 +10,32 @@
           <th style="padding: 8px; border: 1px solid #bbb;">Recovered Weight (lbs)</th>
           <th style="padding: 8px; border: 1px solid #bbb;">Market Price/lb ($)</th>
           <th style="padding: 8px; border: 1px solid #bbb;">Total Value ($)</th>
+          <th style="padding: 8px; border: 1px solid #bbb;"></th>
         </tr>
       </thead>
       <tbody id="contractTable">
         <tr>
           <td><input type="text" value="Aluminum" onchange="recalculate()" /></td>
           <td><input type="number" value="40" onchange="recalculate()" /></td>
-          <td><input type="number" value="4000" onchange="recalculate()" /></td>
+          <td><input type="number" value="8000" readonly /></td>
           <td><input type="number" step="0.01" value="1.05" onchange="recalculate()" /></td>
-          <td class="totalValue">$4,200.00</td>
+          <td class="totalValue">$8,400.00</td>
+          <td></td>
         </tr>
         <tr>
           <td><input type="text" value="Rubber" onchange="recalculate()" /></td>
           <td><input type="number" value="60" onchange="recalculate()" /></td>
-          <td><input type="number" value="6000" onchange="recalculate()" /></td>
+          <td><input type="number" value="12000" readonly /></td>
           <td><input type="number" step="0.01" value="0.35" onchange="recalculate()" /></td>
-          <td class="totalValue">$2,100.00</td>
+          <td class="totalValue">$4,200.00</td>
+          <td></td>
         </tr>
       </tbody>
     </table>
   
-    <br>
+    <button onclick="addRow()" style="margin-top: 12px; padding: 6px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">+ Add Material</button>
+  
+    <br><br>
   
     <table style="width: 100%; border-collapse: collapse; margin-top: 24px;">
       <thead>
@@ -48,32 +55,48 @@
         </tr>
         <tr>
           <td style="padding: 8px;"><strong>Raw Total Value ($)</strong></td>
-          <td style="padding: 8px;"><strong>$<span id="rawValue">6300.00</span></strong></td>
+          <td style="padding: 8px;"><strong>$<span id="rawValue">12600.00</span></strong></td>
         </tr>
         <tr>
           <td style="padding: 8px;"><strong>After Yard Margin ($)</strong></td>
-          <td style="padding: 8px;">$<span id="afterMargin">5985.00</span></td>
+          <td style="padding: 8px;">$<span id="afterMargin">11970.00</span></td>
         </tr>
         <tr>
           <td style="padding: 8px;"><strong>+ Contract Fee ($)</strong></td>
-          <td style="padding: 8px;">$<span id="finalValue">6035.00</span></td>
+          <td style="padding: 8px;">$<span id="finalValue">12020.00</span></td>
         </tr>
       </tbody>
     </table>
   </div>
   
   <script>
+  const TOTAL_WEIGHT = 20000;
+  
   function recalculate() {
     const rows = document.querySelectorAll("#contractTable tr");
     let rawTotal = 0;
+    let totalPercent = 0;
   
     rows.forEach(row => {
-      const weight = parseFloat(row.cells[2].querySelector("input").value) || 0;
-      const price = parseFloat(row.cells[3].querySelector("input").value) || 0;
-      const total = weight * price;
-      row.querySelector(".totalValue").textContent = `$${total.toFixed(2)}`;
+      const percentInput = row.cells[1].querySelector("input");
+      const recoveredInput = row.cells[2].querySelector("input");
+      const priceInput = row.cells[3].querySelector("input");
+      const valueCell = row.querySelector(".totalValue");
+  
+      const percent = parseFloat(percentInput.value) || 0;
+      const price = parseFloat(priceInput.value) || 0;
+      const recovered = (percent / 100) * TOTAL_WEIGHT;
+      const total = recovered * price;
+  
+      recoveredInput.value = recovered.toFixed(2);
+      valueCell.textContent = `$${total.toFixed(2)}`;
+  
       rawTotal += total;
+      totalPercent += percent;
     });
+  
+    const warning = document.getElementById("warning");
+    warning.textContent = totalPercent > 100 ? "⚠️ Total % of Load exceeds 100%. Please adjust." : "";
   
     const marginPercent = parseFloat(document.getElementById("marginInput").value) || 0;
     const contractFee = parseFloat(document.getElementById("feeInput").value) || 0;
@@ -86,6 +109,21 @@
     document.getElementById("finalValue").textContent = finalValue.toFixed(2);
   }
   
-  recalculate(); // run once at load
-  </script>
+  function addRow() {
+    const table = document.getElementById("contractTable");
+    const row = table.insertRow();
   
+    row.innerHTML = `
+      <td><input type="text" value="New Material" onchange="recalculate()" /></td>
+      <td><input type="number" value="0" onchange="recalculate()" /></td>
+      <td><input type="number" value="0" readonly /></td>
+      <td><input type="number" step="0.01" value="0.00" onchange="recalculate()" /></td>
+      <td class="totalValue">$0.00</td>
+      <td><button onclick="this.parentElement.parentElement.remove(); recalculate();" style="color: red; border: none; background: none; font-weight: bold;">✖</button></td>
+    `;
+    recalculate();
+  }
+  
+  recalculate();
+  </script>
+
