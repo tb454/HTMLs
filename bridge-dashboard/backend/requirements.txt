@@ -17,3 +17,4 @@ numpy
 python-multipart
 databases
 asyncpg
+python-dotenv
