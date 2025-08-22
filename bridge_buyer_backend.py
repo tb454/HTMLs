@@ -74,23 +74,6 @@ class LoginRequest(BaseModel):
 # --- In-memory store (temporary for BOLs only) ---
 bol_records: List[BOLRecord] = []
 
-# --- Login Endpoint ---
-@app.post("/login")
-async def login(data: LoginRequest):
-    query = users.select().where(
-        users.c.username == data.username.strip(),
-        users.c.password == data.password.strip()
-    )
-    result = await database.fetch_one(query)
-
-    if not result:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    return {
-        "username": result["username"],
-        "role": result["role"]
-    }
-
 # --- BOL Endpoints ---
 @app.post("/create_bol")
 def create_bol(record: BOLRecord):
@@ -141,3 +124,20 @@ def add_delivery_signature(bol_id: str, signature: Signature):
             record.status = "Delivered"
             return {"message": "Delivery signature added"}
     raise HTTPException(status_code=404, detail="BOL not found")
+
+# --- Login Endpoint ---
+@app.post("/login")
+async def login(data: LoginRequest):
+    query = users.select().where(
+        users.c.username == data.username.strip(),
+        users.c.password == data.password.strip()
+    )
+    result = await database.fetch_one(query)
+
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return {
+        "username": result["username"],
+        "role": result["role"]
+    }
