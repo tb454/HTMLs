@@ -3,12 +3,36 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from sqlalchemy import create_engine, Table, MetaData
+from fastapi import Request
+import os
+import databases
 import uuid
 import csv
 
 app = FastAPI()
 
-# Allow cross-origin requests from frontend
+# --- Database Setup ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
+
+database = databases.Database(DATABASE_URL)
+metadata = MetaData()
+engine = create_engine(DATABASE_URL)
+metadata.reflect(bind=engine)
+
+users = Table("users", metadata, autoload_with=engine)
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,10 +67,31 @@ class BOLRecord(BaseModel):
     delivery_time: Optional[datetime] = None
     status: str
 
-# --- In-memory store ---
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+# --- In-memory store (temporary for BOLs only) ---
 bol_records: List[BOLRecord] = []
 
-# --- Endpoints ---
+# --- Login Endpoint ---
+@app.post("/login")
+async def login(data: LoginRequest):
+    query = users.select().where(
+        users.c.username == data.username.strip(),
+        users.c.password == data.password.strip()
+    )
+    result = await database.fetch_one(query)
+
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return {
+        "username": result["username"],
+        "role": result["role"]
+    }
+
+# --- BOL Endpoints ---
 @app.post("/create_bol")
 def create_bol(record: BOLRecord):
     bol_records.append(record)
