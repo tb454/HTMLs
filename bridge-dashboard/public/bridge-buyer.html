@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BRidge Buyer Portal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background-color: #f4f6f8;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 20px;
+    }
+    .contract-card {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+    .signature-pad {
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 100%;
+      height: 150px;
+      background-color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="mb-4">📦 BRidge Buyer Portal</h2>
+
+    <!-- Lewis Salvage -->
+    <div class="contract-card">
+      <h4>Shred Steel – 40 Tons</h4>
+      <p><strong>Seller:</strong> Winski Brothers</p>
+      <p><strong>Buyer:</strong> Lewis Salvage</p>
+      <p><strong>Price:</strong> $245/ton</p>
+      <p><strong>Total:</strong> $9,800</p>
+      <p><strong>Status:</strong> Open</p>
+      <p><strong>Pickup Location:</strong> Indiana</p>
+
+      <h5 class="mt-4">🚛 Assign Carrier</h5>
+      <div class="row mb-3">
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Carrier Name" />
+        </div>
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Truck VIN" />
+        </div>
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Driver Name" />
+        </div>
+      </div>
+
+      <h5>✍️ Pickup Signature</h5>
+      <canvas class="signature-pad" id="sig1"></canvas>
+
+      <button class="btn btn-primary mt-3">📄 Generate BOL</button>
+      <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
+    </div>
+
+    <!-- C&Y Global -->
+    <div class="contract-card">
+      <h4>Insulated Copper Wire – 10,000 lbs</h4>
+      <p><strong>Seller:</strong> Winski Brothers</p>
+      <p><strong>Buyer:</strong> C&Y Global (Jimmy Cheng)</p>
+      <p><strong>Price:</strong> $1.32/lb</p>
+      <p><strong>Total:</strong> $13,200</p>
+      <p><strong>Status:</strong> Open</p>
+      <p><strong>Pickup Location:</strong> Indiana</p>
+
+      <h5 class="mt-4">🚛 Assign Carrier</h5>
+      <div class="row mb-3">
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Carrier Name" />
+        </div>
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Truck VIN" />
+        </div>
+        <div class="col">
+          <input type="text" class="form-control" placeholder="Driver Name" />
+        </div>
+      </div>
+
+      <h5>✍️ Pickup Signature</h5>
+      <canvas class="signature-pad" id="sig2"></canvas>
+
+      <button class="btn btn-primary mt-3">📄 Generate BOL</button>
+      <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
+    </div>
+  </div>
+</body>
+</html>
