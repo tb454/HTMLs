@@ -19,4 +19,5 @@ databases
 asyncpg
 python-dotenv
 databases
+psycopg2
 psycopg2-binary
