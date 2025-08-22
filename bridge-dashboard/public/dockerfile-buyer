@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  bridge-backend:
+    build: ./backend
+    container_name: bridge-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://bridge_user:bridge_pass@bridge-db/bridge_db
+    depends_on:
+      - bridge-db
+
+  bridge-db:
+    image: postgres:15
+    container_name: bridge-db
+    restart: always
+    environment:
+      POSTGRES_USER: bridge_user
+      POSTGRES_PASSWORD: bridge_pass
+      POSTGRES_DB: bridge_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
