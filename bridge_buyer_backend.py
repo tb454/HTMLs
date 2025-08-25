@@ -21,14 +21,16 @@ if not DATABASE_URL:
 database = databases.Database(DATABASE_URL)
 metadata = MetaData()
 engine = create_engine(DATABASE_URL)
-metadata.reflect(bind=engine)
-
-users = Table("users", metadata, autoload_with=engine)
+users = None
 
 @app.on_event("startup")
 async def startup():
+    global users
     await database.connect()
-
+    metadata.reflect(bind=engine)
+    users = metadata.tables["users"]
+    if users is None:
+        raise RuntimeError("The 'users' table was not found in the database schema.")
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
