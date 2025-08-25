@@ -1,4 +1,3 @@
-# [unchanged imports]
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -137,10 +136,25 @@ class ContractUpdate(BaseModel):
     status: str
     signature: Optional[str] = None
 
-# --- In-memory BOLs (temporary) ---
-bol_records: List[BOLRecord] = []
+class BOLIn(BaseModel):
+    contract_id: uuid.UUID
+    buyer: str
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_unit: float
+    total_value: float
+    carrier: CarrierInfo
+    pickup_signature: Signature
+    pickup_time: datetime
 
-# --- Contract (BOL) Endpoints using Postgres ---
+class BOLOut(BOLIn):
+    bol_id: uuid.UUID
+    status: str
+    delivery_signature: Optional[Signature] = None
+    delivery_time: Optional[datetime] = None
+
+# --- Contract Endpoints ---
 @app.post("/contracts", response_model=ContractOut)
 async def create_contract(contract: ContractIn):
     query = """
@@ -212,6 +226,122 @@ async def export_contracts_csv():
         "Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'
     }
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+
+# --- Postgres-based BOL Endpoints ---
+@app.post("/bols", response_model=BOLOut)
+async def create_bol_pg(bol: BOLIn):
+    query = """
+        INSERT INTO bols (
+            bol_id, contract_id, buyer, seller, material, weight_tons,
+            price_per_unit, total_value,
+            carrier_name, carrier_driver, carrier_truck_vin,
+            pickup_signature_base64, pickup_signature_time,
+            pickup_time, status
+        )
+        VALUES (
+            :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
+            :price_per_unit, :total_value,
+            :carrier_name, :carrier_driver, :carrier_truck_vin,
+            :pickup_sig_b64, :pickup_sig_time,
+            :pickup_time, 'Scheduled'
+        )
+        RETURNING *
+    """
+    values = {
+        "bol_id": str(uuid.uuid4()),
+        "contract_id": str(bol.contract_id),
+        "buyer": bol.buyer,
+        "seller": bol.seller,
+        "material": bol.material,
+        "weight_tons": bol.weight_tons,
+        "price_per_unit": bol.price_per_unit,
+        "total_value": bol.total_value,
+        "carrier_name": bol.carrier.name,
+        "carrier_driver": bol.carrier.driver,
+        "carrier_truck_vin": bol.carrier.truck_vin,
+        "pickup_sig_b64": bol.pickup_signature.base64,
+        "pickup_sig_time": bol.pickup_signature.timestamp,
+        "pickup_time": bol.pickup_time
+    }
+    row = await database.fetch_one(query, values)
+    return {
+        **bol.dict(),
+        "bol_id": row["bol_id"],
+        "status": row["status"],
+        "delivery_signature": None,
+        "delivery_time": None
+    }
+
+@app.get("/bols", response_model=List[BOLOut])
+async def get_all_bols_pg():
+    query = "SELECT * FROM bols ORDER BY pickup_time DESC"
+    rows = await database.fetch_all(query)
+    result = []
+    for row in rows:
+        result.append({
+            "bol_id": row["bol_id"],
+            "contract_id": row["contract_id"],
+            "buyer": row["buyer"],
+            "seller": row["seller"],
+            "material": row["material"],
+            "weight_tons": row["weight_tons"],
+            "price_per_unit": row["price_per_unit"],
+            "total_value": row["total_value"],
+            "carrier": {
+                "name": row["carrier_name"],
+                "driver": row["carrier_driver"],
+                "truck_vin": row["carrier_truck_vin"]
+            },
+            "pickup_signature": {
+                "base64": row["pickup_signature_base64"],
+                "timestamp": row["pickup_signature_time"]
+            },
+            "delivery_signature": (
+                {
+                    "base64": row["delivery_signature_base64"],
+                    "timestamp": row["delivery_signature_time"]
+                } if row["delivery_signature_base64"] else None
+            ),
+            "pickup_time": row["pickup_time"],
+            "delivery_time": row["delivery_time"],
+            "status": row["status"]
+        })
+    return result
+
+@app.post("/bols/{bol_id}/update_status")
+async def update_bol_status_pg(bol_id: str, new_status: str):
+    query = """
+        UPDATE bols
+        SET status = :status,
+            delivery_time = CASE WHEN :status ILIKE 'delivered' THEN NOW() ELSE delivery_time END
+        WHERE bol_id = :bol_id
+        RETURNING bol_id
+    """
+    row = await database.fetch_one(query, {"bol_id": bol_id, "status": new_status})
+    if not row:
+        raise HTTPException(status_code=404, detail="BOL not found")
+    return {"message": "Status updated"}
+
+@app.post("/bols/{bol_id}/add_delivery_signature")
+async def add_delivery_signature_pg(bol_id: str, sig: Signature):
+    query = """
+        UPDATE bols
+        SET delivery_signature_base64 = :b64,
+            delivery_signature_time = :ts,
+            status = 'Delivered',
+            delivery_time = NOW()
+        WHERE bol_id = :bol_id
+        RETURNING bol_id
+    """
+    values = {
+        "bol_id": bol_id,
+        "b64": sig.base64,
+        "ts": sig.timestamp
+    }
+    row = await database.fetch_one(query, values)
+    if not row:
+        raise HTTPException(status_code=404, detail="BOL not found")
+    return {"message": "Delivery signature added"}
 
 # --- Login Endpoint with Redirects or JSON ---
 @app.post("/login")
