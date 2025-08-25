@@ -148,7 +148,9 @@ def add_delivery_signature(bol_id: str, signature: Signature):
             return {"message": "Delivery signature added"}
     raise HTTPException(status_code=404, detail="BOL not found")
 
-# --- Login Endpoint ---
+from fastapi.responses import RedirectResponse
+
+# --- Login Endpoint with Redirects ---
 @app.post("/login")
 async def login(data: LoginRequest):
     query = users.select().where(
@@ -160,7 +162,13 @@ async def login(data: LoginRequest):
     if not result:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    return {
-        "username": result["username"],
-        "role": result["role"]
-    }
+    role = result["role"]
+
+    if role == "admin":
+        return RedirectResponse(url="/admin", status_code=303)
+    elif role == "buyer":
+        return RedirectResponse(url="/buyer", status_code=303)
+    elif role == "seller":
+        return RedirectResponse(url="/seller", status_code=303)  # optional if you add a seller page
+    else:
+        raise HTTPException(status_code=400, detail="Unknown user role")
