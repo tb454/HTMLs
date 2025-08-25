@@ -6,4 +6,4 @@ services:
     startCommand: "uvicorn bridge_buyer_backend:app --host 0.0.0.0 --port 10000"
     envVars:
       - key: DATABASE_URL
-        value: "postgresql://postgres:Vh9jGqvfnjHtNZlr@db.apbkobhfnmcqqzqeeqss.supabase.co:5432/postgres"
+        value: postgresql://postgres:Vh9jGqvfnjHtNZlr@db.naoaitepvzrwlaqihzvc.supabase.co:5432/postgres
