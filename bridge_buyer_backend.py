@@ -1,3 +1,4 @@
+# [unchanged imports]
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -118,7 +119,6 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-# ✅ NEW CONTRACT MODELS HERE:
 class ContractIn(BaseModel):
     buyer: str
     seller: str
@@ -133,66 +133,85 @@ class ContractOut(ContractIn):
     signed_at: Optional[datetime]
     signature: Optional[str]
 
-# --- In-memory store (temporary for BOLs only) ---
+class ContractUpdate(BaseModel):
+    status: str
+    signature: Optional[str] = None
+
+# --- In-memory BOLs (temporary) ---
 bol_records: List[BOLRecord] = []
 
-# --- BOL Endpoints ---
-@app.post("/create_bol")
-def create_bol(record: BOLRecord):
-    bol_records.append(record)
-    return {"message": "BOL created", "bol_id": record.bol_id}
+# --- Contract (BOL) Endpoints using Postgres ---
+@app.post("/contracts", response_model=ContractOut)
+async def create_contract(contract: ContractIn):
+    query = """
+        INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton)
+        VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton)
+        RETURNING *
+    """
+    values = {
+        "id": str(uuid.uuid4()),
+        **contract.dict()
+    }
+    row = await database.fetch_one(query, values)
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create contract")
+    return row
 
-@app.get("/bols")
-def get_all_bols():
-    return bol_records
+@app.get("/contracts", response_model=List[ContractOut])
+async def get_all_contracts():
+    query = "SELECT * FROM contracts ORDER BY created_at DESC"
+    return await database.fetch_all(query)
 
-@app.get("/bol/{bol_id}")
-def get_bol_by_id(bol_id: str):
-    for record in bol_records:
-        if record.bol_id == bol_id:
-            return record
-    raise HTTPException(status_code=404, detail="BOL not found")
+@app.get("/contracts/{contract_id}", response_model=ContractOut)
+async def get_contract_by_id(contract_id: str):
+    query = "SELECT * FROM contracts WHERE id = :id"
+    row = await database.fetch_one(query, {"id": contract_id})
+    if not row:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
 
-@app.get("/export_csv")
-def export_csv():
+@app.put("/contracts/{contract_id}", response_model=ContractOut)
+async def update_contract(contract_id: str, update: ContractUpdate):
+    query = """
+        UPDATE contracts
+        SET status = :status,
+            signature = :signature,
+            signed_at = CASE WHEN :signature IS NOT NULL THEN NOW() ELSE signed_at END
+        WHERE id = :id
+        RETURNING *
+    """
+    values = {
+        "id": contract_id,
+        "status": update.status,
+        "signature": update.signature
+    }
+    row = await database.fetch_one(query, values)
+    if not row:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
+
+# --- CSV Export from Postgres Contracts ---
+@app.get("/contracts/export_csv")
+async def export_contracts_csv():
+    query = "SELECT * FROM contracts ORDER BY created_at DESC"
+    rows = await database.fetch_all(query)
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "BOL_ID", "Contract_ID", "Buyer", "Seller", "Material", "Weight_Tons",
-        "Status", "Pickup_Time", "Delivery_Time", "Total_Value"
-    ])
-    for r in bol_records:
+    writer.writerow(["ID", "Buyer", "Seller", "Material", "Weight (tons)", "Price/ton", "Status", "Created", "Signed", "Signature"])
+    for row in rows:
         writer.writerow([
-            r.bol_id, r.contract_id, r.buyer, r.seller, r.material, r.weight_tons, r.status,
-            r.pickup_time.isoformat(),
-            r.delivery_time.isoformat() if r.delivery_time else "",
-            f"{r.total_value:.2f}"
+            row["id"], row["buyer"], row["seller"], row["material"],
+            row["weight_tons"], row["price_per_ton"], row["status"],
+            row["created_at"].isoformat(),
+            row["signed_at"].isoformat() if row["signed_at"] else "",
+            row["signature"] or ""
         ])
     output.seek(0)
     headers = {
-        "Content-Disposition": f'attachment; filename="bol_export_{datetime.utcnow().isoformat()}.csv"'
+        "Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'
     }
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
-
-@app.post("/update_status/{bol_id}")
-def update_status(bol_id: str, new_status: str):
-    for record in bol_records:
-        if record.bol_id == bol_id:
-            record.status = new_status
-            if new_status.lower() == "delivered":
-                record.delivery_time = datetime.utcnow()
-            return {"message": "Status updated"}
-    raise HTTPException(status_code=404, detail="BOL not found")
-
-@app.post("/add_delivery_signature/{bol_id}")
-def add_delivery_signature(bol_id: str, signature: Signature):
-    for record in bol_records:
-        if record.bol_id == bol_id:
-            record.delivery_signature = signature
-            record.delivery_time = datetime.utcnow()
-            record.status = "Delivered"
-            return {"message": "Delivery signature added"}
-    raise HTTPException(status_code=404, detail="BOL not found")
 
 # --- Login Endpoint with Redirects or JSON ---
 @app.post("/login")
