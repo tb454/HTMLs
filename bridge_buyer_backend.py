@@ -9,6 +9,8 @@ import os
 import databases
 import uuid
 import csv
+from dotenv import load_dotenv
+load_dotenv()
 
 
 app = FastAPI()
