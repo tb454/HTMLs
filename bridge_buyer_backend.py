@@ -23,7 +23,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
 async def root():
-    # Serve your login as the root page
     return FileResponse("static/bridge-login.html")
 
 @app.get("/healthz", include_in_schema=False)
@@ -32,7 +31,6 @@ async def healthz():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    # Avoid 404 noise in logs
     return Response(status_code=204)
 
 @app.get("/buyer")
@@ -52,16 +50,13 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set")
 
-# databases uses asyncpg for postgresql
 database = databases.Database(DATABASE_URL)
 metadata = MetaData()
-# Engine is fine for reflection; psycopg/asyncpg both OK for read-only reflection
 engine = create_engine(DATABASE_URL)
 
-# These names must match your actual DB columns
 USERS_TABLE_NAME = "users"
-USERNAME_COL = "username"        # change to "email" if your schema uses email
-PASSWORD_HASH_COL = "password"   # change to "password_hash" if hashed column is named that
+USERNAME_COL = "username"
+PASSWORD_HASH_COL = "password"
 ROLE_COL = "role"
 
 users: Optional[Table] = None
@@ -72,7 +67,6 @@ async def startup():
     await database.connect()
     metadata.reflect(bind=engine)
     if USERS_TABLE_NAME not in metadata.tables:
-        # Don’t crash the app if users table doesn’t exist yet; just warn loudly.
         raise RuntimeError(f"The '{USERS_TABLE_NAME}' table was not found in the database schema.")
     users = metadata.tables[USERS_TABLE_NAME]
 
@@ -81,7 +75,6 @@ async def shutdown():
     await database.disconnect()
 
 # --- CORS ---
-# Wildcard + allow_credentials=True is invalid. Add your real origins here.
 ALLOWED_ORIGINS = [
     "https://scrapfutures.com",
     "https://www.scrapfutures.com",
@@ -125,8 +118,22 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+# ✅ NEW CONTRACT MODELS HERE:
+class ContractIn(BaseModel):
+    buyer: str
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_ton: float
+
+class ContractOut(ContractIn):
+    id: uuid.UUID
+    status: str
+    created_at: datetime
+    signed_at: Optional[datetime]
+    signature: Optional[str]
+
 # --- In-memory store (temporary for BOLs only) ---
-# TODO: Persist BOLs to Postgres (industrial-grade); this is fine for now to keep your flow.
 bol_records: List[BOLRecord] = []
 
 # --- BOL Endpoints ---
@@ -148,9 +155,6 @@ def get_bol_by_id(bol_id: str):
 
 @app.get("/export_csv")
 def export_csv():
-    """
-    Stream CSV to client instead of writing files on disk (serverless-safe).
-    """
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -196,8 +200,6 @@ async def login(data: LoginRequest, request: Request):
     if users is None:
         raise HTTPException(status_code=500, detail="Users table not initialized")
 
-    # Build a proper AND clause (two separate conditions)
-    # NOTE: we read the stored password/hash from DB and check safely.
     stmt = (
         select(
             users.c[USERNAME_COL].label("username"),
@@ -213,12 +215,10 @@ async def login(data: LoginRequest, request: Request):
 
     stored_hash_or_plain = row["password_hash"]
 
-    # First try bcrypt verify; if it fails, fall back to plaintext equality (for legacy rows).
     ok = False
     try:
         ok = bcrypt.verify(data.password.strip(), stored_hash_or_plain)
     except Exception:
-        # Not a bcrypt hash; do a safe constant-time compare if you want (here, plain compare)
         ok = data.password.strip() == str(stored_hash_or_plain)
 
     if not ok:
@@ -226,8 +226,6 @@ async def login(data: LoginRequest, request: Request):
 
     role = row["role"]
 
-    # If it’s a form POST (browser navigation), redirects will work.
-    # If called via fetch(), we return JSON so your JS can decide where to go.
     accepts = request.headers.get("accept", "")
     if "text/html" in accepts:
         if role == "admin":
