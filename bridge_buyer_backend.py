@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
@@ -10,12 +12,25 @@ import databases
 import uuid
 import csv
 from dotenv import load_dotenv
-load_dotenv()
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
+load_dotenv()
 
 app = FastAPI()
+
+# --- Serve static HTML from /static ---
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def root():
+    return FileResponse("static/bridge-login.html")
+
+@app.get("/buyer")
+async def buyer_page():
+    return FileResponse("static/bridge-buyer.html")
+
+@app.get("/admin")
+async def admin_page():
+    return FileResponse("static/bridge-admin-dashboard.html")
 
 # --- Database Setup ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -35,6 +50,7 @@ async def startup():
     users = metadata.tables["users"]
     if users is None:
         raise RuntimeError("The 'users' table was not found in the database schema.")
+
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
