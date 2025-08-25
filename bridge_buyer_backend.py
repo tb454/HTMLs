@@ -1,28 +1,39 @@
-from fastapi import FastAPI, HTTPException 
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-from sqlalchemy import create_engine, Table, MetaData
-from fastapi import Request
+from sqlalchemy import create_engine, Table, MetaData, and_, select
 import os
 import databases
 import uuid
 import csv
+import io
+from passlib.hash import bcrypt
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(title="BRidge API")
 
 # --- Serve static HTML from /static ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 async def root():
+    # Serve your login as the root page
     return FileResponse("static/bridge-login.html")
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"ok": True, "service": "bridge-buyer"}
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    # Avoid 404 noise in logs
+    return Response(status_code=204)
 
 @app.get("/buyer")
 async def buyer_page():
@@ -32,33 +43,53 @@ async def buyer_page():
 async def admin_page():
     return FileResponse("static/bridge-admin-dashboard.html")
 
+@app.get("/seller")
+async def seller_page():
+    return FileResponse("static/index.html")
+
 # --- Database Setup ---
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set")
 
+# databases uses asyncpg for postgresql
 database = databases.Database(DATABASE_URL)
 metadata = MetaData()
+# Engine is fine for reflection; psycopg/asyncpg both OK for read-only reflection
 engine = create_engine(DATABASE_URL)
-users = None
+
+# These names must match your actual DB columns
+USERS_TABLE_NAME = "users"
+USERNAME_COL = "username"        # change to "email" if your schema uses email
+PASSWORD_HASH_COL = "password"   # change to "password_hash" if hashed column is named that
+ROLE_COL = "role"
+
+users: Optional[Table] = None
 
 @app.on_event("startup")
 async def startup():
     global users
     await database.connect()
     metadata.reflect(bind=engine)
-    users = metadata.tables["users"]
-    if users is None:
-        raise RuntimeError("The 'users' table was not found in the database schema.")
+    if USERS_TABLE_NAME not in metadata.tables:
+        # Don’t crash the app if users table doesn’t exist yet; just warn loudly.
+        raise RuntimeError(f"The '{USERS_TABLE_NAME}' table was not found in the database schema.")
+    users = metadata.tables[USERS_TABLE_NAME]
 
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
 
 # --- CORS ---
+# Wildcard + allow_credentials=True is invalid. Add your real origins here.
+ALLOWED_ORIGINS = [
+    "https://scrapfutures.com",
+    "https://www.scrapfutures.com",
+    "https://bridge-buyer.onrender.com",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,6 +126,7 @@ class LoginRequest(BaseModel):
     password: str
 
 # --- In-memory store (temporary for BOLs only) ---
+# TODO: Persist BOLs to Postgres (industrial-grade); this is fine for now to keep your flow.
 bol_records: List[BOLRecord] = []
 
 # --- BOL Endpoints ---
@@ -116,24 +148,34 @@ def get_bol_by_id(bol_id: str):
 
 @app.get("/export_csv")
 def export_csv():
-    filename = f"bol_export_{datetime.utcnow().isoformat()}.csv"
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["BOL_ID", "Contract_ID", "Buyer", "Material", "Weight", "Status", "Pickup_Time", "Delivery_Time", "Total_Value"])
-        for r in bol_records:
-            writer.writerow([
-                r.bol_id, r.contract_id, r.buyer, r.material, r.weight_tons, r.status,
-                r.pickup_time.isoformat(), r.delivery_time.isoformat() if r.delivery_time else "",
-                f"${r.total_value:,.2f}"
-            ])
-    return {"message": "CSV exported", "filename": filename}
+    """
+    Stream CSV to client instead of writing files on disk (serverless-safe).
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "BOL_ID", "Contract_ID", "Buyer", "Seller", "Material", "Weight_Tons",
+        "Status", "Pickup_Time", "Delivery_Time", "Total_Value"
+    ])
+    for r in bol_records:
+        writer.writerow([
+            r.bol_id, r.contract_id, r.buyer, r.seller, r.material, r.weight_tons, r.status,
+            r.pickup_time.isoformat(),
+            r.delivery_time.isoformat() if r.delivery_time else "",
+            f"{r.total_value:.2f}"
+        ])
+    output.seek(0)
+    headers = {
+        "Content-Disposition": f'attachment; filename="bol_export_{datetime.utcnow().isoformat()}.csv"'
+    }
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
 @app.post("/update_status/{bol_id}")
 def update_status(bol_id: str, new_status: str):
     for record in bol_records:
         if record.bol_id == bol_id:
             record.status = new_status
-            if new_status == "Delivered":
+            if new_status.lower() == "delivered":
                 record.delivery_time = datetime.utcnow()
             return {"message": "Status updated"}
     raise HTTPException(status_code=404, detail="BOL not found")
@@ -148,27 +190,53 @@ def add_delivery_signature(bol_id: str, signature: Signature):
             return {"message": "Delivery signature added"}
     raise HTTPException(status_code=404, detail="BOL not found")
 
-from fastapi.responses import RedirectResponse
-
-# --- Login Endpoint with Redirects ---
+# --- Login Endpoint with Redirects or JSON ---
 @app.post("/login")
-async def login(data: LoginRequest):
-    query = users.select().where(
-        users.c.username == data.username.strip(),
-        users.c.password == data.password.strip()
-    )
-    result = await database.fetch_one(query)
+async def login(data: LoginRequest, request: Request):
+    if users is None:
+        raise HTTPException(status_code=500, detail="Users table not initialized")
 
-    if not result:
+    # Build a proper AND clause (two separate conditions)
+    # NOTE: we read the stored password/hash from DB and check safely.
+    stmt = (
+        select(
+            users.c[USERNAME_COL].label("username"),
+            users.c[PASSWORD_HASH_COL].label("password_hash"),
+            users.c[ROLE_COL].label("role")
+        )
+        .where(and_(users.c[USERNAME_COL] == data.username.strip()))
+        .limit(1)
+    )
+    row = await database.fetch_one(stmt)
+    if not row:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    role = result["role"]
+    stored_hash_or_plain = row["password_hash"]
 
-    if role == "admin":
-        return RedirectResponse(url="/admin", status_code=303)
-    elif role == "buyer":
-        return RedirectResponse(url="/buyer", status_code=303)
-    elif role == "seller":
-        return RedirectResponse(url="/seller", status_code=303)  # optional if you add a seller page
+    # First try bcrypt verify; if it fails, fall back to plaintext equality (for legacy rows).
+    ok = False
+    try:
+        ok = bcrypt.verify(data.password.strip(), stored_hash_or_plain)
+    except Exception:
+        # Not a bcrypt hash; do a safe constant-time compare if you want (here, plain compare)
+        ok = data.password.strip() == str(stored_hash_or_plain)
+
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    role = row["role"]
+
+    # If it’s a form POST (browser navigation), redirects will work.
+    # If called via fetch(), we return JSON so your JS can decide where to go.
+    accepts = request.headers.get("accept", "")
+    if "text/html" in accepts:
+        if role == "admin":
+            return RedirectResponse(url="/admin", status_code=303)
+        elif role == "buyer":
+            return RedirectResponse(url="/buyer", status_code=303)
+        elif role == "seller":
+            return RedirectResponse(url="/seller", status_code=303)
+        else:
+            raise HTTPException(status_code=400, detail="Unknown user role")
     else:
-        raise HTTPException(status_code=400, detail="Unknown user role")
+        return JSONResponse({"ok": True, "role": role, "redirect": f"/{role if role in ('admin','buyer','seller') else 'buyer'}"})
