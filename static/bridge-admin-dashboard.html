@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BRidge Admin Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
   <style>
     body {
       background-color: #f4f6f8;
@@ -22,6 +22,14 @@
     }
     .filters {
       margin-bottom: 20px;
+    }
+    .signature-pad {
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 100%;
+      height: 150px;
+      background-color: #fff;
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -64,6 +72,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
 
@@ -119,18 +128,85 @@
     }
 
     async function downloadCSV() {
-      const res = await fetch(`${endpoint}/export_csv`);
-      const data = await res.json();
-      const fileRes = await fetch(`${endpoint}/${data.filename}`);
-      const blob = await fileRes.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = data.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      window.open(`${endpoint}/contracts/export_csv`, "_blank");
     }
+
+    function getCanvasSignature(canvas) {
+      return {
+        base64: canvas.toDataURL("image/png"),
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    function collectCarrierInfo(cardElement) {
+      const inputs = cardElement.querySelectorAll("input");
+      return {
+        name: inputs[0].value,
+        truck_vin: inputs[1].value,
+        driver: inputs[2].value
+      };
+    }
+
+    function generateBOLData(index, canvas) {
+      const contract = index === 0 ? {
+        contract_id: "CNT-1001",
+        buyer: "Lewis Salvage",
+        material: "Shred Steel",
+        weight_tons: 40,
+        price_per_unit: 245.00
+      } : {
+        contract_id: "CNT-1002",
+        buyer: "C&Y Global",
+        material: "Insulated Copper Wire",
+        weight_tons: 5,
+        price_per_unit: 2640.00 / 5
+      };
+
+      const total = contract.weight_tons * contract.price_per_unit;
+      const card = document.querySelectorAll(".contract-card")[index];
+      const carrier = collectCarrierInfo(card);
+      const pickup_signature = getCanvasSignature(canvas);
+
+      return {
+        contract_id: contract.contract_id,
+        buyer: contract.buyer,
+        seller: "Winski Brothers",
+        material: contract.material,
+        weight_tons: contract.weight_tons,
+        price_per_unit: contract.price_per_unit,
+        total_value: total,
+        carrier,
+        pickup_signature,
+        pickup_time: new Date().toISOString()
+      };
+    }
+
+    document.querySelectorAll(".btn.btn-primary").forEach((btn, index) => {
+      btn.addEventListener("click", async () => {
+        const canvas = document.querySelectorAll(".signature-pad")[index];
+        const bolData = generateBOLData(index, canvas);
+        const res = await fetch(`${endpoint}/bols`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bolData)
+        });
+        alert(res.ok ? `✅ BOL created for ${bolData.buyer}` : "❌ Failed to create BOL");
+      });
+    });
+
+    document.querySelectorAll(".btn.btn-success").forEach((btn, index) => {
+      btn.addEventListener("click", async () => {
+        const bol_id = prompt("Enter BOL ID to update status to 'In Transit':");
+        if (!bol_id) return;
+
+        const res = await fetch(`${endpoint}/bols/${bol_id}/update_status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify("In Transit")
+        });
+        alert(res.ok ? `✅ Status updated to In Transit for BOL ${bol_id}` : "❌ Failed to update status");
+      });
+    });
 
     document.getElementById("startDate").addEventListener("change", fetchBOLs);
     document.getElementById("endDate").addEventListener("change", fetchBOLs);
