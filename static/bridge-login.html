@@ -61,14 +61,13 @@
         localStorage.setItem("bridgeUser", JSON.stringify(data));
 
         if (data.role === "admin") {
-          window.location.href = "/BRidge/bridge-admin-dashboard.html";
-        } else if (data.role === "buyer") {
-          window.location.href = "/BRidge/bridge-buyer.html";
-        } else if (data.role === "yard") {
-          window.location.href = "/BRidge";
-        } else {
-          alert("Unknown role: " + data.role);
-        }
+  window.location.href = "/admin";
+} else if (data.role === "buyer") {
+  window.location.href = "/buyer";
+} else if (data.role === "yard") {
+  window.location.href = "/seller";
+}
+
       } else {
         document.getElementById("error").style.display = "block";
       }
