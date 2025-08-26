@@ -39,7 +39,7 @@ async def buyer_page():
 
 @app.get("/admin")
 async def admin_page():
-    return FileResponse("static/bridge-admin-dashboard.html")
+    return FileResponse("file:///C:/Users/tbyer/BRidge-html/HTMLs/static/bridge-admin-dashboard.html")
 
 @app.get("/seller")
 async def seller_page():
