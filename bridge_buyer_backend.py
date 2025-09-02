@@ -21,6 +21,19 @@ load_dotenv()
 
 app = FastAPI(title="BRidge API")
 
+@app.get("/terms", include_in_schema=False)
+async def terms_page():
+    return FileResponse("static/legal/terms.html")
+
+@app.get("/eula", include_in_schema=False)
+async def eula_page():
+    return FileResponse("static/legal/eula.html")
+
+@app.get("/privacy", include_in_schema=False)
+async def privacy_page():
+    return FileResponse("static/legal/privacy.html")
+
+
 # --- Serve static HTML from /static ---
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
