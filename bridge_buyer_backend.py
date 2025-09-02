@@ -22,15 +22,15 @@ load_dotenv()
 
 app = FastAPI(title="BRidge API")
 
-@app.get("/terms", include_in_schema=False)
+@app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
 async def terms_page():
     return FileResponse("static/legal/terms.html")
 
-@app.get("/eula", include_in_schema=False)
+@app.get("/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement (EULA)", description="View the BRidge platform EULA.", status_code=200)
 async def eula_page():
     return FileResponse("static/legal/eula.html")
 
-@app.get("/privacy", include_in_schema=False)
+@app.get("/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy", description="View the BRidge platform Privacy Policy.", status_code=200)
 async def privacy_page():
     return FileResponse("static/legal/privacy.html")
 
@@ -42,7 +42,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return FileResponse("static/bridge-login.html")
 
-@app.get("/healthz", include_in_schema=False)
+@app.get("/healthz", tags=["Health"], summary="Health Check", description="Simple health check to confirm service uptime.", status_code=200)
 async def healthz():
     return {"ok": True, "service": "bridge-buyer"}
 
@@ -62,8 +62,15 @@ async def admin_page():
 async def seller_page():
     return FileResponse("static/index.html")
 
-@app.get("/bol/{bol_id}/pdf")
+@app.get(
+    "/bol/{bol_id}/pdf",
+    tags=["Documents"],
+    summary="Download BOL as PDF",
+    description="Generates and returns a downloadable PDF version of the specified BOL.",
+    status_code=200
+)
 async def generate_bol_pdf(bol_id: str):
+
     query = "SELECT * FROM bols WHERE bol_id = :bol_id"
     row = await database.fetch_one(query, {"bol_id": bol_id})
     if not row:
@@ -222,7 +229,7 @@ class BOLOut(BOLIn):
     delivery_time: Optional[datetime] = None
 
 # --- Contract Endpoints ---
-@app.post("/contracts", response_model=ContractOut)
+@app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", description="Create a new contract with buyer, seller, material, weight, and price.", status_code=201)
 async def create_contract(contract: ContractIn):
     query = """
         INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton)
@@ -240,13 +247,23 @@ async def create_contract(contract: ContractIn):
 
 from fastapi import Query
 
-@app.get("/contracts", response_model=List[ContractOut])
+from fastapi import Query
+
+@app.get(
+    "/contracts",
+    response_model=List[ContractOut],
+    tags=["Contracts"],
+    summary="Get All Contracts",
+    description="Retrieve all contracts with optional filters like buyer, seller, status, or date range.",
+    status_code=200
+)
 async def get_all_contracts(
-    buyer: Optional[str] = Query(None),
-    seller: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None)
+    buyer: Optional[str] = Query(None, description="Filter by buyer name"),
+    seller: Optional[str] = Query(None, description="Filter by seller name"),
+    status: Optional[str] = Query(None, description="Filter by contract status"),
+    start: Optional[datetime] = Query(None, description="Start date (created_at >=)"),
+    end: Optional[datetime] = Query(None, description="End date (created_at <=)")
+
 ):
     query = "SELECT * FROM contracts"
     conditions = []
@@ -281,7 +298,7 @@ async def get_all_contracts(
     return await database.fetch_all(query=query, values=values)
 
 
-@app.get("/contracts/{contract_id}", response_model=ContractOut)
+@app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", description="Retrieve a specific contract by its unique ID.", status_code=200)
 async def get_contract_by_id(contract_id: str):
     query = "SELECT * FROM contracts WHERE id = :id"
     row = await database.fetch_one(query, {"id": contract_id})
@@ -289,7 +306,7 @@ async def get_contract_by_id(contract_id: str):
         raise HTTPException(status_code=404, detail="Contract not found")
     return row
 
-@app.put("/contracts/{contract_id}", response_model=ContractOut)
+@app.put("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Update Contract", description="Update a contract’s status or signature using its ID.", status_code=200)
 async def update_contract(contract_id: str, update: ContractUpdate):
     query = """
         UPDATE contracts
@@ -310,7 +327,7 @@ async def update_contract(contract_id: str, update: ContractUpdate):
     return row
 
 # --- CSV Export from Postgres Contracts ---
-@app.get("/contracts/export_csv")
+@app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", description="Export all contract records to a downloadable CSV file.", status_code=200)
 async def export_contracts_csv():
     query = "SELECT * FROM contracts ORDER BY created_at DESC"
     rows = await database.fetch_all(query)
@@ -333,7 +350,7 @@ async def export_contracts_csv():
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
 # --- BOL Endpoints ---
-@app.post("/bols", response_model=BOLOut)
+@app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
 async def create_bol_pg(bol: BOLIn):
     query = """
         INSERT INTO bols (
@@ -377,14 +394,25 @@ async def create_bol_pg(bol: BOLIn):
         "delivery_time": None
     }
 
-@app.get("/bols", response_model=List[BOLOut])
+from fastapi import Query
+
+@app.get("/bols", response_model=List[BOLOut], tags=["BOLs"], summary="List BOLs", description="Retrieve all BOLs. Supports optional filtering by buyer, seller, status, and pickup date range.", status_code=200)
 async def get_all_bols_pg(
-    buyer: Optional[str] = Query(None),
-    seller: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None)
+    buyer: Optional[str] = Query(None, description="Filter by buyer name"),
+    seller: Optional[str] = Query(None, description="Filter by seller name"),
+    status: Optional[str] = Query(None, description="Filter by BOL status"),
+    start: Optional[datetime] = Query(None, description="Start date (pickup_time >=)"),
+    end: Optional[datetime] = Query(None, description="End date (pickup_time <=)")
 ):
+
+ async def get_all_bols_pg(
+    buyer: Optional[str] = Query(None, description="Filter by buyer name"),
+    seller: Optional[str] = Query(None, description="Filter by seller name"),
+    status: Optional[str] = Query(None, description="Filter by BOL status (e.g. 'Open', 'Delivered')"),
+    start: Optional[datetime] = Query(None, description="Start of pickup time range (pickup_time >=)"),
+    end: Optional[datetime] = Query(None, description="End of pickup time range (pickup_time <=)")
+):
+
     query = "SELECT * FROM bols"
     conditions = []
 
@@ -448,7 +476,7 @@ async def get_all_bols_pg(
     return result
 
 
-@app.post("/bols/{bol_id}/update_status")
+@app.post("/bols/{bol_id}/update_status", tags=["BOLs"], summary="Update BOL Status", description="Update the status of a BOL (e.g., to In Transit or Delivered).", status_code=200)
 async def update_bol_status_pg(bol_id: str, new_status: str):
     query = """
         UPDATE bols
@@ -462,7 +490,7 @@ async def update_bol_status_pg(bol_id: str, new_status: str):
         raise HTTPException(status_code=404, detail="BOL not found")
     return {"message": "Status updated"}
 
-@app.post("/bols/{bol_id}/add_delivery_signature")
+@app.post("/bols/{bol_id}/add_delivery_signature", tags=["BOLs"], summary="Add Delivery Signature", description="Attach a delivery signature and mark the BOL as Delivered.", status_code=200)
 async def add_delivery_signature_pg(bol_id: str, sig: Signature):
     query = """
         UPDATE bols
@@ -484,8 +512,15 @@ async def add_delivery_signature_pg(bol_id: str, sig: Signature):
     return {"message": "Delivery signature added"}
 
 # --- Login Endpoint ---
-@app.post("/login")
+@app.post(
+    "/login",
+    tags=["Auth"],
+    summary="User Login",
+    description="Authenticate a user based on username and password. Returns role and redirect path on success.",
+    status_code=200
+)
 async def login(data: LoginRequest, request: Request):
+
     if users is None:
         raise HTTPException(status_code=500, detail="Users table not initialized")
 
