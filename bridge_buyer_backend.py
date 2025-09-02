@@ -192,6 +192,14 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "username": "admin",
+                "password": "securepass123"
+            }
+        }
+
 class ContractIn(BaseModel):
     buyer: str
     seller: str
@@ -222,6 +230,14 @@ class ContractUpdate(BaseModel):
     status: str
     signature: Optional[str] = None
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "Signed",
+                "signature": "JohnDoe123"
+            }
+        }
+
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
     buyer: str
@@ -233,6 +249,29 @@ class BOLIn(BaseModel):
     carrier: CarrierInfo
     pickup_signature: Signature
     pickup_time: datetime
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "contract_id": "1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_unit": 245.00,
+                "total_value": 9800.00,
+                "carrier": {
+                    "name": "ABC Trucking Co.",
+                    "driver": "John Driver",
+                    "truck_vin": "1FDUF5GY3KDA12345"
+                },
+                "pickup_signature": {
+                    "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+                    "timestamp": "2025-09-01T12:00:00Z"
+                },
+                "pickup_time": "2025-09-01T12:15:00Z"
+            }
+        }
 
 class BOLOut(BOLIn):
     bol_id: uuid.UUID
@@ -256,8 +295,6 @@ async def create_contract(contract: ContractIn):
     if not row:
         raise HTTPException(status_code=500, detail="Failed to create contract")
     return row
-
-from fastapi import Query
 
 from fastapi import Query
 
