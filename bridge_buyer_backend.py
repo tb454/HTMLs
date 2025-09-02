@@ -50,15 +50,15 @@ async def healthz():
 async def favicon():
     return Response(status_code=204)
 
-@app.get("/buyer")
+@app.get("/buyer", include_in_schema=False)
 async def buyer_page():
     return FileResponse("static/bridge-buyer.html")
 
-@app.get("/admin")
+@app.get("/admin", include_in_schema=False)
 async def admin_page():
     return FileResponse("static/bridge-admin-dashboard.html")
 
-@app.get("/seller")
+@app.get("/seller", include_in_schema=False)
 async def seller_page():
     return FileResponse("static/index.html")
 
