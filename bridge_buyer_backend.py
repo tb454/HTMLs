@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
+from fastapi import Query
 
 load_dotenv()
 
@@ -237,10 +238,48 @@ async def create_contract(contract: ContractIn):
         raise HTTPException(status_code=500, detail="Failed to create contract")
     return row
 
+from fastapi import Query
+
 @app.get("/contracts", response_model=List[ContractOut])
-async def get_all_contracts():
-    query = "SELECT * FROM contracts ORDER BY created_at DESC"
-    return await database.fetch_all(query)
+async def get_all_contracts(
+    buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None)
+):
+    query = "SELECT * FROM contracts"
+    conditions = []
+    
+    if buyer:
+        conditions.append("buyer ILIKE :buyer")
+    if seller:
+        conditions.append("seller ILIKE :seller")
+    if status:
+        conditions.append("status ILIKE :status")
+    if start:
+        conditions.append("created_at >= :start")
+    if end:
+        conditions.append("created_at <= :end")
+    
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY created_at DESC"
+
+    values = {
+        "buyer": f"%{buyer}%" if buyer else None,
+        "seller": f"%{seller}%" if seller else None,
+        "status": f"%{status}%" if status else None,
+        "start": start,
+        "end": end,
+    }
+
+    # Clean out None values
+    values = {k: v for k, v in values.items() if v is not None}
+
+    return await database.fetch_all(query=query, values=values)
+
 
 @app.get("/contracts/{contract_id}", response_model=ContractOut)
 async def get_contract_by_id(contract_id: str):
@@ -339,9 +378,43 @@ async def create_bol_pg(bol: BOLIn):
     }
 
 @app.get("/bols", response_model=List[BOLOut])
-async def get_all_bols_pg():
-    query = "SELECT * FROM bols ORDER BY pickup_time DESC"
-    rows = await database.fetch_all(query)
+async def get_all_bols_pg(
+    buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None)
+):
+    query = "SELECT * FROM bols"
+    conditions = []
+
+    if buyer:
+        conditions.append("buyer ILIKE :buyer")
+    if seller:
+        conditions.append("seller ILIKE :seller")
+    if status:
+        conditions.append("status ILIKE :status")
+    if start:
+        conditions.append("pickup_time >= :start")
+    if end:
+        conditions.append("pickup_time <= :end")
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY pickup_time DESC"
+
+    values = {
+        "buyer": f"%{buyer}%" if buyer else None,
+        "seller": f"%{seller}%" if seller else None,
+        "status": f"%{status}%" if status else None,
+        "start": start,
+        "end": end,
+    }
+
+    values = {k: v for k, v in values.items() if v is not None}
+
+    rows = await database.fetch_all(query=query, values=values)
     result = []
     for row in rows:
         result.append({
@@ -373,6 +446,7 @@ async def get_all_bols_pg():
             "status": row["status"]
         })
     return result
+
 
 @app.post("/bols/{bol_id}/update_status")
 async def update_bol_status_pg(bol_id: str, new_status: str):
