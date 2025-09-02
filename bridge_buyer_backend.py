@@ -199,6 +199,18 @@ class ContractIn(BaseModel):
     weight_tons: float
     price_per_ton: float
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40.0,
+                "price_per_ton": 245.00
+            }
+        }
+
+
 class ContractOut(ContractIn):
     id: uuid.UUID
     status: str
