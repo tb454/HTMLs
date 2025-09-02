@@ -20,3 +20,4 @@ asyncpg
 python-dotenv
 databases
 psycopg2-binary
+reportlabs
