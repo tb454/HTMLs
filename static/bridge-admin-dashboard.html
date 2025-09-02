@@ -65,6 +65,7 @@
             <th>Pickup Time</th>
             <th>Delivery Time</th>
             <th>Total Value</th>
+            <th>Download</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -106,7 +107,8 @@
           <td>${formatTime(bol.pickup_time)}</td>
           <td>${bol.delivery_time ? formatTime(bol.delivery_time) : "—"}</td>
           <td>$${bol.total_value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-        `;
+          <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
+          `;
         tbody.appendChild(row);
       });
     }
@@ -130,6 +132,10 @@
     async function downloadCSV() {
       window.open(`${endpoint}/contracts/export_csv`, "_blank");
     }
+
+    function downloadPDF(bolId) {
+  window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
+}
 
     function getCanvasSignature(canvas) {
       return {
