@@ -53,6 +53,7 @@
 
       <button class="btn btn-primary mt-3">📄 Generate BOL</button>
       <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
+      <button class="btn btn-outline-dark mt-2 download-btn" style="display:none;">📄 Download BOL (PDF)</button>
     </div>
 
     <!-- C&Y Global -->
@@ -77,11 +78,10 @@
 
       <button class="btn btn-primary mt-3">📄 Generate BOL</button>
       <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
+      <button class="btn btn-outline-dark mt-2 download-btn" style="display:none;">📄 Download BOL (PDF)</button>
     </div>
   </div>
 
- 
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
 
@@ -138,6 +138,10 @@
       };
     }
 
+    function downloadPDF(bolId) {
+      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
+    }
+
     document.querySelectorAll(".signature-pad").forEach((canvas) => {
       let drawing = false;
       const ctx = canvas.getContext('2d');
@@ -161,12 +165,21 @@
       btn.addEventListener("click", async () => {
         const canvas = document.querySelectorAll(".signature-pad")[index];
         const bolData = generateBOLData(index, canvas);
-        const res = await fetch(`${endpoint}/create_bol`, {
+        const res = await fetch(`${endpoint}/bols`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(bolData)
         });
-        alert(res.ok ? `✅ BOL created for ${bolData.buyer}` : "❌ Failed to create BOL");
+
+        if (res.ok) {
+          alert(`✅ BOL created for ${bolData.buyer}`);
+          const bol_id = bolData.bol_id;
+          const downloadBtn = document.querySelectorAll(".download-btn")[index];
+          downloadBtn.style.display = "inline-block";
+          downloadBtn.onclick = () => downloadPDF(bol_id);
+        } else {
+          alert("❌ Failed to create BOL");
+        }
       });
     });
 
@@ -174,7 +187,7 @@
       btn.addEventListener("click", async () => {
         const bol_id = document.querySelectorAll(".contract-card")[index]
           .querySelector("canvas").id.replace("sig", "BRG-");
-        const res = await fetch(`${endpoint}/update_status/${bol_id}`, {
+        const res = await fetch(`${endpoint}/bols/${bol_id}/update_status`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify("In Transit")
