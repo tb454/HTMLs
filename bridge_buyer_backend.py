@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 from sqlalchemy import create_engine, Table, MetaData, and_, select
 import os
@@ -19,6 +19,21 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
+
+# ===== NEW: middleware & observability deps =====
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+import structlog, time
+
+# rate limiting
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import PlainTextResponse
+
+# metrics & errors
+from prometheus_fastapi_instrumentator import Instrumentator
+import sentry_sdk
 
 load_dotenv()
 
@@ -37,6 +52,59 @@ app = FastAPI(
     },
 )
 
+# ===== NEW: Trusted hosts + session cookie =====
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
+)
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me"))
+
+# ===== NEW: Security headers (incl. CSP that allows jsDelivr you use in HTML) =====
+async def security_headers_mw(request, call_next):
+    resp: Response = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Permissions-Policy"] = "geolocation=()"
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self' https://cdn.jsdelivr.net; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+    )
+    return resp
+
+app.middleware("http")(security_headers_mw)
+
+# ===== NEW: request-id + structured logs =====
+logger = structlog.get_logger()
+
+@app.middleware("http")
+async def request_id_logging(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    start = time.time()
+    response = await call_next(request)
+    elapsed = int((time.time() - start) * 1000)
+    response.headers["X-Request-ID"] = rid
+    logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
+    return response
+
+# ===== NEW: rate limiting =====
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def ratelimit_handler(request, exc):
+    return PlainTextResponse("Too Many Requests", status_code=429)
+
+# ===== NEW: Prometheus metrics + optional Sentry =====
+@app.on_event("startup")
+async def _metrics_and_sentry():
+    Instrumentator().instrument(app).expose(app, include_in_schema=False)
+    dsn = os.getenv("SENTRY_DSN")
+    if dsn:
+        sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
+
 # -------- Legal pages --------
 @app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
 async def terms_page():
@@ -51,6 +119,7 @@ async def privacy_page():
     return FileResponse("static/legal/privacy.html")
 
 # -------- Static HTML --------
+from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
@@ -181,8 +250,11 @@ class ContractOut(ContractIn):
             "status":"Signed","created_at":"2025-09-01T10:00:00Z","signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
 
+# Optional tighter typing for updates
+ContractStatus = Literal["Pending","Signed","Dispatched","Fulfilled","Cancelled"]
+
 class ContractUpdate(BaseModel):
-    status: str
+    status: ContractStatus
     signature: Optional[str] = None
     class Config:
         schema_extra = {"example":{"status":"Signed","signature":"JohnDoe123"}}
@@ -221,6 +293,9 @@ class BOLOut(BOLIn):
             "pickup_signature":{"base64":"data:image/png;base64,iVBOR...","timestamp":"2025-09-01T12:00:00Z"},
             "pickup_time":"2025-09-01T12:15:00Z","delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
+
+# ===== Idempotency cache for POST /bols (starter) =====
+_idem_cache = {}
 
 # -------- Documents: BOL PDF --------
 @app.get(
@@ -300,24 +375,20 @@ async def get_all_contracts(
     seller: Optional[str] = Query(None, description="Filter by seller name"),
     status: Optional[str] = Query(None, description="Filter by contract status"),
     start: Optional[datetime] = Query(None, description="Start date (created_at >=)"),
-    end: Optional[datetime] = Query(None, description="End date (created_at <=)")
+    end: Optional[datetime] = Query(None, description="End date (created_at <=)"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     query = "SELECT * FROM contracts"
-    conditions = []
-    if buyer: conditions.append("buyer ILIKE :buyer")
-    if seller: conditions.append("seller ILIKE :seller")
-    if status: conditions.append("status ILIKE :status")
-    if start: conditions.append("created_at >= :start")
-    if end: conditions.append("created_at <= :end")
+    conditions, values = [], {}
+    if buyer: conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
+    if seller: conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
+    if status: conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
+    if start: conditions.append("created_at >= :start"); values["start"] = start
+    if end:   conditions.append("created_at <= :end");   values["end"] = end
     if conditions: query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY created_at DESC"
-    values = {
-        "buyer": f"%{buyer}%" if buyer else None,
-        "seller": f"%{seller}%" if seller else None,
-        "status": f"%{status}%" if status else None,
-        "start": start, "end": end,
-    }
-    values = {k: v for k, v in values.items() if v is not None}
+    query += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    values["limit"], values["offset"] = limit, offset
     return await database.fetch_all(query=query, values=values)
 
 @app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", description="Retrieve a specific contract by its unique ID.", status_code=200)
@@ -361,7 +432,12 @@ async def export_contracts_csv():
 
 # -------- BOLs --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
-async def create_bol_pg(bol: BOLIn):
+async def create_bol_pg(bol: BOLIn, request: Request):
+    # ===== NEW: idempotency support =====
+    idem_key = request.headers.get("Idempotency-Key")
+    if idem_key and idem_key in _idem_cache:
+        return _idem_cache[idem_key]
+
     row = await database.fetch_one("""
         INSERT INTO bols (
             bol_id, contract_id, buyer, seller, material, weight_tons,
@@ -387,13 +463,16 @@ async def create_bol_pg(bol: BOLIn):
         "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
         "pickup_time": bol.pickup_time
     })
-    return {
+    resp = {
         **bol.dict(),
         "bol_id": row["bol_id"],
         "status": row["status"],
         "delivery_signature": None,
         "delivery_time": None
     }
+    if idem_key:
+        _idem_cache[idem_key] = resp
+    return resp
 
 @app.get("/bols", response_model=List[BOLOut], tags=["BOLs"], summary="List BOLs", description="Retrieve all BOLs. Supports optional filtering by buyer, seller, status, contract_id, and pickup date range.", status_code=200)
 async def get_all_bols_pg(
@@ -402,26 +481,22 @@ async def get_all_bols_pg(
     status: Optional[str] = Query(None, description="Filter by BOL status"),
     contract_id: Optional[str] = Query(None, description="Filter by contract ID"),
     start: Optional[datetime] = Query(None, description="Start date (pickup_time >=)"),
-    end: Optional[datetime] = Query(None, description="End date (pickup_time <=)")
+    end: Optional[datetime] = Query(None, description="End date (pickup_time <=)"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     query = "SELECT * FROM bols"
-    conditions = []
-    if buyer: conditions.append("buyer ILIKE :buyer")
-    if seller: conditions.append("seller ILIKE :seller")
-    if status: conditions.append("status ILIKE :status")
-    if contract_id: conditions.append("contract_id = :contract_id")
-    if start: conditions.append("pickup_time >= :start")
-    if end: conditions.append("pickup_time <= :end")
+    conditions, values = [], {}
+    if buyer: conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
+    if seller: conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
+    if status: conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
+    if contract_id: conditions.append("contract_id = :contract_id"); values["contract_id"] = contract_id
+    if start: conditions.append("pickup_time >= :start"); values["start"] = start
+    if end:   conditions.append("pickup_time <= :end");   values["end"] = end
     if conditions: query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY pickup_time DESC"
-    values = {
-        "buyer": f"%{buyer}%" if buyer else None,
-        "seller": f"%{seller}%" if seller else None,
-        "status": f"%{status}%" if status else None,
-        "contract_id": contract_id,
-        "start": start, "end": end,
-    }
-    values = {k: v for k, v in values.items() if v is not None}
+    query += " ORDER BY pickup_time DESC LIMIT :limit OFFSET :offset"
+    values["limit"], values["offset"] = limit, offset
+
     rows = await database.fetch_all(query=query, values=values)
     result = []
     for row in rows:
@@ -485,6 +560,7 @@ async def add_delivery_signature_pg(bol_id: str, sig: Signature):
     return {"message": "Delivery signature added, contract fulfilled"}
 
 # -------- Auth --------
+@limiter.limit("5/minute")  # ===== NEW: rate limit login =====
 @app.post(
     "/login",
     tags=["Auth"],
