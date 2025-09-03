@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -44,7 +44,6 @@
       </div>
     </div>
 
-    <!-- Pagination controls -->
     <div class="d-flex gap-2 mb-2">
       <button id="prevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
       <button id="nextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
@@ -65,6 +64,7 @@
             <th>Delivery Time</th>
             <th>Total Value</th>
             <th>Download</th>
+            <th>View</th> <!-- ✅ View BOLs column -->
           </tr>
         </thead>
         <tbody></tbody>
@@ -89,26 +89,23 @@
       qs.set("limit", String(limit));
       qs.set("offset", String(offset));
 
-      // ✅ backticks around the whole URL so ${endpoint} works
-    const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
-const data = await res.json();
+      const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
+      const data = await res.json();
 
-const tbody = document.querySelector("#bol-table tbody");
-tbody.innerHTML = "";
+      const tbody = document.querySelector("#bol-table tbody");
+      tbody.innerHTML = "";
 
-if (data.length === 0) {
-  const row = document.createElement("tr");
-  row.innerHTML = `<td colspan="10" class="text-center text-muted py-3">No BOLs match your filters.</td>`;
-  tbody.appendChild(row);
-  document.getElementById("nextBtn").disabled = true;
-  document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
-  return;
-}
-
+      if (data.length === 0) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td colspan="11" class="text-center text-muted py-3">No BOLs match your filters.</td>`;
+        tbody.appendChild(row);
+        document.getElementById("nextBtn").disabled = true;
+        document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
+        return;
+      }
 
       data.forEach(bol => {
         const row = document.createElement("tr");
-        // ✅ backticks around the row markup (template literal)
         row.innerHTML = `
           <td>${bol.bol_id}</td>
           <td>${bol.contract_id}</td>
@@ -120,6 +117,7 @@ if (data.length === 0) {
           <td>${bol.delivery_time ? formatTime(bol.delivery_time) : "—"}</td>
           <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
           <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
+          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td> <!-- ✅ View Button -->
         `;
         tbody.appendChild(row);
       });
@@ -127,6 +125,14 @@ if (data.length === 0) {
       document.getElementById("pageInfo").textContent = `Showing ${data.length} • offset ${offset}`;
       document.getElementById("prevBtn").disabled = offset === 0;
       document.getElementById("nextBtn").disabled = data.length < limit;
+    }
+
+    function viewBOLsFor(contractId) {
+      const qs = new URLSearchParams();
+      qs.set("contract_id", contractId);
+      qs.set("limit", "100");
+      qs.set("offset", "0");
+      window.location.href = `${endpoint}/bols?${qs.toString()}`;
     }
 
     function formatTime(isoString) {
