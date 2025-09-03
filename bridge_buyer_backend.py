@@ -51,6 +51,8 @@ app = FastAPI(
         "url": "https://scrapfutures.com/legal",
     },
 )
+instrumentator = Instrumentator()
+instrumentator.instrument(app)
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
@@ -102,10 +104,12 @@ async def ratelimit_handler(request, exc):
 # =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
 async def _metrics_and_sentry():
-    Instrumentator().instrument(app).expose(app, include_in_schema=False)
-    dsn = os.getenv("SENTRY_DSN")
-    if dsn:
+        instrumentator.expose(app, include_in_schema=False)
+
+dsn = os.getenv("SENTRY_DSN")
+if dsn:
         sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
+
 
 # -------- Legal pages --------
 @app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
