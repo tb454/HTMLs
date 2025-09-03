@@ -20,7 +20,20 @@ from fastapi import Query
 
 load_dotenv()
 
-app = FastAPI(title="BRidge API")
+app = FastAPI(
+    title="BRidge API",
+    description="A secure, auditable contract and logistics platform for real-world commodity trading. Built for ICE, Nasdaq, and global counterparties.",
+    version="1.0.0",
+    contact={
+        "name": "Atlas IP Holdings",
+        "url": "https://scrapfutures.com",
+        "email": "info@atlasipholdingsllc.com",
+    },
+    license_info={
+        "name": "Proprietary — Atlas IP Holdings",
+        "url": "https://scrapfutures.com/legal",
+    },
+)
 
 @app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
 async def terms_page():
@@ -168,9 +181,26 @@ class CarrierInfo(BaseModel):
     driver: str
     truck_vin: str
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "ABC Trucking Co.",
+                "driver": "Jane Doe",
+                "truck_vin": "1FTSW21P34ED12345"
+            }
+        }
+
 class Signature(BaseModel):
     base64: str
     timestamp: datetime
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA...",
+                "timestamp": "2025-09-01T12:00:00Z"
+            }
+        }
 
 class BOLRecord(BaseModel):
     bol_id: str
@@ -226,6 +256,22 @@ class ContractOut(ContractIn):
     signed_at: Optional[datetime]
     signature: Optional[str]
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_ton": 245.00,
+                "status": "Signed",
+                "created_at": "2025-09-01T10:00:00Z",
+                "signed_at": "2025-09-01T10:15:00Z",
+                "signature": "abc123signature"
+            }
+        }
+
 class ContractUpdate(BaseModel):
     status: str
     signature: Optional[str] = None
@@ -278,6 +324,33 @@ class BOLOut(BOLIn):
     status: str
     delivery_signature: Optional[Signature] = None
     delivery_time: Optional[datetime] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "bol_id": "9fd89221-4247-4f93-bf4b-df9473ed8e57",
+                "contract_id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_unit": 245.0,
+                "total_value": 9800.0,
+                "carrier": {
+                    "name": "ABC Trucking Co.",
+                    "driver": "Jane Doe",
+                    "truck_vin": "1FTSW21P34ED12345"
+                },
+                "pickup_signature": {
+                    "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA...",
+                    "timestamp": "2025-09-01T12:00:00Z"
+                },
+                "pickup_time": "2025-09-01T12:15:00Z",
+                "delivery_signature": None,
+                "delivery_time": None,
+                "status": "BOL Issued"
+            }
+        }
 
 # --- Contract Endpoints ---
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", description="Create a new contract with buyer, seller, material, weight, and price.", status_code=201)
