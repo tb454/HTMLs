@@ -90,11 +90,21 @@
       qs.set("offset", String(offset));
 
       // ✅ backticks around the whole URL so ${endpoint} works
-      const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
-      const data = await res.json();
+    const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
+const data = await res.json();
 
-      const tbody = document.querySelector("#bol-table tbody");
-      tbody.innerHTML = "";
+const tbody = document.querySelector("#bol-table tbody");
+tbody.innerHTML = "";
+
+if (data.length === 0) {
+  const row = document.createElement("tr");
+  row.innerHTML = `<td colspan="10" class="text-center text-muted py-3">No BOLs match your filters.</td>`;
+  tbody.appendChild(row);
+  document.getElementById("nextBtn").disabled = true;
+  document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
+  return;
+}
+
 
       data.forEach(bol => {
         const row = document.createElement("tr");
