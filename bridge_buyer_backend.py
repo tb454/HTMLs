@@ -52,14 +52,16 @@ app = FastAPI(
     },
 )
 
-# ===== NEW: Trusted hosts + session cookie =====
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
-)
+# ===== Trusted hosts + session cookie =====
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
+# Allow local/pytest hosts when not in production
+if os.getenv("ENV", "development").lower() != "production":
+    allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me"))
 
-# ===== NEW: Security headers (incl. CSP that allows jsDelivr you use in HTML) =====
+# ===== Security headers (incl. CSP that allows jsDelivr you use in HTML) =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -76,7 +78,7 @@ async def security_headers_mw(request, call_next):
 
 app.middleware("http")(security_headers_mw)
 
-# ===== NEW: request-id + structured logs =====
+# =====  request-id + structured logs =====
 logger = structlog.get_logger()
 
 @app.middleware("http")
@@ -89,7 +91,7 @@ async def request_id_logging(request: Request, call_next):
     logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
     return response
 
-# ===== NEW: rate limiting =====
+# =====  rate limiting =====
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
@@ -97,7 +99,7 @@ app.state.limiter = limiter
 async def ratelimit_handler(request, exc):
     return PlainTextResponse("Too Many Requests", status_code=429)
 
-# ===== NEW: Prometheus metrics + optional Sentry =====
+# =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
 async def _metrics_and_sentry():
     Instrumentator().instrument(app).expose(app, include_in_schema=False)
@@ -433,7 +435,7 @@ async def export_contracts_csv():
 # -------- BOLs --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
-    # ===== NEW: idempotency support =====
+    # =====  idempotency support =====
     idem_key = request.headers.get("Idempotency-Key")
     if idem_key and idem_key in _idem_cache:
         return _idem_cache[idem_key]

@@ -21,3 +21,7 @@ python-dotenv
 databases
 psycopg2-binary
 reportlab
+itsdangerous
+slowapi
+structlog
+sentry-sdk
