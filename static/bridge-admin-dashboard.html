@@ -17,19 +17,11 @@
       box-shadow: 0 0 10px rgba(0,0,0,0.1);
       padding: 20px;
     }
-    .table th, .table td {
-      vertical-align: middle;
-    }
-    .filters {
-      margin-bottom: 20px;
-    }
+    .table th, .table td { vertical-align: middle; }
+    .filters { margin-bottom: 20px; }
     .signature-pad {
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      width: 100%;
-      height: 150px;
-      background-color: #fff;
-      margin-top: 10px;
+      border: 1px solid #ccc; border-radius: 6px;
+      width: 100%; height: 150px; background-color: #fff; margin-top: 10px;
     }
   </style>
 </head>
@@ -50,6 +42,13 @@
       <div class="col-md-3">
         <button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button>
       </div>
+    </div>
+
+    <!-- Pagination controls -->
+    <div class="d-flex gap-2 mb-2">
+      <button id="prevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
+      <button id="nextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
+      <span id="pageInfo" class="ms-2 small text-muted"></span>
     </div>
 
     <div class="table-container">
@@ -76,27 +75,30 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
+    let offset = 0, limit = 100;
 
     async function fetchBOLs() {
-      const res = await fetch(`${endpoint}/bols`);
+      const start = document.getElementById("startDate").value;
+      const end   = document.getElementById("endDate").value;
+      const buyer = document.getElementById("buyerFilter").value;
+
+      const qs = new URLSearchParams();
+      if (buyer) qs.set("buyer", buyer);
+      if (start) qs.set("start", new Date(start).toISOString());
+      if (end)   qs.set("end",   new Date(end).toISOString());
+      qs.set("limit", String(limit));
+      qs.set("offset", String(offset));
+
+      // ✅ backticks around the whole URL so ${endpoint} works
+      const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
       const data = await res.json();
+
       const tbody = document.querySelector("#bol-table tbody");
       tbody.innerHTML = "";
 
-      const startDate = document.getElementById("startDate").value;
-      const endDate = document.getElementById("endDate").value;
-      const buyerFilter = document.getElementById("buyerFilter").value.toLowerCase();
-
-      const filtered = data.filter(bol => {
-        const pickupTime = new Date(bol.pickup_time);
-        const afterStart = !startDate || pickupTime >= new Date(startDate);
-        const beforeEnd = !endDate || pickupTime <= new Date(endDate);
-        const matchesBuyer = !buyerFilter || bol.buyer.toLowerCase().includes(buyerFilter);
-        return afterStart && beforeEnd && matchesBuyer;
-      });
-
-      filtered.forEach(bol => {
+      data.forEach(bol => {
         const row = document.createElement("tr");
+        // ✅ backticks around the row markup (template literal)
         row.innerHTML = `
           <td>${bol.bol_id}</td>
           <td>${bol.contract_id}</td>
@@ -106,15 +108,19 @@
           <td><span class="badge bg-${statusColor(bol.status)}">${bol.status}</span></td>
           <td>${formatTime(bol.pickup_time)}</td>
           <td>${bol.delivery_time ? formatTime(bol.delivery_time) : "—"}</td>
-          <td>$${bol.total_value.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+          <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
           <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
-          `;
+        `;
         tbody.appendChild(row);
       });
+
+      document.getElementById("pageInfo").textContent = `Showing ${data.length} • offset ${offset}`;
+      document.getElementById("prevBtn").disabled = offset === 0;
+      document.getElementById("nextBtn").disabled = data.length < limit;
     }
 
     function formatTime(isoString) {
-      return new Date(isoString).toLocaleString();
+      try { return new Date(isoString).toLocaleString(); } catch { return "—"; }
     }
 
     function statusColor(status) {
@@ -129,104 +135,32 @@
       }
     }
 
-    async function downloadCSV() {
+    function downloadCSV() {
       window.open(`${endpoint}/contracts/export_csv`, "_blank");
     }
 
     function downloadPDF(bolId) {
-  window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
-}
-
-    function getCanvasSignature(canvas) {
-      return {
-        base64: canvas.toDataURL("image/png"),
-        timestamp: new Date().toISOString()
-      };
+      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
     }
 
-    function collectCarrierInfo(cardElement) {
-      const inputs = cardElement.querySelectorAll("input");
-      return {
-        name: inputs[0].value,
-        truck_vin: inputs[1].value,
-        driver: inputs[2].value
-      };
-    }
+    // Reset to first page when filters change
+    document.getElementById("startDate").addEventListener("change", () => { offset = 0; fetchBOLs(); });
+    document.getElementById("endDate").addEventListener("change",   () => { offset = 0; fetchBOLs(); });
+    document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; fetchBOLs(); });
 
-    function generateBOLData(index, canvas) {
-      const contract = index === 0 ? {
-        contract_id: "CNT-1001",
-        buyer: "Lewis Salvage",
-        material: "Shred Steel",
-        weight_tons: 40,
-        price_per_unit: 245.00
-      } : {
-        contract_id: "CNT-1002",
-        buyer: "C&Y Global",
-        material: "Insulated Copper Wire",
-        weight_tons: 5,
-        price_per_unit: 2640.00 / 5
-      };
+    // Prev/Next buttons
+    document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); fetchBOLs(); });
+    document.getElementById("nextBtn").addEventListener("click", () => { offset = offset + limit; fetchBOLs(); });
 
-      const total = contract.weight_tons * contract.price_per_unit;
-      const card = document.querySelectorAll(".contract-card")[index];
-      const carrier = collectCarrierInfo(card);
-      const pickup_signature = getCanvasSignature(canvas);
-
-      return {
-        contract_id: contract.contract_id,
-        buyer: contract.buyer,
-        seller: "Winski Brothers",
-        material: contract.material,
-        weight_tons: contract.weight_tons,
-        price_per_unit: contract.price_per_unit,
-        total_value: total,
-        carrier,
-        pickup_signature,
-        pickup_time: new Date().toISOString()
-      };
-    }
-
-    document.querySelectorAll(".btn.btn-primary").forEach((btn, index) => {
-      btn.addEventListener("click", async () => {
-        const canvas = document.querySelectorAll(".signature-pad")[index];
-        const bolData = generateBOLData(index, canvas);
-        const res = await fetch(`${endpoint}/bols`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(bolData)
-        });
-        alert(res.ok ? `✅ BOL created for ${bolData.buyer}` : "❌ Failed to create BOL");
-      });
-    });
-
-    document.querySelectorAll(".btn.btn-success").forEach((btn, index) => {
-      btn.addEventListener("click", async () => {
-        const bol_id = prompt("Enter BOL ID to update status to 'In Transit':");
-        if (!bol_id) return;
-
-        const res = await fetch(`${endpoint}/bols/${bol_id}/update_status`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify("In Transit")
-        });
-        alert(res.ok ? `✅ Status updated to In Transit for BOL ${bol_id}` : "❌ Failed to update status");
-      });
-    });
-
-    document.getElementById("startDate").addEventListener("change", fetchBOLs);
-    document.getElementById("endDate").addEventListener("change", fetchBOLs);
-    document.getElementById("buyerFilter").addEventListener("input", fetchBOLs);
-
+    // Initial load + periodic refresh
     fetchBOLs();
     setInterval(fetchBOLs, 10000);
   </script>
 
   <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
-  <a href="/terms" target="_blank">Terms of Use</a> | 
-  <a href="/eula" target="_blank">EULA</a> | 
-  <a href="/privacy" target="_blank">Privacy Policy</a>
-</footer>
-
+    <a href="/terms" target="_blank">Terms of Use</a> |
+    <a href="/eula" target="_blank">EULA</a> |
+    <a href="/privacy" target="_blank">Privacy Policy</a>
+  </footer>
 </body>
 </html>
