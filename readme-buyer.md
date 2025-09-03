@@ -82,6 +82,28 @@ docker-compose up --build
 - ✅ Modular login flow (yard, buyer, admin)
 - ✅ Dockerized deployment
 
+
+# BRidge Data Retention & Recovery
+
+- Retention Target: 7+ years
+- Daily Backup:
+  - Enable in Supabase → Project Settings → Backups
+  - OR use: pg_dump "$DATABASE_URL" > backups/bridge-$(date +%F).sql
+- Weekly Snapshot:
+  - Call `/admin/export_all` (ZIP with contracts.csv + bols.csv)
+  - Store in S3 (enable Object Lock)
+- Restore Plan:
+  1. Restore DB via Supabase UI or psql
+  2. Reapply constraints/indexes (see constraints.sql)
+  3. Smoke test:
+     - `GET /healthz` == 200
+     - `POST /contracts` == 200
+     - `GET /bols` returns rows
+     - `/docs` loads cleanly
+- Secrets:
+  - Managed via Render + GitHub Secrets (never commit `.env`)
+  - Rotate on staff changes or breach
+
 ---
 
 For help with setup or deployment, contact [info@atlasipholdingsllc.com] 
