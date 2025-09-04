@@ -11,14 +11,13 @@ def _make_contract(client):
         "seller": "Winski Brothers",
         "material": "Shred Steel",
         "weight_tons": 40.0,
-        "price_per_ton": 245.0
+        "price_per_ton": 245.0,
     }
     r = client.post("/contracts", json=payload)
     assert r.status_code in (200, 201), r.text
     return r.json()["id"]
 
 def test_create_bol_idempotent_and_list(client):
-    # Ensure we have a contract_id to attach this BOL to
     contract_id = _make_contract(client)
 
     bol_payload = {
@@ -27,7 +26,7 @@ def test_create_bol_idempotent_and_list(client):
         "seller": "Winski Brothers",
         "material": "Shred Steel",
         "weight_tons": 40.0,
-        "price_per_unit": 245.0,
+        "price_per_unit": 245.0,  # matches your BOL schema naming
         "total_value": 9800.0,
         "carrier": {
             "name": "ABC Trucking Co.",
@@ -35,13 +34,12 @@ def test_create_bol_idempotent_and_list(client):
             "truck_vin": "1FDUF5GY3KDA12345"
         },
         "pickup_signature": {
-            "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",  # fake data URL
+            "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",  # dummy
             "timestamp": _iso_now()
         },
         "pickup_time": _iso_now()
     }
 
-    # Use Idempotency-Key to assert duplicate submits return same result
     idem_key = str(uuid.uuid4())
     r1 = client.post("/bols", json=bol_payload, headers={"Idempotency-Key": idem_key})
     assert r1.status_code in (200, 201), r1.text
@@ -49,12 +47,13 @@ def test_create_bol_idempotent_and_list(client):
     assert data1["contract_id"] == contract_id
     assert "bol_id" in data1
 
+    # Same payload + same key should return the same bol_id
     r2 = client.post("/bols", json=bol_payload, headers={"Idempotency-Key": idem_key})
     assert r2.status_code in (200, 201), r2.text
     data2 = r2.json()
-    assert data1["bol_id"] == data2["bol_id"]  # idempotency worked
+    assert data1["bol_id"] == data2["bol_id"]
 
-    # List BOLs filtered by contract_id + pagination
+    # List by contract_id
     r = client.get("/bols", params={"contract_id": contract_id, "limit": 5, "offset": 0})
     assert r.status_code == 200, r.text
     bols = r.json()

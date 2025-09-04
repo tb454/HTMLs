@@ -1,13 +1,23 @@
-# tests/conftest.py
 import os
+import sys
+import pathlib
 import pytest
-from starlette.testclient import TestClient
+from fastapi.testclient import TestClient
 
-# IMPORTANT: point to a staging DB before running tests in CI or locally.
-# os.environ["DATABASE_URL"] = "postgresql://postgres:***@your-staging.supabase.co:5432/postgres"
+# Put the repo's HTMLs folder on sys.path so imports work
+THIS_FILE = pathlib.Path(__file__).resolve()
+HTMLS_ROOT = THIS_FILE.parents[1]  # ...\BRidge-html\HTMLs
+sys.path.insert(0, str(HTMLS_ROOT))
 
-# Import your FastAPI app
-from backend import app  # <-- if your file isn't named backend.py, adjust the import
+# Ensure non-production env so TrustedHost allows 'testserver'
+os.environ.setdefault("ENV", "ci")
+
+# IMPORTANT: DATABASE_URL must point to your staging DB before running tests
+# Example:
+# os.environ.setdefault("DATABASE_URL", "postgresql://postgres:PASS@HOST.supabase.co:5432/postgres")
+
+# Import your FastAPI app from the real filename
+from bridge_buyer_backend import app  # <-- your file is bridge_buyer_backend.py
 
 @pytest.fixture(scope="session")
 def client():
