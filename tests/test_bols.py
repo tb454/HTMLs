@@ -34,10 +34,11 @@ def test_create_bol_idempotent_and_list(client):
             "truck_vin": "1FDUF5GY3KDA12345"
         },
         "pickup_signature": {
-            "base64": "data:image/png;base64,...",
-            "timestamp": _iso_now()
-        },
-        "pickup_time": _iso_now()
+    "base64": "data:image/png;base64,...",
+    "timestamp": str(_iso_now())
+},
+"pickup_time": str(_iso_now())
+
     }
 
     idem_key = str(uuid.uuid4())
