@@ -26,7 +26,7 @@ def test_create_bol_idempotent_and_list(client):
         "seller": "Winski Brothers",
         "material": "Shred Steel",
         "weight_tons": 40.0,
-        "price_per_unit": 245.0,  # matches your BOL schema naming
+        "price_per_unit": 245.0,  
         "total_value": 9800.0,
         "carrier": {
             "name": "ABC Trucking Co.",
@@ -34,12 +34,11 @@ def test_create_bol_idempotent_and_list(client):
             "truck_vin": "1FDUF5GY3KDA12345"
         },
         "pickup_signature": {
-            "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",  # dummy
-            "timestamp": _iso_now()
-        },
-        "pickup_time": _iso_now()
-    }
-
+        "base64": "data:image/png;base64,...",
+        "timestamp": _iso_now()  
+    },
+    "pickup_time": _iso_now()  
+}
     idem_key = str(uuid.uuid4())
     r1 = client.post("/bols", json=bol_payload, headers={"Idempotency-Key": idem_key})
     assert r1.status_code in (200, 201), r1.text
