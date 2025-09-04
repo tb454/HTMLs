@@ -100,6 +100,8 @@ docker-compose up --build
      - `POST /contracts` == 200
      - `GET /bols` returns rows
      - `/docs` loads cleanly
+- Backups: Supabase scheduled nightly (see Dashboard → Database → Backups). RPO ≤ 24h. Weekly CSV ZIP archived via /admin/export_all.
+
 - Secrets:
   - Managed via Render + GitHub Secrets (never commit `.env`)
   - Rotate on staff changes or breach
