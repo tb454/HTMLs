@@ -104,6 +104,9 @@ docker-compose up --build
   - Managed via Render + GitHub Secrets (never commit `.env`)
   - Rotate on staff changes or breach
 
+![CI](https://github.com/tb454/HTMLs/actions/workflows/ci.yml/badge.svg)
+
+
 ---
 
 For help with setup or deployment, contact [info@atlasipholdingsllc.com] 
