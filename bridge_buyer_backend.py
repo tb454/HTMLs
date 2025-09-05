@@ -746,17 +746,26 @@ async def admin_export_all(request: Request, x_admin_token: str | None = Header(
     if not (_is_admin_session(request) or (ADMIN_EXPORT_TOKEN and x_admin_token == ADMIN_EXPORT_TOKEN)):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Fetch rows
-    contracts = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-    bols = await database.fetch_all("SELECT * FROM bols ORDER BY COALESCE(pickup_time, created_at) DESC")
+    try:
+        contracts = await database.fetch_all(
+            "SELECT * FROM contracts ORDER BY created_at DESC"
+        )
+        bols = await database.fetch_all(
+            "SELECT * FROM bols ORDER BY pickup_time DESC NULLS LAST, bol_id DESC"
+        )
 
-    # Build ZIP in-memory
-    zip_bytes = io.BytesIO()
-    with zipfile.ZipFile(zip_bytes, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("contracts.csv", _rows_to_csv_bytes(contracts))
-        zf.writestr("bols.csv", _rows_to_csv_bytes(bols))
-    zip_bytes.seek(0)
+        # Build ZIP in-memory
+        zip_bytes = io.BytesIO()
+        with zipfile.ZipFile(zip_bytes, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("contracts.csv", _rows_to_csv_bytes(contracts))
+            zf.writestr("bols.csv", _rows_to_csv_bytes(bols))
+        zip_bytes.seek(0)
 
-    ts = datetime.utcnow().strftime("%Y-%m-%d")
-    headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip"'}
-    return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
+        ts = datetime.utcnow().strftime("%Y-%m-%d")
+        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip"'}
+        return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
+
+    except Exception as e:
+        # Log server-side; return generic 500 to client
+        logger.error("export_all_failed", err=str(e))
+        raise HTTPException(status_code=500, detail="Export failed")
