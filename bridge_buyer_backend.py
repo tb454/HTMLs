@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import List, Optional, Literal
 from datetime import datetime, date
@@ -31,7 +31,6 @@ import structlog, time
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from fastapi.responses import PlainTextResponse
 
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -127,7 +126,6 @@ async def privacy_page():
     return FileResponse("static/legal/privacy.html")
 
 # -------- Static HTML --------
-from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
@@ -244,6 +242,7 @@ class ContractIn(BaseModel):
         schema_extra = {"example":{
             "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
+
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
     expected_status: Literal["Pending"] = "Pending"
@@ -261,15 +260,6 @@ class ContractOut(ContractIn):
             "material":"Shred Steel","weight_tons":40,"price_per_ton":245.00,
             "status":"Signed","created_at":"2025-09-01T10:00:00Z","signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
-
-# Optional tighter typing for updates
-ContractStatus = Literal["Pending","Signed","Dispatched","Fulfilled","Cancelled"]
-
-class ContractUpdate(BaseModel):
-    status: ContractStatus
-    signature: Optional[str] = None
-    class Config:
-        schema_extra = {"example":{"status":"Signed","signature":"JohnDoe123"}}
 
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
@@ -306,7 +296,56 @@ class BOLOut(BOLIn):
             "pickup_time":"2025-09-01T12:15:00Z","delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
 
-# ===== Idempotency cache for POST /bols (starter) =====
+# ========== INVENTORY API MODELS ==========
+MovementType = Literal['upsert','adjust','reserve','unreserve','commit','ship','cancel','reconcile']
+
+class UpsertItem(BaseModel):
+    sku: str
+    description: Optional[str] = None
+    uom: Optional[str] = "ton"
+    location: Optional[str] = None
+    qty_on_hand: float
+    external_id: Optional[str] = None
+
+class BulkUpsertBody(BaseModel):
+    source: str
+    seller: str
+    items: List[UpsertItem]
+
+class MovementEvent(BaseModel):
+    sku: str
+    movement_type: MovementType
+    qty: float
+    ref_contract: Optional[str] = None
+    meta: Optional[dict] = None
+
+class MovementBody(BaseModel):
+    source: str
+    seller: str
+    events: List[MovementEvent]
+
+class InventoryRowOut(BaseModel):
+    seller: str
+    sku: str
+    description: Optional[str] = None
+    uom: str
+    location: Optional[str] = None
+    qty_on_hand: float
+    qty_reserved: float
+    qty_available: float
+    qty_committed: float
+    updated_at: datetime
+
+# Optional tighter typing for updates
+ContractStatus = Literal["Pending","Signed","Dispatched","Fulfilled","Cancelled"]
+
+class ContractUpdate(BaseModel):
+    status: ContractStatus
+    signature: Optional[str] = None
+    class Config:
+        schema_extra = {"example":{"status":"Signed","signature":"JohnDoe123"}}
+
+# ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
 
 # ===== Admin export helpers (CSV normalization + token) =====
@@ -431,17 +470,60 @@ async def generate_bol_pdf(bol_id: str):
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
 
-# -------- Contracts --------
-@app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", description="Create a new contract with buyer, seller, material, weight, and price.", status_code=201)
+# -------- Contracts (with Inventory linkage) --------
+@app.post(
+    "/contracts",
+    response_model=ContractOut,
+    tags=["Contracts"],
+    summary="Create Contract",
+    description="Creates a Pending contract and reserves inventory (qty_reserved += weight_tons).",
+    status_code=201
+)
 async def create_contract(contract: ContractIn):
-    row = await database.fetch_one("""
-        INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton)
-        VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton)
-        RETURNING *
-    """, {"id": str(uuid.uuid4()), **contract.dict()})
-    if not row:
-        raise HTTPException(status_code=500, detail="Failed to create contract")
-    return row
+    qty = float(contract.weight_tons)
+    seller = contract.seller.strip()
+    sku = contract.material.strip()  # material == SKU for inventory mapping
+
+    async with database.transaction():
+        # Ensure inventory row exists
+        await database.execute("""
+            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
+            VALUES (:seller, :sku, 0, 0, 0)
+            ON CONFLICT (seller, sku) DO NOTHING
+        """, {"seller": seller, "sku": sku})
+
+        # Lock row & check availability
+        inv = await database.fetch_one("""
+            SELECT qty_on_hand, qty_reserved FROM inventory_items
+            WHERE seller=:seller AND sku=:sku
+            FOR UPDATE
+        """, {"seller": seller, "sku": sku})
+        on_hand = float(inv["qty_on_hand"]) if inv else 0.0
+        reserved = float(inv["qty_reserved"]) if inv else 0.0
+        available = on_hand - reserved
+        if available < qty:
+            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+
+        # Reserve
+        await database.execute("""
+            UPDATE inventory_items
+            SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+            WHERE seller=:seller AND sku=:sku
+        """, {"q": qty, "seller": seller, "sku": sku})
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'reserve', :q, NULL, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "meta": json.dumps({"reason": "contract_create"})})
+
+        # Create contract
+        row = await database.fetch_one("""
+            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status)
+            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending')
+            RETURNING *
+        """, {"id": str(uuid.uuid4()), **contract.dict()})
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create contract")
+        return row
 
 @app.get(
     "/contracts",
@@ -510,11 +592,12 @@ async def export_contracts_csv():
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'})
+
 @app.patch(
     "/contracts/{contract_id}/purchase",
     tags=["Contracts"],
     summary="Purchase (atomic)",
-    description="Atomically change a Pending contract to Signed and auto-create a Scheduled BOL.",
+    description="Atomically change a Pending contract to Signed, move reserved→committed, and auto-create a Scheduled BOL.",
     status_code=200
 )
 async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):
@@ -523,53 +606,126 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
     if idem and idem in _idem_cache:
         return _idem_cache[idem]
 
-    # 1) Flip Pending -> Signed atomically
-    row = await database.fetch_one("""
-        UPDATE contracts
-        SET status = 'Signed', signed_at = NOW()
-        WHERE id = :id AND status = :expected
-        RETURNING id, buyer, seller, material, weight_tons, price_per_ton
-    """, {"id": contract_id, "expected": body.expected_status})
-    if not row:
-        # Someone else purchased it (or wrong status)
-        raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
+    async with database.transaction():
+        # 1) Flip Pending -> Signed atomically
+        row = await database.fetch_one("""
+            UPDATE contracts
+            SET status = 'Signed', signed_at = NOW()
+            WHERE id = :id AND status = :expected
+            RETURNING id, buyer, seller, material, weight_tons, price_per_ton
+        """, {"id": contract_id, "expected": body.expected_status})
+        if not row:
+            # Someone else purchased it (or wrong status)
+            raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
 
-    # 2) Create a BOL stub immediately (Scheduled). Buyer/Admin can edit carrier later.
-    bol_id = str(uuid.uuid4())
-    await database.fetch_one("""
-        INSERT INTO bols (
-            bol_id, contract_id, buyer, seller, material, weight_tons,
-            price_per_unit, total_value,
-            carrier_name, carrier_driver, carrier_truck_vin,
-            pickup_signature_base64, pickup_signature_time,
-            pickup_time, status
-        )
-        VALUES (
-            :bol_id, :contract_id, :buyer, :seller, :material, :tons,
-            :ppu, :total,
-            :cname, :cdriver, :cvin,
-            :ps_b64, :ps_time,
-            :pickup_time, 'Scheduled'
-        )
-        RETURNING bol_id
-    """, {
-        "bol_id": bol_id,
-        "contract_id": contract_id,
-        "buyer": row["buyer"],
-        "seller": row["seller"],
-        "material": row["material"],
-        "tons": row["weight_tons"],
-        "ppu": row["price_per_ton"],
-        "total": float(row["weight_tons"]) * float(row["price_per_ton"]),
-        "cname": "TBD", "cdriver": "TBD", "cvin": "TBD",
-        "ps_b64": None, "ps_time": None,
-        "pickup_time": datetime.utcnow()
-    })
+        qty = float(row["weight_tons"])
+        seller = row["seller"].strip()
+        sku = row["material"].strip()
+
+        # 2) Move reserved -> committed in inventory
+        inv = await database.fetch_one("""
+            SELECT qty_reserved FROM inventory_items
+            WHERE seller=:seller AND sku=:sku
+            FOR UPDATE
+        """, {"seller": seller, "sku": sku})
+        reserved = float(inv["qty_reserved"]) if inv else 0.0
+        if reserved < qty:
+            raise HTTPException(status_code=409, detail="Reserved inventory insufficient to commit.")
+
+        await database.execute("""
+            UPDATE inventory_items
+            SET qty_reserved = qty_reserved - :q,
+                qty_committed = qty_committed + :q,
+                updated_at = NOW()
+            WHERE seller=:seller AND sku=:sku
+        """, {"q": qty, "seller": seller, "sku": sku})
+
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'commit', :q, :ref_contract, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
+              "meta": json.dumps({"reason": "purchase"})})
+
+        # 3) Create a BOL stub immediately (Scheduled)
+        bol_id = str(uuid.uuid4())
+        await database.fetch_one("""
+            INSERT INTO bols (
+                bol_id, contract_id, buyer, seller, material, weight_tons,
+                price_per_unit, total_value,
+                carrier_name, carrier_driver, carrier_truck_vin,
+                pickup_signature_base64, pickup_signature_time,
+                pickup_time, status
+            )
+            VALUES (
+                :bol_id, :contract_id, :buyer, :seller, :material, :tons,
+                :ppu, :total,
+                :cname, :cdriver, :cvin,
+                :ps_b64, :ps_time,
+                :pickup_time, 'Scheduled'
+            )
+            RETURNING bol_id
+        """, {
+            "bol_id": bol_id,
+            "contract_id": contract_id,
+            "buyer": row["buyer"],
+            "seller": row["seller"],
+            "material": row["material"],
+            "tons": qty,
+            "ppu": float(row["price_per_ton"]),
+            "total": qty * float(row["price_per_ton"]),
+            "cname": "TBD", "cdriver": "TBD", "cvin": "TBD",
+            "ps_b64": None, "ps_time": None,
+            "pickup_time": datetime.utcnow()
+        })
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
     if idem:
         _idem_cache[idem] = resp
     return resp
+
+@app.post(
+    "/contracts/{contract_id}/cancel",
+    tags=["Contracts"],
+    summary="Cancel Pending contract",
+    description="Cancels a Pending contract and releases reserved inventory (unreserve).",
+    status_code=200
+)
+async def cancel_contract(contract_id: str):
+    async with database.transaction():
+        row = await database.fetch_one("""
+            UPDATE contracts
+            SET status='Cancelled'
+            WHERE id=:id AND status='Pending'
+            RETURNING seller, material, weight_tons
+        """, {"id": contract_id})
+        if not row:
+            raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
+
+        qty = float(row["weight_tons"])
+        seller = row["seller"].strip()
+        sku = row["material"].strip()
+
+        # Lock inv and unreserve
+        _ = await database.fetch_one("""
+            SELECT qty_reserved FROM inventory_items
+            WHERE seller=:seller AND sku=:sku
+            FOR UPDATE
+        """, {"seller": seller, "sku": sku})
+
+        await database.execute("""
+            UPDATE inventory_items
+            SET qty_reserved = GREATEST(0, qty_reserved - :q),
+                updated_at = NOW()
+            WHERE seller=:seller AND sku=:sku
+        """, {"q": qty, "seller": seller, "sku": sku})
+
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'unreserve', :q, :ref_contract, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
+              "meta": json.dumps({"reason": "cancel"})})
+
+    return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
 
 # -------- BOLs --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
@@ -701,7 +857,7 @@ async def add_delivery_signature_pg(bol_id: str, sig: Signature):
     return {"message": "Delivery signature added, contract fulfilled"}
 
 # -------- Auth --------
-@limiter.limit("5/minute")  # ===== NEW: rate limit login =====
+@limiter.limit("5/minute")  # rate limit login
 @app.post(
     "/login",
     tags=["Auth"],
@@ -827,10 +983,152 @@ async def admin_export_all(request: Request, x_admin_token: str | None = Header(
         zip_bytes.seek(0)
 
         ts = datetime.utcnow().strftime("%Y-%m-%d")
-        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip"'}
+        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip'}
         return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
 
     except Exception as e:
         # Log server-side; return generic 500 to client
         logger.error("export_all_failed", err=str(e))
         raise HTTPException(status_code=500, detail="Export failed")
+
+# ========== INVENTORY API ==========
+INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
+
+def _idem(key: Optional[str], payload: dict):
+    if not key:
+        return None
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return f"{key}:{digest}"
+
+@app.post(
+    "/inventory/bulk_upsert",
+    tags=["Inventory"],
+    summary="Bulk upsert inventory items",
+    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
+    response_model=dict,
+    status_code=200
+)
+async def inventory_bulk_upsert(body: BulkUpsertBody, request: Request):
+    # HMAC (optional) & replay
+    raw = await request.body()
+    if os.getenv(INVENTORY_SECRET_ENV, ""):
+        sig = request.headers.get("X-Signature")
+        if not (verify_sig(raw, sig, INVENTORY_SECRET_ENV) and not is_replay(sig)):
+            raise HTTPException(401, "Bad signature")
+
+    # Idempotency (best-effort)
+    idem_key = request.headers.get("Idempotency-Key")
+    cache_key = _idem(idem_key, body.dict()) if idem_key else None
+    if cache_key and cache_key in _idem_cache:
+        return _idem_cache[cache_key]
+
+    seller = body.seller.strip()
+    async with database.transaction():
+        for it in body.items:
+            # Ensure row
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
+                VALUES (:seller, :sku, :description, :uom, :location, 0, :source, :external_id)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {"seller": seller, "sku": it.sku, "description": it.description, "uom": it.uom or 'ton',
+                  "location": it.location, "source": body.source, "external_id": it.external_id})
+
+            # Lock & read old
+            prev = await database.fetch_one("""
+                SELECT qty_on_hand FROM inventory_items
+                WHERE seller=:seller AND sku=:sku
+                FOR UPDATE
+            """, {"seller": seller, "sku": it.sku})
+            old = float(prev["qty_on_hand"]) if prev else 0.0
+            new = float(it.qty_on_hand)
+            delta = new - old
+
+            # Update absolute qty_on_hand
+            await database.execute("""
+                UPDATE inventory_items
+                SET qty_on_hand = :new, updated_at = NOW(), source=:source
+                WHERE seller=:seller AND sku=:sku
+            """, {"new": new, "source": body.source, "seller": seller, "sku": it.sku})
+
+            # Movement (delta)
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:seller, :sku, 'upsert', :qty, NULL, :meta)
+            """, {"seller": seller, "sku": it.sku, "qty": delta, "meta": json.dumps({"from": old, "to": new})})
+
+    resp = {"ok": True, "count": len(body.items)}
+    if cache_key:
+        _idem_cache[cache_key] = resp
+    return resp
+
+@app.post(
+    "/inventory/movements",
+    tags=["Inventory"],
+    summary="Apply inventory movements (adjustments or reconciliations)",
+    description="Adjust qty_on_hand by deltas; reserve/commit/unreserve are driven by Contracts flow and typically not called directly.",
+    response_model=dict,
+    status_code=200
+)
+async def inventory_movements(body: MovementBody, request: Request):
+    raw = await request.body()
+    if os.getenv(INVENTORY_SECRET_ENV, ""):
+        sig = request.headers.get("X-Signature")
+        if not (verify_sig(raw, sig, INVENTORY_SECRET_ENV) and not is_replay(sig)):
+            raise HTTPException(401, "Bad signature")
+
+    idem_key = request.headers.get("Idempotency-Key")
+    cache_key = _idem(idem_key, body.dict()) if idem_key else None
+    if cache_key and cache_key in _idem_cache:
+        return _idem_cache[cache_key]
+
+    seller = body.seller.strip()
+    async with database.transaction():
+        for ev in body.events:
+            # Create row if missing
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, qty_on_hand)
+                VALUES (:seller, :sku, 0)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {"seller": seller, "sku": ev.sku})
+
+            # Adjust qty_on_hand only for 'adjust' type here
+            if ev.movement_type == 'adjust':
+                await database.execute("""
+                    UPDATE inventory_items
+                    SET qty_on_hand = qty_on_hand + :delta, updated_at = NOW()
+                    WHERE seller=:seller AND sku=:sku
+                """, {"delta": ev.qty, "seller": seller, "sku": ev.sku})
+
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:seller, :sku, :type, :qty, :ref_contract, :meta)
+            """, {"seller": seller, "sku": ev.sku, "type": ev.movement_type,
+                  "qty": ev.qty, "ref_contract": ev.ref_contract, "meta": json.dumps(ev.meta or {})})
+
+    resp = {"ok": True, "events": len(body.events)}
+    if cache_key:
+        _idem_cache[cache_key] = resp
+    return resp
+
+@app.get(
+    "/inventory",
+    tags=["Inventory"],
+    summary="List inventory (available view)",
+    response_model=List[InventoryRowOut],
+    status_code=200
+)
+async def list_inventory(
+    seller: str = Query(..., description="Seller name"),
+    sku: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0)
+):
+    q = "SELECT * FROM inventory_available WHERE seller = :seller"
+    vals = {"seller": seller}
+    if sku:
+        q += " AND sku = :sku"
+        vals["sku"] = sku
+    q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
+    vals["limit"], vals["offset"] = limit, offset
+    rows = await database.fetch_all(q, vals)
+    return [InventoryRowOut(**dict(r)) for r in rows]
