@@ -6,195 +6,86 @@
   <title>BRidge Buyer Portal</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
   <style>
-    body {
-      background-color: #f4f6f8;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      padding: 20px;
-    }
-    .contract-card {
-      background: white;
-      border-radius: 10px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      padding: 20px;
-      margin-bottom: 30px;
-    }
-    .signature-pad {
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      width: 100%;
-      height: 150px;
-      background-color: #fff;
-    }
+    body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
+    .cardy{background:#fff;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,.06);padding:18px;margin-bottom:16px}
   </style>
 </head>
 <body>
   <div class="container">
-    <h2 class="mb-4">📦 BRidge Buyer Portal</h2>
-
-    <!-- Lewis Salvage -->
-    <div class="contract-card">
-      <h4>Shred Steel – 20 Tons</h4>
-      <p><strong>Seller:</strong> Winski Brothers</p>
-      <p><strong>Buyer:</strong> Lewis Salvage</p>
-      <p><strong>Price:</strong> $245/ton</p>
-      <p><strong>Total:</strong> $4,900</p>
-      <p><strong>Status:</strong> Open</p>
-      <p><strong>Pickup Location:</strong> Indiana</p>
-
-      <h5 class="mt-4">🚛 Assign Carrier</h5>
-      <div class="row mb-3">
-        <div class="col"><input type="text" class="form-control" placeholder="Carrier Name" /></div>
-        <div class="col"><input type="text" class="form-control" placeholder="Truck VIN" /></div>
-        <div class="col"><input type="text" class="form-control" placeholder="Driver Name" /></div>
-      </div>
-
-      <h5>✍️ Pickup Signature</h5>
-      <canvas class="signature-pad" id="sig1"></canvas>
-
-      <button class="btn btn-primary mt-3">📄 Generate BOL</button>
-      <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
-      <button class="btn btn-outline-dark mt-2 download-btn" style="display:none;">📄 Download BOL (PDF)</button>
+    <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
+    <div class="d-flex gap-2 mb-3">
+      <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)">
+      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">Refresh</button>
     </div>
-
-    <!-- C&Y Global -->
-    <div class="contract-card">
-      <h4>Insulated Copper Wire – 10,000 lbs</h4>
-      <p><strong>Seller:</strong> Winski Brothers</p>
-      <p><strong>Buyer:</strong> C&Y Global (Jimmy Cheng)</p>
-      <p><strong>Price:</strong> $1.32/lb</p>
-      <p><strong>Total:</strong> $13,200</p>
-      <p><strong>Status:</strong> Open</p>
-      <p><strong>Pickup Location:</strong> Indiana</p>
-
-      <h5 class="mt-4">🚛 Assign Carrier</h5>
-      <div class="row mb-3">
-        <div class="col"><input type="text" class="form-control" placeholder="Carrier Name" /></div>
-        <div class="col"><input type="text" class="form-control" placeholder="Truck VIN" /></div>
-        <div class="col"><input type="text" class="form-control" placeholder="Driver Name" /></div>
-      </div>
-
-      <h5>✍️ Pickup Signature</h5>
-      <canvas class="signature-pad" id="sig2"></canvas>
-
-      <button class="btn btn-primary mt-3">📄 Generate BOL</button>
-      <button class="btn btn-success mt-3">✅ Mark as Dispatched</button>
-      <button class="btn btn-outline-dark mt-2 download-btn" style="display:none;">📄 Download BOL (PDF)</button>
+    <div id="list"></div>
+    <div class="d-flex gap-2 mt-2">
+      <button class="btn btn-outline-secondary btn-sm" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next ▶</button>
+      <span class="small text-muted" id="pageInfo"></span>
     </div>
   </div>
 
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
+    let offset = 0, limit = 100;
 
-    function getCanvasSignature(canvas) {
-      return {
-        base64: canvas.toDataURL("image/png"),
-        timestamp: new Date().toISOString()
-      };
-    }
+    async function loadOpenContracts() {
+      const q = new URLSearchParams({ status: "Pending", limit, offset });
+      const buyer = document.getElementById("buyerFilter").value.trim();
+      if (buyer) q.set("buyer", buyer);
 
-    function collectCarrierInfo(cardElement) {
-      const inputs = cardElement.querySelectorAll("input");
-      return {
-        name: inputs[0].value,
-        truck_vin: inputs[1].value,
-        driver: inputs[2].value
-      };
-    }
+      const res = await fetch(`${endpoint}/contracts?` + q.toString());
+      if (!res.ok) { console.error(await res.text()); return; }
+      const rows = await res.json();
 
-    function generateBOLData(index, canvas) {
-      const contract = index === 0 ? {
-        contract_id: "CNT-1001",
-        buyer: "Lewis Salvage",
-        material: "Shred Steel",
-        weight_tons: 40,
-        price_per_unit: 245.00
-      } : {
-        contract_id: "CNT-1002",
-        buyer: "C&Y Global",
-        material: "Insulated Copper Wire",
-        weight_tons: 5,
-        price_per_unit: 2640.00 / 5
-      };
-
-      const total = contract.weight_tons * contract.price_per_unit;
-      const bol_id = `BRG-${Date.now()}`;
-      const card = document.querySelectorAll(".contract-card")[index];
-      const carrier = collectCarrierInfo(card);
-      const pickup_signature = getCanvasSignature(canvas);
-
-      return {
-        bol_id,
-        contract_id: contract.contract_id,
-        buyer: contract.buyer,
-        seller: "Winski Brothers",
-        material: contract.material,
-        weight_tons: contract.weight_tons,
-        price_per_unit: contract.price_per_unit,
-        total_value: total,
-        carrier,
-        pickup_signature,
-        pickup_time: new Date().toISOString(),
-        status: "BOL Issued"
-      };
-    }
-
-    function downloadPDF(bolId) {
-      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
-    }
-
-    document.querySelectorAll(".signature-pad").forEach((canvas) => {
-      let drawing = false;
-      const ctx = canvas.getContext('2d');
-      canvas.addEventListener('mousedown', () => drawing = true);
-      canvas.addEventListener('mouseup', () => drawing = false);
-      canvas.addEventListener('mouseleave', () => drawing = false);
-      canvas.addEventListener('mousemove', (e) => {
-        if (!drawing) return;
-        const rect = canvas.getBoundingClientRect();
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = '#000';
-        ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+      const root = document.getElementById("list");
+      root.innerHTML = "";
+      if (rows.length === 0) {
+        root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
+        document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
+        return;
+      }
+      rows.forEach(r => {
+        const div = document.createElement("div");
+        div.className = "cardy";
+        const total = (Number(r.weight_tons) * Number(r.price_per_ton)).toLocaleString(undefined,{minimumFractionDigits:2});
+        div.innerHTML = `
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <h5 class="mb-1">${r.material}</h5>
+              <div class="text-muted small">Seller: ${r.seller}</div>
+              <div class="text-muted small">Buyer: ${r.buyer}</div>
+              <div class="small">Tons: <b>${r.weight_tons}</b> @ $<b>${r.price_per_ton}</b>/ton · Total $<b>${total}</b></div>
+              <div class="small text-muted">Created: ${r.created_at ?? ""}</div>
+            </div>
+            <div class="text-end">
+              <button class="btn btn-primary btn-sm" onclick="buy('${r.id}')">Buy</button>
+            </div>
+          </div>`;
+        root.appendChild(div);
       });
-    });
+      document.getElementById("pageInfo").textContent = `Showing ${rows.length} • offset ${offset}`;
+    }
 
-    document.querySelectorAll(".btn.btn-primary").forEach((btn, index) => {
-      btn.addEventListener("click", async () => {
-        const canvas = document.querySelectorAll(".signature-pad")[index];
-        const bolData = generateBOLData(index, canvas);
-        const res = await fetch(`${endpoint}/bols`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(bolData)
-        });
-
-        if (res.ok) {
-          alert(`✅ BOL created for ${bolData.buyer}`);
-          const bol_id = bolData.bol_id;
-          const downloadBtn = document.querySelectorAll(".download-btn")[index];
-          downloadBtn.style.display = "inline-block";
-          downloadBtn.onclick = () => downloadPDF(bol_id);
-        } else {
-          alert("❌ Failed to create BOL");
-        }
+    async function buy(id) {
+      const res = await fetch(`${endpoint}/contracts/${id}/purchase`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ op: "purchase", expected_status: "Pending" })
       });
-    });
+      if (!res.ok) { alert("Purchase failed: " + (await res.text())); return; }
+      const data = await res.json();
+      alert(`Purchased. BOL ${data.bol_id} created.`);
+      loadOpenContracts();
+    }
 
-    document.querySelectorAll(".btn.btn-success").forEach((btn, index) => {
-      btn.addEventListener("click", async () => {
-        const bol_id = document.querySelectorAll(".contract-card")[index]
-          .querySelector("canvas").id.replace("sig", "BRG-");
-        const res = await fetch(`${endpoint}/bols/${bol_id}/update_status`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify("In Transit")
-        });
-        alert(res.ok ? `✅ Status updated to In Transit for BOL ${bol_id}` : "❌ Failed to update status");
-      });
-    });
+    document.getElementById("refreshBtn").addEventListener("click", () => { offset = 0; loadOpenContracts(); });
+    document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; loadOpenContracts(); });
+    document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); loadOpenContracts(); });
+    document.getElementById("nextBtn").addEventListener("click", () => { offset += limit; loadOpenContracts(); });
+
+    loadOpenContracts();
+    setInterval(loadOpenContracts, 10000);
   </script>
 </body>
 </html>

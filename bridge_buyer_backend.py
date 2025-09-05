@@ -65,7 +65,7 @@ if os.getenv("ENV", "development").lower() != "production":
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me"))
 
-# ===== Security headers (incl. CSP that allows jsDelivr you use in HTML) =====
+# ===== Security headers (incl. CSP that allows jsDelivr + Google Fonts) =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -75,7 +75,8 @@ async def security_headers_mw(request, call_next):
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self' https://cdn.jsdelivr.net; "
         "img-src 'self' data:; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
     )
     return resp
@@ -143,7 +144,7 @@ async def admin_page():
 
 @app.get("/seller", include_in_schema=False)
 async def seller_page():
-    return FileResponse("static/index.html")
+    return FileResponse("static/seller.html")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -243,6 +244,10 @@ class ContractIn(BaseModel):
         schema_extra = {"example":{
             "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
+class PurchaseIn(BaseModel):
+    op: Literal["purchase"] = "purchase"
+    expected_status: Literal["Pending"] = "Pending"
+    idempotency_key: Optional[str] = None
 
 class ContractOut(ContractIn):
     id: uuid.UUID
@@ -505,6 +510,66 @@ async def export_contracts_csv():
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'})
+@app.patch(
+    "/contracts/{contract_id}/purchase",
+    tags=["Contracts"],
+    summary="Purchase (atomic)",
+    description="Atomically change a Pending contract to Signed and auto-create a Scheduled BOL.",
+    status_code=200
+)
+async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):
+    # Optional idempotency
+    idem = body.idempotency_key or request.headers.get("Idempotency-Key")
+    if idem and idem in _idem_cache:
+        return _idem_cache[idem]
+
+    # 1) Flip Pending -> Signed atomically
+    row = await database.fetch_one("""
+        UPDATE contracts
+        SET status = 'Signed', signed_at = NOW()
+        WHERE id = :id AND status = :expected
+        RETURNING id, buyer, seller, material, weight_tons, price_per_ton
+    """, {"id": contract_id, "expected": body.expected_status})
+    if not row:
+        # Someone else purchased it (or wrong status)
+        raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
+
+    # 2) Create a BOL stub immediately (Scheduled). Buyer/Admin can edit carrier later.
+    bol_id = str(uuid.uuid4())
+    await database.fetch_one("""
+        INSERT INTO bols (
+            bol_id, contract_id, buyer, seller, material, weight_tons,
+            price_per_unit, total_value,
+            carrier_name, carrier_driver, carrier_truck_vin,
+            pickup_signature_base64, pickup_signature_time,
+            pickup_time, status
+        )
+        VALUES (
+            :bol_id, :contract_id, :buyer, :seller, :material, :tons,
+            :ppu, :total,
+            :cname, :cdriver, :cvin,
+            :ps_b64, :ps_time,
+            :pickup_time, 'Scheduled'
+        )
+        RETURNING bol_id
+    """, {
+        "bol_id": bol_id,
+        "contract_id": contract_id,
+        "buyer": row["buyer"],
+        "seller": row["seller"],
+        "material": row["material"],
+        "tons": row["weight_tons"],
+        "ppu": row["price_per_ton"],
+        "total": float(row["weight_tons"]) * float(row["price_per_ton"]),
+        "cname": "TBD", "cdriver": "TBD", "cvin": "TBD",
+        "ps_b64": None, "ps_time": None,
+        "pickup_time": datetime.utcnow()
+    })
+
+    resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
+    if idem:
+        _idem_cache[idem] = resp
+    return resp
 
 # -------- BOLs --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
