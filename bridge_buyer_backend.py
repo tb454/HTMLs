@@ -807,6 +807,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if idem_key:
         _idem_cache[idem_key] = resp
     return resp
+
 @app.get("/bols",
     response_model=List[BOLOut],
     tags=["BOLs"],
@@ -843,14 +844,23 @@ async def get_all_bols_pg(
     rows = await database.fetch_all(query=query, values=values)
     result = []
     for row in rows:
-        d = dict(row)  # asyncpg.Record -> dict
+        d = dict(row)  # Record -> dict
 
-        # Ensure non-null pickup_signature for Pydantic (Signature fields are required)
-        # If DB has no pickup_signature_base64/time yet, use empty string and pickup_time (or now) as timestamp.
+        # Coalesce strings Pydantic expects to be non-null
+        carrier_name  = (d.get("carrier_name")  or "TBD")
+        carrier_driver= (d.get("carrier_driver")or "TBD")
+        carrier_vin   = (d.get("carrier_truck_vin") or "TBD")
+
+        # Coalesce numerics
+        weight_tons     = float(d.get("weight_tons")     or 0.0)
+        price_per_unit  = float(d.get("price_per_unit")  or 0.0)
+        total_value     = float(d.get("total_value")     or 0.0)
+
+        # Pickup signature must not be null for BOLOut(Signature)
         ps_b64 = d.get("pickup_signature_base64") or ""
         ps_ts  = d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow()
 
-        # delivery signature is optional in your BOLOut, so we can keep it None when missing
+        # Delivery signature is optional in BOLOut, keep None when missing
         delivery_sig = None
         if d.get("delivery_signature_base64") is not None:
             delivery_sig = {
@@ -861,22 +871,22 @@ async def get_all_bols_pg(
         result.append({
             "bol_id": d["bol_id"],
             "contract_id": d["contract_id"],
-            "buyer": d["buyer"],
-            "seller": d["seller"],
-            "material": d["material"],
-            "weight_tons": d["weight_tons"],
-            "price_per_unit": d["price_per_unit"],
-            "total_value": d["total_value"],
+            "buyer": d.get("buyer") or "",        # coalesce to empty string if null
+            "seller": d.get("seller") or "",
+            "material": d.get("material") or "",
+            "weight_tons": weight_tons,
+            "price_per_unit": price_per_unit,
+            "total_value": total_value,
             "carrier": {
-                "name": d.get("carrier_name"),
-                "driver": d.get("carrier_driver"),
-                "truck_vin": d.get("carrier_truck_vin"),
+                "name": carrier_name,
+                "driver": carrier_driver,
+                "truck_vin": carrier_vin,
             },
             "pickup_signature": { "base64": ps_b64, "timestamp": ps_ts },
             "delivery_signature": delivery_sig,
             "pickup_time": d.get("pickup_time"),
             "delivery_time": d.get("delivery_time"),
-            "status": d["status"],
+            "status": d.get("status") or "",
         })
     return result
 
