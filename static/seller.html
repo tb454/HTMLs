@@ -115,7 +115,6 @@
         const r = await fetch(`${window.endpoint || 'https://bridge-buyer.onrender.com'}/prices/copper_last`);
         if (!r.ok) throw new Error(`bad resp ${r.status}`);
         const j = await r.json();
-        // base is "last - 0.25"
         window.copperBaseUSD = j.base_minus_025; // USD/lb
         console.log("Copper base (last - 0.25):", window.copperBaseUSD);
       } catch (e) {
@@ -221,6 +220,53 @@
       });
     }
   </script>
+
+  <!-- SKU dropdown loader -->
+  <script>
+    async function loadSellerSKUs() {
+      const seller = document.getElementById("sellerName")?.value?.trim();
+      const sel    = document.getElementById("material");
+      if (!sel) return;
+
+      sel.innerHTML = "";
+      if (!seller) {
+        const opt = document.createElement("option");
+        opt.value = ""; opt.textContent = "Enter seller name first…";
+        sel.appendChild(opt);
+        return;
+      }
+      try {
+        const url = `${window.endpoint || "https://bridge-buyer.onrender.com"}/inventory?seller=${encodeURIComponent(seller)}&limit=1000`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const rows = await r.json();
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+          const opt = document.createElement("option");
+          opt.value = ""; opt.textContent = "No SKUs in inventory — add via /inventory/bulk_upsert";
+          sel.appendChild(opt);
+          return;
+        }
+
+        const seen = new Set();
+        rows.forEach(row => {
+          if (row?.sku && !seen.has(row.sku)) {
+            seen.add(row.sku);
+            const opt = document.createElement("option");
+            opt.value = row.sku;
+            opt.textContent = row.sku;
+            sel.appendChild(opt);
+          }
+        });
+        if (sel.options.length > 0) sel.selectedIndex = 0;
+      } catch (e) {
+        console.warn("Failed to load SKUs:", e);
+        const opt = document.createElement("option");
+        opt.value = ""; opt.textContent = "Error loading SKUs — try Reload";
+        sel.appendChild(opt);
+      }
+    }
+  </script>
 </head>
 <body>
   <div class="container">
@@ -316,7 +362,12 @@
           <input id="buyerName" class="form-control" placeholder="Buyer (e.g., Lewis Salvage)">
         </div>
         <div class="col-md-3">
-          <input id="material" class="form-control" placeholder="Material / SKU (e.g., SHRED)">
+          <!-- REPLACED: text input -> dropdown + reload button -->
+          <div class="d-flex gap-2">
+            <select id="material" class="form-control"></select>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="reloadSKUsBtn">Reload SKUs</button>
+          </div>
+          <small class="text-muted">Choose from your live inventory SKUs.</small>
         </div>
         <div class="col-md-1">
           <input id="tons" type="number" class="form-control" placeholder="Tons">
@@ -593,6 +644,11 @@
         return;
       }
 
+      if (!material) {
+        alert("Select a Material / SKU from the dropdown.");
+        return;
+      }
+
       const res = await fetch(`${endpoint}/contracts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -651,6 +707,10 @@
         if (u && u !== "Guest") sellerEl.value = u;
       }
 
+      // NEW: load SKUs when seller changes / on reload button
+      document.getElementById("sellerName")?.addEventListener("change", loadSellerSKUs);
+      document.getElementById("reloadSKUsBtn")?.addEventListener("click", loadSellerSKUs);
+
       document.getElementById("createContractBtn")?.addEventListener("click", createContract);
       document.getElementById("refreshContractsBtn")?.addEventListener("click", () => { offset = 0; listContracts(); });
       document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
@@ -662,8 +722,8 @@
       document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); listContracts(); });
       document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; listContracts(); });
 
-      // initial load after a tick (lets sellerName prefill)
-      setTimeout(listContracts, 200);
+      // initial load (let seller prefill first)
+      setTimeout(() => { loadSellerSKUs(); listContracts(); }, 200);
     }
 
     document.addEventListener("DOMContentLoaded", wireSellerUI);
@@ -699,7 +759,7 @@
     <hr style="margin-bottom: 15px;">
     <div><strong>BRidge Platform</strong> – Powered by ScrapFutures.com</div>
     <div>For acquisition inquiries or product demos:</div>
-    <div><a href="mailto:anthony@priorityrecycling.com" style="color: #3498db;">anthony@priorityrecycling.com</a></div>
+    <div><a href="mailto:info@atlasipholdingsllc.com" style="color: #3498db;">info@atlasipholdingsllc.com</a></div>
     <div style="margin-top: 10px;">&copy; 2025 BRidge Technologies. All rights reserved.</div>
   </footer>
 </body>
