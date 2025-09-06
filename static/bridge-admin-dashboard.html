@@ -40,6 +40,9 @@
         <input type="text" class="form-control" id="buyerFilter" placeholder="Filter by Buyer" />
       </div>
       <div class="col-md-3">
+        <input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" />
+      </div>
+      <div class="col-md-3">
         <button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button>
       </div>
     </div>
@@ -78,18 +81,25 @@
     let offset = 0, limit = 100;
 
     async function fetchBOLs() {
-      const start = document.getElementById("startDate").value;
-      const end   = document.getElementById("endDate").value;
-      const buyer = document.getElementById("buyerFilter").value;
+      const start    = document.getElementById("startDate").value;
+      const end      = document.getElementById("endDate").value;
+      const buyer    = document.getElementById("buyerFilter").value;
+      const material = document.getElementById("materialFilter").value;
 
       const qs = new URLSearchParams();
-      if (buyer) qs.set("buyer", buyer);
-      if (start) qs.set("start", new Date(start).toISOString());
-      if (end)   qs.set("end",   new Date(end).toISOString());
+      if (buyer)    qs.set("buyer", buyer);
+      if (material) qs.set("material", material);
+      if (start)    qs.set("start", new Date(start).toISOString());
+      if (end)      qs.set("end",   new Date(end).toISOString());
       qs.set("limit", String(limit));
       qs.set("offset", String(offset));
 
       const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
+      if (!res.ok) {
+        const t = await res.text();
+        console.error("BOLs fetch failed:", t);
+        return;
+      }
       const data = await res.json();
 
       const tbody = document.querySelector("#bol-table tbody");
@@ -117,7 +127,7 @@
           <td>${bol.delivery_time ? formatTime(bol.delivery_time) : "—"}</td>
           <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
           <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td> <!-- ✅ View Button -->
+          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td>
         `;
         tbody.appendChild(row);
       });
@@ -163,6 +173,7 @@
     document.getElementById("startDate").addEventListener("change", () => { offset = 0; fetchBOLs(); });
     document.getElementById("endDate").addEventListener("change",   () => { offset = 0; fetchBOLs(); });
     document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; fetchBOLs(); });
+    document.getElementById("materialFilter").addEventListener("input", () => { offset = 0; fetchBOLs(); });
 
     // Prev/Next buttons
     document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); fetchBOLs(); });

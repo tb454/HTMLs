@@ -15,6 +15,7 @@
     <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
     <div class="d-flex gap-2 mb-3">
       <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)">
+      <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)">
       <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">Refresh</button>
     </div>
     <div id="list"></div>
@@ -31,8 +32,12 @@
 
     async function loadOpenContracts() {
       const q = new URLSearchParams({ status: "Pending", limit, offset });
+
       const buyer = document.getElementById("buyerFilter").value.trim();
       if (buyer) q.set("buyer", buyer);
+
+      const material = document.getElementById("materialFilter").value.trim();
+      if (material) q.set("material", material);
 
       const res = await fetch(`${endpoint}/contracts?` + q.toString());
       if (!res.ok) { console.error(await res.text()); return; }
@@ -48,7 +53,9 @@
       rows.forEach(r => {
         const div = document.createElement("div");
         div.className = "cardy";
-        const total = (Number(r.weight_tons) * Number(r.price_per_ton)).toLocaleString(undefined,{minimumFractionDigits:2});
+        const total = (Number(r.weight_tons) * Number(r.price_per_ton)).toLocaleString(
+          undefined,{minimumFractionDigits:2}
+        );
         div.innerHTML = `
           <div class="d-flex justify-content-between align-items-start">
             <div>
@@ -81,6 +88,7 @@
 
     document.getElementById("refreshBtn").addEventListener("click", () => { offset = 0; loadOpenContracts(); });
     document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; loadOpenContracts(); });
+    document.getElementById("materialFilter").addEventListener("input", () => { offset = 0; loadOpenContracts(); });
     document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); loadOpenContracts(); });
     document.getElementById("nextBtn").addEventListener("click", () => { offset += limit; loadOpenContracts(); });
 
