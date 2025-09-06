@@ -37,15 +37,13 @@ from prometheus_fastapi_instrumentator import Instrumentator
 import sentry_sdk
 
 # -------- Live Prices (COMEX Copper) --------
-import re, time
+import re, time as _t
 import requests
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
 
 load_dotenv()
-
-
 
 app = FastAPI(
     title="BRidge API",
@@ -63,6 +61,36 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
+
+# === Prices endpoint (after app is defined) ===
+@app.get(
+    "/prices/copper_last",
+    tags=["Prices"],
+    summary="COMEX copper last trade (USD/lb)",
+    description="Scrapes https://comexlive.org/copper/ for the 'last trade' price and returns base = last - 0.25",
+    status_code=200
+)
+async def prices_copper_last():
+    now = _t.time()
+    if _PRICE_CACHE["copper_last"] and now - _PRICE_CACHE["ts"] < PRICE_TTL_SEC:
+        last = _PRICE_CACHE["copper_last"]
+        return {"last": last, "base_minus_025": round(last - 0.25, 4)}
+    try:
+        resp = requests.get("https://comexlive.org/copper/", timeout=6)
+        resp.raise_for_status()
+        html = resp.text
+        m = (re.search(r"Last\s*Trade[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
+             or re.search(r"Last[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
+             or re.search(r'>(\d\.\d{2,4})<', html))
+        if not m:
+            raise ValueError("Unable to locate last trade price on page.")
+        last = float(m.group(1))
+        _PRICE_CACHE["copper_last"] = last
+        _PRICE_CACHE["ts"] = now
+        return {"last": last, "base_minus_025": round(last - 0.25, 4)}
+    except Exception as e:
+        last = 4.19
+        return {"last": last, "base_minus_025": round(last - 0.25, 4), "note": f"fallback: {e.__class__.__name__}"}
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
@@ -992,7 +1020,7 @@ async def admin_export_all(request: Request, x_admin_token: str | None = Header(
         zip_bytes.seek(0)
 
         ts = datetime.utcnow().strftime("%Y-%m-%d")
-        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip'}
+        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip"'}
         return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
 
     except Exception as e:
