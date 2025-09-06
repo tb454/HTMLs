@@ -843,9 +843,21 @@ async def get_all_bols_pg(
     rows = await database.fetch_all(query=query, values=values)
     result = []
     for row in rows:
-        d = dict(row)  # convert Record -> dict so .get() is safe
+        d = dict(row)  # asyncpg.Record -> dict
 
-        # Build the response safely from dict
+        # Ensure non-null pickup_signature for Pydantic (Signature fields are required)
+        # If DB has no pickup_signature_base64/time yet, use empty string and pickup_time (or now) as timestamp.
+        ps_b64 = d.get("pickup_signature_base64") or ""
+        ps_ts  = d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow()
+
+        # delivery signature is optional in your BOLOut, so we can keep it None when missing
+        delivery_sig = None
+        if d.get("delivery_signature_base64") is not None:
+            delivery_sig = {
+                "base64": d.get("delivery_signature_base64"),
+                "timestamp": d.get("delivery_signature_time")
+            }
+
         result.append({
             "bol_id": d["bol_id"],
             "contract_id": d["contract_id"],
@@ -860,20 +872,13 @@ async def get_all_bols_pg(
                 "driver": d.get("carrier_driver"),
                 "truck_vin": d.get("carrier_truck_vin"),
             },
-            "pickup_signature": (
-                {"base64": d.get("pickup_signature_base64"), "timestamp": d.get("pickup_signature_time")}
-                if d.get("pickup_signature_base64") is not None else None
-            ),
-            "delivery_signature": (
-                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
-                if d.get("delivery_signature_base64") is not None else None
-            ),
+            "pickup_signature": { "base64": ps_b64, "timestamp": ps_ts },
+            "delivery_signature": delivery_sig,
             "pickup_time": d.get("pickup_time"),
             "delivery_time": d.get("delivery_time"),
             "status": d["status"],
         })
     return result
-
 
 @app.post("/bols/{bol_id}/update_status", tags=["BOLs"], summary="Update BOL Status", description="Update the status of a BOL (e.g., to In Transit or Delivered).", status_code=200)
 async def update_bol_status_pg(bol_id: str, new_status: str):
