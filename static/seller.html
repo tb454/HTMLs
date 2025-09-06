@@ -115,6 +115,7 @@
         const r = await fetch(`${window.endpoint || 'https://bridge-buyer.onrender.com'}/prices/copper_last`);
         if (!r.ok) throw new Error(`bad resp ${r.status}`);
         const j = await r.json();
+        // base is "last - 0.25"
         window.copperBaseUSD = j.base_minus_025; // USD/lb
         console.log("Copper base (last - 0.25):", window.copperBaseUSD);
       } catch (e) {
@@ -180,9 +181,13 @@
 
     function updateGroupedComputedMaterialsInventory() {
       const tableBody = document.getElementById('greenspark-table').querySelector('tbody');
+      // Remove previous groups
       tableBody.querySelectorAll('tr[data-group]').forEach(r => r.remove());
+
       for (let category in computedCategoriesMapping) {
         const { materials, pricingFunc } = computedCategoriesMapping[category];
+
+        // Group header row
         const groupRow = document.createElement('tr');
         groupRow.setAttribute('data-group', category);
         groupRow.classList.add('group-header');
@@ -190,14 +195,16 @@
         groupRow.innerHTML = `<td colspan="6">${category} <span style="float:right;">&#9660;</span></td>`;
         tableBody.appendChild(groupRow);
 
+        // Sub-rows
         materials.forEach(material => {
           const price = pricingFunc(material);
           if (price !== null) {
-            const wip = Math.floor(Math.random()*10000)+5000;
-            const finished = Math.floor(Math.random()*20000)+10000;
+            const wip = Math.floor(Math.random() * 10000) + 5000;
+            const finished = Math.floor(Math.random() * 20000) + 10000;
             const total = wip + finished;
-            const avgCost = (price*0.8).toFixed(2);
-            const totalPurchaseValue = (total*price).toFixed(2);
+            const avgCost = (price * 0.8).toFixed(2);
+            const totalPurchaseValue = (total * price).toFixed(2);
+
             const subRow = document.createElement('tr');
             subRow.setAttribute('data-group', category);
             subRow.classList.add('group-sub');
@@ -214,57 +221,11 @@
         });
       }
     }
+
     function toggleGroup(category) {
       document.querySelectorAll(`tr.group-sub[data-group='${category}']`).forEach(row => {
         row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
       });
-    }
-  </script>
-
-  <!-- SKU dropdown loader -->
-  <script>
-    async function loadSellerSKUs() {
-      const seller = document.getElementById("sellerName")?.value?.trim();
-      const sel    = document.getElementById("material");
-      if (!sel) return;
-
-      sel.innerHTML = "";
-      if (!seller) {
-        const opt = document.createElement("option");
-        opt.value = ""; opt.textContent = "Enter seller name first…";
-        sel.appendChild(opt);
-        return;
-      }
-      try {
-        const url = `${window.endpoint || "https://bridge-buyer.onrender.com"}/inventory?seller=${encodeURIComponent(seller)}&limit=1000`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const rows = await r.json();
-
-        if (!Array.isArray(rows) || rows.length === 0) {
-          const opt = document.createElement("option");
-          opt.value = ""; opt.textContent = "No SKUs in inventory — add via /inventory/bulk_upsert";
-          sel.appendChild(opt);
-          return;
-        }
-
-        const seen = new Set();
-        rows.forEach(row => {
-          if (row?.sku && !seen.has(row.sku)) {
-            seen.add(row.sku);
-            const opt = document.createElement("option");
-            opt.value = row.sku;
-            opt.textContent = row.sku;
-            sel.appendChild(opt);
-          }
-        });
-        if (sel.options.length > 0) sel.selectedIndex = 0;
-      } catch (e) {
-        console.warn("Failed to load SKUs:", e);
-        const opt = document.createElement("option");
-        opt.value = ""; opt.textContent = "Error loading SKUs — try Reload";
-        sel.appendChild(opt);
-      }
     }
   </script>
 </head>
@@ -362,12 +323,7 @@
           <input id="buyerName" class="form-control" placeholder="Buyer (e.g., Lewis Salvage)">
         </div>
         <div class="col-md-3">
-          <!-- REPLACED: text input -> dropdown + reload button -->
-          <div class="d-flex gap-2">
-            <select id="material" class="form-control"></select>
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="reloadSKUsBtn">Reload SKUs</button>
-          </div>
-          <small class="text-muted">Choose from your live inventory SKUs.</small>
+          <input id="material" class="form-control" placeholder="Material / SKU (e.g., SHRED)">
         </div>
         <div class="col-md-1">
           <input id="tons" type="number" class="form-control" placeholder="Tons">
@@ -644,11 +600,6 @@
         return;
       }
 
-      if (!material) {
-        alert("Select a Material / SKU from the dropdown.");
-        return;
-      }
-
       const res = await fetch(`${endpoint}/contracts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -707,10 +658,6 @@
         if (u && u !== "Guest") sellerEl.value = u;
       }
 
-      // NEW: load SKUs when seller changes / on reload button
-      document.getElementById("sellerName")?.addEventListener("change", loadSellerSKUs);
-      document.getElementById("reloadSKUsBtn")?.addEventListener("click", loadSellerSKUs);
-
       document.getElementById("createContractBtn")?.addEventListener("click", createContract);
       document.getElementById("refreshContractsBtn")?.addEventListener("click", () => { offset = 0; listContracts(); });
       document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
@@ -722,8 +669,8 @@
       document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); listContracts(); });
       document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; listContracts(); });
 
-      // initial load (let seller prefill first)
-      setTimeout(() => { loadSellerSKUs(); listContracts(); }, 200);
+      // initial load after a tick (lets sellerName prefill)
+      setTimeout(listContracts, 200);
     }
 
     document.addEventListener("DOMContentLoaded", wireSellerUI);
