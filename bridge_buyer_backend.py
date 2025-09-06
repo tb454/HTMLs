@@ -36,7 +36,16 @@ from slowapi.errors import RateLimitExceeded
 from prometheus_fastapi_instrumentator import Instrumentator
 import sentry_sdk
 
+# -------- Live Prices (COMEX Copper) --------
+import re, time
+import requests
+
+_PRICE_CACHE = {"copper_last": None, "ts": 0}
+PRICE_TTL_SEC = 300  # 5 minutes
+
 load_dotenv()
+
+
 
 app = FastAPI(
     title="BRidge API",
