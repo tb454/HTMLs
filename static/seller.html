@@ -105,6 +105,27 @@
     }
   </style>
 
+  <!-- Live Copper Base (COMEX last - $0.25) -->
+  <script>
+    // Live copper base ($/lb): COMEX last - $0.25, fetched from backend.
+    window.copperBaseUSD = null;
+
+    async function fetchCopperBase() {
+      try {
+        const r = await fetch(`${window.endpoint || 'https://bridge-buyer.onrender.com'}/prices/copper_last`);
+        if (!r.ok) throw new Error(`bad resp ${r.status}`);
+        const j = await r.json();
+        // base is "last - 0.25"
+        window.copperBaseUSD = j.base_minus_025; // USD/lb
+        console.log("Copper base (last - 0.25):", window.copperBaseUSD);
+      } catch (e) {
+        // fallback if backend unreachable
+        window.copperBaseUSD = 4.19 - 0.25;
+        console.warn("Copper price fallback used:", window.copperBaseUSD, e);
+      }
+    }
+  </script>
+
   <!-- Material arrays + pricing (for inventory table rendering) -->
   <script>
     const copperMaterials = ["Barley","#1","#2","#3"];
@@ -114,19 +135,37 @@
     const stainlessMaterials = ["SS304","SS316"];
     const eScrapMaterials = ["E_Scrap_Board"];
     const insulatedWireMaterials = ["ICW_LowGrade_ChristmasLights","ICW_LowGrade_ComputerWire25","ICW_LowGrade_CuCATV","ICW_LowGrade_ExtCords35Up","ICW_LowGrade_MixedWire40Up","ICW1_Heliax57_OpenEyeBaled","ICW1_MCM85HG","ICW1_Romex65_NoWeatherProof","ICW1_THHN80","ICW2_50Cat5TelWire","ICW2_HarnessWireNoFuseBoxes","ICW2_BX_Cable_AL","ICW2_BX_Cable_FE24"];
-    const miscProductMaterials = ["Ballast_Electronic","Ballast_Regular","BatteryAuto_PbAcid","BatterySteelCase_Industrial","Compressor_SealedUnitNoCastIron","EMotorLowGrade_CeilingFanMotors","EMotorMix_NoPumpsPowerToolsFans","EMotorLarge_LessThan1000lbs","Transformer_AluLargeOnly","TransformerCu_AlCu","TransformerCu_SmallPalmSize","TransformerCu_MediumOver200lbs","TransformerCu_Large","Zinc_DieCast"];
-    const radiatorProductMaterials = ["ACReefer_CleanTalkBaled","ACReefer_CleanUnbaled","ACReefer_DirtyTalkBaled","ACReefer_DirtyUnbaled","Radiator_CleanCar","CuBkg_ACReeferEnd"];
 
-    function copperPrice(grade){switch(grade){case 'Barley':return 4.19*0.94;case '#1':return 4.19*0.91;case '#2':return 4.19*0.85;case '#3':return 4.19*0.83;default:return null;}}
+    /* === Steel materials (placeholder pricing for now) === */
+    const steelMaterials = ["SHRED","CLIPS","BUSHELING","HMS","PS"];
+    function steelPrice(sku) {
+      const basePerTon = 300;  // TODO: replace with live steel baseline
+      return basePerTon / 2000; // $/lb
+    }
+
+    /* === Pricing functions === */
+    // Updated copper: uses live base (COMEX last - $0.25)
+    function copperPrice(grade) {
+      const base = (typeof window.copperBaseUSD === 'number') ? window.copperBaseUSD : (4.19 - 0.25);
+      let mult = 1.0;
+      switch (grade) {
+        case 'Barley': mult = 0.94; break;        // Cu BB
+        case '#1':     mult = 0.91; break;        // Berry & Candy
+        case '#2':     mult = 0.85; break;        // Birch & Cliff
+        case '#3':     mult = 0.83; break;        // Sheet Copper
+        default: return null;
+      }
+      return base * mult; // $/lb
+    }
+
     function aluminumPrice(p){const x={"AL6061_NewBareExtrusion":.84,"AL6061_ClipPlatePipe":.78,"AL6063_Secondary":.78,"AL6063_OldExtrusion":.95,"AL6063_Extrusion10/10":.85,"AL_PAS_Baled":.82,"AL_Cast_Clean":.72,"AL_RADS_CleanBaled":.67,"AL_RADS_DirtyBaled":.46,"AL_Sheet_CleanBaled":.75,"AL_WheelAuto_Clean":.93,"AL_WheelChrome_Clean":.80,"TruckWheel_Clean":.72,"AL_Wire_BareCATV":.43,"AL_Wire_NeopreneACSR":.54,"AL_Wire_ECPrepared":1.03,"AL_MLC_Prepared":.84};return 1.25*(x[p]??null);}
     function brassPrice(p){const m={"Brass_Hard":.81,"Brass_Red_Ebony":.77,"Brass_Red_Semi":.72,"Brass_Shaving_AlBronze":.57,"Brass_Shaving_BrassRed":.61,"Brass_Shell":.60,"Brass_Special":.64,"Brass_YellowRegular":.61};return 4.19*(m[p]??null);}
     function leadPrice(p){if(p==='Lead_Clean')return (2034/2000)*.718;if(p==='Lead_Range')return (2034/2000)*.728;return null;}
     function stainlessPrice(p){if(p==='SS304')return (15675/2000)*.0638;if(p==='SS316')return (15675/2000)*.1174;return null;}
     function eScrapPrice(){return .5;}
     function insulatedWirePrice(p){const m={"ICW_LowGrade_ChristmasLights":.528,"ICW_LowGrade_ComputerWire25":.448,"ICW_LowGrade_CuCATV":1.008,"ICW_LowGrade_ExtCords35Up":.92,"ICW_LowGrade_MixedWire40Up":1.08,"ICW1_Heliax57_OpenEyeBaled":1.536,"ICW1_MCM85HG":2.536,"ICW1_Romex65_NoWeatherProof":1.904,"ICW1_THHN80":2.36,"ICW2_50Cat5TelWire":1.384,"ICW2_HarnessWireNoFuseBoxes":1.408,"ICW2_BX_Cable_AL":1.648,"ICW2_BX_Cable_FE24":.6};return 1.25*(m[p]??null);}
-    function miscProductPrice(p){const m={"Ballast_Electronic":.12,"Ballast_Regular":.216,"BatteryAuto_PbAcid":.216,"BatterySteelCase_Industrial":.192,"Compressor_SealedUnitNoCastIron":.264,"EMotorLowGrade_CeilingFanMotors":.144,"EMotorMix_NoPumpsPowerToolsFans":.344,"EMotorLarge_LessThan1000lbs":.312,"Transformer_AluLargeOnly":.176,"TransformerCu_AlCu":.28,"TransformerCu_SmallPalmSize":.56,"TransformerCu_MediumOver200lbs":.592,"TransformerCu_Large":.624,"Zinc_DieCast":(2879/2000)*.5903};return 1.25*(m[p]??null);}
-    function radiatorProductPrice(p){const m={"ACReefer_CleanTalkBaled":1.608,"ACReefer_CleanUnbaled":1.592,"ACReefer_DirtyTalkBaled":1.496,"ACReefer_DirtyUnbaled":1.48,"Radiator_CleanCar":1.984,"CuBkg_ACReeferEnd":1.008};return 1.25*(m[p]??null);}
 
+    /* === Group mapping (now includes Steel) === */
     const computedCategoriesMapping = {
       "Copper": { materials: copperMaterials, pricingFunc: copperPrice },
       "Aluminum": { materials: aluminumMaterials, pricingFunc: aluminumPrice },
@@ -136,7 +175,8 @@
       "E-Scrap": { materials: eScrapMaterials, pricingFunc: eScrapPrice },
       "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
       "Misc Product": { materials: miscProductMaterials, pricingFunc: miscProductPrice },
-      "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice }
+      "Radiator Product": { materials: radiatorProductMaterials, pricingFunc: radiatorProductPrice },
+      "Steel": { materials: steelMaterials, pricingFunc: steelPrice }
     };
 
     function updateGroupedComputedMaterialsInventory() {
@@ -191,11 +231,11 @@
         <span id="current-user">User: Guest</span>
         <button onclick="showLoginModal()">Login</button>
         <button onclick="/* logout wiring here if needed */">Logout</button>
-        <button onclick="window.location.href='static\Spec-ferrous.html'">Spec Sheet Ferrous</button>
-        <button onclick="window.location.href='static\Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
-        <button onclick="window.location.href='static\Shipping terms.html'">Shipping Terms</button>
-        <button onclick="window.location.href='static\Contract-specs.html'">Contract Specs</button>
-        <button onclick="window.location.href='static\mixed-load.html'">Mixed Load</button>
+        <button onclick="window.location.href='/static/Spec-ferrous.html'">Spec Sheet Ferrous</button>
+        <button onclick="window.location.href='/static/Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
+        <button onclick="window.location.href='/static/Shipping terms.html'">Shipping Terms</button>
+        <button onclick="window.location.href='/static/Contract-specs.html'">Contract Specs</button>
+        <button onclick="window.location.href='/static/mixed-load.html'">Mixed Load</button>
         <span id="header-date">02/14/2025</span>
       </div>
     </header>
@@ -217,7 +257,11 @@
           <canvas id="activeContractsChart" width="250" height="200"></canvas>
         </div>
         <div class="card-custom">
-          <div><strong>Market Snapshot</strong></div>
+          <div class="d-flex align-items-center justify-content-center gap-2">
+            <strong class="me-2">Market Snapshot</strong>
+            <!-- Copper base badge -->
+            <span id="copperBaseBadge" class="badge bg-info text-dark"></span>
+          </div>
           <div id="price-Copper">Copper: $9,500.00</div>
           <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
           <div id="price-Brass">Brass: $7,500.00</div>
@@ -443,7 +487,10 @@
     let finishedGoodsChart, finishedGoodsChartLabels = [], finishedGoodsChartData = [];
     let kpiChart, kpiChartLabels = [], kpiChartData = [];
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
+      // fetch live copper base first
+      await fetchCopperBase();
+
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
@@ -478,9 +525,17 @@
         });
       }
 
-      // Build the inventory table once on load
+      // Build the inventory table once on load (copper base already fetched)
       updateGroupedComputedMaterialsInventory();
       updatePurchaseValues();
+
+      // show copper base badge
+      try {
+        const badge = document.getElementById("copperBaseBadge");
+        if (badge && typeof window.copperBaseUSD === 'number') {
+          badge.textContent = `Cu base (COMEX-0.25): $${window.copperBaseUSD.toFixed(4)}/lb`;
+        }
+      } catch {}
     });
 
     function updatePurchaseValues() {
