@@ -807,7 +807,6 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if idem_key:
         _idem_cache[idem_key] = resp
     return resp
-
 @app.get("/bols",
     response_model=List[BOLOut],
     tags=["BOLs"],
@@ -818,7 +817,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
 async def get_all_bols_pg(
     buyer: Optional[str] = Query(None, description="Filter by buyer name"),
     seller: Optional[str] = Query(None, description="Filter by seller name"),
-    material: Optional[str] = Query(None, description="Filter by material/SKU"),   # ← NEW
+    material: Optional[str] = Query(None, description="Filter by material/SKU"),
     status: Optional[str] = Query(None, description="Filter by BOL status"),
     contract_id: Optional[str] = Query(None, description="Filter by contract ID"),
     start: Optional[datetime] = Query(None, description="Start date (pickup_time >=)"),
@@ -830,7 +829,7 @@ async def get_all_bols_pg(
     conditions, values = [], {}
     if buyer:       conditions.append("buyer ILIKE :buyer");           values["buyer"] = f"%{buyer}%"
     if seller:      conditions.append("seller ILIKE :seller");         values["seller"] = f"%{seller}%"
-    if material:    conditions.append("material ILIKE :material");     values["material"] = f"%{material}%"   # ← NEW
+    if material:    conditions.append("material ILIKE :material");     values["material"] = f"%{material}%"
     if status:      conditions.append("status ILIKE :status");         values["status"] = f"%{status}%"
     if contract_id: conditions.append("contract_id = :contract_id");   values["contract_id"] = contract_id
     if start:       conditions.append("pickup_time >= :start");        values["start"] = start
@@ -838,36 +837,43 @@ async def get_all_bols_pg(
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY pickup_time DESC LIMIT :limit OFFSET :offset"
+    query += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
     values["limit"], values["offset"] = limit, offset
 
     rows = await database.fetch_all(query=query, values=values)
     result = []
     for row in rows:
+        d = dict(row)  # convert Record -> dict so .get() is safe
+
+        # Build the response safely from dict
         result.append({
-            "bol_id": row["bol_id"],
-            "contract_id": row["contract_id"],
-            "buyer": row["buyer"],
-            "seller": row["seller"],
-            "material": row["material"],
-            "weight_tons": row["weight_tons"],
-            "price_per_unit": row["price_per_unit"],
-            "total_value": row["total_value"],
+            "bol_id": d["bol_id"],
+            "contract_id": d["contract_id"],
+            "buyer": d["buyer"],
+            "seller": d["seller"],
+            "material": d["material"],
+            "weight_tons": d["weight_tons"],
+            "price_per_unit": d["price_per_unit"],
+            "total_value": d["total_value"],
             "carrier": {
-                "name": row["carrier_name"], "driver": row["carrier_driver"], "truck_vin": row["carrier_truck_vin"]
+                "name": d.get("carrier_name"),
+                "driver": d.get("carrier_driver"),
+                "truck_vin": d.get("carrier_truck_vin"),
             },
-            "pickup_signature": {
-                "base64": row["pickup_signature_base64"], "timestamp": row["pickup_signature_time"]
-            },
-            "delivery_signature": (
-                {"base64": row.get("delivery_signature_base64"), "timestamp": row.get("delivery_signature_time")}
-                if row.get("delivery_signature_base64") else None
+            "pickup_signature": (
+                {"base64": d.get("pickup_signature_base64"), "timestamp": d.get("pickup_signature_time")}
+                if d.get("pickup_signature_base64") is not None else None
             ),
-            "pickup_time": row["pickup_time"],
-            "delivery_time": row["delivery_time"],
-            "status": row["status"]
+            "delivery_signature": (
+                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
+                if d.get("delivery_signature_base64") is not None else None
+            ),
+            "pickup_time": d.get("pickup_time"),
+            "delivery_time": d.get("delivery_time"),
+            "status": d["status"],
         })
     return result
+
 
 @app.post("/bols/{bol_id}/update_status", tags=["BOLs"], summary="Update BOL Status", description="Update the status of a BOL (e.g., to In Transit or Delivered).", status_code=200)
 async def update_bol_status_pg(bol_id: str, new_status: str):
