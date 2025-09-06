@@ -808,10 +808,17 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
-@app.get("/bols", response_model=List[BOLOut], tags=["BOLs"], summary="List BOLs", description="Retrieve all BOLs. Supports optional filtering by buyer, seller, status, contract_id, and pickup date range.", status_code=200)
+@app.get("/bols",
+    response_model=List[BOLOut],
+    tags=["BOLs"],
+    summary="List BOLs",
+    description="Retrieve all BOLs. Supports optional filtering by buyer, seller, material, status, contract_id, and pickup date range.",
+    status_code=200
+)
 async def get_all_bols_pg(
     buyer: Optional[str] = Query(None, description="Filter by buyer name"),
     seller: Optional[str] = Query(None, description="Filter by seller name"),
+    material: Optional[str] = Query(None, description="Filter by material/SKU"),   # ← NEW
     status: Optional[str] = Query(None, description="Filter by BOL status"),
     contract_id: Optional[str] = Query(None, description="Filter by contract ID"),
     start: Optional[datetime] = Query(None, description="Start date (pickup_time >=)"),
@@ -821,13 +828,16 @@ async def get_all_bols_pg(
 ):
     query = "SELECT * FROM bols"
     conditions, values = [], {}
-    if buyer: conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
-    if seller: conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
-    if status: conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
-    if contract_id: conditions.append("contract_id = :contract_id"); values["contract_id"] = contract_id
-    if start: conditions.append("pickup_time >= :start"); values["start"] = start
-    if end:   conditions.append("pickup_time <= :end");   values["end"] = end
-    if conditions: query += " WHERE " + " AND ".join(conditions)
+    if buyer:       conditions.append("buyer ILIKE :buyer");           values["buyer"] = f"%{buyer}%"
+    if seller:      conditions.append("seller ILIKE :seller");         values["seller"] = f"%{seller}%"
+    if material:    conditions.append("material ILIKE :material");     values["material"] = f"%{material}%"   # ← NEW
+    if status:      conditions.append("status ILIKE :status");         values["status"] = f"%{status}%"
+    if contract_id: conditions.append("contract_id = :contract_id");   values["contract_id"] = contract_id
+    if start:       conditions.append("pickup_time >= :start");        values["start"] = start
+    if end:         conditions.append("pickup_time <= :end");          values["end"] = end
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY pickup_time DESC LIMIT :limit OFFSET :offset"
     values["limit"], values["offset"] = limit, offset
 
@@ -850,7 +860,7 @@ async def get_all_bols_pg(
                 "base64": row["pickup_signature_base64"], "timestamp": row["pickup_signature_time"]
             },
             "delivery_signature": (
-                {"base64": row["delivery_signature_base64"], "timestamp": row["delivery_signature_time"]}
+                {"base64": row.get("delivery_signature_base64"), "timestamp": row.get("delivery_signature_time")}
                 if row.get("delivery_signature_base64") else None
             ),
             "pickup_time": row["pickup_time"],
