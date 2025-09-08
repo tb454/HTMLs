@@ -21,6 +21,9 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
+from typing import List, Optional
+from datetime import datetime
+from fastapi import Query
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -567,28 +570,59 @@ async def create_contract(contract: ContractIn):
     response_model=List[ContractOut],
     tags=["Contracts"],
     summary="List Contracts",
-    description="Retrieve contracts with optional filters: buyer, seller, status, created_at date range.",
+    description="Retrieve contracts with optional filters: buyer, seller, material, status, created_at date range.",
     status_code=200
 )
 async def get_all_contracts(
     buyer: Optional[str] = Query(None, description="Filter by buyer name"),
     seller: Optional[str] = Query(None, description="Filter by seller name"),
+    material: Optional[str] = Query(None, description="Filter by material/SKU"),
     status: Optional[str] = Query(None, description="Filter by contract status"),
     start: Optional[datetime] = Query(None, description="Start date (created_at >=)"),
-    end: Optional[datetime] = Query(None, description="End date (created_at <=)"),
+    end: Optional[datetime]   = Query(None, description="End date (created_at <=)"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
+    # normalize simple strings (defensive)
+    buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
+    seller   = seller.strip()   if isinstance(seller, str) else seller
+    material = material.strip() if isinstance(material, str) else material
+    status   = status.strip()   if isinstance(status, str) else status
+
     query = "SELECT * FROM contracts"
     conditions, values = [], {}
-    if buyer: conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
-    if seller: conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
-    if status: conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
-    if start: conditions.append("created_at >= :start"); values["start"] = start
-    if end:   conditions.append("created_at <= :end");   values["end"] = end
-    if conditions: query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+
+    if buyer:
+        conditions.append("buyer ILIKE :buyer")
+        values["buyer"] = f"%{buyer}%"
+
+    if seller:
+        conditions.append("seller ILIKE :seller")
+        values["seller"] = f"%{seller}%"
+
+    if material:
+        conditions.append("material ILIKE :material")
+        values["material"] = f"%{material}%"
+
+    if status:
+        conditions.append("status ILIKE :status")
+        values["status"] = f"%{status}%"
+
+    if start:
+        conditions.append("created_at >= :start")
+        values["start"] = start
+
+    if end:
+        conditions.append("created_at <= :end")
+        values["end"] = end
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    # keep null created_at at the end for stable paging
+    query += " ORDER BY created_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
     values["limit"], values["offset"] = limit, offset
+
     return await database.fetch_all(query=query, values=values)
 
 @app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", description="Retrieve a specific contract by its unique ID.", status_code=200)
