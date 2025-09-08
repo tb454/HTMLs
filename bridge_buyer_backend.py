@@ -542,7 +542,7 @@ async def create_contract(contract: ContractIn):
         reserved = float(inv["qty_reserved"]) if inv else 0.0
         available = on_hand - reserved
         if available < qty:
-            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)." )
 
         # Reserve
         await database.execute("""
@@ -1056,51 +1056,34 @@ async def contracts_by_day():
     """)
     return [{"day": str(r["day"]), "count": r["count"]} for r in rows]
 
-# -------- Admin export (retention helper) --------
-@app.get(
-    "/admin/export_all",
-    tags=["Admin"],
-    summary="Export all data (ZIP)",
-    description="Exports contracts.csv and bols.csv in a ZIP. Accepts X-Admin-Token header OR admin session.",
-    status_code=200
-)
-async def admin_export_all(request: Request, x_admin_token: str | None = Header(None)):
-    # Auth: allow either admin session **or** header token
-    if not (_is_admin_session(request) or (ADMIN_EXPORT_TOKEN and x_admin_token == ADMIN_EXPORT_TOKEN)):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    try:
-        contracts = await database.fetch_all(
-            "SELECT * FROM contracts ORDER BY created_at DESC"
-        )
-        bols = await database.fetch_all(
-            "SELECT * FROM bols ORDER BY pickup_time DESC NULLS LAST, bol_id DESC"
-        )
-
-        # Build ZIP in-memory
-        zip_bytes = io.BytesIO()
-        with zipfile.ZipFile(zip_bytes, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("contracts.csv", _rows_to_csv_bytes(contracts))
-            zf.writestr("bols.csv", _rows_to_csv_bytes(bols))
-        zip_bytes.seek(0)
-
-        ts = datetime.utcnow().strftime("%Y-%m-%d")
-        headers = {"Content-Disposition": f'attachment; filename="bridge_export_{ts}.zip"'}
-        return StreamingResponse(zip_bytes, media_type="application/zip", headers=headers)
-
-    except Exception as e:
-        # Log server-side; return generic 500 to client
-        logger.error("export_all_failed", err=str(e))
-        raise HTTPException(status_code=500, detail="Export failed")
-
 # ========== INVENTORY API ==========
 INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
+ENV = os.getenv("ENV", "development").lower()
 
 def _idem(key: Optional[str], payload: dict):
     if not key:
         return None
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
     return f"{key}:{digest}"
+
+def _require_hmac_in_this_env() -> bool:
+    # Require in prod when a secret is set. Optional in dev for easy DX.
+    return ENV == "production" and bool(os.getenv(INVENTORY_SECRET_ENV, ""))
+
+# ---- NEW: ingest log helper (DB audit trail) ----
+async def _log_ingest(request: Request, source: str, seller: str, item_count: int, sig_present: bool, sig_valid: bool):
+    try:
+        idem_key = request.headers.get("Idempotency-Key", "")
+        remote   = request.client.host if request.client else ""
+        ua       = request.headers.get("user-agent", "")
+        await database.execute("""
+            INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
+            VALUES (:source, :seller, :item_count, :idem_key, :sig_present, :sig_valid, :remote_addr, :user_agent)
+        """, {"source": source, "seller": seller, "item_count": item_count, "idem_key": idem_key,
+              "sig_present": bool(sig_present), "sig_valid": bool(sig_valid),
+              "remote_addr": remote, "user_agent": ua})
+    except Exception as e:
+        logger.warn("ingest_log_failed", err=str(e))
 
 @app.post(
     "/inventory/bulk_upsert",
@@ -1111,12 +1094,16 @@ def _idem(key: Optional[str], payload: dict):
     status_code=200
 )
 async def inventory_bulk_upsert(body: BulkUpsertBody, request: Request):
-    # HMAC (optional) & replay
+    # HMAC (prod required; dev optional)
     raw = await request.body()
-    if os.getenv(INVENTORY_SECRET_ENV, ""):
-        sig = request.headers.get("X-Signature")
-        if not (verify_sig(raw, sig, INVENTORY_SECRET_ENV) and not is_replay(sig)):
-            raise HTTPException(401, "Bad signature")
+    sig = request.headers.get("X-Signature", "")
+    sig_ok = bool(sig) and bool(verify_sig(raw, sig, INVENTORY_SECRET_ENV)) and not is_replay(sig)
+
+    if _require_hmac_in_this_env() and not sig_ok:
+        raise HTTPException(401, "Bad signature")
+
+    # log ingest attempt (before transaction)
+    await _log_ingest(request, body.source, body.seller, len(body.items), bool(sig), sig_ok)
 
     # Idempotency (best-effort)
     idem_key = request.headers.get("Idempotency-Key")
@@ -1172,12 +1159,18 @@ async def inventory_bulk_upsert(body: BulkUpsertBody, request: Request):
     status_code=200
 )
 async def inventory_movements(body: MovementBody, request: Request):
+    # HMAC (prod required; dev optional)
     raw = await request.body()
-    if os.getenv(INVENTORY_SECRET_ENV, ""):
-        sig = request.headers.get("X-Signature")
-        if not (verify_sig(raw, sig, INVENTORY_SECRET_ENV) and not is_replay(sig)):
-            raise HTTPException(401, "Bad signature")
+    sig = request.headers.get("X-Signature", "")
+    sig_ok = bool(sig) and bool(verify_sig(raw, sig, INVENTORY_SECRET_ENV)) and not is_replay(sig)
 
+    if _require_hmac_in_this_env() and not sig_ok:
+        raise HTTPException(401, "Bad signature")
+
+    # log ingest attempt
+    await _log_ingest(request, body.source, body.seller, len(body.events), bool(sig), sig_ok)
+
+    # Idempotency (best-effort)
     idem_key = request.headers.get("Idempotency-Key")
     cache_key = _idem(idem_key, body.dict()) if idem_key else None
     if cache_key and cache_key in _idem_cache:
@@ -1211,6 +1204,36 @@ async def inventory_movements(body: MovementBody, request: Request):
     if cache_key:
         _idem_cache[cache_key] = resp
     return resp
+
+# ---- NEW: Read API for movements (for UI visibility) ----
+@app.get("/inventory/movements/list",
+    tags=["Inventory"],
+    summary="List inventory movements",
+    description="Recent inventory movements. Filter by seller, sku, type, time range.",
+    status_code=200
+)
+async def list_movements(
+    seller: str = Query(...),
+    sku: Optional[str] = Query(None),
+    movement_type: Optional[str] = Query(None, description="upsert, adjust, reserve, unreserve, commit, ship, cancel, reconcile"),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    q = "SELECT * FROM inventory_movements WHERE seller=:seller"
+    vals = {"seller": seller, "limit": limit, "offset": offset}
+    if sku:
+        q += " AND sku=:sku"; vals["sku"] = sku
+    if movement_type:
+        q += " AND movement_type=:mt"; vals["mt"] = movement_type
+    if start:
+        q += " AND created_at >= :start"; vals["start"] = start
+    if end:
+        q += " AND created_at <= :end"; vals["end"] = end
+    q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    rows = await database.fetch_all(q, vals)
+    return [dict(r) for r in rows]
 
 @app.get(
     "/inventory",

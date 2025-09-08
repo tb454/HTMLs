@@ -338,6 +338,15 @@
       </div>
     </section>
 
+    <!-- NEW: Recent Movements (auto-updates after create) -->
+    <section class="section" id="recentMovementsSection">
+      <div class="section-title">Recent Inventory Movements</div>
+      <div id="recentMovementsHelp" class="text-muted small mb-2">
+        Shows the latest 5 movements for this seller/material.
+      </div>
+      <ul id="recentMovements" class="list-group"></ul>
+    </section>
+
     <!-- My Contracts (REAL) -->
     <section class="section">
       <div class="section-title">My Contracts</div>
@@ -588,6 +597,41 @@
     let offset = 0, limit = 50;
     const toISO = (d) => d ? new Date(d).toISOString() : undefined;
 
+    // NEW: render the recent movements list (top 5)
+    async function renderRecentMovements(seller, material) {
+      if (!seller || !material) return;
+      const url = `${endpoint}/inventory/movements/list?seller=${encodeURIComponent(seller)}&sku=${encodeURIComponent(material)}&limit=5`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(await r.text());
+        const rows = await r.json();
+
+        const ul = document.getElementById("recentMovements");
+        ul.innerHTML = "";
+        if (!rows.length) {
+          ul.innerHTML = `<li class="list-group-item text-muted">No recent movements.</li>`;
+          return;
+        }
+
+        rows.forEach(mv => {
+          const li = document.createElement("li");
+          li.className = "list-group-item d-flex justify-content-between align-items-center";
+          const when = mv.created_at ? new Date(mv.created_at).toLocaleString() : "";
+          const qty = (mv.qty !== undefined && mv.qty !== null) ? Number(mv.qty).toLocaleString() : "";
+          li.innerHTML = `
+            <div>
+              <div><strong>${mv.movement_type?.toUpperCase() || ''}</strong> — ${mv.sku || ''}</div>
+              <div class="small text-muted">${when}</div>
+            </div>
+            <span class="badge bg-secondary rounded-pill">${qty}</span>
+          `;
+          ul.appendChild(li);
+        });
+      } catch (e) {
+        console.warn("recent movements fetch failed:", e);
+      }
+    }
+
     async function createContract() {
       const seller = document.getElementById("sellerName").value.trim();
       const buyer  = document.getElementById("buyerName").value.trim();
@@ -609,8 +653,15 @@
         const t = await res.text(); console.error(t);
         alert("Create failed"); return;
       }
-      alert("Contract created.");
+
+      // ✅ Seller UI toast — show the reserve step happened
+      alert(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
+
+      // Refresh the seller's contracts table
       await listContracts();
+
+      // ✅ Pull top 5 recent movements for this seller/material
+      renderRecentMovements(seller, material);
     }
 
     async function listContracts() {
