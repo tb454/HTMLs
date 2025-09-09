@@ -102,7 +102,7 @@ if os.getenv("ENV", "development").lower() != "production":
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me"))
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "3ZzQmVoYqNQk5t8R7yJ1xw0uHgBFh9dXea2MUpnCKlGTsvr4OjWPZ6LAiEbNYDf"))
 
 # ===== Security headers (incl. CSP that allows jsDelivr + Google Fonts) =====
 async def security_headers_mw(request, call_next):
