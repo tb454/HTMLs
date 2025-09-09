@@ -6,23 +6,11 @@
   <title>BRidge Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
   <style>
-    body {
-      background-color: #f4f6f8;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      padding: 20px;
-    }
-    .table-container {
-      background: white;
-      border-radius: 10px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      padding: 20px;
-    }
+    body { background-color: #f4f6f8; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
+    .table-container { background: white; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); padding: 20px; }
     .table th, .table td { vertical-align: middle; }
     .filters { margin-bottom: 20px; }
-    .signature-pad {
-      border: 1px solid #ccc; border-radius: 6px;
-      width: 100%; height: 150px; background-color: #fff; margin-top: 10px;
-    }
+    .signature-pad { border: 1px solid #ccc; border-radius: 6px; width: 100%; height: 150px; background-color: #fff; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -47,10 +35,11 @@
       </div>
     </div>
 
+    <!-- NEW: Admin pagination controls -->
     <div class="d-flex gap-2 mb-2">
-      <button id="prevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
-      <button id="nextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
-      <span id="pageInfo" class="ms-2 small text-muted"></span>
+      <button id="adminPrevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
+      <button id="adminNextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
+      <span id="adminPageInfo" class="small text-muted"></span>
     </div>
 
     <div class="table-container">
@@ -67,7 +56,7 @@
             <th>Delivery Time</th>
             <th>Total Value</th>
             <th>Download</th>
-            <th>View</th> <!-- ✅ View BOLs column -->
+            <th>View</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -78,65 +67,40 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
-    let offset = 0, limit = 100;
 
-    async function fetchBOLs() {
-      const start    = document.getElementById("startDate").value;
-      const end      = document.getElementById("endDate").value;
-      const buyer    = document.getElementById("buyerFilter").value;
-      const material = document.getElementById("materialFilter").value;
+    // === NEW admin pagination state + elements ===
+    let aOffset = 0, aLimit = 100;
 
-      const qs = new URLSearchParams();
-      if (buyer)    qs.set("buyer", buyer);
-      if (material) qs.set("material", material);
-      if (start)    qs.set("start", new Date(start).toISOString());
-      if (end)      qs.set("end",   new Date(end).toISOString());
-      qs.set("limit", String(limit));
-      qs.set("offset", String(offset));
+    const startDate      = document.getElementById("startDate");
+    const endDate        = document.getElementById("endDate");
+    const buyerFilter    = document.getElementById("buyerFilter");
+    const materialFilter = document.getElementById("materialFilter");
 
-      const res  = await fetch(`${endpoint}/bols?${qs.toString()}`);
-      if (!res.ok) {
-        const t = await res.text();
-        console.error("BOLs fetch failed:", t);
-        return;
+    const adminPrevBtn   = document.getElementById("adminPrevBtn");
+    const adminNextBtn   = document.getElementById("adminNextBtn");
+    const adminPageInfo  = document.getElementById("adminPageInfo");
+
+    function statusColor(status) {
+      switch(status) {
+        case 'Open':         return 'secondary';
+        case 'Matched':      return 'info';
+        case 'BOL Issued':   return 'primary';
+        case 'In Transit':   return 'warning';
+        case 'Delivered':    return 'success';
+        case 'Closed':       return 'dark';
+        default:             return 'light';
       }
-      const data = await res.json();
-
-      const tbody = document.querySelector("#bol-table tbody");
-      tbody.innerHTML = "";
-
-      if (data.length === 0) {
-        const row = document.createElement("tr");
-        row.innerHTML = `<td colspan="11" class="text-center text-muted py-3">No BOLs match your filters.</td>`;
-        tbody.appendChild(row);
-        document.getElementById("nextBtn").disabled = true;
-        document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
-        return;
-      }
-
-      data.forEach(bol => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${bol.bol_id}</td>
-          <td>${bol.contract_id}</td>
-          <td>${bol.buyer}</td>
-          <td>${bol.material}</td>
-          <td>${bol.weight_tons}</td>
-          <td><span class="badge bg-${statusColor(bol.status)}">${bol.status}</span></td>
-          <td>${formatTime(bol.pickup_time)}</td>
-          <td>${bol.delivery_time ? formatTime(bol.delivery_time) : "—"}</td>
-          <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-          <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td>
-        `;
-        tbody.appendChild(row);
-      });
-
-      document.getElementById("pageInfo").textContent = `Showing ${data.length} • offset ${offset}`;
-      document.getElementById("prevBtn").disabled = offset === 0;
-      document.getElementById("nextBtn").disabled = data.length < limit;
+    }
+    function formatTime(isoString) {
+      try { return isoString ? new Date(isoString).toLocaleString() : "—"; } catch { return "—"; }
     }
 
+    function downloadCSV() {
+      window.open(`${endpoint}/contracts/export_csv`, "_blank");
+    }
+    function downloadPDF(bolId) {
+      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
+    }
     function viewBOLsFor(contractId) {
       const qs = new URLSearchParams();
       qs.set("contract_id", contractId);
@@ -145,43 +109,79 @@
       window.location.href = `${endpoint}/bols?${qs.toString()}`;
     }
 
-    function formatTime(isoString) {
-      try { return new Date(isoString).toLocaleString(); } catch { return "—"; }
+    // === NEW loader that honors admin pagination + filters ===
+    async function loadBOLsAdmin() {
+      const qs = new URLSearchParams({ limit: aLimit, offset: aOffset });
+
+      const buyer    = buyerFilter.value.trim();
+      const material = materialFilter.value.trim();
+      const start    = startDate.value;
+      const end      = endDate.value;
+
+      if (buyer)    qs.set("buyer", buyer);
+      if (material) qs.set("material", material);
+      if (start)    qs.set("start", new Date(start).toISOString());
+      if (end)      qs.set("end",   new Date(end).toISOString());
+
+      const res = await fetch(`${endpoint}/bols?${qs.toString()}`, {
+        headers: { "Accept": "application/json" }
+      });
+      if (!res.ok) { console.error("BOLs fetch failed:", await res.text()); return; }
+      const rows = await res.json();
+
+      renderBOLTable(rows);
+
+      // Paging guards
+      adminPrevBtn.disabled = aOffset === 0;
+      adminNextBtn.disabled = rows.length < aLimit;
+      adminPageInfo.textContent = `Showing ${rows.length} • offset ${aOffset}`;
     }
 
-    function statusColor(status) {
-      switch(status) {
-        case 'Open': return 'secondary';
-        case 'Matched': return 'info';
-        case 'BOL Issued': return 'primary';
-        case 'In Transit': return 'warning';
-        case 'Delivered': return 'success';
-        case 'Closed': return 'dark';
-        default: return 'light';
+    function renderBOLTable(rows) {
+      const tbody = document.querySelector("#bol-table tbody");
+      tbody.innerHTML = "";
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-3">No BOLs match your filters.</td></tr>`;
+        return;
       }
+
+      rows.forEach(bol => {
+        const pdfUrl = `${endpoint}/bol/${bol.bol_id}/pdf`;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${bol.bol_id}</td>
+          <td>${bol.contract_id}</td>
+          <td>${bol.buyer}</td>
+          <td>${bol.material}</td>
+          <td>${bol.weight_tons}</td>
+          <td><span class="badge bg-${statusColor(bol.status)}">${bol.status}</span></td>
+          <td>${formatTime(bol.pickup_time)}</td>
+          <td>${formatTime(bol.delivery_time)}</td>
+          <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+          <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
+          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
     }
 
-    function downloadCSV() {
-      window.open(`${endpoint}/contracts/export_csv`, "_blank");
-    }
+    // Hook buttons (NEW)
+    adminPrevBtn?.addEventListener("click", () => { aOffset = Math.max(0, aOffset - aLimit); loadBOLsAdmin(); });
+    adminNextBtn?.addEventListener("click", () => { aOffset = aOffset + aLimit; loadBOLsAdmin(); });
 
-    function downloadPDF(bolId) {
-      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
-    }
+    // Debounce helper for inputs
+    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
 
-    // Reset to first page when filters change
-    document.getElementById("startDate").addEventListener("change", () => { offset = 0; fetchBOLs(); });
-    document.getElementById("endDate").addEventListener("change",   () => { offset = 0; fetchBOLs(); });
-    document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; fetchBOLs(); });
-    document.getElementById("materialFilter").addEventListener("input", () => { offset = 0; fetchBOLs(); });
-
-    // Prev/Next buttons
-    document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); fetchBOLs(); });
-    document.getElementById("nextBtn").addEventListener("click", () => { offset = offset + limit; fetchBOLs(); });
+    // Filters trigger reload, reset to first page
+    startDate.addEventListener("change",   () => { aOffset = 0; loadBOLsAdmin(); });
+    endDate.addEventListener("change",     () => { aOffset = 0; loadBOLsAdmin(); });
+    buyerFilter.addEventListener("input",  debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
+    materialFilter.addEventListener("input", debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
 
     // Initial load + periodic refresh
-    fetchBOLs();
-    setInterval(fetchBOLs, 10000);
+    loadBOLsAdmin();
+    setInterval(loadBOLsAdmin, 10000);
   </script>
 
   <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
