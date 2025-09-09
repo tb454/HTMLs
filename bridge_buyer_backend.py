@@ -105,7 +105,7 @@ prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 
 if not prod or allow_local:
-    allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
+    allowed += ["localhost", "127.0.0.1:8000", "testserver", "0.0.0.0"]
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "3ZzQmVoYqNQk5t8R7yJ1xw0uHgBFh9dXea2MUpnCKlGTsvr4OjWPZ6LAiEbNYDf"))
