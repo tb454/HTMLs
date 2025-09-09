@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Your staging DB (must include ?sslmode=require)
+      DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+      ENV: ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install system tools (psql client)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Verify DB URL is present (masked)
+        run: python - << 'PY'
+import os, sys
+print("has_DATABASE_URL=", bool(os.getenv("DATABASE_URL")))
+sys.exit(0 if os.getenv("DATABASE_URL") else 1)
+PY
+
+      - name: Optional ping DB (no secrets printed)
+        run: |
+          psql "$DATABASE_URL" -Atqc "SELECT 1" || (echo "DB connect failed" && exit 1)
+
+      - name: Install Python deps (requirements if present; fallback safety net)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # Ensure test deps and common libs are present
+          pip install \
+            pytest \
+            slowapi structlog prometheus-fastapi-instrumentator sentry-sdk itsdangerous \
+            requests python-dotenv reportlab \
+            fastapi "databases[postgres]" sqlalchemy asyncpg passlib[bcrypt] uvicorn
+
+      - name: Run tests
+        run: pytest -q
