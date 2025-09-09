@@ -97,8 +97,14 @@ async def prices_copper_last():
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
-# Allow local/pytest hosts when not in production
-if os.getenv("ENV", "development").lower() != "production":
+
+# Allow localhost in:
+# - any non-production environment, OR
+# - production when ALLOW_LOCALHOST_IN_PROD=1|true|yes (useful for local testing)
+prod = os.getenv("ENV", "development").lower() == "production"
+allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
+
+if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
