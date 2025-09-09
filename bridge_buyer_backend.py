@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header
+from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
@@ -24,6 +24,11 @@ from reportlab.pdfgen import canvas
 from typing import List, Optional
 from datetime import datetime
 from fastapi import Query
+
+# ===== ADDED =====
+from fastapi import APIRouter
+from datetime import date as _date
+# ===== /ADDED =====
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -227,6 +232,103 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
+
+# ===== ADDED: Futures schema bootstrap (idempotent) =====
+@app.on_event("startup")
+async def _ensure_futures_schema():
+    ddl = [
+        # products
+        """
+        CREATE TABLE IF NOT EXISTS futures_products (
+          id UUID PRIMARY KEY,
+          symbol_root TEXT UNIQUE NOT NULL,
+          material TEXT NOT NULL,
+          delivery_location TEXT NOT NULL,
+          contract_size_tons NUMERIC NOT NULL,
+          tick_size NUMERIC NOT NULL,
+          currency TEXT NOT NULL DEFAULT 'USD',
+          price_method TEXT NOT NULL DEFAULT 'VWAP_BASIS'
+        );
+        """,
+        # listings
+        """
+        CREATE TABLE IF NOT EXISTS futures_listings (
+          id UUID PRIMARY KEY,
+          product_id UUID NOT NULL REFERENCES futures_products(id) ON DELETE CASCADE,
+          contract_month CHAR(1) NOT NULL,   -- F,G,H,J,K,M,N,Q,U,V,X,Z
+          contract_year INT NOT NULL,
+          expiry_date DATE NOT NULL,
+          first_notice_date DATE,
+          last_trade_date DATE,
+          status TEXT NOT NULL DEFAULT 'Draft'  -- Draft | Listed | Halted | Expired
+        );
+        """,
+        # unique series key (index is fine)
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_futures_series_idx
+        ON futures_listings (product_id, contract_month, contract_year);
+        """,
+        # pricing params
+        """
+        CREATE TABLE IF NOT EXISTS futures_pricing_params (
+          product_id UUID PRIMARY KEY REFERENCES futures_products(id) ON DELETE CASCADE,
+          lookback_days INT NOT NULL DEFAULT 14,
+          basis_adjustment NUMERIC NOT NULL DEFAULT 0,
+          carry_per_month NUMERIC NOT NULL DEFAULT 0,
+          manual_mark NUMERIC,
+          external_source TEXT
+        );
+        """,
+        # official marks
+        """
+        CREATE TABLE IF NOT EXISTS futures_marks (
+          id UUID PRIMARY KEY,
+          listing_id UUID NOT NULL REFERENCES futures_listings(id) ON DELETE CASCADE,
+          mark_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          mark_price NUMERIC NOT NULL,
+          method TEXT NOT NULL
+        );
+        """,
+        # ---- PATCHED VIEW: VWAP uses Signed/Fulfilled only ----
+        """
+        CREATE OR REPLACE VIEW v_recent_vwap AS
+        SELECT
+          fp.id AS product_id,
+          fp.material,
+          fp.delivery_location,
+          COALESCE(p.lookback_days, 14) AS lookback_days,
+          CASE
+            WHEN SUM(c.weight_tons) FILTER (
+              WHERE c.status IN ('Signed','Fulfilled')
+                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+            ) IS NULL
+             OR SUM(c.weight_tons) FILTER (
+              WHERE c.status IN ('Signed','Fulfilled')
+                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+            ) = 0
+            THEN NULL
+            ELSE
+              SUM(c.price_per_ton * c.weight_tons) FILTER (
+                WHERE c.status IN ('Signed','Fulfilled')
+                  AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+              )
+              / NULLIF(SUM(c.weight_tons) FILTER (
+                  WHERE c.status IN ('Signed','Fulfilled')
+                    AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+                ), 0)
+          END AS recent_vwap
+        FROM futures_products fp
+        LEFT JOIN futures_pricing_params p ON p.product_id = fp.id
+        LEFT JOIN contracts c ON c.material = fp.material
+        GROUP BY fp.id, fp.material, fp.delivery_location, COALESCE(p.lookback_days,14);
+        """
+    ]
+    for stmt in ddl:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("futures_schema_bootstrap_failed", err=str(e), sql=stmt[:80])
+# ===== /ADDED =====
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -1263,3 +1365,208 @@ async def list_inventory(
     vals["limit"], vals["offset"] = limit, offset
     rows = await database.fetch_all(q, vals)
     return [InventoryRowOut(**dict(r)) for r in rows]
+
+# =====================  FUTURES (Admin)  =====================
+# Server-side pricing + admin endpoints to list futures seeded by spot flow
+
+futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
+
+# ----- Models -----
+class ProductIn(BaseModel):
+    symbol_root: str
+    material: str
+    delivery_location: str
+    contract_size_tons: float = 20.0
+    tick_size: float = 0.5
+    currency: str = "USD"
+    price_method: Literal["VWAP_BASIS", "MANUAL", "EXTERNAL"] = "VWAP_BASIS"
+
+class ProductOut(ProductIn):
+    id: str
+
+class PricingParamsIn(BaseModel):
+    lookback_days: int = 14
+    basis_adjustment: float = 0.0
+    carry_per_month: float = 0.0
+    manual_mark: Optional[float] = None
+    external_source: Optional[str] = None
+
+class ListingGenerateIn(BaseModel):
+    product_id: str
+    months_ahead: int = 12
+    day_of_month: int = 15  # default expiry day (safe when clamped to <= 28)
+
+class ListingOut(BaseModel):
+    id: str
+    product_id: str
+    contract_month: str
+    contract_year: int
+    expiry_date: date
+    status: str
+
+class PublishMarkIn(BaseModel):
+    listing_id: str
+    mark_date: Optional[date] = None  # default today
+
+# ----- Helpers -----
+MONTH_CODE = {1:"F",2:"G",3:"H",4:"J",5:"K",6:"M",7:"N",8:"Q",9:"U",10:"V",11:"X",12:"Z"}
+
+async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] = None) -> tuple[float, str]:
+    """Compute mark = VWAP + basis + carry*months OR manual/external (if configured)."""
+    md = mark_date or _date.today()
+
+    listing = await database.fetch_one("""
+        SELECT fl.id AS listing_id,
+               fl.expiry_date,
+               fp.id  AS product_id,
+               fp.price_method,
+               COALESCE(p.lookback_days, 14)   AS lookback_days,
+               COALESCE(p.basis_adjustment, 0) AS basis_adjustment,
+               COALESCE(p.carry_per_month, 0)  AS carry_per_month,
+               p.manual_mark
+        FROM futures_listings fl
+        JOIN futures_products fp        ON fp.id = fl.product_id
+        LEFT JOIN futures_pricing_params p ON p.product_id = fp.id
+        WHERE fl.id = :id AND fl.status IN ('Draft','Listed')
+    """, {"id": listing_id})
+    if not listing:
+        raise HTTPException(404, "listing not found or not listable")
+
+    # VWAP source (from patched view)
+    vwap_row = await database.fetch_one(
+        "SELECT recent_vwap FROM v_recent_vwap WHERE product_id=:pid",
+        {"pid": listing["product_id"]}
+    )
+    recent_vwap = vwap_row["recent_vwap"] if vwap_row else None
+
+    # months to expiry (non-negative)
+    m_to_exp = max(
+        0,
+        (listing["expiry_date"].year - md.year) * 12 + (listing["expiry_date"].month - md.month)
+    )
+
+    method = listing["price_method"]
+    if method == "MANUAL":
+        manual = listing["manual_mark"]
+        if manual is None:
+            raise HTTPException(400, "manual_mark not set")
+        return float(manual), "MANUAL"
+
+    if method == "EXTERNAL":
+        # Wire your external feed here (reject publishing until available)
+        raise HTTPException(400, "external pricing not wired")
+
+    # Default: VWAP_BASIS
+    if recent_vwap is None:
+        raise HTTPException(400, "no recent VWAP in lookback window")
+    mark = float(recent_vwap) + float(listing["basis_adjustment"]) + m_to_exp * float(listing["carry_per_month"])
+    return float(mark), "VWAP_BASIS"
+
+# ----- Routes -----
+@futures_router.post("/products", response_model=ProductOut, summary="Create/Upsert a futures product")
+async def create_product(p: ProductIn):
+    row = await database.fetch_one("""
+      INSERT INTO futures_products (id, symbol_root, material, delivery_location, contract_size_tons, tick_size, currency, price_method)
+      VALUES (:id,:symbol_root,:material,:delivery_location,:contract_size_tons,:tick_size,:currency,:price_method)
+      ON CONFLICT (symbol_root) DO UPDATE SET
+        material=EXCLUDED.material,
+        delivery_location=EXCLUDED.delivery_location,
+        contract_size_tons=EXCLUDED.contract_size_tons,
+        tick_size=EXCLUDED.tick_size,
+        currency=EXCLUDED.currency,
+        price_method=EXCLUDED.price_method
+      RETURNING *
+    """, {"id": str(uuid.uuid4()), **p.dict()})
+    return row
+
+@futures_router.post("/products/{symbol_root}/pricing", summary="Set pricing params")
+async def set_pricing(symbol_root: str, body: PricingParamsIn):
+    prod = await database.fetch_one("SELECT id FROM futures_products WHERE symbol_root=:s", {"s": symbol_root})
+    if not prod:
+        raise HTTPException(404, "product not found")
+    await database.execute("""
+      INSERT INTO futures_pricing_params (product_id, lookback_days, basis_adjustment, carry_per_month, manual_mark, external_source)
+      VALUES (:pid,:lookback,:basis,:carry,:manual,:ext)
+      ON CONFLICT (product_id) DO UPDATE SET
+        lookback_days=EXCLUDED.lookback_days,
+        basis_adjustment=EXCLUDED.basis_adjustment,
+        carry_per_month=EXCLUDED.carry_per_month,
+        manual_mark=EXCLUDED.manual_mark,
+        external_source=EXCLUDED.external_source
+    """, {"pid": prod["id"], "lookback": body.lookback_days, "basis": body.basis_adjustment,
+          "carry": body.carry_per_month, "manual": body.manual_mark, "ext": body.external_source})
+    return {"ok": True}
+
+@futures_router.post("/series/generate", response_model=List[ListingOut], summary="Generate monthly listings")
+async def generate_series(body: ListingGenerateIn):
+    today = _date.today()
+    out = []
+    for k in range(body.months_ahead):
+        y = today.year + (today.month + k - 1)//12
+        m = ((today.month + k - 1)%12) + 1
+        code = MONTH_CODE[m]
+        exp = _date(y, m, min(body.day_of_month, 28))  # clamp safely
+        row = await database.fetch_one("""
+          INSERT INTO futures_listings (id, product_id, contract_month, contract_year, expiry_date, status)
+          VALUES (:id,:pid,:cm,:cy,:exp,'Draft')
+          ON CONFLICT (product_id, contract_month, contract_year) DO NOTHING
+          RETURNING *
+        """, {"id": str(uuid.uuid4()), "pid": body.product_id, "cm": code, "cy": y, "exp": exp})
+        if row:
+            out.append(row)
+    return out
+
+@futures_router.post("/series/{listing_id}/list", summary="Publish Draft listing to Listed")
+async def list_series(listing_id: str):
+    await database.execute("UPDATE futures_listings SET status='Listed' WHERE id=:id", {"id": listing_id})
+    return {"ok": True}
+
+@futures_router.post("/marks/publish", summary="Publish an official settlement/mark for a listing")
+async def publish_mark(body: PublishMarkIn):
+    mark_price, method = await _compute_mark_for_listing(body.listing_id, body.mark_date)
+    await database.execute("""
+      INSERT INTO futures_marks (id, listing_id, mark_date, mark_price, method)
+      VALUES (:id,:lid,:dt,:px,:m)
+    """, {"id": str(uuid.uuid4()), "lid": body.listing_id, "dt": (body.mark_date or _date.today()), "px": mark_price, "m": method})
+    return {"listing_id": body.listing_id, "mark_date": str(body.mark_date or _date.today()), "mark_price": mark_price, "method": method}
+
+@futures_router.get("/products", response_model=List[ProductOut], summary="List products")
+async def list_products():
+    rows = await database.fetch_all("SELECT * FROM futures_products ORDER BY symbol_root")
+    return rows
+
+@futures_router.get("/series", response_model=List[ListingOut], summary="List series")
+async def list_series_admin(product_id: Optional[str] = Query(None), status: Optional[str] = Query(None)):
+    q = "SELECT * FROM futures_listings WHERE 1=1"
+    vals = {}
+    if product_id:
+        q += " AND product_id=:pid"; vals["pid"] = product_id
+    if status:
+        q += " AND status=:st"; vals["st"] = status
+    # ---- PATCHED ORDER: chronological by month code ----
+    q += " ORDER BY contract_year, array_position(ARRAY['F','G','H','J','K','M','N','Q','U','V','X','Z'], contract_month::text)"
+    return await database.fetch_all(q, vals)
+
+@futures_router.get("/marks", summary="List recent marks (join product + listing)", tags=["Futures"])
+async def list_recent_marks(limit: int = Query(50, ge=1, le=500)):
+    rows = await database.fetch_all("""
+      SELECT
+        fp.symbol_root,
+        fp.material,
+        fl.contract_month,
+        fl.contract_year,
+        fm.mark_date,
+        fm.mark_price,
+        fm.method
+      FROM futures_marks fm
+      JOIN futures_listings fl ON fl.id = fm.listing_id
+      JOIN futures_products fp ON fp.id = fl.product_id
+      ORDER BY fm.mark_date DESC, fl.contract_year DESC,
+        array_position(ARRAY['F','G','H','J','K','M','N','Q','U','V','X','Z'], fl.contract_month::text) DESC
+      LIMIT :lim
+    """, {"lim": limit})
+    return [dict(r) for r in rows]
+
+# mount router
+app.include_router(futures_router)
+# ===================  /FUTURES (Admin)  =====================

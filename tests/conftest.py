@@ -23,3 +23,16 @@ from bridge_buyer_backend import app  # <-- your file is bridge_buyer_backend.py
 def client():
     with TestClient(app) as c:
         yield c
+
+# Auto-seed inventory for tests so ?contracts can reserve without 409
+@pytest.fixture(scope="session", autouse=True)
+def seed_inventory(client):
+    payload = {
+        "source": "ci",
+        "seller": "Winski Brothers",
+        "items": [
+            {"sku": "Shred Steel", "qty_on_hand": 100.0, "description": "test", "uom": "ton"}
+        ]
+    }
+    r = client.post("/inventory/bulk_upsert", json=payload)
+    assert r.status_code == 200, f"seed_inventory failed: {r.text}"

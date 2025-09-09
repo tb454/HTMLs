@@ -11,64 +11,264 @@
     .table th, .table td { vertical-align: middle; }
     .filters { margin-bottom: 20px; }
     .signature-pad { border: 1px solid #ccc; border-radius: 6px; width: 100%; height: 150px; background-color: #fff; margin-top: 10px; }
+    .form-hint { font-size: 0.85rem; color: #6c757d; }
+    .badge-pill { border-radius: 50rem; padding: 0.35em 0.6em; }
+    .muted { color: #6c757d; }
   </style>
 </head>
 <body>
   <div class="container-fluid">
     <h2 class="mb-4">📊 BRidge Admin Dashboard</h2>
 
-    <div class="filters row g-3">
-      <div class="col-md-3">
-        <input type="date" class="form-control" id="startDate" />
-      </div>
-      <div class="col-md-3">
-        <input type="date" class="form-control" id="endDate" />
-      </div>
-      <div class="col-md-3">
-        <input type="text" class="form-control" id="buyerFilter" placeholder="Filter by Buyer" />
-      </div>
-      <div class="col-md-3">
-        <input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" />
-      </div>
-      <div class="col-md-3">
-        <button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button>
-      </div>
-    </div>
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="bols-tab" data-bs-toggle="tab" data-bs-target="#bols-pane" type="button" role="tab" aria-controls="bols-pane" aria-selected="true">BOLs</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="futures-tab" data-bs-toggle="tab" data-bs-target="#futures-pane" type="button" role="tab" aria-controls="futures-pane" aria-selected="false">Futures</button>
+      </li>
+    </ul>
 
-    <!-- NEW: Admin pagination controls -->
-    <div class="d-flex gap-2 mb-2">
-      <button id="adminPrevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
-      <button id="adminNextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
-      <span id="adminPageInfo" class="small text-muted"></span>
-    </div>
+    <div class="tab-content" id="adminTabsContent">
+      <!-- ====================== BOLs TAB ====================== -->
+      <div class="tab-pane fade show active" id="bols-pane" role="tabpanel" aria-labelledby="bols-tab">
+        <div class="filters row g-3">
+          <div class="col-md-3">
+            <input type="date" class="form-control" id="startDate" />
+          </div>
+          <div class="col-md-3">
+            <input type="date" class="form-control" id="endDate" />
+          </div>
+          <div class="col-md-3">
+            <input type="text" class="form-control" id="buyerFilter" placeholder="Filter by Buyer" />
+          </div>
+          <div class="col-md-3">
+            <input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" />
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button>
+          </div>
+        </div>
 
-    <div class="table-container">
-      <table class="table table-bordered table-striped" id="bol-table">
-        <thead class="table-dark">
-          <tr>
-            <th>BOL ID</th>
-            <th>Contract ID</th>
-            <th>Buyer</th>
-            <th>Material</th>
-            <th>Weight (Tons)</th>
-            <th>Status</th>
-            <th>Pickup Time</th>
-            <th>Delivery Time</th>
-            <th>Total Value</th>
-            <th>Download</th>
-            <th>View</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+        <!-- Admin pagination controls -->
+        <div class="d-flex gap-2 mb-2">
+          <button id="adminPrevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
+          <button id="adminNextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
+          <span id="adminPageInfo" class="small text-muted"></span>
+        </div>
+
+        <div class="table-container">
+          <table class="table table-bordered table-striped" id="bol-table">
+            <thead class="table-dark">
+              <tr>
+                <th>BOL ID</th>
+                <th>Contract ID</th>
+                <th>Buyer</th>
+                <th>Material</th>
+                <th>Weight (Tons)</th>
+                <th>Status</th>
+                <th>Pickup Time</th>
+                <th>Delivery Time</th>
+                <th>Total Value</th>
+                <th>Download</th>
+                <th>View</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ====================== FUTURES TAB ====================== -->
+      <div class="tab-pane fade" id="futures-pane" role="tabpanel" aria-labelledby="futures-tab">
+        <div class="row g-4">
+          <!-- Create Product -->
+          <div class="col-lg-6">
+            <div class="table-container">
+              <h5 class="mb-3">Create Product</h5>
+              <form id="productForm" onsubmit="event.preventDefault(); createProduct(this);">
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label">Symbol Root</label>
+                    <input name="symbol_root" class="form-control" placeholder="HMS" required />
+                  </div>
+                  <div class="col-md-8">
+                    <label class="form-label">Material</label>
+                    <input name="material" class="form-control" placeholder="Shred Steel" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Delivery Location</label>
+                    <input name="delivery_location" class="form-control" placeholder="IN-Midwest" required />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Contract Size (tons)</label>
+                    <input name="contract_size_tons" type="number" step="0.01" class="form-control" value="20" required />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Tick Size</label>
+                    <input name="tick_size" type="number" step="0.01" class="form-control" value="0.5" required />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Currency</label>
+                    <select name="currency" class="form-select">
+                      <option>USD</option>
+                      <option>EUR</option>
+                    </select>
+                  </div>
+                  <div class="col-md-8">
+                    <label class="form-label">Price Method</label>
+                    <select name="price_method" class="form-select">
+                      <option value="VWAP_BASIS">VWAP_BASIS</option>
+                      <option value="MANUAL">MANUAL</option>
+                      <option value="EXTERNAL">EXTERNAL</option>
+                    </select>
+                    <div class="form-hint">VWAP_BASIS = VWAP + basis + carry×months</div>
+                  </div>
+                  <div class="col-12">
+                    <button class="btn btn-primary">Create / Upsert</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Pricing Params -->
+          <div class="col-lg-6">
+            <div class="table-container">
+              <h5 class="mb-3">Pricing Params</h5>
+              <form id="pricingForm" onsubmit="event.preventDefault(); submitPricing();">
+                <div class="row g-3">
+                  <div class="col-md-5">
+                    <label class="form-label">Product (Symbol Root)</label>
+                    <select id="pricingSymbol" class="form-select" required></select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Lookback (days)</label>
+                    <input id="pricingLookback" type="number" class="form-control" value="14" />
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label">Basis ($/t)</label>
+                    <input id="pricingBasis" type="number" step="0.01" class="form-control" value="0" />
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label">Carry ($/t/mo)</label>
+                    <input id="pricingCarry" type="number" step="0.01" class="form-control" value="0" />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Manual Mark (if MANUAL)</label>
+                    <input id="pricingManual" type="number" step="0.01" class="form-control" />
+                  </div>
+                  <div class="col-12">
+                    <button class="btn btn-primary">Save Pricing</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Generate Series -->
+          <div class="col-lg-6">
+            <div class="table-container">
+              <h5 class="mb-3">Generate Series (12 months)</h5>
+              <form id="seriesForm" onsubmit="event.preventDefault(); submitGenerateSeries();">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Product</label>
+                    <select id="seriesProduct" class="form-select" required></select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Expiry Day</label>
+                    <input id="seriesDay" type="number" min="1" max="28" class="form-control" value="15" />
+                  </div>
+                  <div class="col-md-3 d-flex align-items-end">
+                    <button class="btn btn-primary w-100">Generate</button>
+                  </div>
+                </div>
+              </form>
+              <div class="form-hint mt-2">Generates monthly <b>Draft</b> listings. Then click <b>List</b> to publish and <b>Publish Mark</b> for settlement.</div>
+            </div>
+          </div>
+
+          <!-- Listings + backfill mark date -->
+          <div class="col-12">
+            <div class="table-container">
+              <div class="d-flex align-items-center justify-content-between">
+                <h5 class="mb-3">Listings</h5>
+                <div class="d-flex gap-2 align-items-center">
+                  <input type="date" id="markDate" class="form-control form-control-sm" style="width: 170px;" />
+                  <span class="muted small">Backfill Mark Date (optional)</span>
+                  <select id="filterSeriesProduct" class="form-select form-select-sm" style="width: 220px;"></select>
+                  <select id="filterSeriesStatus" class="form-select form-select-sm" style="width: 160px;">
+                    <option value="">(all statuses)</option>
+                    <option>Draft</option>
+                    <option>Listed</option>
+                    <option>Halted</option>
+                    <option>Expired</option>
+                  </select>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="refreshSeries()">Refresh</button>
+                </div>
+              </div>
+              <table class="table table-bordered table-striped" id="series-table">
+                <thead class="table-dark">
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Material</th>
+                    <th>Month</th>
+                    <th>Year</th>
+                    <th>Expiry</th>
+                    <th>Status</th>
+                    <th class="text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Recent Marks -->
+          <div class="col-12">
+            <div class="table-container">
+              <div class="d-flex align-items-center justify-content-between">
+                <h5 class="mb-3">Recent Marks</h5>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary btn-sm" onclick="refreshMarks()">Refresh</button>
+                </div>
+              </div>
+              <table class="table table-bordered table-striped" id="marks-table">
+                <thead class="table-dark">
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Contract</th>
+                    <th>Mark Date</th>
+                    <th>Mark Price</th>
+                    <th>Method</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <!-- =============== /FUTURES TAB ================= -->
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     const endpoint = "https://bridge-buyer.onrender.com";
 
-    // === NEW admin pagination state + elements ===
+    // ----------------- Utilities -----------------
+    async function fetchJSON(url, opts) {
+      const r = await fetch(url, opts || {});
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+    function toast(msg) { console.log(msg); } // you can swap for a nicer toast later
+
+    // ----------------- BOLs JS -----------------
     let aOffset = 0, aLimit = 100;
 
     const startDate      = document.getElementById("startDate");
@@ -95,12 +295,8 @@
       try { return isoString ? new Date(isoString).toLocaleString() : "—"; } catch { return "—"; }
     }
 
-    function downloadCSV() {
-      window.open(`${endpoint}/contracts/export_csv`, "_blank");
-    }
-    function downloadPDF(bolId) {
-      window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank");
-    }
+    function downloadCSV() { window.open(`${endpoint}/contracts/export_csv`, "_blank"); }
+    function downloadPDF(bolId) { window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank"); }
     function viewBOLsFor(contractId) {
       const qs = new URLSearchParams();
       qs.set("contract_id", contractId);
@@ -109,7 +305,6 @@
       window.location.href = `${endpoint}/bols?${qs.toString()}`;
     }
 
-    // === NEW loader that honors admin pagination + filters ===
     async function loadBOLsAdmin() {
       const qs = new URLSearchParams({ limit: aLimit, offset: aOffset });
 
@@ -123,18 +318,15 @@
       if (start)    qs.set("start", new Date(start).toISOString());
       if (end)      qs.set("end",   new Date(end).toISOString());
 
-      const res = await fetch(`${endpoint}/bols?${qs.toString()}`, {
-        headers: { "Accept": "application/json" }
-      });
-      if (!res.ok) { console.error("BOLs fetch failed:", await res.text()); return; }
-      const rows = await res.json();
-
-      renderBOLTable(rows);
-
-      // Paging guards
-      adminPrevBtn.disabled = aOffset === 0;
-      adminNextBtn.disabled = rows.length < aLimit;
-      adminPageInfo.textContent = `Showing ${rows.length} • offset ${aOffset}`;
+      try {
+        const rows = await fetchJSON(`${endpoint}/bols?${qs.toString()}`, { headers: { "Accept": "application/json" }});
+        renderBOLTable(rows);
+        adminPrevBtn.disabled = aOffset === 0;
+        adminNextBtn.disabled = rows.length < aLimit;
+        adminPageInfo.textContent = `Showing ${rows.length} • offset ${aOffset}`;
+      } catch (e) {
+        console.error("BOLs fetch failed:", e.message);
+      }
     }
 
     function renderBOLTable(rows) {
@@ -147,7 +339,6 @@
       }
 
       rows.forEach(bol => {
-        const pdfUrl = `${endpoint}/bol/${bol.bol_id}/pdf`;
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${bol.bol_id}</td>
@@ -166,22 +357,248 @@
       });
     }
 
-    // Hook buttons (NEW)
     adminPrevBtn?.addEventListener("click", () => { aOffset = Math.max(0, aOffset - aLimit); loadBOLsAdmin(); });
     adminNextBtn?.addEventListener("click", () => { aOffset = aOffset + aLimit; loadBOLsAdmin(); });
 
-    // Debounce helper for inputs
     function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-
-    // Filters trigger reload, reset to first page
     startDate.addEventListener("change",   () => { aOffset = 0; loadBOLsAdmin(); });
     endDate.addEventListener("change",     () => { aOffset = 0; loadBOLsAdmin(); });
     buyerFilter.addEventListener("input",  debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
     materialFilter.addEventListener("input", debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
 
-    // Initial load + periodic refresh
+    // ----------------- FUTURES JS -----------------
+    const api = `${endpoint}/admin/futures`;
+
+    // cached products map for symbol/metadata
+    let products = [];               // array of rows
+    const productById = {};          // {id: product}
+    const productBySymbol = {};      // {symbol_root: product}
+
+    // UI elements
+    const pricingSymbolSel   = document.getElementById("pricingSymbol");
+    const seriesProductSel   = document.getElementById("seriesProduct");
+    const filterSeriesProdSel= document.getElementById("filterSeriesProduct");
+    const filterSeriesStatus = document.getElementById("filterSeriesStatus");
+    const markDateInput      = document.getElementById("markDate");
+
+    async function refreshProducts() {
+      try {
+        products = await fetchJSON(`${api}/products`);
+      } catch (e) {
+        console.error("products fetch failed", e.message);
+        return;
+      }
+
+      // reset maps/lists
+      Object.keys(productById).forEach(k => delete productById[k]);
+      Object.keys(productBySymbol).forEach(k => delete productBySymbol[k]);
+
+      pricingSymbolSel.innerHTML = "";
+      seriesProductSel.innerHTML = "";
+      filterSeriesProdSel.innerHTML = `<option value="">(all products)</option>`;
+
+      products.forEach(p => {
+        productById[p.id] = p;
+        productBySymbol[p.symbol_root] = p;
+
+        const opt1 = document.createElement("option"); opt1.value = p.symbol_root; opt1.textContent = `${p.symbol_root} — ${p.material}`;
+        const opt2 = document.createElement("option"); opt2.value = p.id;          opt2.textContent = `${p.symbol_root} — ${p.material}`;
+        const opt3 = document.createElement("option"); opt3.value = p.id;          opt3.textContent = `${p.symbol_root} — ${p.material}`;
+
+        pricingSymbolSel.appendChild(opt1);
+        seriesProductSel.appendChild(opt2);
+        filterSeriesProdSel.appendChild(opt3);
+      });
+    }
+
+    async function refreshSeries() {
+      const q = new URLSearchParams();
+      const pid = filterSeriesProdSel.value;
+      const st  = filterSeriesStatus.value;
+      if (pid) q.set("product_id", pid);
+      if (st)  q.set("status", st);
+
+      let rows = [];
+      try {
+        rows = await fetchJSON(`${api}/series?${q.toString()}`);
+      } catch (e) {
+        console.error("series fetch failed", e.message);
+      }
+      renderSeriesTable(rows);
+    }
+
+    async function refreshMarks() {
+      let rows = [];
+      try {
+        rows = await fetchJSON(`${api}/marks`);
+      } catch (e) {
+        console.error("marks fetch failed", e.message);
+      }
+      renderMarksTable(rows);
+    }
+
+    async function createProduct(form) {
+      const body = Object.fromEntries(new FormData(form));
+      // numeric fields
+      body.contract_size_tons = parseFloat(body.contract_size_tons);
+      body.tick_size = parseFloat(body.tick_size);
+      try {
+        await fetchJSON(`${api}/products`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+        form.reset();
+        await refreshProducts();
+        await refreshSeries();
+        toast("Product saved.");
+      } catch (e) {
+        alert("Create product failed: " + e.message);
+      }
+    }
+
+    async function setPricing(symbol_root, body) {
+      try {
+        await fetchJSON(`${api}/products/${encodeURIComponent(symbol_root)}/pricing`, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(body)
+        });
+        toast("Pricing saved.");
+      } catch (e) {
+        alert("Save pricing failed: " + e.message);
+      }
+    }
+
+    async function generateSeries(product_id) {
+      try {
+        await fetchJSON(`${api}/series/generate`, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ product_id, months_ahead:12, day_of_month: parseInt(document.getElementById("seriesDay").value || "15",10) })
+        });
+        await refreshSeries();
+        toast("Series generated.");
+      } catch (e) {
+        alert("Generate series failed: " + e.message);
+      }
+    }
+
+    async function listSeries(listing_id) {
+      try {
+        await fetchJSON(`${api}/series/${listing_id}/list`, { method:"POST" });
+        await refreshSeries();
+      } catch (e) {
+        alert("List failed: " + e.message);
+      }
+    }
+
+    async function publishMark(listing_id) {
+      const mark_date = markDateInput.value ? new Date(markDateInput.value + "T00:00:00Z").toISOString().substring(0,10) : null;
+      const body = { listing_id };
+      if (mark_date) body.mark_date = mark_date;
+      try {
+        await fetchJSON(`${api}/marks/publish`, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(body)
+        });
+        await refreshSeries();
+        await refreshMarks();
+      } catch (e) {
+        alert("Publish mark failed: " + e.message);
+      }
+    }
+
+    function renderSeriesTable(rows) {
+      const tbody = document.querySelector("#series-table tbody");
+      tbody.innerHTML = "";
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-3">No listings yet. Create a product, set pricing, then Generate Series.</td></tr>`;
+        return;
+      }
+      rows.forEach(r => {
+        const p = productById[r.product_id] || {};
+        const sym = p.symbol_root || "—";
+        const mat = p.material || "—";
+        const actions = [];
+        if (r.status === "Draft") {
+          actions.push(`<button class="btn btn-sm btn-outline-success me-2" onclick="listSeries('${r.id}')">List</button>`);
+        }
+        actions.push(`<button class="btn btn-sm btn-outline-primary" onclick="publishMark('${r.id}')">Publish Mark</button>`);
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${sym}</td>
+          <td>${mat}</td>
+          <td>${r.contract_month}</td>
+          <td>${r.contract_year}</td>
+          <td>${r.expiry_date}</td>
+          <td><span class="badge ${r.status==='Listed'?'bg-primary':'bg-secondary'}">${r.status}</span></td>
+          <td class="text-center">${actions.join("")}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMarksTable(rows) {
+      const tbody = document.querySelector("#marks-table tbody");
+      tbody.innerHTML = "";
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">No marks yet.</td></tr>`;
+        return;
+      }
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        const contract = `${r.contract_month}${String(r.contract_year).slice(-2)}`;
+        tr.innerHTML = `
+          <td>${r.symbol_root}</td>
+          <td>${contract}</td>
+          <td>${r.mark_date}</td>
+          <td>$${Number(r.mark_price).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+          <td><span class="badge badge-pill ${r.method==='MANUAL' ? 'bg-warning text-dark' : (r.method==='EXTERNAL' ? 'bg-info' : 'bg-success')}">${r.method}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Pricing form handler
+    async function submitPricing() {
+      const symbol_root = pricingSymbolSel.value;
+      const body = {
+        lookback_days: parseInt(document.getElementById("pricingLookback").value || "14", 10),
+        basis_adjustment: parseFloat(document.getElementById("pricingBasis").value || "0"),
+        carry_per_month: parseFloat(document.getElementById("pricingCarry").value || "0"),
+        manual_mark: document.getElementById("pricingManual").value ? parseFloat(document.getElementById("pricingManual").value) : null
+      };
+      await setPricing(symbol_root, body);
+      alert("Pricing saved.");
+    }
+
+    // Series form handler
+    async function submitGenerateSeries() {
+      const pid = seriesProductSel.value;
+      if (!pid) { alert("Select a product."); return; }
+      await generateSeries(pid);
+    }
+
+    // Filters
+    filterSeriesProdSel?.addEventListener("change", refreshSeries);
+    filterSeriesStatus?.addEventListener("change", refreshSeries);
+
+    // Init loads
     loadBOLsAdmin();
     setInterval(loadBOLsAdmin, 10000);
+
+    // Only load futures data when the tab is shown (and once at start)
+    let futuresLoadedOnce = false;
+    document.getElementById("futures-tab").addEventListener("shown.bs.tab", async () => {
+      if (!futuresLoadedOnce) {
+        await refreshProducts();
+        await refreshSeries();
+        await refreshMarks();
+        futuresLoadedOnce = true;
+      } else {
+        await refreshSeries();
+        await refreshMarks();
+      }
+    });
   </script>
 
   <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
