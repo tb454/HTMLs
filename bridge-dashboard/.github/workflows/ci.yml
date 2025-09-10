@@ -1,61 +1,45 @@
 name: CI
-
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bridge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=20
     env:
-      # Your staging DB (must include ?sslmode=require)
-      DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
       ENV: ci
-
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install system tools (psql client)
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install --upgrade pip
+      - run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest fastapi "sqlalchemy" "asyncpg" "psycopg[binary]" \
+                      reportlab itsdangerous slowapi structlog \
+                      prometheus-client sentry-sdk python-multipart uvicorn
+      - name: Bootstrap CI DB (optional)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-      - name: Verify DB URL is present (masked)
-        run: python - << 'PY'
-import os, sys
-print("has_DATABASE_URL=", bool(os.getenv("DATABASE_URL")))
-sys.exit(0 if os.getenv("DATABASE_URL") else 1)
-PY
-
-      - name: Optional ping DB (no secrets printed)
-        run: |
-          psql "$DATABASE_URL" -Atqc "SELECT 1" || (echo "DB connect failed" && exit 1)
-
-      - name: Install Python deps (requirements if present; fallback safety net)
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-          # Ensure test deps and common libs are present
-          pip install \
-            pytest \
-            slowapi structlog prometheus-fastapi-instrumentator sentry-sdk itsdangerous \
-            requests python-dotenv reportlab \
-            fastapi "databases[postgres]" sqlalchemy asyncpg passlib[bcrypt] uvicorn
-
-      - name: Run tests
-        run: pytest -q
+          python - <<'PY'
+          import os, psycopg
+          with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as con:
+              con.execute("""
+              CREATE TABLE IF NOT EXISTS idempotency_keys (key text PRIMARY KEY, created_at timestamptz DEFAULT now());
+              CREATE TABLE IF NOT EXISTS webhook_events (
+                id bigserial PRIMARY KEY,
+                source text, headers_json jsonb, body_json jsonb,
+                signature_valid boolean, created_at timestamptz DEFAULT now()
+              );
+              """)
+          PY
+      - run: pytest -q
