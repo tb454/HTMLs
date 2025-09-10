@@ -41,45 +41,65 @@
     <div id="error" class="mt-3 text-danger text-center" style="display:none;">Invalid credentials. Try again.</div>
   </div>
 
-  <script>
-    const endpoint = "https://bridge-buyer.onrender.com";
+<script>
+  const endpoint = "https://bridge-buyer.onrender.com";
 
-    document.getElementById("loginForm").addEventListener("submit", async function (e) {
-      e.preventDefault();
+  document.getElementById("loginForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    document.getElementById("error").style.display = "none";
 
-      const username = document.getElementById("username").value;
-      const password = document.getElementById("password").value;
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value.trim();
 
+    try {
       const res = await fetch(`${endpoint}/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"   // ensure JSON branch on the server
+        },
         body: JSON.stringify({ username, password })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem("bridgeUser", JSON.stringify(data));
-
-        if (data.role === "admin") {
-  window.location.href = "/admin";
-} else if (data.role === "buyer") {
-  window.location.href = "/buyer";
-} else if (data.role === "yard") {
-  window.location.href = "/seller";
-}
-
-      } else {
+      if (!res.ok) {
+        // show backend message if present
+        let msg = "Invalid credentials. Try again.";
+        try {
+          const err = await res.json();
+          if (err?.detail) msg = err.detail;
+        } catch {}
+        document.getElementById("error").textContent = msg;
         document.getElementById("error").style.display = "block";
+        return;
       }
-    });
-  </script>
 
+      const data = await res.json();
+      // Persist minimal session info if you want
+      localStorage.setItem("bridgeUser", JSON.stringify({ role: data.role }));
 
+      // Prefer server-provided redirect if present
+      if (data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
 
-</body>
+      // Fallback by role (note: 'seller', not 'yard')
+      if (data.role === "admin")      window.location.href = "/admin";
+      else if (data.role === "buyer") window.location.href = "/buyer";
+      else if (data.role === "seller")window.location.href = "/seller";
+      else                            window.location.href = "/buyer";
+    } catch (err) {
+      document.getElementById("error").textContent = "Network error. Please try again.";
+      document.getElementById("error").style.display = "block";
+      console.error(err);
+    }
+  });
+</script>
+
   <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
   <a href="/terms" target="_blank">Terms of Use</a> | 
   <a href="/eula" target="_blank">EULA</a> | 
   <a href="/privacy" target="_blank">Privacy Policy</a>
 </footer>
+</body>
 </html>
