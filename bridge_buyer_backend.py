@@ -115,7 +115,7 @@ if not prod or allow_local:
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "3ZzQmVoYqNQk5t8R7yJ1xw0uHgBFh9dXea2MUpnCKlGTsvr4OjWPZ6LAiEbNYDf"))
 
-# ===== Security headers (incl. CSP that allows jsDelivr + Google Fonts) =====
+# ===== Security headers =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -233,11 +233,10 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-# ===== ADDED: Futures schema bootstrap (idempotent) =====
+# ===== FUTURES schema bootstrap =====
 @app.on_event("startup")
 async def _ensure_futures_schema():
     ddl = [
-        # products
         """
         CREATE TABLE IF NOT EXISTS futures_products (
           id UUID PRIMARY KEY,
@@ -250,25 +249,19 @@ async def _ensure_futures_schema():
           price_method TEXT NOT NULL DEFAULT 'VWAP_BASIS'
         );
         """,
-        # listings
         """
         CREATE TABLE IF NOT EXISTS futures_listings (
           id UUID PRIMARY KEY,
           product_id UUID NOT NULL REFERENCES futures_products(id) ON DELETE CASCADE,
-          contract_month CHAR(1) NOT NULL,   -- F,G,H,J,K,M,N,Q,U,V,X,Z
+          contract_month CHAR(1) NOT NULL,
           contract_year INT NOT NULL,
           expiry_date DATE NOT NULL,
           first_notice_date DATE,
           last_trade_date DATE,
-          status TEXT NOT NULL DEFAULT 'Draft'  -- Draft | Listed | Halted | Expired
+          status TEXT NOT NULL DEFAULT 'Draft'
         );
         """,
-        # unique series key (index is fine)
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_futures_series_idx
-        ON futures_listings (product_id, contract_month, contract_year);
-        """,
-        # pricing params
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_futures_series_idx ON futures_listings (product_id, contract_month, contract_year);",
         """
         CREATE TABLE IF NOT EXISTS futures_pricing_params (
           product_id UUID PRIMARY KEY REFERENCES futures_products(id) ON DELETE CASCADE,
@@ -279,7 +272,6 @@ async def _ensure_futures_schema():
           external_source TEXT
         );
         """,
-        # official marks
         """
         CREATE TABLE IF NOT EXISTS futures_marks (
           id UUID PRIMARY KEY,
@@ -289,7 +281,7 @@ async def _ensure_futures_schema():
           method TEXT NOT NULL
         );
         """,
-        # ---- PATCHED VIEW: VWAP uses Signed/Fulfilled only ----
+        # Patched VWAP view (Signed/Fulfilled only)
         """
         CREATE OR REPLACE VIEW v_recent_vwap AS
         SELECT
@@ -328,7 +320,121 @@ async def _ensure_futures_schema():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("futures_schema_bootstrap_failed", err=str(e), sql=stmt[:80])
-# ===== /ADDED =====
+
+# ===== TRADING & CLEARING SCHEMA bootstrap =====
+@app.on_event("startup")
+async def _ensure_trading_schema():
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS accounts (
+          id UUID PRIMARY KEY,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('buyer','seller','broker'))
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS margin_accounts (
+          account_id UUID PRIMARY KEY REFERENCES accounts(id),
+          balance NUMERIC NOT NULL DEFAULT 0,
+          initial_pct NUMERIC NOT NULL DEFAULT 0.10,
+          maintenance_pct NUMERIC NOT NULL DEFAULT 0.07
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS orders (
+          id UUID PRIMARY KEY,
+          account_id UUID NOT NULL REFERENCES accounts(id),
+          listing_id UUID NOT NULL REFERENCES futures_listings(id),
+          side TEXT NOT NULL CHECK (side IN ('BUY','SELL')),
+          price NUMERIC NOT NULL,
+          qty NUMERIC NOT NULL,
+          qty_open NUMERIC NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('NEW','PARTIAL','FILLED','CANCELLED')),
+          tif TEXT NOT NULL DEFAULT 'GTC',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_orders_book ON orders(listing_id, side, price, created_at) WHERE status IN ('NEW','PARTIAL');",
+        """
+        CREATE TABLE IF NOT EXISTS trades (
+          id UUID PRIMARY KEY,
+          buy_order_id UUID NOT NULL REFERENCES orders(id),
+          sell_order_id UUID NOT NULL REFERENCES orders(id),
+          listing_id UUID NOT NULL REFERENCES futures_listings(id),
+          price NUMERIC NOT NULL,
+          qty NUMERIC NOT NULL,
+          traded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_trades_listing_time ON trades(listing_id, traded_at DESC);",
+        """
+        CREATE TABLE IF NOT EXISTS positions (
+          account_id UUID NOT NULL REFERENCES accounts(id),
+          listing_id UUID NOT NULL REFERENCES futures_listings(id),
+          net_qty NUMERIC NOT NULL DEFAULT 0,
+          PRIMARY KEY (account_id, listing_id)
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS margin_events (
+          id UUID PRIMARY KEY,
+          account_id UUID NOT NULL REFERENCES accounts(id),
+          amount NUMERIC NOT NULL,
+          reason TEXT NOT NULL,
+          ref_id UUID,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE OR REPLACE VIEW v_latest_settle AS
+        SELECT fl.id AS listing_id,
+               (SELECT fm.mark_price
+                  FROM futures_marks fm
+                 WHERE fm.listing_id = fl.id
+                 ORDER BY fm.mark_date DESC
+                 LIMIT 1) AS settle_price
+        FROM futures_listings fl;
+        """
+    ]
+    for stmt in ddl:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("trading_schema_bootstrap_failed", err=str(e), sql=stmt[:90])
+
+# ===== TRADING HARDENING: risk limits, audit, trading status =====
+@app.on_event("startup")
+async def _ensure_trading_hardening():
+    ddl = [
+        # risk columns + block flag
+        """
+        ALTER TABLE margin_accounts
+        ADD COLUMN IF NOT EXISTS risk_limit_open_lots NUMERIC NOT NULL DEFAULT 50,
+        ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
+        # append-only orders audit
+        """
+        CREATE TABLE IF NOT EXISTS orders_audit (
+          id UUID PRIMARY KEY,
+          order_id UUID NOT NULL,
+          event TEXT NOT NULL,               -- NEW | PARTIAL | FILLED | CANCELLED
+          qty_open NUMERIC NOT NULL,
+          reason TEXT,
+          at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        # listing trading status
+        """
+        ALTER TABLE futures_listings
+        ADD COLUMN IF NOT EXISTS trading_status TEXT NOT NULL DEFAULT 'Trading',
+        ADD CONSTRAINT chk_trading_status CHECK (trading_status IN ('Trading','Halted','Expired'));
+        """
+    ]
+    for stmt in ddl:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("trading_hardening_bootstrap_failed", err=str(e), sql=stmt[:120])
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -387,8 +493,9 @@ class ContractIn(BaseModel):
     weight_tons: float
     price_per_ton: float
     class Config:
-        schema_extra = {"example":{
-            "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
+        schema_extra = {"example": {
+            "buyer":"Lewis Salvage","seller":"Winski Brothers",
+            "material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
 
 class PurchaseIn(BaseModel):
@@ -403,10 +510,12 @@ class ContractOut(ContractIn):
     signed_at: Optional[datetime]
     signature: Optional[str]
     class Config:
-        schema_extra = {"example":{
-            "id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9","buyer":"Lewis Salvage","seller":"Winski Brothers",
+        schema_extra = {"example": {
+            "id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+            "buyer":"Lewis Salvage","seller":"Winski Brothers",
             "material":"Shred Steel","weight_tons":40,"price_per_ton":245.00,
-            "status":"Signed","created_at":"2025-09-01T10:00:00Z","signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
+            "status":"Signed","created_at":"2025-09-01T10:00:00Z",
+            "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
 
 class BOLIn(BaseModel):
@@ -421,9 +530,11 @@ class BOLIn(BaseModel):
     pickup_signature: Signature
     pickup_time: datetime
     class Config:
-        schema_extra = {"example":{
-            "contract_id":"1ec9e850-8b5a-45de-b631-f9fae4a1d4c9","buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40,"price_per_unit":245.00,"total_value":9800.00,
+        schema_extra = {"example": {
+            "contract_id":"1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
+            "buyer":"Lewis Salvage","seller":"Winski Brothers",
+            "material":"Shred Steel","weight_tons":40,"price_per_unit":245.00,
+            "total_value":9800.00,
             "carrier":{"name":"ABC Trucking Co.","driver":"John Driver","truck_vin":"1FDUF5GY3KDA12345"},
             "pickup_signature":{"base64":"data:image/png;base64,iVBOR...","timestamp":"2025-09-01T12:00:00Z"},
             "pickup_time":"2025-09-01T12:15:00Z"
@@ -435,13 +546,16 @@ class BOLOut(BOLIn):
     delivery_signature: Optional[Signature] = None
     delivery_time: Optional[datetime] = None
     class Config:
-        schema_extra = {"example":{
-            "bol_id":"9fd89221-4247-4f93-bf4b-df9473ed8e57","contract_id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
-            "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel","weight_tons":40,
+        schema_extra = {"example": {
+            "bol_id":"9fd89221-4247-4f93-bf4b-df9473ed8e57",
+            "contract_id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+            "buyer":"Lewis Salvage","seller":"Winski Brothers",
+            "material":"Shred Steel","weight_tons":40,
             "price_per_unit":245.0,"total_value":9800.0,
             "carrier":{"name":"ABC Trucking Co.","driver":"Jane Doe","truck_vin":"1FTSW21P34ED12345"},
             "pickup_signature":{"base64":"data:image/png;base64,iVBOR...","timestamp":"2025-09-01T12:00:00Z"},
-            "pickup_time":"2025-09-01T12:15:00Z","delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
+            "pickup_time":"2025-09-01T12:15:00Z",
+            "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
 
 # ========== INVENTORY API MODELS ==========
@@ -500,7 +614,6 @@ _idem_cache = {}
 ADMIN_EXPORT_TOKEN = os.getenv("ADMIN_EXPORT_TOKEN", "")
 
 def _normalize(v):
-    """Make DB values CSV-safe and deterministic."""
     if isinstance(v, (datetime, date)):
         return v.isoformat()
     if isinstance(v, Decimal):
@@ -510,7 +623,6 @@ def _normalize(v):
     return v
 
 def _rows_to_csv_bytes(rows):
-    """Dict rows -> CSV bytes, with stable header order."""
     buf = io.StringIO(newline="")
     if not rows:
         writer = csv.writer(buf)
@@ -530,7 +642,7 @@ def _is_admin_session(request: Request) -> bool:
     except Exception:
         return False
 
-# ===== Webhook HMAC + replay protection (enabled when secret set) =====
+# ===== Webhook HMAC + replay protection =====
 def verify_sig(raw: bytes, header_sig: str, secret_env: str) -> bool:
     secret = os.getenv(secret_env, "")
     if not (secret and header_sig):
@@ -603,7 +715,6 @@ async def generate_bol_pdf(bol_id: str):
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(margin, y, f"Generated by BRidge on {datetime.utcnow().isoformat()}")
 
-    # === Verification footer: short SHA-256 over the DB row ===
     try:
         d = dict(row)
         fingerprint = hashlib.sha256(
@@ -630,17 +741,15 @@ async def generate_bol_pdf(bol_id: str):
 async def create_contract(contract: ContractIn):
     qty = float(contract.weight_tons)
     seller = contract.seller.strip()
-    sku = contract.material.strip()  # material == SKU for inventory mapping
+    sku = contract.material.strip()
 
     async with database.transaction():
-        # Ensure inventory row exists
         await database.execute("""
             INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
             VALUES (:seller, :sku, 0, 0, 0)
             ON CONFLICT (seller, sku) DO NOTHING
         """, {"seller": seller, "sku": sku})
 
-        # Lock row & check availability
         inv = await database.fetch_one("""
             SELECT qty_on_hand, qty_reserved FROM inventory_items
             WHERE seller=:seller AND sku=:sku
@@ -652,7 +761,6 @@ async def create_contract(contract: ContractIn):
         if available < qty:
             raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)." )
 
-        # Reserve
         await database.execute("""
             UPDATE inventory_items
             SET qty_reserved = qty_reserved + :q, updated_at = NOW()
@@ -663,7 +771,6 @@ async def create_contract(contract: ContractIn):
             VALUES (:seller, :sku, 'reserve', :q, NULL, :meta)
         """, {"seller": seller, "sku": sku, "q": qty, "meta": json.dumps({"reason": "contract_create"})})
 
-        # Create contract
         row = await database.fetch_one("""
             INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status)
             VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending')
@@ -682,16 +789,15 @@ async def create_contract(contract: ContractIn):
     status_code=200
 )
 async def get_all_contracts(
-    buyer: Optional[str] = Query(None, description="Filter by buyer name"),
-    seller: Optional[str] = Query(None, description="Filter by seller name"),
-    material: Optional[str] = Query(None, description="Filter by material/SKU"),
-    status: Optional[str] = Query(None, description="Filter by contract status"),
-    start: Optional[datetime] = Query(None, description="Start date (created_at >=)"),
-    end: Optional[datetime]   = Query(None, description="End date (created_at <=)"),
+    buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    material: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime]   = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    # normalize simple strings (defensive)
     buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
     seller   = seller.strip()   if isinstance(seller, str) else seller
     material = material.strip() if isinstance(material, str) else material
@@ -701,46 +807,34 @@ async def get_all_contracts(
     conditions, values = [], {}
 
     if buyer:
-        conditions.append("buyer ILIKE :buyer")
-        values["buyer"] = f"%{buyer}%"
-
+        conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
     if seller:
-        conditions.append("seller ILIKE :seller")
-        values["seller"] = f"%{seller}%"
-
+        conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
     if material:
-        conditions.append("material ILIKE :material")
-        values["material"] = f"%{material}%"
-
+        conditions.append("material ILIKE :material"); values["material"] = f"%{material}%"
     if status:
-        conditions.append("status ILIKE :status")
-        values["status"] = f"%{status}%"
-
+        conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
     if start:
-        conditions.append("created_at >= :start")
-        values["start"] = start
-
+        conditions.append("created_at >= :start"); values["start"] = start
     if end:
-        conditions.append("created_at <= :end")
-        values["end"] = end
+        conditions.append("created_at <= :end"); values["end"] = end
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    # keep null created_at at the end for stable paging
     query += " ORDER BY created_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
     values["limit"], values["offset"] = limit, offset
 
     return await database.fetch_all(query=query, values=values)
 
-@app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", description="Retrieve a specific contract by its unique ID.", status_code=200)
+@app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", status_code=200)
 async def get_contract_by_id(contract_id: str):
     row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
     if not row:
         raise HTTPException(status_code=404, detail="Contract not found")
     return row
 
-@app.put("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Update Contract", description="Update a contract’s status or signature using its ID.", status_code=200)
+@app.put("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Update Contract", status_code=200)
 async def update_contract(contract_id: str, update: ContractUpdate):
     row = await database.fetch_one("""
         UPDATE contracts
@@ -754,7 +848,7 @@ async def update_contract(contract_id: str, update: ContractUpdate):
         raise HTTPException(status_code=404, detail="Contract not found")
     return row
 
-@app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", description="Export all contract records to a downloadable CSV file.", status_code=200)
+@app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
     rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
     output = io.StringIO()
@@ -780,13 +874,11 @@ async def export_contracts_csv():
     status_code=200
 )
 async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):
-    # Optional idempotency
     idem = body.idempotency_key or request.headers.get("Idempotency-Key")
     if idem and idem in _idem_cache:
         return _idem_cache[idem]
 
     async with database.transaction():
-        # 1) Flip Pending -> Signed atomically
         row = await database.fetch_one("""
             UPDATE contracts
             SET status = 'Signed', signed_at = NOW()
@@ -794,14 +886,12 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             RETURNING id, buyer, seller, material, weight_tons, price_per_ton
         """, {"id": contract_id, "expected": body.expected_status})
         if not row:
-            # Someone else purchased it (or wrong status)
             raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
 
         qty = float(row["weight_tons"])
         seller = row["seller"].strip()
         sku = row["material"].strip()
 
-        # 2) Move reserved -> committed in inventory
         inv = await database.fetch_one("""
             SELECT qty_reserved FROM inventory_items
             WHERE seller=:seller AND sku=:sku
@@ -825,7 +915,6 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
               "meta": json.dumps({"reason": "purchase"})})
 
-        # 3) Create a BOL stub immediately (Scheduled)
         bol_id = str(uuid.uuid4())
         await database.fetch_one("""
             INSERT INTO bols (
@@ -884,7 +973,6 @@ async def cancel_contract(contract_id: str):
         seller = row["seller"].strip()
         sku = row["material"].strip()
 
-        # Lock inv and unreserve
         _ = await database.fetch_one("""
             SELECT qty_reserved FROM inventory_items
             WHERE seller=:seller AND sku=:sku
@@ -907,9 +995,8 @@ async def cancel_contract(contract_id: str):
     return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
 
 # -------- BOLs --------
-@app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", description="Create a new Bill of Lading for a contract with carrier and signature data.", status_code=201)
+@app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
-    # =====  idempotency support =====
     idem_key = request.headers.get("Idempotency-Key")
     if idem_key and idem_key in _idem_cache:
         return _idem_cache[idem_key]
@@ -950,428 +1037,9 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
-@app.get("/bols",
-    response_model=List[BOLOut],
-    tags=["BOLs"],
-    summary="List BOLs",
-    description="Retrieve all BOLs. Supports optional filtering by buyer, seller, material, status, contract_id, and pickup date range.",
-    status_code=200
-)
-async def get_all_bols_pg(
-    buyer: Optional[str] = Query(None, description="Filter by buyer name"),
-    seller: Optional[str] = Query(None, description="Filter by seller name"),
-    material: Optional[str] = Query(None, description="Filter by material/SKU"),
-    status: Optional[str] = Query(None, description="Filter by BOL status"),
-    contract_id: Optional[str] = Query(None, description="Filter by contract ID"),
-    start: Optional[datetime] = Query(None, description="Start date (pickup_time >=)"),
-    end: Optional[datetime] = Query(None, description="End date (pickup_time <=)"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    query = "SELECT * FROM bols"
-    conditions, values = [], {}
-    if buyer:       conditions.append("buyer ILIKE :buyer");           values["buyer"] = f"%{buyer}%"
-    if seller:      conditions.append("seller ILIKE :seller");         values["seller"] = f"%{seller}%"
-    if material:    conditions.append("material ILIKE :material");     values["material"] = f"%{material}%"
-    if status:      conditions.append("status ILIKE :status");         values["status"] = f"%{status}%"
-    if contract_id: conditions.append("contract_id = :contract_id");   values["contract_id"] = contract_id
-    if start:       conditions.append("pickup_time >= :start");        values["start"] = start
-    if end:         conditions.append("pickup_time <= :end");          values["end"] = end
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
-    values["limit"], values["offset"] = limit, offset
-
-    rows = await database.fetch_all(query=query, values=values)
-    result = []
-    for row in rows:
-        d = dict(row)  # Record -> dict
-
-        # Coalesce strings Pydantic expects to be non-null
-        carrier_name  = (d.get("carrier_name")  or "TBD")
-        carrier_driver= (d.get("carrier_driver")or "TBD")
-        carrier_vin   = (d.get("carrier_truck_vin") or "TBD")
-
-        # Coalesce numerics
-        weight_tons     = float(d.get("weight_tons")     or 0.0)
-        price_per_unit  = float(d.get("price_per_unit")  or 0.0)
-        total_value     = float(d.get("total_value")     or 0.0)
-
-        # Pickup signature must not be null for BOLOut(Signature)
-        ps_b64 = d.get("pickup_signature_base64") or ""
-        ps_ts  = d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow()
-
-        # Delivery signature is optional in BOLOut, keep None when missing
-        delivery_sig = None
-        if d.get("delivery_signature_base64") is not None:
-            delivery_sig = {
-                "base64": d.get("delivery_signature_base64"),
-                "timestamp": d.get("delivery_signature_time")
-            }
-
-        result.append({
-            "bol_id": d["bol_id"],
-            "contract_id": d["contract_id"],
-            "buyer": d.get("buyer") or "",        # coalesce to empty string if null
-            "seller": d.get("seller") or "",
-            "material": d.get("material") or "",
-            "weight_tons": weight_tons,
-            "price_per_unit": price_per_unit,
-            "total_value": total_value,
-            "carrier": {
-                "name": carrier_name,
-                "driver": carrier_driver,
-                "truck_vin": carrier_vin,
-            },
-            "pickup_signature": { "base64": ps_b64, "timestamp": ps_ts },
-            "delivery_signature": delivery_sig,
-            "pickup_time": d.get("pickup_time"),
-            "delivery_time": d.get("delivery_time"),
-            "status": d.get("status") or "",
-        })
-    return result
-
-@app.post("/bols/{bol_id}/update_status", tags=["BOLs"], summary="Update BOL Status", description="Update the status of a BOL (e.g., to In Transit or Delivered).", status_code=200)
-async def update_bol_status_pg(bol_id: str, new_status: str):
-    row = await database.fetch_one("""
-        UPDATE bols
-        SET status = :status,
-            delivery_time = CASE WHEN :status ILIKE 'delivered' THEN NOW() ELSE delivery_time END
-        WHERE bol_id = :bol_id
-        RETURNING bol_id
-    """, {"bol_id": bol_id, "status": new_status})
-    if not row:
-        raise HTTPException(status_code=404, detail="BOL not found")
-    return {"message": "Status updated"}
-
-@app.post("/bols/{bol_id}/add_delivery_signature", tags=["BOLs"], summary="Add Delivery Signature", description="Attach a delivery signature and mark the BOL as Delivered. Also auto-fulfills the linked contract.", status_code=200)
-async def add_delivery_signature_pg(bol_id: str, sig: Signature):
-    row = await database.fetch_one("""
-        UPDATE bols
-        SET delivery_signature_base64 = :b64,
-            delivery_signature_time = :ts,
-            status = 'Delivered',
-            delivery_time = NOW()
-        WHERE bol_id = :bol_id
-        RETURNING bol_id, contract_id
-    """, {"bol_id": bol_id, "b64": sig.base64, "ts": sig.timestamp})
-    if not row:
-        raise HTTPException(status_code=404, detail="BOL not found")
-
-    # Auto-update the linked contract to Fulfilled
-    await database.execute("""
-        UPDATE contracts SET status = 'Fulfilled'
-        WHERE id = :cid
-    """, {"cid": row["contract_id"]})
-    return {"message": "Delivery signature added, contract fulfilled"}
-
-# -------- Auth --------
-@limiter.limit("5/minute")  # rate limit login
-@app.post(
-    "/login",
-    tags=["Auth"],
-    summary="User Login",
-    description="Authenticate a user based on username and password. Returns role and redirect path on success.",
-    status_code=200
-)
-async def login(data: LoginRequest, request: Request):
-    if users is None:
-        raise HTTPException(status_code=500, detail="Users table not initialized")
-
-    stmt = (
-        select(
-            users.c[USERNAME_COL].label("username"),
-            users.c[PASSWORD_HASH_COL].label("password_hash"),
-            users.c[ROLE_COL].label("role")
-        )
-        .where(and_(users.c[USERNAME_COL] == data.username.strip()))
-        .limit(1)
-    )
-    row = await database.fetch_one(stmt)
-    if not row:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    stored_hash_or_plain = row["password_hash"]
-    ok = False
-    try:
-        ok = bcrypt.verify(data.password.strip(), stored_hash_or_plain)
-    except Exception:
-        ok = data.password.strip() == str(stored_hash_or_plain)
-    if not ok:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    role = row["role"]
-    accepts = request.headers.get("accept", "")
-    if "text/html" in accepts:
-        if role == "admin": return RedirectResponse(url="/admin", status_code=303)
-        elif role == "buyer": return RedirectResponse(url="/buyer", status_code=303)
-        elif role == "seller": return RedirectResponse(url="/seller", status_code=303)
-        else: raise HTTPException(status_code=400, detail="Unknown user role")
-    else:
-        return JSONResponse({"ok": True, "role": role, "redirect": f"/{role if role in ('admin','buyer','seller') else 'buyer'}"})
-
-# -------- Integrations (hardened ICE webhook) --------
-@app.post("/ice-digital-trade", tags=["Integrations"], summary="ICE DT Webhook")
-async def ice_dt_webhook(request: Request):
-    raw = await request.body()
-    ice_secret = os.getenv("ICE_WEBHOOK_SECRET", "")
-    sig = request.headers.get("X-Signature")
-
-    # Enforce HMAC + replay **only if** secret is configured
-    if ice_secret:
-        if not (verify_sig(raw, sig, "ICE_WEBHOOK_SECRET") and not is_replay(sig)):
-            raise HTTPException(401, "Bad signature")
-
-    payload = await request.json()
-    contract_id = payload.get("contract_id")
-    external_ref = payload.get("external_ref")
-    if contract_id:
-        await database.execute("""
-            UPDATE contracts
-            SET status = COALESCE(status,'Pending'),
-                signature = COALESCE(signature,'ICE'),
-                signed_at = NOW()
-            WHERE id = :id
-        """, {"id": contract_id})
-    return {"ok": True, "received": payload, "external_ref": external_ref, "hmac_enforced": bool(ice_secret)}
-
-@app.post("/docsign", tags=["Integrations"], summary="DocSign Stub", description="Stub endpoint to simulate doc-sign webhooks.", status_code=200)
-async def docsign_stub(payload: dict):
-    bol_id = payload.get("bol_id")
-    sig_b64 = payload.get("signature_base64", "stub")
-    if bol_id:
-        row = await database.fetch_one("""
-            UPDATE bols
-            SET delivery_signature_base64 = :sig_b64,
-                delivery_signature_time = NOW(),
-                status = 'Delivered',
-                delivery_time = NOW()
-            WHERE bol_id = :bol_id
-            RETURNING contract_id
-        """, {"sig_b64": sig_b64, "bol_id": bol_id})
-        if row:
-            await database.execute("UPDATE contracts SET status = 'Fulfilled' WHERE id = :cid", {"cid": row["contract_id"]})
-    return {"ok": True, "received": payload, "note": "stub only"}
-
-# -------- Analytics --------
-@app.get("/analytics/contracts_by_day", tags=["Analytics"], summary="Contracts per day", description="Counts of contracts grouped by day (last 30).", status_code=200)
-async def contracts_by_day():
-    rows = await database.fetch_all("""
-        SELECT DATE(created_at) as day, COUNT(*) as count
-        FROM contracts
-        GROUP BY day ORDER BY day DESC LIMIT 30
-    """)
-    return [{"day": str(r["day"]), "count": r["count"]} for r in rows]
-
-# ========== INVENTORY API ==========
-INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
-ENV = os.getenv("ENV", "development").lower()
-
-def _idem(key: Optional[str], payload: dict):
-    if not key:
-        return None
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
-    return f"{key}:{digest}"
-
-def _require_hmac_in_this_env() -> bool:
-    # Require in prod when a secret is set. Optional in dev for easy DX.
-    return ENV == "production" and bool(os.getenv(INVENTORY_SECRET_ENV, ""))
-
-# ---- NEW: ingest log helper (DB audit trail) ----
-async def _log_ingest(request: Request, source: str, seller: str, item_count: int, sig_present: bool, sig_valid: bool):
-    try:
-        idem_key = request.headers.get("Idempotency-Key", "")
-        remote   = request.client.host if request.client else ""
-        ua       = request.headers.get("user-agent", "")
-        await database.execute("""
-            INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
-            VALUES (:source, :seller, :item_count, :idem_key, :sig_present, :sig_valid, :remote_addr, :user_agent)
-        """, {"source": source, "seller": seller, "item_count": item_count, "idem_key": idem_key,
-              "sig_present": bool(sig_present), "sig_valid": bool(sig_valid),
-              "remote_addr": remote, "user_agent": ua})
-    except Exception as e:
-        logger.warn("ingest_log_failed", err=str(e))
-
-@app.post(
-    "/inventory/bulk_upsert",
-    tags=["Inventory"],
-    summary="Bulk upsert inventory items",
-    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
-    response_model=dict,
-    status_code=200
-)
-async def inventory_bulk_upsert(body: BulkUpsertBody, request: Request):
-    # HMAC (prod required; dev optional)
-    raw = await request.body()
-    sig = request.headers.get("X-Signature", "")
-    sig_ok = bool(sig) and bool(verify_sig(raw, sig, INVENTORY_SECRET_ENV)) and not is_replay(sig)
-
-    if _require_hmac_in_this_env() and not sig_ok:
-        raise HTTPException(401, "Bad signature")
-
-    # log ingest attempt (before transaction)
-    await _log_ingest(request, body.source, body.seller, len(body.items), bool(sig), sig_ok)
-
-    # Idempotency (best-effort)
-    idem_key = request.headers.get("Idempotency-Key")
-    cache_key = _idem(idem_key, body.dict()) if idem_key else None
-    if cache_key and cache_key in _idem_cache:
-        return _idem_cache[cache_key]
-
-    seller = body.seller.strip()
-    async with database.transaction():
-        for it in body.items:
-            # Ensure row
-            await database.execute("""
-                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
-                VALUES (:seller, :sku, :description, :uom, :location, 0, :source, :external_id)
-                ON CONFLICT (seller, sku) DO NOTHING
-            """, {"seller": seller, "sku": it.sku, "description": it.description, "uom": it.uom or 'ton',
-                  "location": it.location, "source": body.source, "external_id": it.external_id})
-
-            # Lock & read old
-            prev = await database.fetch_one("""
-                SELECT qty_on_hand FROM inventory_items
-                WHERE seller=:seller AND sku=:sku
-                FOR UPDATE
-            """, {"seller": seller, "sku": it.sku})
-            old = float(prev["qty_on_hand"]) if prev else 0.0
-            new = float(it.qty_on_hand)
-            delta = new - old
-
-            # Update absolute qty_on_hand
-            await database.execute("""
-                UPDATE inventory_items
-                SET qty_on_hand = :new, updated_at = NOW(), source=:source
-                WHERE seller=:seller AND sku=:sku
-            """, {"new": new, "source": body.source, "seller": seller, "sku": it.sku})
-
-            # Movement (delta)
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller, :sku, 'upsert', :qty, NULL, :meta)
-            """, {"seller": seller, "sku": it.sku, "qty": delta, "meta": json.dumps({"from": old, "to": new})})
-
-    resp = {"ok": True, "count": len(body.items)}
-    if cache_key:
-        _idem_cache[cache_key] = resp
-    return resp
-
-@app.post(
-    "/inventory/movements",
-    tags=["Inventory"],
-    summary="Apply inventory movements (adjustments or reconciliations)",
-    description="Adjust qty_on_hand by deltas; reserve/commit/unreserve are driven by Contracts flow and typically not called directly.",
-    response_model=dict,
-    status_code=200
-)
-async def inventory_movements(body: MovementBody, request: Request):
-    # HMAC (prod required; dev optional)
-    raw = await request.body()
-    sig = request.headers.get("X-Signature", "")
-    sig_ok = bool(sig) and bool(verify_sig(raw, sig, INVENTORY_SECRET_ENV)) and not is_replay(sig)
-
-    if _require_hmac_in_this_env() and not sig_ok:
-        raise HTTPException(401, "Bad signature")
-
-    # log ingest attempt
-    await _log_ingest(request, body.source, body.seller, len(body.events), bool(sig), sig_ok)
-
-    # Idempotency (best-effort)
-    idem_key = request.headers.get("Idempotency-Key")
-    cache_key = _idem(idem_key, body.dict()) if idem_key else None
-    if cache_key and cache_key in _idem_cache:
-        return _idem_cache[cache_key]
-
-    seller = body.seller.strip()
-    async with database.transaction():
-        for ev in body.events:
-            # Create row if missing
-            await database.execute("""
-                INSERT INTO inventory_items (seller, sku, qty_on_hand)
-                VALUES (:seller, :sku, 0)
-                ON CONFLICT (seller, sku) DO NOTHING
-            """, {"seller": seller, "sku": ev.sku})
-
-            # Adjust qty_on_hand only for 'adjust' type here
-            if ev.movement_type == 'adjust':
-                await database.execute("""
-                    UPDATE inventory_items
-                    SET qty_on_hand = qty_on_hand + :delta, updated_at = NOW()
-                    WHERE seller=:seller AND sku=:sku
-                """, {"delta": ev.qty, "seller": seller, "sku": ev.sku})
-
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller, :sku, :type, :qty, :ref_contract, :meta)
-            """, {"seller": seller, "sku": ev.sku, "type": ev.movement_type,
-                  "qty": ev.qty, "ref_contract": ev.ref_contract, "meta": json.dumps(ev.meta or {})})
-
-    resp = {"ok": True, "events": len(body.events)}
-    if cache_key:
-        _idem_cache[cache_key] = resp
-    return resp
-
-# ---- NEW: Read API for movements (for UI visibility) ----
-@app.get("/inventory/movements/list",
-    tags=["Inventory"],
-    summary="List inventory movements",
-    description="Recent inventory movements. Filter by seller, sku, type, time range.",
-    status_code=200
-)
-async def list_movements(
-    seller: str = Query(...),
-    sku: Optional[str] = Query(None),
-    movement_type: Optional[str] = Query(None, description="upsert, adjust, reserve, unreserve, commit, ship, cancel, reconcile"),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    q = "SELECT * FROM inventory_movements WHERE seller=:seller"
-    vals = {"seller": seller, "limit": limit, "offset": offset}
-    if sku:
-        q += " AND sku=:sku"; vals["sku"] = sku
-    if movement_type:
-        q += " AND movement_type=:mt"; vals["mt"] = movement_type
-    if start:
-        q += " AND created_at >= :start"; vals["start"] = start
-    if end:
-        q += " AND created_at <= :end"; vals["end"] = end
-    q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
-    rows = await database.fetch_all(q, vals)
-    return [dict(r) for r in rows]
-
-@app.get(
-    "/inventory",
-    tags=["Inventory"],
-    summary="List inventory (available view)",
-    response_model=List[InventoryRowOut],
-    status_code=200
-)
-async def list_inventory(
-    seller: str = Query(..., description="Seller name"),
-    sku: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
-):
-    q = "SELECT * FROM inventory_available WHERE seller = :seller"
-    vals = {"seller": seller}
-    if sku:
-        q += " AND sku = :sku"
-        vals["sku"] = sku
-    q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
-    vals["limit"], vals["offset"] = limit, offset
-    rows = await database.fetch_all(q, vals)
-    return [InventoryRowOut(**dict(r)) for r in rows]
-
-# =====================  FUTURES (Admin)  =====================
-# Server-side pricing + admin endpoints to list futures seeded by spot flow
-
+# =============== FUTURES (Admin) ===============
 futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
 
-# ----- Models -----
 class ProductIn(BaseModel):
     symbol_root: str
     material: str
@@ -1394,7 +1062,7 @@ class PricingParamsIn(BaseModel):
 class ListingGenerateIn(BaseModel):
     product_id: str
     months_ahead: int = 12
-    day_of_month: int = 15  # default expiry day (safe when clamped to <= 28)
+    day_of_month: int = 15
 
 class ListingOut(BaseModel):
     id: str
@@ -1406,15 +1074,12 @@ class ListingOut(BaseModel):
 
 class PublishMarkIn(BaseModel):
     listing_id: str
-    mark_date: Optional[date] = None  # default today
+    mark_date: Optional[date] = None
 
-# ----- Helpers -----
 MONTH_CODE = {1:"F",2:"G",3:"H",4:"J",5:"K",6:"M",7:"N",8:"Q",9:"U",10:"V",11:"X",12:"Z"}
 
 async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] = None) -> tuple[float, str]:
-    """Compute mark = VWAP + basis + carry*months OR manual/external (if configured)."""
     md = mark_date or _date.today()
-
     listing = await database.fetch_one("""
         SELECT fl.id AS listing_id,
                fl.expiry_date,
@@ -1432,14 +1097,12 @@ async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] 
     if not listing:
         raise HTTPException(404, "listing not found or not listable")
 
-    # VWAP source (from patched view)
     vwap_row = await database.fetch_one(
         "SELECT recent_vwap FROM v_recent_vwap WHERE product_id=:pid",
         {"pid": listing["product_id"]}
     )
     recent_vwap = vwap_row["recent_vwap"] if vwap_row else None
 
-    # months to expiry (non-negative)
     m_to_exp = max(
         0,
         (listing["expiry_date"].year - md.year) * 12 + (listing["expiry_date"].month - md.month)
@@ -1453,16 +1116,13 @@ async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] 
         return float(manual), "MANUAL"
 
     if method == "EXTERNAL":
-        # Wire your external feed here (reject publishing until available)
         raise HTTPException(400, "external pricing not wired")
 
-    # Default: VWAP_BASIS
     if recent_vwap is None:
         raise HTTPException(400, "no recent VWAP in lookback window")
     mark = float(recent_vwap) + float(listing["basis_adjustment"]) + m_to_exp * float(listing["carry_per_month"])
     return float(mark), "VWAP_BASIS"
 
-# ----- Routes -----
 @futures_router.post("/products", response_model=ProductOut, summary="Create/Upsert a futures product")
 async def create_product(p: ProductIn):
     row = await database.fetch_one("""
@@ -1505,7 +1165,7 @@ async def generate_series(body: ListingGenerateIn):
         y = today.year + (today.month + k - 1)//12
         m = ((today.month + k - 1)%12) + 1
         code = MONTH_CODE[m]
-        exp = _date(y, m, min(body.day_of_month, 28))  # clamp safely
+        exp = _date(y, m, min(body.day_of_month, 28))
         row = await database.fetch_one("""
           INSERT INTO futures_listings (id, product_id, contract_month, contract_year, expiry_date, status)
           VALUES (:id,:pid,:cm,:cy,:exp,'Draft')
@@ -1520,6 +1180,22 @@ async def generate_series(body: ListingGenerateIn):
 async def list_series(listing_id: str):
     await database.execute("UPDATE futures_listings SET status='Listed' WHERE id=:id", {"id": listing_id})
     return {"ok": True}
+
+class TradingStatusIn(BaseModel):
+    trading_status: Literal["Trading","Halted","Expired"]
+
+@futures_router.post("/series/{listing_id}/trading_status", summary="Set listing trading status")
+async def set_trading_status(listing_id: str, body: TradingStatusIn):
+    await database.execute("UPDATE futures_listings SET trading_status=:st WHERE id=:id",
+                           {"st": body.trading_status, "id": listing_id})
+    return {"ok": True, "listing_id": listing_id, "trading_status": body.trading_status}
+
+@futures_router.post("/series/{listing_id}/expire", summary="Expire listing (cash-settled)")
+async def expire_listing(listing_id: str):
+    await database.execute("""
+      UPDATE futures_listings SET trading_status='Expired', status='Expired' WHERE id=:id
+    """, {"id": listing_id})
+    return {"ok": True, "listing_id": listing_id, "status": "Expired"}
 
 @futures_router.post("/marks/publish", summary="Publish an official settlement/mark for a listing")
 async def publish_mark(body: PublishMarkIn):
@@ -1543,7 +1219,6 @@ async def list_series_admin(product_id: Optional[str] = Query(None), status: Opt
         q += " AND product_id=:pid"; vals["pid"] = product_id
     if status:
         q += " AND status=:st"; vals["st"] = status
-    # ---- PATCHED ORDER: chronological by month code ----
     q += " ORDER BY contract_year, array_position(ARRAY['F','G','H','J','K','M','N','Q','U','V','X','Z'], contract_month::text)"
     return await database.fetch_all(q, vals)
 
@@ -1567,6 +1242,391 @@ async def list_recent_marks(limit: int = Query(50, ge=1, le=500)):
     """, {"lim": limit})
     return [dict(r) for r in rows]
 
-# mount router
 app.include_router(futures_router)
-# ===================  /FUTURES (Admin)  =====================
+# =============== /FUTURES (Admin) ===============
+
+# ===================== TRADING (Order Book) =====================
+trade_router = APIRouter(prefix="/trade", tags=["Trading"])
+
+class OrderIn(BaseModel):
+    account_id: str
+    listing_id: str
+    side: Literal["BUY","SELL"]
+    price: float
+    qty: float
+    tif: Optional[str] = "GTC"
+
+class CancelOut(BaseModel):
+    id: str
+    status: str
+
+class BookLevel(BaseModel):
+    price: float
+    qty: float
+
+class BookSnapshot(BaseModel):
+    bids: List[BookLevel]
+    asks: List[BookLevel]
+
+# --- Helpers ---
+async def _get_contract_size(listing_id: str) -> float:
+    row = await database.fetch_one("""
+      SELECT fp.contract_size_tons
+      FROM futures_listings fl
+      JOIN futures_products fp ON fp.id = fl.product_id
+      WHERE fl.id = :id
+    """, {"id": listing_id})
+    if not row:
+        raise HTTPException(404, "listing not found")
+    return float(row["contract_size_tons"])
+
+async def _ensure_margin_account(account_id: str):
+    row = await database.fetch_one("SELECT account_id FROM margin_accounts WHERE account_id=:a", {"a": account_id})
+    if not row:
+        await database.execute("INSERT INTO margin_accounts (account_id, balance) VALUES (:a, 0)", {"a": account_id})
+
+async def _get_margin_params(account_id: str) -> dict:
+    r = await database.fetch_one("""
+      SELECT balance, initial_pct, maintenance_pct, risk_limit_open_lots, is_blocked
+      FROM margin_accounts WHERE account_id=:a
+    """, {"a": account_id})
+    if not r:
+        raise HTTPException(400, "margin account missing")
+    return dict(r)
+
+async def _adjust_margin(account_id: str, amount: float, reason: str, ref_id: Optional[str] = None):
+    await database.execute("UPDATE margin_accounts SET balance = balance + :amt WHERE account_id=:a",
+                           {"amt": amount, "a": account_id})
+    await database.execute("""
+      INSERT INTO margin_events (id, account_id, amount, reason, ref_id)
+      VALUES (:id,:a,:amt,:rsn,:ref)
+    """, {"id": str(uuid.uuid4()), "a": account_id, "amt": amount, "rsn": reason, "ref": ref_id})
+
+async def _update_position(account_id: str, listing_id: str, delta_qty: float):
+    await database.execute("""
+      INSERT INTO positions (account_id, listing_id, net_qty)
+      VALUES (:a,:l,:dq)
+      ON CONFLICT (account_id, listing_id) DO UPDATE
+      SET net_qty = positions.net_qty + EXCLUDED.net_qty
+    """, {"a": account_id, "l": listing_id, "dq": delta_qty})
+
+async def _sum_open_lots(account_id: str) -> float:
+    r = await database.fetch_one("""
+      SELECT COALESCE(SUM(qty_open),0) AS open_lots
+      FROM orders
+      WHERE account_id=:a AND status IN ('NEW','PARTIAL')
+    """, {"a": account_id})
+    return float(r["open_lots"] or 0)
+
+async def _audit_order(order_id: str, event: str, qty_open: float, reason: Optional[str] = None):
+    await database.execute("""
+      INSERT INTO orders_audit (id, order_id, event, qty_open, reason)
+      VALUES (:id,:oid,:ev,:qo,:rsn)
+    """, {"id": str(uuid.uuid4()), "oid": order_id, "ev": event, "qo": qty_open, "rsn": reason or ""})
+
+async def _require_listing_trading(listing_id: str):
+    r = await database.fetch_one("SELECT trading_status FROM futures_listings WHERE id=:id", {"id": listing_id})
+    if not r:
+        raise HTTPException(404, "listing not found")
+    if r["trading_status"] != "Trading":
+        raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
+
+# --- Place order + match (price-time FIFO) ---
+@trade_router.post("/orders", summary="Place order (limit) and match")
+async def place_order(ord_in: OrderIn):
+    await _ensure_margin_account(ord_in.account_id)
+    contract_size = await _get_contract_size(ord_in.listing_id)
+
+    order_id = str(uuid.uuid4())
+    side = ord_in.side.upper()
+    price = float(ord_in.price)
+    qty   = float(ord_in.qty)
+    if qty <= 0 or price <= 0:
+        raise HTTPException(400, "price and qty must be positive")
+
+    async with database.transaction():
+        # Insert NEW order
+        await database.execute("""
+          INSERT INTO orders (id, account_id, listing_id, side, price, qty, qty_open, status, tif)
+          VALUES (:id,:a,:l,:s,:p,:q,:q,'NEW',:tif)
+        """, {"id": order_id, "a": ord_in.account_id, "l": ord_in.listing_id,
+              "s": side, "p": price, "q": qty, "tif": ord_in.tif or "GTC"})
+        await _audit_order(order_id, "NEW", qty, "order accepted")
+
+        # Trading status gate
+        await _require_listing_trading(ord_in.listing_id)
+
+        # Risk gate: account not blocked + open lots limit
+        params = await _get_margin_params(ord_in.account_id)
+        if params.get("is_blocked"):
+            raise HTTPException(402, "account blocked pending margin call")
+        open_lots = await _sum_open_lots(ord_in.account_id)
+        limit_lots = float(params.get("risk_limit_open_lots", 50))
+        if open_lots + qty > limit_lots:
+            raise HTTPException(429, f"risk limit exceeded: {open_lots}+{qty}>{limit_lots}")
+
+        remaining = qty
+
+        if side == "BUY":
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p
+               ORDER BY price ASC, created_at ASC
+               FOR UPDATE
+            """, {"l": ord_in.listing_id, "p": price})
+        else:
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p
+               ORDER BY price DESC, created_at ASC
+               FOR UPDATE
+            """, {"l": ord_in.listing_id, "p": price})
+
+        for row in opp:
+            if remaining <= 0:
+                break
+            open_qty = float(row["qty_open"])
+            if open_qty <= 0:
+                continue
+
+            trade_qty = min(remaining, open_qty)
+            trade_px  = float(row["price"])
+
+            buy_id  = order_id if side == "BUY" else row["id"]
+            sell_id = row["id"]   if side == "BUY" else order_id
+
+            notional = trade_px * contract_size * trade_qty
+
+            part_a = await database.fetch_one("""
+              SELECT o.account_id AS aid, m.balance, m.initial_pct
+              FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+              WHERE o.id=:oid
+            """, {"oid": order_id})
+            part_b = await database.fetch_one("""
+              SELECT o.account_id AS aid, m.balance, m.initial_pct
+              FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+              WHERE o.id=:oid
+            """, {"oid": row["id"]})
+            if not part_a or not part_b:
+                raise HTTPException(400, "margin account not found")
+
+            need_a = float(part_a["initial_pct"]) * notional
+            need_b = float(part_b["initial_pct"]) * notional
+            if float(part_a["balance"]) < need_a:
+                raise HTTPException(402, f"insufficient initial margin for account {part_a['aid']}")
+            if float(part_b["balance"]) < need_b:
+                raise HTTPException(402, f"insufficient initial margin for account {part_b['aid']}")
+
+            await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
+            await _adjust_margin(part_b["aid"], -need_b, "initial_margin", row["id"])
+
+            trade_id = str(uuid.uuid4())
+            await database.execute("""
+              INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
+              VALUES (:id,:b,:s,:l,:px,:q)
+            """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": ord_in.listing_id, "px": trade_px, "q": trade_qty})
+
+            new_open = open_qty - trade_qty
+            new_status = "FILLED" if new_open <= 0 else "PARTIAL"
+            await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+                                   {"qo": new_open, "st": new_status, "id": row["id"]})
+            await _audit_order(row["id"], new_status, new_open, "matched")
+
+            remaining -= trade_qty
+            my_status = "FILLED" if remaining <= 0 else "PARTIAL"
+            await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+                                   {"qo": remaining, "st": my_status, "id": order_id})
+            await _audit_order(order_id, my_status, remaining, "matched")
+
+    final = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
+    return dict(final)
+
+@trade_router.delete("/orders/{order_id}", response_model=CancelOut, summary="Cancel remaining qty")
+async def cancel_order(order_id: str):
+    async with database.transaction():
+      row = await database.fetch_one("SELECT status, qty_open FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
+      if not row:
+          raise HTTPException(404, "order not found")
+      if row["status"] in ("FILLED","CANCELLED") or float(row["qty_open"]) <= 0:
+          return {"id": order_id, "status": row["status"]}
+      await database.execute("UPDATE orders SET status='CANCELLED' WHERE id=:id", {"id": order_id})
+      await _audit_order(order_id, "CANCELLED", float(row["qty_open"]), "manual cancel")
+    return {"id": order_id, "status": "CANCELLED"}
+
+@trade_router.get("/book", response_model=BookSnapshot, summary="Order book snapshot (top levels)")
+async def get_book(listing_id: str, depth: int = Query(5, ge=1, le=50)):
+    bids = await database.fetch_all("""
+      SELECT price, SUM(qty_open) AS qty
+        FROM orders
+       WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+       GROUP BY price ORDER BY price DESC LIMIT :d
+    """, {"l": listing_id, "d": depth})
+    asks = await database.fetch_all("""
+      SELECT price, SUM(qty_open) AS qty
+        FROM orders
+       WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+       GROUP BY price ORDER BY price ASC LIMIT :d
+    """, {"l": listing_id, "d": depth})
+    return {
+        "bids": [{"price": float(r["price"]), "qty": float(r["qty"])} for r in bids],
+        "asks": [{"price": float(r["price"]), "qty": float(r["qty"])} for r in asks],
+    }
+
+# ---- Exports (CSV) ----
+@trade_router.get("/orders/export", summary="Export orders by day (CSV)")
+async def export_orders_csv(day: str = Query(..., description="YYYY-MM-DD")):
+    rows = await database.fetch_all("""
+      SELECT * FROM orders
+      WHERE DATE(created_at) = :d
+      ORDER BY created_at, id
+    """, {"d": day})
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id","account_id","listing_id","side","price","qty","qty_open","status","tif","created_at"])
+    for r in rows:
+        w.writerow([r["id"], r["account_id"], r["listing_id"], r["side"], r["price"],
+                    r["qty"], r["qty_open"], r["status"], r["tif"], r["created_at"].isoformat()])
+    out.seek(0)
+    return StreamingResponse(
+        iter([out.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="orders_{day}.csv"'}
+    )
+
+@trade_router.get("/trades/export", summary="Export trades by day (CSV)")
+async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
+    rows = await database.fetch_all("""
+      SELECT t.*, fp.symbol_root, fl.contract_month, fl.contract_year
+      FROM trades t
+      JOIN futures_listings fl ON fl.id = t.listing_id
+      JOIN futures_products fp ON fp.id = fl.product_id
+      WHERE DATE(t.traded_at) = :d
+      ORDER BY t.traded_at, t.id
+    """, {"d": day})
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id","buy_order_id","sell_order_id","listing_id","symbol","month","year","price","qty","traded_at"])
+    for r in rows:
+        w.writerow([r["id"], r["buy_order_id"], r["sell_order_id"], r["listing_id"],
+                    r["symbol_root"], r["contract_month"], r["contract_year"],
+                    r["price"], r["qty"], r["traded_at"].isoformat()])
+    out.seek(0)
+    return StreamingResponse(
+        iter([out.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="trades_{day}.csv"'}
+    )
+
+app.include_router(trade_router)
+# =================== /TRADING (Order Book) =====================
+
+# ===================== CLEARING (Margin & Variation) =====================
+clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])
+
+class DepositIn(BaseModel):
+    account_id: str
+    amount: float
+
+@clearing_router.get("/positions", summary="Positions by account")
+async def get_positions(account_id: str):
+    rows = await database.fetch_all("""
+      SELECT p.listing_id, p.net_qty,
+             fp.symbol_root, fl.contract_month, fl.contract_year
+        FROM positions p
+        JOIN futures_listings fl ON fl.id = p.listing_id
+        JOIN futures_products fp ON fp.id = fl.product_id
+       WHERE p.account_id=:a
+    ORDER BY fp.symbol_root, fl.contract_year,
+      array_position(ARRAY['F','G','H','J','K','M','N','Q','U','V','X','Z'], fl.contract_month::text)
+    """, {"a": account_id})
+    return [dict(r) for r in rows]
+
+@clearing_router.get("/margin", summary="Margin account state")
+async def get_margin(account_id: str):
+    r = await database.fetch_one("SELECT * FROM margin_accounts WHERE account_id=:a", {"a": account_id})
+    if not r:
+        raise HTTPException(404, "margin account not found")
+    return dict(r)
+
+@clearing_router.post("/deposit", summary="Credit margin account (testing/funding)")
+async def deposit(dep: DepositIn):
+    if dep.amount == 0:
+        return {"ok": True, "note": "no-op"}
+    await _ensure_margin_account(dep.account_id)
+    await _adjust_margin(dep.account_id, dep.amount, "deposit", None)
+    return {"ok": True}
+
+class VariationRunIn(BaseModel):
+    mark_date: Optional[date] = None   # defaults to today
+
+@clearing_router.post("/variation_run", summary="Run daily variation margin across all accounts")
+async def run_variation(body: VariationRunIn):
+    dt = body.mark_date or _date.today()
+
+    pos = await database.fetch_all("""
+      SELECT p.account_id, p.listing_id, p.net_qty,
+             COALESCE(
+               (SELECT fm.mark_price FROM futures_marks fm
+                 WHERE fm.listing_id = p.listing_id AND fm.mark_date <= :d
+                 ORDER BY fm.mark_date DESC LIMIT 1),
+               (SELECT settle_price FROM v_latest_settle v WHERE v.listing_id = p.listing_id)
+             ) AS settle_price,
+             fp.contract_size_tons,
+             m.balance, m.maintenance_pct
+        FROM positions p
+        JOIN futures_listings fl ON fl.id = p.listing_id
+        JOIN futures_products fp ON fp.id = fl.product_id
+        JOIN margin_accounts m   ON m.account_id = p.account_id
+    """, {"d": dt})
+
+    prev_map = {}
+    prev = await database.fetch_all("""
+      SELECT DISTINCT ON (fm.listing_id) fm.listing_id, fm.mark_price
+        FROM futures_marks fm
+       WHERE fm.mark_date < :d
+    ORDER BY fm.listing_id, fm.mark_date DESC
+    """, {"d": dt})
+    for r in prev:
+        prev_map[str(r["listing_id"])] = float(r["mark_price"])
+
+    results = []
+    async with database.transaction():
+        for r in pos:
+            lst = str(r["listing_id"])
+            px_t = float(r["settle_price"]) if r["settle_price"] is not None else None
+            px_y = prev_map.get(lst)
+            if px_t is None or px_y is None:
+                continue
+
+            qty  = float(r["net_qty"])
+            size = float(r["contract_size_tons"])
+            pnl  = (px_t - px_y) * qty * size
+
+            if pnl != 0.0:
+                await _adjust_margin(str(r["account_id"]), pnl, "variation_margin", None)
+
+            req = abs(qty) * px_t * size * float(r["maintenance_pct"])
+            cur = await database.fetch_one("SELECT balance FROM margin_accounts WHERE account_id=:a", {"a": r["account_id"]})
+            cur_bal = float(cur["balance"]) if cur else 0.0
+
+            if cur_bal < req:
+                await _adjust_margin(str(r["account_id"]), 0.0, f"margin_call_required: need >= {req:.2f}", None)
+                await database.execute("UPDATE margin_accounts SET is_blocked=TRUE WHERE account_id=:a", {"a": r["account_id"]})
+            else:
+                await database.execute("UPDATE margin_accounts SET is_blocked=FALSE WHERE account_id=:a", {"a": r["account_id"]})
+
+            results.append({
+                "account_id": str(r["account_id"]),
+                "listing_id": lst,
+                "qty": qty,
+                "prev_settle": px_y,
+                "settle": px_t,
+                "variation_pnl": pnl,
+                "maintenance_required": req,
+                "balance_after": cur_bal
+            })
+
+    return {"mark_date": str(dt), "accounts_processed": len(results), "details": results}
+
+app.include_router(clearing_router)
+# =================== /CLEARING (Margin & Variation) =====================
