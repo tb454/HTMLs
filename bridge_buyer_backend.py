@@ -1037,6 +1037,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
+
 @app.get(
     "/bols",
     response_model=List[BOLOut],
