@@ -1241,65 +1241,20 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             # update absolute qty_on_hand
             await database.execute("""
                 UPDATE inventory_items
-                SET qty_on_hand = :new, updated_at = NOW(), source=:source
-                WHERE seller=:seller AND sku=:sku
+                   SET qty_on_hand = :new,
+                       updated_at  = NOW(),
+                       source      = :source
+                 WHERE seller=:seller AND sku=:sku
             """, {"new": qty, "source": source, "seller": seller, "sku": sku})
 
-            # movement delta
+            # movement delta (build JSON in Python; cast to jsonb to avoid type inference issues)
+            meta_json = json.dumps({"from": old, "to": qty})
             await database.execute("""
                 INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller,:sku,'upsert',:qty,NULL, to_jsonb(json_build_object('from',:old,'to',:new)))
-            """, {"seller": seller, "sku": sku, "qty": delta, "old": old, "new": qty})
+                VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
+            """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
 
     return {"ok": True, "count": len(items)}
-
-@app.post(
-    "/inventory/movements",
-    tags=["Inventory"],
-    summary="Apply inventory movements (adjustments)",
-    response_model=dict,
-    status_code=200
-)
-async def inventory_movements(body: dict, request: Request):
-    seller = (body.get("seller") or "").strip()
-    events = body.get("events") or []
-    if not (seller and isinstance(events, list)):
-        raise HTTPException(400, "invalid payload")
-
-    if _require_hmac_in_this_env():
-        raw = await request.body()
-        sig = request.headers.get("X-Signature", "")
-        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
-            raise HTTPException(401, "Bad signature")
-
-    async with database.transaction():
-        for ev in events:
-            sku = (ev.get("sku") or "").strip()
-            if not sku:
-                continue
-            mtype = (ev.get("movement_type") or "").strip()
-            qty   = float(ev.get("qty") or 0.0)
-
-            await database.execute("""
-                INSERT INTO inventory_items (seller, sku, qty_on_hand)
-                VALUES (:seller,:sku,0)
-                ON CONFLICT (seller, sku) DO NOTHING
-            """, {"seller": seller, "sku": sku})
-
-            if mtype == "adjust":
-                await database.execute("""
-                    UPDATE inventory_items
-                    SET qty_on_hand = qty_on_hand + :delta, updated_at = NOW()
-                    WHERE seller=:seller AND sku=:sku
-                """, {"delta": qty, "seller": seller, "sku": sku})
-
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller,:sku,:mtype,:qty,:ref, :meta::jsonb)
-            """, {"seller": seller, "sku": sku, "mtype": mtype, "qty": qty,
-                  "ref": ev.get("ref_contract"), "meta": json.dumps(ev.get("meta") or {})})
-
-    return {"ok": True, "events": len(events)}
 
 # =============== FUTURES (Admin) ===============
 futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
