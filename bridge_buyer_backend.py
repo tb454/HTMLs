@@ -1180,14 +1180,6 @@ async def get_all_bols_pg(
         })
     return out
 
-# ========== INVENTORY API ==========
-INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
-ENV = os.getenv("ENV", "development").lower()
-
-def _require_hmac_in_this_env() -> bool:
-    # Only require HMAC in production AND when a secret is set; CI/dev remain open
-    return ENV == "production" and bool(os.getenv(INVENTORY_SECRET_ENV, ""))
-
 @app.post(
     "/inventory/bulk_upsert",
     tags=["Inventory"],
@@ -1247,12 +1239,20 @@ async def inventory_bulk_upsert(body: dict, request: Request):
                  WHERE seller=:seller AND sku=:sku
             """, {"new": qty, "source": source, "seller": seller, "sku": sku})
 
-            # movement delta (build JSON in Python; cast to jsonb to avoid type inference issues)
+            # movement delta (build JSON in Python)
             meta_json = json.dumps({"from": old, "to": qty})
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
-            """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+
+            # Prefer JSONB; if meta is TEXT in this DB, fall back cleanly
+            try:
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
+                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+            except Exception:
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
+                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
 
     return {"ok": True, "count": len(items)}
 
