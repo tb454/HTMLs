@@ -324,6 +324,13 @@ async def _ensure_futures_schema():
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
 @app.on_event("startup")
 async def _ensure_trading_schema():
+    # Clean up any stray materialized view/table to avoid warnings
+    try:
+        await database.execute("DROP MATERIALIZED VIEW IF EXISTS v_latest_settle")
+        await database.execute("DROP TABLE IF EXISTS v_latest_settle")
+    except Exception:
+        pass
+
     ddl = [
         """
         CREATE TABLE IF NOT EXISTS accounts (
@@ -435,6 +442,77 @@ async def _ensure_trading_hardening():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("trading_hardening_bootstrap_failed", err=str(e), sql=stmt[:120])
+
+# ===== INVENTORY schema bootstrap (idempotent) =====
+@app.on_event("startup")
+async def _ensure_inventory_schema():
+    ddl = [
+        # Items
+        """
+        CREATE TABLE IF NOT EXISTS inventory_items (
+          seller TEXT NOT NULL,
+          sku TEXT NOT NULL,
+          description TEXT,
+          uom TEXT,
+          location TEXT,
+          qty_on_hand NUMERIC NOT NULL DEFAULT 0,
+          qty_reserved NUMERIC NOT NULL DEFAULT 0,
+          qty_committed NUMERIC NOT NULL DEFAULT 0,
+          source TEXT,
+          external_id TEXT,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (seller, sku)
+        );
+        """,
+        # Movements
+        """
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+          seller TEXT NOT NULL,
+          sku TEXT NOT NULL,
+          movement_type TEXT NOT NULL,
+          qty NUMERIC NOT NULL,
+          ref_contract TEXT,
+          meta JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        # Optional ingest log
+        """
+        CREATE TABLE IF NOT EXISTS inventory_ingest_log (
+          id BIGSERIAL PRIMARY KEY,
+          source TEXT,
+          seller TEXT,
+          item_count INT,
+          idem_key TEXT,
+          sig_present BOOLEAN,
+          sig_valid BOOLEAN,
+          remote_addr TEXT,
+          user_agent TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        # Available view
+        """
+        CREATE OR REPLACE VIEW inventory_available AS
+        SELECT
+          seller,
+          sku,
+          description,
+          COALESCE(uom, 'ton') AS uom,
+          location,
+          qty_on_hand,
+          qty_reserved,
+          (qty_on_hand - qty_reserved) AS qty_available,
+          qty_committed,
+          updated_at
+        FROM inventory_items;
+        """
+    ]
+    for stmt in ddl:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -1037,7 +1115,6 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
-
 @app.get(
     "/bols",
     response_model=List[BOLOut],
@@ -1102,6 +1179,127 @@ async def get_all_bols_pg(
             "status": d.get("status") or "",
         })
     return out
+
+# ========== INVENTORY API ==========
+INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
+ENV = os.getenv("ENV", "development").lower()
+
+def _require_hmac_in_this_env() -> bool:
+    # Only require HMAC in production AND when a secret is set; CI/dev remain open
+    return ENV == "production" and bool(os.getenv(INVENTORY_SECRET_ENV, ""))
+
+@app.post(
+    "/inventory/bulk_upsert",
+    tags=["Inventory"],
+    summary="Bulk upsert inventory items",
+    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
+    response_model=dict,
+    status_code=200
+)
+async def inventory_bulk_upsert(body: dict, request: Request):
+    # Minimal validation for CI
+    source = (body.get("source") or "").strip()
+    seller = (body.get("seller") or "").strip()
+    items  = body.get("items") or []
+    if not (source and seller and isinstance(items, list)):
+        raise HTTPException(400, "invalid payload")
+
+    # HMAC only in production
+    if _require_hmac_in_this_env():
+        raw = await request.body()
+        sig = request.headers.get("X-Signature", "")
+        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
+            raise HTTPException(401, "Bad signature")
+
+    async with database.transaction():
+        for it in items:
+            sku = (it.get("sku") or "").strip()
+            if not sku:
+                continue
+            desc = it.get("description")
+            uom  = it.get("uom") or "ton"
+            loc  = it.get("location")
+            qty  = float(it.get("qty_on_hand") or 0.0)
+
+            # ensure row
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
+                VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {"seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
+                  "source": source, "external_id": it.get("external_id")})
+
+            # read old (for delta)
+            prev = await database.fetch_one("""
+                SELECT qty_on_hand FROM inventory_items
+                WHERE seller=:seller AND sku=:sku
+                FOR UPDATE
+            """, {"seller": seller, "sku": sku})
+            old = float(prev["qty_on_hand"]) if prev else 0.0
+            delta = qty - old
+
+            # update absolute qty_on_hand
+            await database.execute("""
+                UPDATE inventory_items
+                SET qty_on_hand = :new, updated_at = NOW(), source=:source
+                WHERE seller=:seller AND sku=:sku
+            """, {"new": qty, "source": source, "seller": seller, "sku": sku})
+
+            # movement delta
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:seller,:sku,'upsert',:qty,NULL, to_jsonb(json_build_object('from',:old,'to',:new)))
+            """, {"seller": seller, "sku": sku, "qty": delta, "old": old, "new": qty})
+
+    return {"ok": True, "count": len(items)}
+
+@app.post(
+    "/inventory/movements",
+    tags=["Inventory"],
+    summary="Apply inventory movements (adjustments)",
+    response_model=dict,
+    status_code=200
+)
+async def inventory_movements(body: dict, request: Request):
+    seller = (body.get("seller") or "").strip()
+    events = body.get("events") or []
+    if not (seller and isinstance(events, list)):
+        raise HTTPException(400, "invalid payload")
+
+    if _require_hmac_in_this_env():
+        raw = await request.body()
+        sig = request.headers.get("X-Signature", "")
+        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
+            raise HTTPException(401, "Bad signature")
+
+    async with database.transaction():
+        for ev in events:
+            sku = (ev.get("sku") or "").strip()
+            if not sku:
+                continue
+            mtype = (ev.get("movement_type") or "").strip()
+            qty   = float(ev.get("qty") or 0.0)
+
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, qty_on_hand)
+                VALUES (:seller,:sku,0)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {"seller": seller, "sku": sku})
+
+            if mtype == "adjust":
+                await database.execute("""
+                    UPDATE inventory_items
+                    SET qty_on_hand = qty_on_hand + :delta, updated_at = NOW()
+                    WHERE seller=:seller AND sku=:sku
+                """, {"delta": qty, "seller": seller, "sku": sku})
+
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:seller,:sku,:mtype,:qty,:ref, :meta::jsonb)
+            """, {"seller": seller, "sku": sku, "mtype": mtype, "qty": qty,
+                  "ref": ev.get("ref_contract"), "meta": json.dumps(ev.get("meta") or {})})
+
+    return {"ok": True, "events": len(events)}
 
 # =============== FUTURES (Admin) ===============
 futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
