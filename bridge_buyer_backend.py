@@ -417,7 +417,7 @@ async def _ensure_trading_hardening():
         CREATE TABLE IF NOT EXISTS orders_audit (
           id UUID PRIMARY KEY,
           order_id UUID NOT NULL,
-          event TEXT NOT NULL,               -- NEW | PARTIAL | FILLED | CANCELLED
+          event TEXT NOT NULL,               -- NEW | PARTIAL | FILLED | CANCELLED | MODIFY (free text)
           qty_open NUMERIC NOT NULL,
           reason TEXT,
           at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1037,6 +1037,71 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
+@app.get(
+    "/bols",
+    response_model=List[BOLOut],
+    tags=["BOLs"],
+    summary="List BOLs",
+    description="Retrieve BOLs with optional filters (buyer, seller, material, status, contract_id, pickup date range).",
+    status_code=200
+)
+async def get_all_bols_pg(
+    buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    material: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    contract_id: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    q = "SELECT * FROM bols"
+    cond, vals = [], {}
+    if buyer:       cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
+    if seller:      cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
+    if material:    cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
+    if status:      cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
+    if contract_id: cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
+    if start:       cond.append("pickup_time >= :start");        vals["start"] = start
+    if end:         cond.append("pickup_time <= :end");          vals["end"] = end
+    if cond:
+        q += " WHERE " + " AND ".join(cond)
+    q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
+    vals["limit"], vals["offset"] = limit, offset
+
+    rows = await database.fetch_all(q, vals)
+    out = []
+    for r in rows:
+        d = dict(r)
+        out.append({
+            "bol_id": d["bol_id"],
+            "contract_id": d["contract_id"],
+            "buyer": d.get("buyer") or "",
+            "seller": d.get("seller") or "",
+            "material": d.get("material") or "",
+            "weight_tons": float(d.get("weight_tons") or 0.0),
+            "price_per_unit": float(d.get("price_per_unit") or 0.0),
+            "total_value": float(d.get("total_value") or 0.0),
+            "carrier": {
+                "name": d.get("carrier_name") or "TBD",
+                "driver": d.get("carrier_driver") or "TBD",
+                "truck_vin": d.get("carrier_truck_vin") or "TBD",
+            },
+            "pickup_signature": {
+                "base64": d.get("pickup_signature_base64") or "",
+                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
+            },
+            "delivery_signature": (
+                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
+                if d.get("delivery_signature_base64") is not None else None
+            ),
+            "pickup_time": d.get("pickup_time"),
+            "delivery_time": d.get("delivery_time"),
+            "status": d.get("status") or "",
+        })
+    return out
+
 # =============== FUTURES (Admin) ===============
 futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
 
@@ -1252,9 +1317,14 @@ class OrderIn(BaseModel):
     account_id: str
     listing_id: str
     side: Literal["BUY","SELL"]
-    price: float
+    price: Optional[float] = None            # price ignored for MARKET
     qty: float
+    order_type: Literal["LIMIT","MARKET"] = "LIMIT"
     tif: Optional[str] = "GTC"
+
+class ModifyOrderIn(BaseModel):
+    price: Optional[float] = None            # omit to keep
+    qty: Optional[float] = None              # total desired qty (not delta)
 
 class CancelOut(BaseModel):
     id: str
@@ -1332,17 +1402,20 @@ async def _require_listing_trading(listing_id: str):
         raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
 
 # --- Place order + match (price-time FIFO) ---
-@trade_router.post("/orders", summary="Place order (limit) and match")
+@trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn):
     await _ensure_margin_account(ord_in.account_id)
     contract_size = await _get_contract_size(ord_in.listing_id)
 
     order_id = str(uuid.uuid4())
     side = ord_in.side.upper()
-    price = float(ord_in.price)
+    is_market = (ord_in.order_type == "MARKET")
+    price = float(ord_in.price) if (ord_in.price is not None) else (0.0 if is_market and side == "SELL" else float("inf"))
     qty   = float(ord_in.qty)
-    if qty <= 0 or price <= 0:
-        raise HTTPException(400, "price and qty must be positive")
+    if qty <= 0:
+        raise HTTPException(400, "qty must be positive")
+    if not is_market and (ord_in.price is None or float(ord_in.price) <= 0):
+        raise HTTPException(400, "price must be positive for LIMIT orders")
 
     async with database.transaction():
         # Insert NEW order
@@ -1350,7 +1423,7 @@ async def place_order(ord_in: OrderIn):
           INSERT INTO orders (id, account_id, listing_id, side, price, qty, qty_open, status, tif)
           VALUES (:id,:a,:l,:s,:p,:q,:q,'NEW',:tif)
         """, {"id": order_id, "a": ord_in.account_id, "l": ord_in.listing_id,
-              "s": side, "p": price, "q": qty, "tif": ord_in.tif or "GTC"})
+              "s": side, "p": (0 if is_market else price), "q": qty, "tif": ord_in.tif or "GTC"})
         await _audit_order(order_id, "NEW", qty, "order accepted")
 
         # Trading status gate
@@ -1362,26 +1435,45 @@ async def place_order(ord_in: OrderIn):
             raise HTTPException(402, "account blocked pending margin call")
         open_lots = await _sum_open_lots(ord_in.account_id)
         limit_lots = float(params.get("risk_limit_open_lots", 50))
+        # Even for MARKET (IOC), enforce a cap to be safe
         if open_lots + qty > limit_lots:
             raise HTTPException(429, f"risk limit exceeded: {open_lots}+{qty}>{limit_lots}")
 
         remaining = qty
 
+        # Build opposing book
         if side == "BUY":
-            opp = await database.fetch_all("""
-              SELECT * FROM orders
-               WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p
-               ORDER BY price ASC, created_at ASC
-               FOR UPDATE
-            """, {"l": ord_in.listing_id, "p": price})
+            if is_market:
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+                   ORDER BY price ASC, created_at ASC
+                   FOR UPDATE
+                """, {"l": ord_in.listing_id})
+            else:
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p
+                   ORDER BY price ASC, created_at ASC
+                   FOR UPDATE
+                """, {"l": ord_in.listing_id, "p": price})
         else:
-            opp = await database.fetch_all("""
-              SELECT * FROM orders
-               WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p
-               ORDER BY price DESC, created_at ASC
-               FOR UPDATE
-            """, {"l": ord_in.listing_id, "p": price})
+            if is_market:
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+                   ORDER BY price DESC, created_at ASC
+                   FOR UPDATE
+                """, {"l": ord_in.listing_id})
+            else:
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p
+                   ORDER BY price DESC, created_at ASC
+                   FOR UPDATE
+                """, {"l": ord_in.listing_id, "p": price})
 
+        any_fill = False
         for row in opp:
             if remaining <= 0:
                 break
@@ -1389,12 +1481,14 @@ async def place_order(ord_in: OrderIn):
             if open_qty <= 0:
                 continue
 
+            # Trade at resting price
             trade_qty = min(remaining, open_qty)
             trade_px  = float(row["price"])
 
             buy_id  = order_id if side == "BUY" else row["id"]
             sell_id = row["id"]   if side == "BUY" else order_id
 
+            # Initial margin (simple: both sides pay initial_pct * notional)
             notional = trade_px * contract_size * trade_qty
 
             part_a = await database.fetch_one("""
@@ -1420,23 +1514,160 @@ async def place_order(ord_in: OrderIn):
             await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
             await _adjust_margin(part_b["aid"], -need_b, "initial_margin", row["id"])
 
+            # Record trade
             trade_id = str(uuid.uuid4())
             await database.execute("""
               INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
               VALUES (:id,:b,:s,:l,:px,:q)
             """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": ord_in.listing_id, "px": trade_px, "q": trade_qty})
 
+            # Update resting order
             new_open = open_qty - trade_qty
             new_status = "FILLED" if new_open <= 0 else "PARTIAL"
             await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
                                    {"qo": new_open, "st": new_status, "id": row["id"]})
             await _audit_order(row["id"], new_status, new_open, "matched")
 
+            # Update incoming order
             remaining -= trade_qty
             my_status = "FILLED" if remaining <= 0 else "PARTIAL"
             await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
                                    {"qo": remaining, "st": my_status, "id": order_id})
             await _audit_order(order_id, my_status, remaining, "matched")
+            any_fill = True
+
+        # MARKET orders are IOC: cancel any remainder
+        if is_market and remaining > 0:
+            await database.execute("UPDATE orders SET qty_open=0, status='CANCELLED' WHERE id=:id", {"id": order_id})
+            await _audit_order(order_id, "CANCELLED", 0, "market IOC remainder")
+
+    final = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
+    return dict(final)
+
+@trade_router.patch("/orders/{order_id}", summary="Modify order (price/qty) and rematch")
+async def modify_order(order_id: str, body: ModifyOrderIn):
+    if body.price is None and body.qty is None:
+        raise HTTPException(400, "provide price and/or qty to modify")
+
+    async with database.transaction():
+        # Lock the order
+        row = await database.fetch_one("SELECT * FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
+        if not row:
+            raise HTTPException(404, "order not found")
+        if row["status"] in ("FILLED","CANCELLED"):
+            raise HTTPException(409, f"order is {row['status']} and cannot be modified")
+
+        account_id = row["account_id"]
+        listing_id = row["listing_id"]
+        side = row["side"]
+        old_price = float(row["price"])
+        old_qty   = float(row["qty"])
+        old_open  = float(row["qty_open"])
+        filled    = old_qty - old_open
+
+        # Desired new totals
+        new_total = float(body.qty) if body.qty is not None else old_qty
+        if new_total < filled:
+            raise HTTPException(400, f"qty too low; already filled {filled}")
+
+        new_price = float(body.price) if body.price is not None else old_price
+        new_open  = new_total - filled
+
+        # Risk: if working open increases, enforce open-lots cap
+        delta_open = new_open - old_open
+        if delta_open > 0:
+            params = await _get_margin_params(account_id)
+            if params.get("is_blocked"):
+                raise HTTPException(402, "account blocked pending margin call")
+            open_lots = await _sum_open_lots(account_id)
+            limit_lots = float(params.get("risk_limit_open_lots", 50))
+            if open_lots + delta_open > limit_lots:
+                raise HTTPException(429, f"risk limit exceeded: {open_lots}+{delta_open}>{limit_lots}")
+
+        # Apply amendment
+        new_status = "FILLED" if new_open <= 0 else ("PARTIAL" if filled > 0 else "NEW")
+        await database.execute("""
+          UPDATE orders SET price=:p, qty=:qt, qty_open=:qo, status=:st WHERE id=:id
+        """, {"p": new_price, "qt": new_total, "qo": new_open, "st": new_status, "id": order_id})
+        await _audit_order(order_id, "MODIFY", new_open, "amend price/qty")
+
+        # If still working and crosses, run matching pass
+        contract_size = await _get_contract_size(listing_id)
+        remaining = new_open
+        if remaining > 0:
+            if side == "BUY":
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p AND id <> :me
+                   ORDER BY price ASC, created_at ASC
+                   FOR UPDATE
+                """, {"l": listing_id, "p": new_price, "me": order_id})
+            else:
+                opp = await database.fetch_all("""
+                  SELECT * FROM orders
+                   WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p AND id <> :me
+                   ORDER BY price DESC, created_at ASC
+                   FOR UPDATE
+                """, {"l": listing_id, "p": new_price, "me": order_id})
+
+            for r in opp:
+                if remaining <= 0:
+                    break
+                open_qty = float(r["qty_open"])
+                if open_qty <= 0:
+                    continue
+
+                trade_qty = min(remaining, open_qty)
+                trade_px  = float(r["price"])
+
+                buy_id  = order_id if side == "BUY" else r["id"]
+                sell_id = r["id"]   if side == "BUY" else order_id
+
+                notional = trade_px * contract_size * trade_qty
+
+                part_a = await database.fetch_one("""
+                  SELECT o.account_id AS aid, m.balance, m.initial_pct
+                  FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+                  WHERE o.id=:oid
+                """, {"oid": order_id})
+                part_b = await database.fetch_one("""
+                  SELECT o.account_id AS aid, m.balance, m.initial_pct
+                  FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+                  WHERE o.id=:oid
+                """, {"oid": r["id"]})
+                if not part_a or not part_b:
+                    raise HTTPException(400, "margin account not found")
+
+                need_a = float(part_a["initial_pct"]) * notional
+                need_b = float(part_b["initial_pct"]) * notional
+                if float(part_a["balance"]) < need_a:
+                    raise HTTPException(402, f"insufficient initial margin for account {part_a['aid']}")
+                if float(part_b["balance"]) < need_b:
+                    raise HTTPException(402, f"insufficient initial margin for account {part_b['aid']}")
+
+                await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
+                await _adjust_margin(part_b["aid"], -need_b, "initial_margin", r["id"])
+
+                # Trade
+                trade_id = str(uuid.uuid4())
+                await database.execute("""
+                  INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
+                  VALUES (:id,:b,:s,:l,:px,:q)
+                """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": listing_id, "px": trade_px, "q": trade_qty})
+
+                # Update resting
+                r_new_open = open_qty - trade_qty
+                r_status = "FILLED" if r_new_open <= 0 else "PARTIAL"
+                await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+                                       {"qo": r_new_open, "st": r_status, "id": r["id"]})
+                await _audit_order(r["id"], r_status, r_new_open, "matched")
+
+                # Update modified order
+                remaining -= trade_qty
+                my_status = "FILLED" if remaining <= 0 else ("PARTIAL" if filled > 0 or new_total != remaining else "NEW")
+                await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+                                       {"qo": remaining, "st": my_status, "id": order_id})
+                await _audit_order(order_id, my_status, remaining, "matched")
 
     final = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
     return dict(final)
