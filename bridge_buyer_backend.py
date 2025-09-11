@@ -1226,19 +1226,58 @@ async def get_all_bols_pg(
     status_code=200
 )
 async def inventory_bulk_upsert(body: dict, request: Request):
-    # Minimal validation
+    # ---- Minimal validation
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload")
 
-    # HMAC only in prod (same as before)
+    # ---- HMAC only in prod
     if _require_hmac_in_this_env():
         raw = await request.body()
         sig = request.headers.get("X-Signature", "")
         if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
             raise HTTPException(401, "Bad signature")
+
+    # ---- Preflight schema (idempotent; safe to run every call)
+    preflight = [
+        # tables
+        """
+        CREATE TABLE IF NOT EXISTS inventory_items (
+          seller TEXT NOT NULL,
+          sku TEXT NOT NULL,
+          qty_on_hand NUMERIC NOT NULL DEFAULT 0,
+          qty_reserved NUMERIC NOT NULL DEFAULT 0,
+          qty_committed NUMERIC NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (seller, sku)
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+          seller TEXT NOT NULL,
+          sku TEXT NOT NULL,
+          movement_type TEXT NOT NULL,
+          qty NUMERIC NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        # add missing columns (older prod schemas)
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS description TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS uom TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS location TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS source TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS external_id TEXT;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS ref_contract TEXT;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS meta JSONB;"
+    ]
+    for stmt in preflight:
+        try:
+            await database.execute(stmt)
+        except Exception:
+            # ignore; we'll still attempt fallbacks below
+            pass
 
     async with database.transaction():
         for it in items:
@@ -1250,7 +1289,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             loc  = it.get("location")
             qty  = float(it.get("qty_on_hand") or 0.0)
 
-            # 1) Ensure row exists — try full column set, fall back to minimal
+            # 1) Ensure row exists — try full column set, fall back to minimal PK
             try:
                 await database.execute("""
                     INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
@@ -1259,7 +1298,6 @@ async def inventory_bulk_upsert(body: dict, request: Request):
                 """, {"seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
                       "source": source, "external_id": it.get("external_id")})
             except Exception:
-                # minimal PK-only ensure
                 await database.execute("""
                     INSERT INTO inventory_items (seller, sku, qty_on_hand)
                     VALUES (:seller,:sku,0)
@@ -1312,6 +1350,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
                     """, {"seller": seller, "sku": sku, "qty": delta})
 
     return {"ok": True, "count": len(items)}
+
 
     # HMAC only in production
     if _require_hmac_in_this_env():
