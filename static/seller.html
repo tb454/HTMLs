@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Dashboard</title>
 
+<script>
+  const u = JSON.parse(localStorage.getItem('bridgeUser') || '{}');
+  const role = (u.role || '').toLowerCase();
+  if (role !== 'seller' && role !== 'yard') {
+    window.location.href = '/static/bridge-login.html';
+  }
+</script>
+
+
   <!-- Deployed API base -->
   <script>
     window.endpoint = "https://bridge-buyer.onrender.com";

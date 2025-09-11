@@ -74,6 +74,12 @@
       }
 
       const data = await res.json();
+
+      let role = (data.role || "").toLowerCase();
+       if (role === "yard") role = "seller";  // back-compat
+       localStorage.setItem("bridgeUser", JSON.stringify({ role }));
+       window.location.href = `/${role}`;
+
       // Persist minimal session info if you want
       localStorage.setItem("bridgeUser", JSON.stringify({ role: data.role }));
 

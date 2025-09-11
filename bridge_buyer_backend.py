@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header 
+from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
@@ -21,9 +21,8 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from typing import List, Optional
-from datetime import datetime
-from fastapi import Query
+import re, time as _t
+import requests
 
 # ===== ADDED =====
 from fastapi import APIRouter
@@ -43,10 +42,6 @@ from slowapi.errors import RateLimitExceeded
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
 import sentry_sdk
-
-# -------- Live Prices (COMEX Copper) --------
-import re, time as _t
-import requests
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
@@ -103,12 +98,8 @@ async def prices_copper_last():
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
 
-# Allow localhost in:
-# - any non-production environment, OR
-# - production when ALLOW_LOCALHOST_IN_PROD=1|true|yes (useful for local testing)
 prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
-
 if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
@@ -195,6 +186,15 @@ async def admin_page():
 async def seller_page():
     return FileResponse("static/seller.html")
 
+# alias: support any old links that hit /yard
+@app.get("/yard", include_in_schema=False)
+async def yard_alias():
+    return RedirectResponse("/seller", status_code=307)
+
+@app.get("/yard/", include_in_schema=False)
+async def yard_alias_slash():
+    return RedirectResponse("/seller", status_code=307)
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
@@ -215,7 +215,7 @@ engine = create_engine(DATABASE_URL)
 
 USERS_TABLE_NAME = "users"
 USERNAME_COL = "username"
-PASSWORD_HASH_COL = "password"
+PASSWORD_HASH_COL = "password_hash"  # fixed
 ROLE_COL = "role"
 
 users: Optional[Table] = None
@@ -233,17 +233,21 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-# ======= /AUTH ========
+# ======= AUTH ========
 class LoginIn(BaseModel):
     username: str
     password: str
 
-@app.post("/login", tags=["Auth"], summary="Login", description="DB-side bcrypt via pgcrypto: crypt($password, password_hash)")
+@app.post(
+    "/login",
+    tags=["Auth"],
+    summary="Login",
+    description="Authenticate via DB-side bcrypt using pgcrypto: crypt(:password, password_hash)"
+)
 async def login(body: LoginIn, request: Request):
     username = (body.username or "").strip()
     password = body.password or ""
 
-    # DB-side bcrypt check (fast, no Python bcrypt needed)
     row = await database.fetch_one(
         """
         SELECT username, role
@@ -257,18 +261,28 @@ async def login(body: LoginIn, request: Request):
     if not row:
         raise HTTPException(status_code=401, detail="Invalid credentials.")
 
-    # set session for server-rendered pages too
-    request.session["username"] = row["username"]
-    request.session["role"] = row["role"]
+    role = (row["role"] or "").lower()
+    if role == "yard":  # back-compat
+        role = "seller"
 
-    # front-end expects {role, redirect}
-    role = row["role"]
+    request.session["username"] = row["username"]
+    request.session["role"] = role
+
     return {"role": role, "redirect": f"/{role}"}
 
 @app.post("/logout", tags=["Auth"], summary="Logout", description="Clears session cookie")
 async def logout(request: Request):
     request.session.clear()
     return {"ok": True}
+# ======= /AUTH ========
+
+# ===== HMAC gating for inventory endpoints (missing helpers added) =====
+INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
+
+def _require_hmac_in_this_env() -> bool:
+    # Require HMAC only in production and only if a secret is set
+    return os.getenv("ENV", "").lower() == "production" and bool(os.getenv(INVENTORY_SECRET_ENV))
+# ======================================================================
 
 # ===== FUTURES schema bootstrap =====
 @app.on_event("startup")
@@ -361,7 +375,6 @@ async def _ensure_futures_schema():
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
 @app.on_event("startup")
 async def _ensure_trading_schema():
-    # Clean up any stray materialized view/table to avoid warnings
     try:
         await database.execute("DROP MATERIALIZED VIEW IF EXISTS v_latest_settle")
         await database.execute("DROP TABLE IF EXISTS v_latest_settle")
@@ -450,24 +463,21 @@ async def _ensure_trading_schema():
 @app.on_event("startup")
 async def _ensure_trading_hardening():
     ddl = [
-        # risk columns + block flag
         """
         ALTER TABLE margin_accounts
         ADD COLUMN IF NOT EXISTS risk_limit_open_lots NUMERIC NOT NULL DEFAULT 50,
         ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT FALSE;
         """,
-        # append-only orders audit
         """
         CREATE TABLE IF NOT EXISTS orders_audit (
           id UUID PRIMARY KEY,
           order_id UUID NOT NULL,
-          event TEXT NOT NULL,               -- NEW | PARTIAL | FILLED | CANCELLED | MODIFY (free text)
+          event TEXT NOT NULL,
           qty_open NUMERIC NOT NULL,
           reason TEXT,
           at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
-        # listing trading status
         """
         ALTER TABLE futures_listings
         ADD COLUMN IF NOT EXISTS trading_status TEXT NOT NULL DEFAULT 'Trading',
@@ -484,7 +494,6 @@ async def _ensure_trading_hardening():
 @app.on_event("startup")
 async def _ensure_inventory_schema():
     ddl = [
-        # Items
         """
         CREATE TABLE IF NOT EXISTS inventory_items (
           seller TEXT NOT NULL,
@@ -501,7 +510,6 @@ async def _ensure_inventory_schema():
           PRIMARY KEY (seller, sku)
         );
         """,
-        # Movements
         """
         CREATE TABLE IF NOT EXISTS inventory_movements (
           seller TEXT NOT NULL,
@@ -513,7 +521,6 @@ async def _ensure_inventory_schema():
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
-        # Optional ingest log
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
           id BIGSERIAL PRIMARY KEY,
@@ -528,7 +535,6 @@ async def _ensure_inventory_schema():
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
-        # Available view
         """
         CREATE OR REPLACE VIEW inventory_available AS
         SELECT
@@ -550,6 +556,73 @@ async def _ensure_inventory_schema():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
+
+class InventoryRowOut(BaseModel):
+    seller: str
+    sku: str
+    description: Optional[str] = None
+    uom: str
+    location: Optional[str] = None
+    qty_on_hand: float
+    qty_reserved: float
+    qty_available: float
+    qty_committed: float
+    updated_at: datetime
+
+from typing import List  # already imported at top
+
+@app.get(
+    "/inventory",
+    tags=["Inventory"],
+    summary="List inventory (available view)",
+    response_model=List[InventoryRowOut],   # <-- change _List -> List
+    status_code=200
+)
+
+async def list_inventory(
+    seller: str = Query(..., description="Seller name"),
+    sku: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0)
+):
+    q = "SELECT * FROM inventory_available WHERE seller = :seller"
+    vals = {"seller": seller}
+    if sku:
+        q += " AND sku = :sku"
+        vals["sku"] = sku
+    q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
+    vals["limit"], vals["offset"] = limit, offset
+    rows = await database.fetch_all(q, vals)
+    return [InventoryRowOut(**dict(r)) for r in rows]
+
+@app.get("/inventory/movements/list",
+    tags=["Inventory"],
+    summary="List inventory movements",
+    description="Recent inventory movements. Filter by seller, sku, type, time range.",
+    status_code=200
+)
+async def list_movements(
+    seller: str = Query(...),
+    sku: Optional[str] = Query(None),
+    movement_type: Optional[str] = Query(None, description="upsert, adjust, reserve, unreserve, commit, ship, cancel, reconcile"),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    q = "SELECT * FROM inventory_movements WHERE seller=:seller"
+    vals = {"seller": seller, "limit": limit, "offset": offset}
+    if sku:
+        q += " AND sku=:sku"; vals["sku"] = sku
+    if movement_type:
+        q += " AND movement_type=:mt"; vals["mt"] = movement_type
+    if start:
+        q += " AND created_at >= :start"; vals["start"] = start
+    if end:
+        q += " AND created_at <= :end"; vals["end"] = end
+    q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    rows = await database.fetch_all(q, vals)
+    return [dict(r) for r in rows]
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -673,61 +746,10 @@ class BOLOut(BOLIn):
             "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
 
-# ========== INVENTORY API MODELS ==========
-MovementType = Literal['upsert','adjust','reserve','unreserve','commit','ship','cancel','reconcile']
-
-class UpsertItem(BaseModel):
-    sku: str
-    description: Optional[str] = None
-    uom: Optional[str] = "ton"
-    location: Optional[str] = None
-    qty_on_hand: float
-    external_id: Optional[str] = None
-
-class BulkUpsertBody(BaseModel):
-    source: str
-    seller: str
-    items: List[UpsertItem]
-
-class MovementEvent(BaseModel):
-    sku: str
-    movement_type: MovementType
-    qty: float
-    ref_contract: Optional[str] = None
-    meta: Optional[dict] = None
-
-class MovementBody(BaseModel):
-    source: str
-    seller: str
-    events: List[MovementEvent]
-
-class InventoryRowOut(BaseModel):
-    seller: str
-    sku: str
-    description: Optional[str] = None
-    uom: str
-    location: Optional[str] = None
-    qty_on_hand: float
-    qty_reserved: float
-    qty_available: float
-    qty_committed: float
-    updated_at: datetime
-
-# Optional tighter typing for updates
-ContractStatus = Literal["Pending","Signed","Dispatched","Fulfilled","Cancelled"]
-
-class ContractUpdate(BaseModel):
-    status: ContractStatus
-    signature: Optional[str] = None
-    class Config:
-        schema_extra = {"example":{"status":"Signed","signature":"JohnDoe123"}}
-
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
 
-# ===== Admin export helpers (CSV normalization + token) =====
-ADMIN_EXPORT_TOKEN = os.getenv("ADMIN_EXPORT_TOKEN", "")
-
+# ===== Admin export helpers =====
 def _normalize(v):
     if isinstance(v, (datetime, date)):
         return v.isoformat()
@@ -874,7 +896,7 @@ async def create_contract(contract: ContractIn):
         reserved = float(inv["qty_reserved"]) if inv else 0.0
         available = on_hand - reserved
         if available < qty:
-            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)." )
+            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
 
         await database.execute("""
             UPDATE inventory_items
@@ -978,8 +1000,11 @@ async def export_contracts_csv():
             r["signature"] or ""
         ])
     output.seek(0)
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
-                             headers={"Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'})
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'}
+    )
 
 @app.patch(
     "/contracts/{contract_id}/purchase",
@@ -1226,131 +1251,12 @@ async def get_all_bols_pg(
     status_code=200
 )
 async def inventory_bulk_upsert(body: dict, request: Request):
-    # ---- Minimal validation
+    # Minimal validation
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload")
-
-    # ---- HMAC only in prod
-    if _require_hmac_in_this_env():
-        raw = await request.body()
-        sig = request.headers.get("X-Signature", "")
-        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
-            raise HTTPException(401, "Bad signature")
-
-    # ---- Preflight schema (idempotent; safe to run every call)
-    preflight = [
-        # tables
-        """
-        CREATE TABLE IF NOT EXISTS inventory_items (
-          seller TEXT NOT NULL,
-          sku TEXT NOT NULL,
-          qty_on_hand NUMERIC NOT NULL DEFAULT 0,
-          qty_reserved NUMERIC NOT NULL DEFAULT 0,
-          qty_committed NUMERIC NOT NULL DEFAULT 0,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (seller, sku)
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS inventory_movements (
-          seller TEXT NOT NULL,
-          sku TEXT NOT NULL,
-          movement_type TEXT NOT NULL,
-          qty NUMERIC NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        """,
-        # add missing columns (older prod schemas)
-        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS description TEXT;",
-        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS uom TEXT;",
-        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS location TEXT;",
-        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS source TEXT;",
-        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS external_id TEXT;",
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS ref_contract TEXT;",
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS meta JSONB;"
-    ]
-    for stmt in preflight:
-        try:
-            await database.execute(stmt)
-        except Exception:
-            # ignore; we'll still attempt fallbacks below
-            pass
-
-    async with database.transaction():
-        for it in items:
-            sku = (it.get("sku") or "").strip()
-            if not sku:
-                continue
-            desc = it.get("description")
-            uom  = it.get("uom") or "ton"
-            loc  = it.get("location")
-            qty  = float(it.get("qty_on_hand") or 0.0)
-
-            # 1) Ensure row exists — try full column set, fall back to minimal PK
-            try:
-                await database.execute("""
-                    INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
-                    VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
-                    ON CONFLICT (seller, sku) DO NOTHING
-                """, {"seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
-                      "source": source, "external_id": it.get("external_id")})
-            except Exception:
-                await database.execute("""
-                    INSERT INTO inventory_items (seller, sku, qty_on_hand)
-                    VALUES (:seller,:sku,0)
-                    ON CONFLICT (seller, sku) DO NOTHING
-                """, {"seller": seller, "sku": sku})
-
-            # 2) Lock & read old for delta
-            prev = await database.fetch_one("""
-                SELECT qty_on_hand FROM inventory_items
-                WHERE seller=:seller AND sku=:sku
-                FOR UPDATE
-            """, {"seller": seller, "sku": sku})
-            old = float(prev["qty_on_hand"]) if prev else 0.0
-            delta = qty - old
-
-            # 3) Update absolute qty_on_hand — try with source, else without
-            try:
-                await database.execute("""
-                    UPDATE inventory_items
-                       SET qty_on_hand = :new,
-                           updated_at  = NOW(),
-                           source      = :source
-                     WHERE seller=:seller AND sku=:sku
-                """, {"new": qty, "source": source, "seller": seller, "sku": sku})
-            except Exception:
-                await database.execute("""
-                    UPDATE inventory_items
-                       SET qty_on_hand = :new,
-                           updated_at  = NOW()
-                     WHERE seller=:seller AND sku=:sku
-                """, {"new": qty, "seller": seller, "sku": sku})
-
-            # 4) Record movement — jsonb meta -> text meta -> no meta/ref_contract
-            meta_json = json.dumps({"from": old, "to": qty})
-            try:
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
-                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-            except Exception:
-                try:
-                    await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                        VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
-                    """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-                except Exception:
-                    await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty)
-                        VALUES (:seller,:sku,'upsert',:qty)
-                    """, {"seller": seller, "sku": sku, "qty": delta})
-
-    return {"ok": True, "count": len(items)}
-
 
     # HMAC only in production
     if _require_hmac_in_this_env():
@@ -1397,8 +1303,6 @@ async def inventory_bulk_upsert(body: dict, request: Request):
 
             # movement delta (build JSON in Python)
             meta_json = json.dumps({"from": old, "to": qty})
-
-            # Prefer JSONB; if meta is TEXT in this DB, fall back cleanly
             try:
                 await database.execute("""
                     INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
@@ -1627,14 +1531,14 @@ class OrderIn(BaseModel):
     account_id: str
     listing_id: str
     side: Literal["BUY","SELL"]
-    price: Optional[float] = None            # price ignored for MARKET
+    price: Optional[float] = None
     qty: float
     order_type: Literal["LIMIT","MARKET"] = "LIMIT"
     tif: Optional[str] = "GTC"
 
 class ModifyOrderIn(BaseModel):
-    price: Optional[float] = None            # omit to keep
-    qty: Optional[float] = None              # total desired qty (not delta)
+    price: Optional[float] = None
+    qty: Optional[float] = None
 
 class CancelOut(BaseModel):
     id: str
@@ -1648,7 +1552,6 @@ class BookSnapshot(BaseModel):
     bids: List[BookLevel]
     asks: List[BookLevel]
 
-# --- Helpers ---
 async def _get_contract_size(listing_id: str) -> float:
     row = await database.fetch_one("""
       SELECT fp.contract_size_tons
@@ -1711,7 +1614,6 @@ async def _require_listing_trading(listing_id: str):
     if r["trading_status"] != "Trading":
         raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
 
-# --- Place order + match (price-time FIFO) ---
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn):
     await _ensure_margin_account(ord_in.account_id)
@@ -1728,7 +1630,6 @@ async def place_order(ord_in: OrderIn):
         raise HTTPException(400, "price must be positive for LIMIT orders")
 
     async with database.transaction():
-        # Insert NEW order
         await database.execute("""
           INSERT INTO orders (id, account_id, listing_id, side, price, qty, qty_open, status, tif)
           VALUES (:id,:a,:l,:s,:p,:q,:q,'NEW',:tif)
@@ -1736,22 +1637,18 @@ async def place_order(ord_in: OrderIn):
               "s": side, "p": (0 if is_market else price), "q": qty, "tif": ord_in.tif or "GTC"})
         await _audit_order(order_id, "NEW", qty, "order accepted")
 
-        # Trading status gate
         await _require_listing_trading(ord_in.listing_id)
 
-        # Risk gate: account not blocked + open lots limit
         params = await _get_margin_params(ord_in.account_id)
         if params.get("is_blocked"):
             raise HTTPException(402, "account blocked pending margin call")
         open_lots = await _sum_open_lots(ord_in.account_id)
         limit_lots = float(params.get("risk_limit_open_lots", 50))
-        # Even for MARKET (IOC), enforce a cap to be safe
         if open_lots + qty > limit_lots:
             raise HTTPException(429, f"risk limit exceeded: {open_lots}+{qty}>{limit_lots}")
 
         remaining = qty
 
-        # Build opposing book
         if side == "BUY":
             if is_market:
                 opp = await database.fetch_all("""
@@ -1783,7 +1680,6 @@ async def place_order(ord_in: OrderIn):
                    FOR UPDATE
                 """, {"l": ord_in.listing_id, "p": price})
 
-        any_fill = False
         for row in opp:
             if remaining <= 0:
                 break
@@ -1791,14 +1687,12 @@ async def place_order(ord_in: OrderIn):
             if open_qty <= 0:
                 continue
 
-            # Trade at resting price
             trade_qty = min(remaining, open_qty)
             trade_px  = float(row["price"])
 
             buy_id  = order_id if side == "BUY" else row["id"]
             sell_id = row["id"]   if side == "BUY" else order_id
 
-            # Initial margin (simple: both sides pay initial_pct * notional)
             notional = trade_px * contract_size * trade_qty
 
             part_a = await database.fetch_one("""
@@ -1824,29 +1718,24 @@ async def place_order(ord_in: OrderIn):
             await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
             await _adjust_margin(part_b["aid"], -need_b, "initial_margin", row["id"])
 
-            # Record trade
             trade_id = str(uuid.uuid4())
             await database.execute("""
               INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
               VALUES (:id,:b,:s,:l,:px,:q)
             """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": ord_in.listing_id, "px": trade_px, "q": trade_qty})
 
-            # Update resting order
             new_open = open_qty - trade_qty
             new_status = "FILLED" if new_open <= 0 else "PARTIAL"
             await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
                                    {"qo": new_open, "st": new_status, "id": row["id"]})
             await _audit_order(row["id"], new_status, new_open, "matched")
 
-            # Update incoming order
             remaining -= trade_qty
             my_status = "FILLED" if remaining <= 0 else "PARTIAL"
             await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
                                    {"qo": remaining, "st": my_status, "id": order_id})
             await _audit_order(order_id, my_status, remaining, "matched")
-            any_fill = True
 
-        # MARKET orders are IOC: cancel any remainder
         if is_market and remaining > 0:
             await database.execute("UPDATE orders SET qty_open=0, status='CANCELLED' WHERE id=:id", {"id": order_id})
             await _audit_order(order_id, "CANCELLED", 0, "market IOC remainder")
@@ -1860,7 +1749,6 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
         raise HTTPException(400, "provide price and/or qty to modify")
 
     async with database.transaction():
-        # Lock the order
         row = await database.fetch_one("SELECT * FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
         if not row:
             raise HTTPException(404, "order not found")
@@ -1875,7 +1763,6 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
         old_open  = float(row["qty_open"])
         filled    = old_qty - old_open
 
-        # Desired new totals
         new_total = float(body.qty) if body.qty is not None else old_qty
         if new_total < filled:
             raise HTTPException(400, f"qty too low; already filled {filled}")
@@ -1883,7 +1770,6 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
         new_price = float(body.price) if body.price is not None else old_price
         new_open  = new_total - filled
 
-        # Risk: if working open increases, enforce open-lots cap
         delta_open = new_open - old_open
         if delta_open > 0:
             params = await _get_margin_params(account_id)
@@ -1894,15 +1780,12 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
             if open_lots + delta_open > limit_lots:
                 raise HTTPException(429, f"risk limit exceeded: {open_lots}+{delta_open}>{limit_lots}")
 
-        # Apply amendment
         new_status = "FILLED" if new_open <= 0 else ("PARTIAL" if filled > 0 else "NEW")
         await database.execute("""
           UPDATE orders SET price=:p, qty=:qt, qty_open=:qo, status=:st WHERE id=:id
         """, {"p": new_price, "qt": new_total, "qo": new_open, "st": new_status, "id": order_id})
         await _audit_order(order_id, "MODIFY", new_open, "amend price/qty")
 
-        # If still working and crosses, run matching pass
-        contract_size = await _get_contract_size(listing_id)
         remaining = new_open
         if remaining > 0:
             if side == "BUY":
@@ -1933,7 +1816,7 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
                 buy_id  = order_id if side == "BUY" else r["id"]
                 sell_id = r["id"]   if side == "BUY" else order_id
 
-                notional = trade_px * contract_size * trade_qty
+                notional = trade_px * (await _get_contract_size(listing_id)) * trade_qty
 
                 part_a = await database.fetch_one("""
                   SELECT o.account_id AS aid, m.balance, m.initial_pct
@@ -1958,21 +1841,18 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
                 await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
                 await _adjust_margin(part_b["aid"], -need_b, "initial_margin", r["id"])
 
-                # Trade
                 trade_id = str(uuid.uuid4())
                 await database.execute("""
                   INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
                   VALUES (:id,:b,:s,:l,:px,:q)
                 """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": listing_id, "px": trade_px, "q": trade_qty})
 
-                # Update resting
                 r_new_open = open_qty - trade_qty
                 r_status = "FILLED" if r_new_open <= 0 else "PARTIAL"
                 await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
                                        {"qo": r_new_open, "st": r_status, "id": r["id"]})
                 await _audit_order(r["id"], r_status, r_new_open, "matched")
 
-                # Update modified order
                 remaining -= trade_qty
                 my_status = "FILLED" if remaining <= 0 else ("PARTIAL" if filled > 0 or new_total != remaining else "NEW")
                 await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
@@ -1985,13 +1865,13 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
 @trade_router.delete("/orders/{order_id}", response_model=CancelOut, summary="Cancel remaining qty")
 async def cancel_order(order_id: str):
     async with database.transaction():
-      row = await database.fetch_one("SELECT status, qty_open FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
-      if not row:
-          raise HTTPException(404, "order not found")
-      if row["status"] in ("FILLED","CANCELLED") or float(row["qty_open"]) <= 0:
-          return {"id": order_id, "status": row["status"]}
-      await database.execute("UPDATE orders SET status='CANCELLED' WHERE id=:id", {"id": order_id})
-      await _audit_order(order_id, "CANCELLED", float(row["qty_open"]), "manual cancel")
+        row = await database.fetch_one("SELECT status, qty_open FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
+        if not row:
+            raise HTTPException(404, "order not found")
+        if row["status"] in ("FILLED","CANCELLED") or float(row["qty_open"]) <= 0:
+            return {"id": order_id, "status": row["status"]}
+        await database.execute("UPDATE orders SET status='CANCELLED' WHERE id=:id", {"id": order_id})
+        await _audit_order(order_id, "CANCELLED", float(row["qty_open"]), "manual cancel")
     return {"id": order_id, "status": "CANCELLED"}
 
 @trade_router.get("/book", response_model=BookSnapshot, summary="Order book snapshot (top levels)")
@@ -2098,7 +1978,7 @@ async def deposit(dep: DepositIn):
     return {"ok": True}
 
 class VariationRunIn(BaseModel):
-    mark_date: Optional[date] = None   # defaults to today
+    mark_date: Optional[date] = None
 
 @clearing_router.post("/variation_run", summary="Run daily variation margin across all accounts")
 async def run_variation(body: VariationRunIn):
