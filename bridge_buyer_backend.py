@@ -233,6 +233,43 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
+# ======= /AUTH ========
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+@app.post("/login", tags=["Auth"], summary="Login", description="DB-side bcrypt via pgcrypto: crypt($password, password_hash)")
+async def login(body: LoginIn, request: Request):
+    username = (body.username or "").strip()
+    password = body.password or ""
+
+    # DB-side bcrypt check (fast, no Python bcrypt needed)
+    row = await database.fetch_one(
+        """
+        SELECT username, role
+        FROM users
+        WHERE username = :u
+          AND password_hash = crypt(:p, password_hash)
+          AND COALESCE(is_active, TRUE) = TRUE
+        """,
+        {"u": username, "p": password}
+    )
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid credentials.")
+
+    # set session for server-rendered pages too
+    request.session["username"] = row["username"]
+    request.session["role"] = row["role"]
+
+    # front-end expects {role, redirect}
+    role = row["role"]
+    return {"role": role, "redirect": f"/{role}"}
+
+@app.post("/logout", tags=["Auth"], summary="Logout", description="Clears session cookie")
+async def logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
 # ===== FUTURES schema bootstrap =====
 @app.on_event("startup")
 async def _ensure_futures_schema():
@@ -1189,12 +1226,92 @@ async def get_all_bols_pg(
     status_code=200
 )
 async def inventory_bulk_upsert(body: dict, request: Request):
-    # Minimal validation for CI
+    # Minimal validation
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload")
+
+    # HMAC only in prod (same as before)
+    if _require_hmac_in_this_env():
+        raw = await request.body()
+        sig = request.headers.get("X-Signature", "")
+        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
+            raise HTTPException(401, "Bad signature")
+
+    async with database.transaction():
+        for it in items:
+            sku = (it.get("sku") or "").strip()
+            if not sku:
+                continue
+            desc = it.get("description")
+            uom  = it.get("uom") or "ton"
+            loc  = it.get("location")
+            qty  = float(it.get("qty_on_hand") or 0.0)
+
+            # 1) Ensure row exists — try full column set, fall back to minimal
+            try:
+                await database.execute("""
+                    INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
+                    VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
+                    ON CONFLICT (seller, sku) DO NOTHING
+                """, {"seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
+                      "source": source, "external_id": it.get("external_id")})
+            except Exception:
+                # minimal PK-only ensure
+                await database.execute("""
+                    INSERT INTO inventory_items (seller, sku, qty_on_hand)
+                    VALUES (:seller,:sku,0)
+                    ON CONFLICT (seller, sku) DO NOTHING
+                """, {"seller": seller, "sku": sku})
+
+            # 2) Lock & read old for delta
+            prev = await database.fetch_one("""
+                SELECT qty_on_hand FROM inventory_items
+                WHERE seller=:seller AND sku=:sku
+                FOR UPDATE
+            """, {"seller": seller, "sku": sku})
+            old = float(prev["qty_on_hand"]) if prev else 0.0
+            delta = qty - old
+
+            # 3) Update absolute qty_on_hand — try with source, else without
+            try:
+                await database.execute("""
+                    UPDATE inventory_items
+                       SET qty_on_hand = :new,
+                           updated_at  = NOW(),
+                           source      = :source
+                     WHERE seller=:seller AND sku=:sku
+                """, {"new": qty, "source": source, "seller": seller, "sku": sku})
+            except Exception:
+                await database.execute("""
+                    UPDATE inventory_items
+                       SET qty_on_hand = :new,
+                           updated_at  = NOW()
+                     WHERE seller=:seller AND sku=:sku
+                """, {"new": qty, "seller": seller, "sku": sku})
+
+            # 4) Record movement — jsonb meta -> text meta -> no meta/ref_contract
+            meta_json = json.dumps({"from": old, "to": qty})
+            try:
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
+                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+            except Exception:
+                try:
+                    await database.execute("""
+                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                        VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
+                    """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+                except Exception:
+                    await database.execute("""
+                        INSERT INTO inventory_movements (seller, sku, movement_type, qty)
+                        VALUES (:seller,:sku,'upsert',:qty)
+                    """, {"seller": seller, "sku": sku, "qty": delta})
+
+    return {"ok": True, "count": len(items)}
 
     # HMAC only in production
     if _require_hmac_in_this_env():
