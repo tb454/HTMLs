@@ -746,6 +746,18 @@ class BOLOut(BOLIn):
             "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
 
+# Optional tighter typing for updates
+ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
+
+class ContractUpdate(BaseModel):
+    status: ContractStatus
+    signature: Optional[str] = None
+    # pydantic v2: use json_schema_extra (formerly schema_extra)
+    class Config:
+        json_schema_extra = {
+            "example": {"status": "Signed", "signature": "JohnDoe123"}
+        }
+
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
 
