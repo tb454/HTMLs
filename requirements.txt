@@ -25,3 +25,4 @@ slowapi
 structlog
 sentry-sdk
 httpx>=0.27,<0.29
+itsdangerous
