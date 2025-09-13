@@ -622,6 +622,83 @@ async def list_movements(
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
 
+# -------- Inventory: Bulk Upsert (NEW) --------
+@app.post(
+    "/inventory/bulk_upsert",
+    tags=["Inventory"],
+    summary="Bulk upsert inventory items",
+    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
+    response_model=dict,
+    status_code=200
+)
+async def inventory_bulk_upsert(body: dict, request: Request):
+    # Minimal validation
+    source = (body.get("source") or "").strip()
+    seller = (body.get("seller") or "").strip()
+    items  = body.get("items") or []
+    if not (source and seller and isinstance(items, list)):
+        raise HTTPException(400, "invalid payload")
+
+    # HMAC only in production
+    if _require_hmac_in_this_env():
+        raw = await request.body()
+        sig = request.headers.get("X-Signature", "")
+        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
+            raise HTTPException(401, "Bad signature")
+
+    async with database.transaction():
+        for it in items:
+            sku = (it.get("sku") or "").strip()
+            if not sku:
+                continue
+            desc = it.get("description")
+            uom  = it.get("uom") or "ton"
+            loc  = it.get("location")
+            qty  = float(it.get("qty_on_hand") or 0.0)
+
+            # ensure row exists (no-op if present)
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
+                VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {
+                "seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
+                "source": source, "external_id": it.get("external_id")
+            })
+
+            # lock & read old quantity
+            prev = await database.fetch_one("""
+                SELECT qty_on_hand FROM inventory_items
+                WHERE seller=:seller AND sku=:sku
+                FOR UPDATE
+            """, {"seller": seller, "sku": sku})
+            old = float(prev["qty_on_hand"]) if prev else 0.0
+            delta = qty - old
+
+            # update absolute qty_on_hand
+            await database.execute("""
+                UPDATE inventory_items
+                   SET qty_on_hand = :new,
+                       updated_at  = NOW(),
+                       source      = :source
+                 WHERE seller=:seller AND sku=:sku
+            """, {"new": qty, "source": source, "seller": seller, "sku": sku})
+
+            # record movement (meta as jsonb; fallback to text if needed)
+            meta_json = json.dumps({"from": old, "to": qty})
+            try:
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
+                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+            except Exception:
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
+                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
+
+    return {"ok": True, "count": len(items)}
+
 @app.on_event("startup")
 async def _ensure_pgcrypto():
     try:
@@ -840,7 +917,6 @@ def is_replay(sig: str | None) -> bool:
     return False
 
 # ===== Link signing (itsdangerous) =====
-# Use a separate secret if you like; fall back to SESSION_SECRET.
 LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", os.getenv("SESSION_SECRET", "dev-only-secret"))
 _link_signer = URLSafeTimedSerializer(LINK_SIGNING_SECRET, salt="bridge-link-v1")
 
@@ -897,7 +973,7 @@ async def generate_bol_pdf(bol_id: str):
     draw("Weight (tons)", row["weight_tons"])
     draw("Price per ton", f"${row['price_per_unit']:.2f}")
     draw("Total Value", f"${row['total_value']:.2f}")
-    draw("Pickup Time", row["pickup_time"].isoformat())
+    draw("Pickup Time", row["pickup_time"].isoformat() if row["pickup_time"] else "—")
     draw("Delivery Time", row["delivery_time"].isoformat() if row["delivery_time"] else "—")
     draw("Carrier Name", row["carrier_name"])
     draw("Driver", row["carrier_driver"])
@@ -920,6 +996,128 @@ async def generate_bol_pdf(bol_id: str):
 
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
+
+@app.post(
+    "/bols",
+    response_model=BOLOut,
+    tags=["BOLs"],
+    summary="Create BOL",
+    status_code=201
+)
+async def create_bol_pg(bol: BOLIn, request: Request):
+    # Optional idempotency
+    idem_key = request.headers.get("Idempotency-Key")
+    if idem_key and idem_key in _idem_cache:
+        return _idem_cache[idem_key]
+
+    row = await database.fetch_one("""
+        INSERT INTO bols (
+            bol_id, contract_id, buyer, seller, material, weight_tons,
+            price_per_unit, total_value,
+            carrier_name, carrier_driver, carrier_truck_vin,
+            pickup_signature_base64, pickup_signature_time,
+            pickup_time, status
+        )
+        VALUES (
+            :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
+            :price_per_unit, :total_value,
+            :carrier_name, :carrier_driver, :carrier_truck_vin,
+            :pickup_sig_b64, :pickup_sig_time,
+            :pickup_time, 'Scheduled'
+        )
+        RETURNING *
+    """, {
+        "bol_id": str(uuid.uuid4()),
+        "contract_id": str(bol.contract_id),
+        "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
+        "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
+        "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
+        "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
+        "pickup_time": bol.pickup_time
+    })
+
+    resp = {
+        **bol.dict(),
+        "bol_id": row["bol_id"],
+        "status": row["status"],
+        "delivery_signature": None,
+        "delivery_time": None
+    }
+    if idem_key:
+        _idem_cache[idem_key] = resp
+    return resp
+
+@app.get(
+    "/bols",
+    response_model=List[BOLOut],
+    tags=["BOLs"],
+    summary="List BOLs",
+    description="Retrieve BOLs with optional filters (buyer, seller, material, status, contract_id, pickup date range).",
+    status_code=200
+)
+async def get_all_bols_pg(
+    buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    material: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    contract_id: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    q = "SELECT * FROM bols"
+    cond, vals = [], {}
+    if buyer:
+        cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
+    if seller:
+        cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
+    if material:
+        cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
+    if status:
+        cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
+    if contract_id:
+        cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
+    if start:
+        cond.append("pickup_time >= :start");        vals["start"] = start
+    if end:
+        cond.append("pickup_time <= :end");          vals["end"] = end
+    if cond:
+        q += " WHERE " + " AND ".join(cond)
+    q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
+    vals["limit"], vals["offset"] = limit, offset
+
+    rows = await database.fetch_all(q, vals)
+    out = []
+    for r in rows:
+        d = dict(r)
+        out.append({
+            "bol_id": d["bol_id"],
+            "contract_id": d["contract_id"],
+            "buyer": d.get("buyer") or "",
+            "seller": d.get("seller") or "",
+            "material": d.get("material") or "",
+            "weight_tons": float(d.get("weight_tons") or 0.0),
+            "price_per_unit": float(d.get("price_per_unit") or 0.0),
+            "total_value": float(d.get("total_value") or 0.0),
+            "carrier": {
+                "name": d.get("carrier_name") or "TBD",
+                "driver": d.get("carrier_driver") or "TBD",
+                "truck_vin": d.get("carrier_truck_vin") or "TBD",
+            },
+            "pickup_signature": {
+                "base64": d.get("pickup_signature_base64") or "",
+                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
+            },
+            "delivery_signature": (
+                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
+                if d.get("delivery_signature_base64") is not None else None
+            ),
+            "pickup_time": d.get("pickup_time"),
+            "delivery_time": d.get("delivery_time"),
+            "status": d.get("status") or "",
+        })
+    return out
 
 # -------- Public ticker (NEW, ungated) --------
 @app.get("/ticker", tags=["Market"], summary="Public ticker snapshot")
@@ -2063,4 +2261,3 @@ async def run_variation(body: VariationRunIn):
 
 app.include_router(clearing_router)
 # =================== /CLEARING (Margin & Variation) =====================
-
