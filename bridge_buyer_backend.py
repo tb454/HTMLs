@@ -23,6 +23,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 import re, time as _t
 import requests
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 # ===== ADDED =====
 from fastapi import APIRouter
@@ -578,7 +579,6 @@ from typing import List  # already imported at top
     response_model=List[InventoryRowOut],   # <-- change _List -> List
     status_code=200
 )
-
 async def list_inventory(
     seller: str = Query(..., description="Seller name"),
     sku: Optional[str] = Query(None),
@@ -791,6 +791,12 @@ def _is_admin_session(request: Request) -> bool:
     except Exception:
         return False
 
+# ===== Admin gate helper (NEW) =====
+def _require_admin(request: Request):
+    # Only enforce in production so local dev stays easy
+    if os.getenv("ENV","").lower()=="production" and request.session.get("role")!="admin":
+        raise HTTPException(403, "admin only")
+
 # ===== Webhook HMAC + replay protection =====
 def verify_sig(raw: bytes, header_sig: str, secret_env: str) -> bool:
     secret = os.getenv(secret_env, "")
@@ -813,6 +819,24 @@ def is_replay(sig: str | None) -> bool:
         return True
     REPLAY_CACHE[sig] = now
     return False
+
+# ===== Link signing (itsdangerous) =====
+# Use a separate secret if you like; fall back to SESSION_SECRET.
+LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", os.getenv("SESSION_SECRET", "dev-only-secret"))
+_link_signer = URLSafeTimedSerializer(LINK_SIGNING_SECRET, salt="bridge-link-v1")
+
+def make_signed_token(payload: dict) -> str:
+    """Create a signed token encoding a small payload (e.g., {'bol_id': ...})."""
+    return _link_signer.dumps(payload)
+
+def verify_signed_token(token: str, max_age_sec: int = 900) -> dict:
+    """Verify and load a signed token (default 15 min TTL)."""
+    try:
+        return _link_signer.loads(token, max_age=max_age_sec)
+    except SignatureExpired:
+        raise HTTPException(status_code=401, detail="Link expired")
+    except BadSignature:
+        raise HTTPException(status_code=401, detail="Bad link signature")
 
 # -------- Documents: BOL PDF --------
 @app.get(
@@ -877,6 +901,36 @@ async def generate_bol_pdf(bol_id: str):
 
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
+
+# -------- Public ticker (NEW, ungated) --------
+@app.get("/ticker", tags=["Market"], summary="Public ticker snapshot")
+async def public_ticker(listing_id: str):
+    last = await database.fetch_one("""
+      SELECT fm.mark_price AS last, fm.mark_date
+      FROM futures_marks fm
+      WHERE fm.listing_id=:l
+      ORDER BY fm.mark_date DESC
+      LIMIT 1
+    """, {"l": listing_id})
+    bid = await database.fetch_one("""
+      SELECT price, SUM(qty_open) qty FROM orders
+      WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+      GROUP BY price ORDER BY price DESC LIMIT 1
+    """, {"l": listing_id})
+    ask = await database.fetch_one("""
+      SELECT price, SUM(qty_open) qty FROM orders
+      WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+      GROUP BY price ORDER BY price ASC LIMIT 1
+    """, {"l": listing_id})
+    return {
+        "listing_id": listing_id,
+        "last": (float(last["last"]) if last and last["last"] is not None else None),
+        "last_date": (str(last["mark_date"]) if last else None),
+        "best_bid": (float(bid["price"]) if bid else None),
+        "best_bid_size": (float(bid["qty"]) if bid else None),
+        "best_ask": (float(ask["price"]) if ask else None),
+        "best_ask_size": (float(ask["qty"]) if ask else None),
+    }
 
 # -------- Contracts (with Inventory linkage) --------
 @app.post(
@@ -1146,190 +1200,12 @@ async def cancel_contract(contract_id: str):
 
     return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
 
-# -------- BOLs --------
-@app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
-async def create_bol_pg(bol: BOLIn, request: Request):
-    idem_key = request.headers.get("Idempotency-Key")
-    if idem_key and idem_key in _idem_cache:
-        return _idem_cache[idem_key]
-
-    row = await database.fetch_one("""
-        INSERT INTO bols (
-            bol_id, contract_id, buyer, seller, material, weight_tons,
-            price_per_unit, total_value,
-            carrier_name, carrier_driver, carrier_truck_vin,
-            pickup_signature_base64, pickup_signature_time,
-            pickup_time, status
-        )
-        VALUES (
-            :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
-            :price_per_unit, :total_value,
-            :carrier_name, :carrier_driver, :carrier_truck_vin,
-            :pickup_sig_b64, :pickup_sig_time,
-            :pickup_time, 'Scheduled'
-        )
-        RETURNING *
-    """, {
-        "bol_id": str(uuid.uuid4()),
-        "contract_id": str(bol.contract_id),
-        "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
-        "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
-        "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
-        "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
-        "pickup_time": bol.pickup_time
-    })
-    resp = {
-        **bol.dict(),
-        "bol_id": row["bol_id"],
-        "status": row["status"],
-        "delivery_signature": None,
-        "delivery_time": None
-    }
-    if idem_key:
-        _idem_cache[idem_key] = resp
-    return resp
-
-@app.get(
-    "/bols",
-    response_model=List[BOLOut],
-    tags=["BOLs"],
-    summary="List BOLs",
-    description="Retrieve BOLs with optional filters (buyer, seller, material, status, contract_id, pickup date range).",
-    status_code=200
-)
-async def get_all_bols_pg(
-    buyer: Optional[str] = Query(None),
-    seller: Optional[str] = Query(None),
-    material: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    contract_id: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    q = "SELECT * FROM bols"
-    cond, vals = [], {}
-    if buyer:       cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
-    if seller:      cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
-    if material:    cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
-    if status:      cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
-    if contract_id: cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
-    if start:       cond.append("pickup_time >= :start");        vals["start"] = start
-    if end:         cond.append("pickup_time <= :end");          vals["end"] = end
-    if cond:
-        q += " WHERE " + " AND ".join(cond)
-    q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
-    vals["limit"], vals["offset"] = limit, offset
-
-    rows = await database.fetch_all(q, vals)
-    out = []
-    for r in rows:
-        d = dict(r)
-        out.append({
-            "bol_id": d["bol_id"],
-            "contract_id": d["contract_id"],
-            "buyer": d.get("buyer") or "",
-            "seller": d.get("seller") or "",
-            "material": d.get("material") or "",
-            "weight_tons": float(d.get("weight_tons") or 0.0),
-            "price_per_unit": float(d.get("price_per_unit") or 0.0),
-            "total_value": float(d.get("total_value") or 0.0),
-            "carrier": {
-                "name": d.get("carrier_name") or "TBD",
-                "driver": d.get("carrier_driver") or "TBD",
-                "truck_vin": d.get("carrier_truck_vin") or "TBD",
-            },
-            "pickup_signature": {
-                "base64": d.get("pickup_signature_base64") or "",
-                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
-            },
-            "delivery_signature": (
-                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
-                if d.get("delivery_signature_base64") is not None else None
-            ),
-            "pickup_time": d.get("pickup_time"),
-            "delivery_time": d.get("delivery_time"),
-            "status": d.get("status") or "",
-        })
-    return out
-
-@app.post(
-    "/inventory/bulk_upsert",
-    tags=["Inventory"],
-    summary="Bulk upsert inventory items",
-    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
-    response_model=dict,
-    status_code=200
-)
-async def inventory_bulk_upsert(body: dict, request: Request):
-    # Minimal validation
-    source = (body.get("source") or "").strip()
-    seller = (body.get("seller") or "").strip()
-    items  = body.get("items") or []
-    if not (source and seller and isinstance(items, list)):
-        raise HTTPException(400, "invalid payload")
-
-    # HMAC only in production
-    if _require_hmac_in_this_env():
-        raw = await request.body()
-        sig = request.headers.get("X-Signature", "")
-        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
-            raise HTTPException(401, "Bad signature")
-
-    async with database.transaction():
-        for it in items:
-            sku = (it.get("sku") or "").strip()
-            if not sku:
-                continue
-            desc = it.get("description")
-            uom  = it.get("uom") or "ton"
-            loc  = it.get("location")
-            qty  = float(it.get("qty_on_hand") or 0.0)
-
-            # ensure row
-            await database.execute("""
-                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
-                VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
-                ON CONFLICT (seller, sku) DO NOTHING
-            """, {"seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
-                  "source": source, "external_id": it.get("external_id")})
-
-            # read old (for delta)
-            prev = await database.fetch_one("""
-                SELECT qty_on_hand FROM inventory_items
-                WHERE seller=:seller AND sku=:sku
-                FOR UPDATE
-            """, {"seller": seller, "sku": sku})
-            old = float(prev["qty_on_hand"]) if prev else 0.0
-            delta = qty - old
-
-            # update absolute qty_on_hand
-            await database.execute("""
-                UPDATE inventory_items
-                   SET qty_on_hand = :new,
-                       updated_at  = NOW(),
-                       source      = :source
-                 WHERE seller=:seller AND sku=:sku
-            """, {"new": qty, "source": source, "seller": seller, "sku": sku})
-
-            # movement delta (build JSON in Python)
-            meta_json = json.dumps({"from": old, "to": qty})
-            try:
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
-                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-            except Exception:
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
-                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-
-    return {"ok": True, "count": len(items)}
-
 # =============== FUTURES (Admin) ===============
-futures_router = APIRouter(prefix="/admin/futures", tags=["Futures"])
+futures_router = APIRouter(
+    prefix="/admin/futures",
+    tags=["Futures"],
+    dependencies=[Depends(_require_admin)]
+)
 
 class ProductIn(BaseModel):
     symbol_root: str
@@ -1488,6 +1364,59 @@ async def expire_listing(listing_id: str):
     """, {"id": listing_id})
     return {"ok": True, "listing_id": listing_id, "status": "Expired"}
 
+@futures_router.post("/series/{listing_id}/finalize", summary="Finalize cash settlement at expiry")
+async def finalize_series(listing_id: str, mark_date: Optional[date] = None):
+    dt = mark_date or _date.today()
+
+    cur = await database.fetch_one("""
+      SELECT mark_price FROM futures_marks
+      WHERE listing_id=:l AND mark_date <= :d
+      ORDER BY mark_date DESC LIMIT 1
+    """, {"l": listing_id, "d": dt})
+    if not cur or cur["mark_price"] is None:
+        raise HTTPException(400, "no settlement mark available")
+
+    prev = await database.fetch_one("""
+      SELECT mark_price FROM futures_marks
+      WHERE listing_id=:l AND mark_date < :d
+      ORDER BY mark_date DESC LIMIT 1
+    """, {"l": listing_id, "d": dt})
+    if not prev or prev["mark_price"] is None:
+        raise HTTPException(400, "no prior mark to settle against")
+
+    px_t, px_y = float(cur["mark_price"]), float(prev["mark_price"])
+
+    cs = await database.fetch_one("""
+      SELECT fp.contract_size_tons AS cs
+      FROM futures_listings fl
+      JOIN futures_products fp ON fp.id = fl.product_id
+      WHERE fl.id=:l
+    """, {"l": listing_id})
+    if not cs:
+        raise HTTPException(404, "listing/product not found for settlement")
+    contract_size = float(cs["cs"])
+
+    pos = await database.fetch_all("""
+      SELECT account_id, net_qty
+      FROM positions
+      WHERE listing_id=:l
+    """, {"l": listing_id})
+
+    async with database.transaction():
+        for r in pos:
+            pnl = (px_t - px_y) * float(r["net_qty"]) * contract_size
+            if pnl != 0.0:
+                await _adjust_margin(str(r["account_id"]), pnl, "final_settlement", None)
+
+        await database.execute("""
+          UPDATE futures_listings SET trading_status='Expired', status='Expired' WHERE id=:l
+        """, {"l": listing_id})
+        await database.execute("""
+          UPDATE orders SET status='CANCELLED' WHERE listing_id=:l AND status IN ('NEW','PARTIAL')
+        """, {"l": listing_id})
+
+    return {"ok": True, "listing_id": listing_id, "final_price": px_t, "previous_price": px_y}
+
 @futures_router.post("/marks/publish", summary="Publish an official settlement/mark for a listing")
 async def publish_mark(body: PublishMarkIn):
     mark_price, method = await _compute_mark_for_listing(body.listing_id, body.mark_date)
@@ -1626,6 +1555,30 @@ async def _require_listing_trading(listing_id: str):
     if r["trading_status"] != "Trading":
         raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
 
+# ---- MARKET price-protection helpers (NEW) ----
+PRICE_BAND_PCT = float(os.getenv("PRICE_BAND_PCT", "0.10"))  # 10% default band
+
+async def _ref_price_for(listing_id: str) -> Optional[float]:
+    # Prefer official marks
+    r = await database.fetch_one("""
+      SELECT mark_price FROM futures_marks
+      WHERE listing_id=:l ORDER BY mark_date DESC LIMIT 1
+    """, {"l": listing_id})
+    if r and r["mark_price"] is not None:
+        return float(r["mark_price"])
+    # Fallback to simple mid from top-of-book
+    bid = await database.fetch_one("""
+      SELECT price FROM orders WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+      ORDER BY price DESC LIMIT 1
+    """, {"l": listing_id})
+    ask = await database.fetch_one("""
+      SELECT price FROM orders WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+      ORDER BY price ASC LIMIT 1
+    """, {"l": listing_id})
+    if bid and ask:
+        return (float(bid["price"]) + float(ask["price"])) / 2.0
+    return float(bid["price"]) if bid else (float(ask["price"]) if ask else None)
+
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn):
     await _ensure_margin_account(ord_in.account_id)
@@ -1661,14 +1614,27 @@ async def place_order(ord_in: OrderIn):
 
         remaining = qty
 
+        # --- market price protection (guard band) ---
+        cap_min = cap_max = None
+        if is_market:
+            ref = await _ref_price_for(ord_in.listing_id)
+            if ref is not None:
+                lo = ref * (1.0 - PRICE_BAND_PCT)
+                hi = ref * (1.0 + PRICE_BAND_PCT)
+                if side == "BUY":
+                    cap_max = hi   # do not execute above cap_max
+                else:
+                    cap_min = lo   # do not execute below cap_min
+
         if side == "BUY":
             if is_market:
                 opp = await database.fetch_all("""
                   SELECT * FROM orders
                    WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+                     AND (:cap_max IS NULL OR price <= :cap_max)
                    ORDER BY price ASC, created_at ASC
                    FOR UPDATE
-                """, {"l": ord_in.listing_id})
+                """, {"l": ord_in.listing_id, "cap_max": cap_max})
             else:
                 opp = await database.fetch_all("""
                   SELECT * FROM orders
@@ -1681,9 +1647,10 @@ async def place_order(ord_in: OrderIn):
                 opp = await database.fetch_all("""
                   SELECT * FROM orders
                    WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+                     AND (:cap_min IS NULL OR price >= :cap_min)
                    ORDER BY price DESC, created_at ASC
                    FOR UPDATE
-                """, {"l": ord_in.listing_id})
+                """, {"l": ord_in.listing_id, "cap_min": cap_min})
             else:
                 opp = await database.fetch_all("""
                   SELECT * FROM orders
@@ -1701,6 +1668,13 @@ async def place_order(ord_in: OrderIn):
 
             trade_qty = min(remaining, open_qty)
             trade_px  = float(row["price"])
+
+            # price cap enforcement for market orders
+            if is_market:
+                if side == "BUY" and cap_max is not None and trade_px > cap_max:
+                    break
+                if side == "SELL" and cap_min is not None and trade_px < cap_min:
+                    break
 
             buy_id  = order_id if side == "BUY" else row["id"]
             sell_id = row["id"]   if side == "BUY" else order_id
@@ -1783,10 +1757,17 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
         new_open  = new_total - filled
 
         delta_open = new_open - old_open
+        # Early initial-margin check on increased exposure (NEW)
         if delta_open > 0:
             params = await _get_margin_params(account_id)
             if params.get("is_blocked"):
                 raise HTTPException(402, "account blocked pending margin call")
+            contract_size = await _get_contract_size(listing_id)
+            est_notional = new_price * contract_size * delta_open
+            need = float(params["initial_pct"]) * est_notional
+            if float(params["balance"]) < need:
+                raise HTTPException(402, f"insufficient initial margin for modification; need ≥ {need:.2f}")
+
             open_lots = await _sum_open_lots(account_id)
             limit_lots = float(params.get("risk_limit_open_lots", 50))
             if open_lots + delta_open > limit_lots:
@@ -2063,3 +2044,4 @@ async def run_variation(body: VariationRunIn):
 
 app.include_router(clearing_router)
 # =================== /CLEARING (Margin & Variation) =====================
+
