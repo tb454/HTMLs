@@ -570,8 +570,6 @@ class InventoryRowOut(BaseModel):
     qty_committed: float
     updated_at: datetime
 
-from typing import List  # already imported at top
-
 @app.get(
     "/inventory",
     tags=["Inventory"],
@@ -623,6 +621,27 @@ async def list_movements(
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
+
+@app.on_event("startup")
+async def _ensure_pgcrypto():
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    except Exception as e:
+        logger.warn("pgcrypto_ext_failed", err=str(e))
+
+@app.on_event("startup")
+async def _ensure_perf_indexes():
+    ddl = [
+        "CREATE INDEX IF NOT EXISTS idx_contracts_mat_status ON contracts(material, created_at DESC, status)",
+        "CREATE INDEX IF NOT EXISTS idx_inv_mov_sku_time ON inventory_movements(seller, sku, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_acct_status ON orders(account_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_audit_order_time ON orders_audit(order_id, at DESC)",
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn('index_bootstrap_failed', sql=s[:80], err=str(e))
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
