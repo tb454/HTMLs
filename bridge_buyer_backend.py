@@ -260,9 +260,13 @@ async def favicon():
     return Response(status_code=204)
 
 # -------- Health --------
-@app.get("/healthz", tags=["Health"], summary="Health Check", description="Simple health check to confirm service uptime.", status_code=200)
+@app.get("/healthz", tags=["Health"], summary="Health Check")
 async def healthz():
-    return {"ok": True, "service": "bridge-buyer"}
+    try:
+        await database.execute("SELECT NOW()")
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
 
 # -------- Database setup --------
 DATABASE_URL = os.getenv("DATABASE_URL")
