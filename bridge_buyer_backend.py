@@ -25,22 +25,20 @@ import re, time as _t
 import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
-
-# ===== ADDED =====
 from fastapi import APIRouter
 from datetime import date as _date
-# ===== /ADDED =====
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 import structlog, time
 
-# rate limiting
+# rate limiting (imports only here; init happens after ProxyHeaders)
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware  
+from slowapi.middleware import SlowAPIMiddleware
 
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -68,10 +66,32 @@ app = FastAPI(
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
 
-# =====  rate limiting =====
+# ===== Trusted hosts + session cookie =====
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
+
+prod = os.getenv("ENV", "development").lower() == "production"
+allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
+if not prod or allow_local:
+    allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
+    https_only=prod,
+    same_site="lax",
+    max_age=60*60*8,
+)
+
+# Make client IP visible behind proxies/CDN so SlowAPI uses the real address
+if prod:
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+# =====  rate limiting (init AFTER ProxyHeaders; keep ONLY this block) =====
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)  # <- add this
+app.add_middleware(SlowAPIMiddleware)
 
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
@@ -107,24 +127,6 @@ async def prices_copper_last():
         last = 4.19
         return {"last": last, "base_minus_025": round(last - 0.25, 4), "note": f"fallback: {e.__class__.__name__}"}
 
-# ===== Trusted hosts + session cookie =====
-allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
-
-prod = os.getenv("ENV", "development").lower() == "production"
-allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
-if not prod or allow_local:
-    allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
-
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
-# (Hardened session cookie in prod)
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
-    https_only=prod,
-    same_site="lax",
-    max_age=60*60*8
-)
-
 # ===== DB bootstrap for CI/staging =====
 import sqlalchemy
 from sqlalchemy import text as _sqltext
@@ -132,10 +134,7 @@ from sqlalchemy import text as _sqltext
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     """Create minimal tables needed for app/tests when ENV is non-prod."""
     ddl = """
-    -- Extensions commonly available on Supabase; safe if already installed
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-    -- USERS table (minimal columns the app expects)
     CREATE TABLE IF NOT EXISTS public.users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email TEXT UNIQUE NOT NULL,
@@ -143,12 +142,9 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
         role TEXT NOT NULL CHECK (role IN ('admin','buyer','seller')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
-    -- Optional seed admin (no-op if present)
     """
     with engine.begin() as conn:
         conn.exec_driver_sql(ddl)
-
         # seed an admin user if none exists (bcrypt is generated in Python)
         try:
             default_email = "admin@example.com"
@@ -162,7 +158,6 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
                 {"e": default_email, "p": default_pass},
             )
         except Exception:
-            # Don't ever fail bootstrap because of seeding
             pass
 # ===== /DB bootstrap =====
 
@@ -220,6 +215,7 @@ async def privacy_page():
     return FileResponse("static/legal/privacy.html")
 
 # -------- Static HTML --------
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
