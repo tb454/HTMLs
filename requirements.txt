@@ -4,7 +4,6 @@ joblib
 fastapi==0.95.2
 uvicorn
 celery
-pydantic-settings==1.0.1
 sqlalchemy
 passlib[bcrypt]
 pyjwt
