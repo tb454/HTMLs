@@ -4,6 +4,7 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
@@ -15,31 +16,86 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U postgres"
           --health-interval=5s --health-timeout=5s --health-retries=20
+
     env:
       ENV: ci
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
+      SESSION_SECRET: test-secret
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python -m pip install --upgrade pip
-      - run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest fastapi "sqlalchemy" "asyncpg" "psycopg[binary]" \
-                      reportlab itsdangerous slowapi structlog \
-                      prometheus-client sentry-sdk python-multipart uvicorn
-      - name: Bootstrap CI DB (optional)
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install pytest fastapi sqlalchemy "databases[postgres]" \
+                      asyncpg "psycopg[binary]" passlib[bcrypt] \
+                      python-dotenv requests reportlab itsdangerous \
+                      slowapi structlog prometheus-client python-multipart
+
+      - name: Bootstrap CI DB
         run: |
           python - <<'PY'
-          import os, psycopg
-          with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as con:
+          import os
+          from passlib.hash import bcrypt
+          import psycopg
+
+          dsn = os.environ["DATABASE_URL"]
+
+          SCHEMA_SQL = """
+          CREATE TABLE IF NOT EXISTS users (
+            id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            email         text UNIQUE NOT NULL,
+            password_hash text NOT NULL,
+            role          text NOT NULL CHECK (role IN ('admin','seller','buyer')),
+            created_at    timestamptz NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS contracts (
+            id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            buyer        text NOT NULL,
+            seller       text NOT NULL,
+            material     text NOT NULL,
+            status       text NOT NULL DEFAULT 'Pending'
+                          CHECK (status IN ('Pending','Signed','Dispatched','Fulfilled','Cancelled')),
+            created_at   timestamptz NOT NULL DEFAULT now(),
+            updated_at   timestamptz NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS bols (
+            id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            contract_id  uuid REFERENCES contracts(id) ON DELETE CASCADE,
+            number       text NOT NULL,
+            status       text NOT NULL DEFAULT 'Created',
+            created_at   timestamptz NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS idempotency_keys (
+            key         text PRIMARY KEY,
+            created_at  timestamptz NOT NULL DEFAULT now()
+          );
+          CREATE TABLE IF NOT EXISTS webhook_events (
+            id               bigserial PRIMARY KEY,
+            source           text,
+            headers_json     jsonb,
+            body_json        jsonb,
+            signature_valid  boolean,
+            created_at       timestamptz NOT NULL DEFAULT now()
+          );
+          """
+          EXTENSIONS_SQL = "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+          with psycopg.connect(dsn, autocommit=True) as con:
+              con.execute(EXTENSIONS_SQL)
+              con.execute(SCHEMA_SQL)
+              email, pw, role = "admin@example.com", bcrypt.hash("admin123"), "admin"
               con.execute("""
-              CREATE TABLE IF NOT EXISTS idempotency_keys (key text PRIMARY KEY, created_at timestamptz DEFAULT now());
-              CREATE TABLE IF NOT EXISTS webhook_events (
-                id bigserial PRIMARY KEY,
-                source text, headers_json jsonb, body_json jsonb,
-                signature_valid boolean, created_at timestamptz DEFAULT now()
-              );
-              """)
+                INSERT INTO users (email, password_hash, role)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (email) DO NOTHING;
+              """, (email, pw, role))
+          print("CI DB bootstrap complete.")
           PY
-      - run: pytest -q
+
+      - name: Run tests
+        run: pytest -q
