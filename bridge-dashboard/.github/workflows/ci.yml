@@ -20,7 +20,6 @@ jobs:
     env:
       ENV: ci
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
-      # psql convenience vars:
       PGHOST: localhost
       PGPORT: "5432"
       PGDATABASE: bridge
@@ -35,9 +34,8 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          # If you have a requirements.txt, this will use it; otherwise we install what tests need.
           pip install -r requirements.txt || true
-          pip install pytest fastapi sqlalchemy "databases[postgres]" asyncpg \
+          pip install pytest fastapi "sqlalchemy" "databases[postgres]" asyncpg \
                      "psycopg[binary]" passlib[bcrypt] python-dotenv requests \
                      reportlab itsdangerous slowapi structlog prometheus-client \
                      python-multipart uvicorn
@@ -45,13 +43,13 @@ jobs:
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - name: Bootstrap schema with psql (users/contracts/bols + extensions)
+      - name: Bootstrap schema (same DB the app uses)
         run: |
-          # Ensure extension available (pgcrypto exists in postgres:16)
-          psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          echo "Using $DATABASE_URL"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-          # Create tables (id uses gen_random_uuid())
-          psql -v ON_ERROR_STOP=1 <<'SQL'
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          -- === USERS (your app hard-fails if missing) ===
           CREATE TABLE IF NOT EXISTS users (
             id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             email         text UNIQUE NOT NULL,
@@ -60,6 +58,7 @@ jobs:
             created_at    timestamptz NOT NULL DEFAULT now()
           );
 
+          -- Minimal tables used by tests/endpoints
           CREATE TABLE IF NOT EXISTS contracts (
             id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             buyer        text NOT NULL,
@@ -74,7 +73,15 @@ jobs:
           CREATE TABLE IF NOT EXISTS bols (
             id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             contract_id  uuid REFERENCES contracts(id) ON DELETE CASCADE,
-            number       text NOT NULL,
+            buyer        text,
+            seller       text,
+            material     text,
+            weight_tons  numeric,
+            price_per_unit numeric,
+            total_value  numeric,
+            pickup_time  timestamptz,
+            carrier      jsonb,
+            pickup_signature jsonb,
             status       text NOT NULL DEFAULT 'Created',
             created_at   timestamptz NOT NULL DEFAULT now()
           );
@@ -93,14 +100,14 @@ jobs:
             created_at       timestamptz NOT NULL DEFAULT now()
           );
 
-          -- Seed admin (idempotent)
+          -- Seed one admin (safe if already present)
           INSERT INTO users (email, password_hash, role)
           VALUES ('admin@example.com', '$2b$12$2Gm2pTprQFOi6eZy8XgY2e4qz4Q4rE9o7QbP1m1o6K6a8y8vQ0a6i', 'admin')
           ON CONFLICT (email) DO NOTHING;
           SQL
 
       - name: Show tables (debug)
-        run: psql -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;"
+        run: psql "$DATABASE_URL" -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;"
 
       - name: Run tests
         run: pytest -q
