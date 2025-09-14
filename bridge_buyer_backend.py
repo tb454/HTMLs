@@ -743,6 +743,48 @@ async def list_movements(
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
 
+# -------- Inventory: Finished Goods snapshot (for seller.html) --------
+class FinishedRow(BaseModel):
+    sku: str
+    wip_lbs: int
+    finished_lbs: int
+    avg_cost_per_lb: Optional[float] = None  # placeholder until costing is wired
+
+@app.get(
+    "/inventory/finished_goods",
+    tags=["Inventory"],
+    summary="Finished goods by SKU for a seller (in pounds)",
+    status_code=200
+)
+async def finished_goods(seller: str = Query(..., description="Seller (yard) name")) -> List[FinishedRow]:
+    """
+    Available finished = max(qty_on_hand - qty_reserved - qty_committed, 0) in TONS → return as POUNDS.
+    wip_lbs is 0 until you split WIP tracking.
+    """
+    rows = await database.fetch_all(
+        """
+        SELECT sku,
+               GREATEST(qty_on_hand - qty_reserved - qty_committed, 0) AS available_tons
+          FROM inventory_items
+         WHERE seller = :seller
+           AND (qty_on_hand - qty_reserved - qty_committed) > 0
+         ORDER BY sku
+        """,
+        {"seller": seller}
+    )
+
+    out: List[FinishedRow] = []
+    for r in rows:
+        avail_tons = float(r["available_tons"] or 0.0)
+        avail_lbs = int(round(avail_tons * 2000.0))
+        out.append(FinishedRow(
+            sku=r["sku"],
+            wip_lbs=0,
+            finished_lbs=max(0, avail_lbs),
+            avg_cost_per_lb=None
+        ))
+    return out
+
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
 @app.on_event("startup")
 async def _ensure_contracts_bols_schema():
@@ -1570,42 +1612,59 @@ async def create_contract(contract: ContractIn):
     qty = float(contract.weight_tons)
     seller = contract.seller.strip()
     sku = contract.material.strip()
+    cid = str(uuid.uuid4())  # create id up front so we can reference it in movements
 
     async with database.transaction():
+        # ensure inventory row exists
         await database.execute("""
             INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
             VALUES (:seller, :sku, 0, 0, 0)
             ON CONFLICT (seller, sku) DO NOTHING
         """, {"seller": seller, "sku": sku})
 
+        # check availability
         inv = await database.fetch_one("""
-            SELECT qty_on_hand, qty_reserved FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
-            FOR UPDATE
+            SELECT qty_on_hand, qty_reserved, qty_committed
+              FROM inventory_items
+             WHERE seller=:seller AND sku=:sku
+             FOR UPDATE
         """, {"seller": seller, "sku": sku})
-        on_hand = float(inv["qty_on_hand"]) if inv else 0.0
-        reserved = float(inv["qty_reserved"]) if inv else 0.0
-        available = on_hand - reserved
+        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
+        reserved  = float(inv["qty_reserved"]) if inv else 0.0
+        committed = float(inv["qty_committed"]) if inv else 0.0
+        available = on_hand - reserved - committed
         if available < qty:
-            raise HTTPException(status_code=409, detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)."
+            )
 
+        # reserve
         await database.execute("""
             UPDATE inventory_items
-            SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-            WHERE seller=:seller AND sku=:sku
+               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+             WHERE seller=:seller AND sku=:sku
         """, {"q": qty, "seller": seller, "sku": sku})
+
+        # movement (now linked to contract id)
         await database.execute("""
             INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-            VALUES (:seller, :sku, 'reserve', :q, NULL, :meta)
-        """, {"seller": seller, "sku": sku, "q": qty, "meta": json.dumps({"reason": "contract_create"})})
+            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
+        """, {
+            "seller": seller, "sku": sku, "q": qty, "cid": cid,
+            "meta": json.dumps({"reason": "contract_create"})
+        })
 
+        # create contract row using the same cid
         row = await database.fetch_one("""
             INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status)
             VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending')
             RETURNING *
-        """, {"id": str(uuid.uuid4()), **contract.dict()})
+        """, {"id": cid, **contract.dict()})
+
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create contract")
+
         return row
 
 @app.get(
