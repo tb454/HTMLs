@@ -125,6 +125,47 @@ app.add_middleware(
     max_age=60*60*8
 )
 
+# ===== DB bootstrap for CI/staging =====
+import sqlalchemy
+from sqlalchemy import text as _sqltext
+
+def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
+    """Create minimal tables needed for app/tests when ENV is non-prod."""
+    ddl = """
+    -- Extensions commonly available on Supabase; safe if already installed
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    -- USERS table (minimal columns the app expects)
+    CREATE TABLE IF NOT EXISTS public.users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin','buyer','seller')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Optional seed admin (no-op if present)
+    """
+    with engine.begin() as conn:
+        conn.exec_driver_sql(ddl)
+
+        # seed an admin user if none exists (bcrypt is generated in Python)
+        try:
+            default_email = "admin@example.com"
+            default_pass = bcrypt.hash("admin123!")  # only used in CI/staging
+            conn.execute(
+                _sqltext(
+                    "INSERT INTO public.users (email, password_hash, role) "
+                    "VALUES (:e, :p, 'admin') "
+                    "ON CONFLICT (email) DO NOTHING"
+                ),
+                {"e": default_email, "p": default_pass},
+            )
+        except Exception:
+            # Don't ever fail bootstrap because of seeding
+            pass
+# ===== /DB bootstrap =====
+
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
