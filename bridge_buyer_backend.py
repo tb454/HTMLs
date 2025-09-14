@@ -197,14 +197,6 @@ async def request_id_logging(request: Request, call_next):
     logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
     return response
 
-# =====  rate limiting =====
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-@app.exception_handler(RateLimitExceeded)
-async def ratelimit_handler(request, exc):
-    return PlainTextResponse("Too Many Requests", status_code=429)
-
 # =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
 async def _metrics_and_sentry():
