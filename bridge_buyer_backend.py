@@ -31,7 +31,7 @@ from datetime import date as _date
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.middleware import ProxyHeadersMiddleware
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 import structlog, time
 
 # rate limiting (imports only here; init happens after ProxyHeaders)
