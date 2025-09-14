@@ -1486,13 +1486,22 @@ async def get_all_bols_pg(
 ):
     q = "SELECT * FROM bols"
     cond, vals = [], {}
-    if buyer:       cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
-    if seller:      cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
-    if material:    cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
-    if status:      cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
-    if contract_id: cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
-    if start:       cond.append("pickup_time >= :start");        vals["start"] = start
-    if end:         cond.append("pickup_time <= :end");          vals["end"] = end
+
+    if buyer:
+        cond.append("buyer ILIKE :buyer");         vals["buyer"] = f"%{buyer}%"
+    if seller:
+        cond.append("seller ILIKE :seller");       vals["seller"] = f"%{seller}%"
+    if material:
+        cond.append("material ILIKE :material");   vals["material"] = f"%{material}%"
+    if status:
+        cond.append("status ILIKE :status");       vals["status"] = f"%{status}%"
+    if contract_id:
+        cond.append("contract_id = :contract_id"); vals["contract_id"] = contract_id
+    if start:
+        cond.append("pickup_time >= :start");      vals["start"] = start
+    if end:
+        cond.append("pickup_time <= :end");        vals["end"] = end
+
     if cond:
         q += " WHERE " + " AND ".join(cond)
     q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
@@ -1509,7 +1518,7 @@ async def get_all_bols_pg(
             "seller": d.get("seller") or "",
             "material": d.get("material") or "",
             "weight_tons": float(d.get("weight_tons") or 0.0),
-            "price_per_unit": float(d.get("price_per_unit") or 0.0),
+            "price_per_unit": float(d.get("price_per_unit") or 0.0),  # column name in bols
             "total_value": float(d.get("total_value") or 0.0),
             "carrier": {
                 "name": d.get("carrier_name") or "TBD",
@@ -1521,7 +1530,7 @@ async def get_all_bols_pg(
                 "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
             },
             "delivery_signature": (
-                {"base4": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
+                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
                 if d.get("delivery_signature_base64") is not None else None
             ),
             "pickup_time": d.get("pickup_time"),
@@ -1530,7 +1539,7 @@ async def get_all_bols_pg(
         })
     return out
 
-# -------- Public ticker (ungated) --------
+# -------- Public ticker (ungated) ------
 @app.get("/ticker", tags=["Market"], summary="Public ticker snapshot")
 async def public_ticker(listing_id: str):
     last = await database.fetch_one("""
