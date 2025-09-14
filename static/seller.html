@@ -73,7 +73,7 @@
     }
   </script>
 
-  <!-- Material arrays + pricing -->
+  <!-- Material arrays + pricing (kept; not used to fabricate inventory anymore) -->
   <script>
     const copperMaterials = ["Barley","#1","#2","#3"];
     const aluminumMaterials = ["AL6061_NewBareExtrusion","AL6061_ClipPlatePipe","AL6063_Secondary","AL6063_OldExtrusion","AL6063_Extrusion10/10","AL_PAS_Baled","AL_Cast_Clean","AL_RADS_CleanBaled","AL_RADS_DirtyBaled","AL_Sheet_CleanBaled","AL_WheelAuto_Clean","AL_WheelChrome_Clean","TruckWheel_Clean","AL_Wire_BareCATV","AL_Wire_NeopreneACSR","AL_Wire_ECPrepared","AL_MLC_Prepared"];
@@ -96,9 +96,9 @@
     function leadPrice(p){if(p==='Lead_Clean')return (2034/2000)*.718;if(p==='Lead_Range')return (2034/2000)*.728;return null;}
     function stainlessPrice(p){if(p==='SS304')return (15675/2000)*.0638;if(p==='SS316')return (15675/2000)*.1174;return null;}
     function eScrapPrice(){return .5;}
-    function insulatedWirePrice(p){const m={"ICW_LowGrade_ChristmasLights":.528,"ICW_LowGrade_ComputerWire25":.448,"ICW_LowGrade_CuCATV":1.008,"ICW_LowGrade_ExtCords35Up":.92,"ICW_LowGrade_MixedWire40Up":1.08,"ICW1_Heliax57_OpenEyeBaled":1.536,"ICW1_MCM85HG":2.536,"ICW1_Romex65_NoWeatherProof":1.904,"ICW1_THHN80":2.36,"ICW2_50Cat5TelWire":1.384,"ICW2_HarnessWireNoFuseBoxes":1.408,"ICW2_BX_Cable_AL":1.648,"ICW2_BX_Cable_FE24":.6};return 1.25*(m[p]??null);}
+    function insulatedWirePrice(p){const m={"ICW_LowGrade_ChristmasLights":.528,"ICW_LowGrade_ComputerWire25":.448,"ICW_LowGrade_CuCATV":1.008,"ICW_LowGrade_ExtCords35Up":.92,"ICW_LowGrade_MixedWire40Up":1.08,"ICW1_Heliax57_OpenEyeBaled":1.536,"ICW1_MCM85HG":2.536,"ICW1_Romex65_NoWeatherProof":1.904,"ICW1_THHN80":2.36,"ICW2_50Cat5TelWire":1.384,"ICW2_HarnessWireNoFuseBoxes":1.408,"ICW2_BX_Cable_FE24":.6};return 1.25*(m[p]??null);}
 
-    /* === Group mapping (removed undefined misc/radiator stubs) === */
+    /* === (Old) computed group mapping left in case you want grouping later; not used for inventory rows === */
     const computedCategoriesMapping = {
       "Copper":         { materials: copperMaterials,        pricingFunc: copperPrice },
       "Aluminum":       { materials: aluminumMaterials,      pricingFunc: aluminumPrice },
@@ -109,46 +109,6 @@
       "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
       "Steel":          { materials: steelMaterials,         pricingFunc: steelPrice }
     };
-
-    function updateGroupedComputedMaterialsInventory() {
-      const tableBody = document.querySelector('#greenspark-table tbody');
-      tableBody.querySelectorAll('tr[data-group]').forEach(r => r.remove());
-
-      for (let category in computedCategoriesMapping) {
-        const { materials, pricingFunc } = computedCategoriesMapping[category];
-
-        const groupRow = document.createElement('tr');
-        groupRow.setAttribute('data-group', category);
-        groupRow.classList.add('group-header');
-        groupRow.onclick = () => toggleGroup(category);
-        groupRow.innerHTML = `<td colspan="6">${category} <span style="float:right;">&#9660;</span></td>`;
-        tableBody.appendChild(groupRow);
-
-        materials.forEach(material => {
-          const price = pricingFunc(material);
-          if (price !== null) {
-            const wip = Math.floor(Math.random() * 10000) + 5000;
-            const finished = Math.floor(Math.random() * 20000) + 10000;
-            const total = wip + finished;
-            const avgCost = (price * 0.8).toFixed(2);
-            const totalPurchaseValue = (total * price).toFixed(2);
-
-            const subRow = document.createElement('tr');
-            subRow.setAttribute('data-group', category);
-            subRow.classList.add('group-sub');
-            subRow.style.display = 'none';
-            subRow.innerHTML = `
-              <td>${material} (${category})</td>
-              <td>${wip.toLocaleString()}</td>
-              <td>${finished.toLocaleString()}</td>
-              <td>${total.toLocaleString()}</td>
-              <td>$${avgCost}</td>
-              <td>$${Number(totalPurchaseValue).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>`;
-            tableBody.appendChild(subRow);
-          }
-        });
-      }
-    }
 
     function toggleGroup(category) {
       document.querySelectorAll(`tr.group-sub[data-group='${category}']`).forEach(row => {
@@ -436,17 +396,8 @@
         });
       }
 
-      // Build inventory table + totals
-      updateGroupedComputedMaterialsInventory();
-      updatePurchaseValues();
-
-      // copper base badge
-      try {
-        const badge = document.getElementById("copperBaseBadge");
-        if (badge && typeof window.copperBaseUSD === 'number') {
-          badge.textContent = `Cu base (COMEX-0.25): $${window.copperBaseUSD.toFixed(4)}/lb`;
-        }
-      } catch {}
+      // Build inventory table (real data) + totals (will populate when seller is known)
+      refreshFinishedFromInputs();
     });
 
     function updatePurchaseValues() {
@@ -491,6 +442,58 @@
     const endpoint = window.endpoint || "https://bridge-buyer.onrender.com";
     let offset = 0, limit = 50;
     const toISO = (d) => d ? new Date(d).toISOString() : undefined;
+
+    /* ==== NEW: finished-goods loader wired to backend ==== */
+    async function loadFinishedGoods(seller) {
+      if (!seller) return;
+
+      const tbody = document.querySelector('#greenspark-table tbody');
+      tbody.innerHTML = '';
+
+      try {
+        const r = await fetch(`${endpoint}/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
+        if (!r.ok) throw new Error(await r.text());
+        const rows = await r.json();
+
+        if (!rows.length) {
+          tbody.innerHTML = `<tr><td colspan="6" class="text-muted">No finished goods on file.</td></tr>`;
+        } else {
+          rows.forEach(item => {
+            const sku = item.sku || '';
+            const wip = Math.max(0, Number(item.wip_lbs ?? 0));
+            const finished = Math.max(0, Number(item.finished_lbs ?? 0));
+            const total = wip + finished;
+            const avgCost = Number(item.avg_cost_per_lb ?? 0) || 0;
+            const totalPurchaseValue = total * avgCost;
+
+            const tr = document.createElement('tr');
+            tr.classList.add('group-sub');
+            tr.innerHTML = `
+              <td>${sku}</td>
+              <td>${wip.toLocaleString()}</td>
+              <td>${finished.toLocaleString()}</td>
+              <td>${total.toLocaleString()}</td>
+              <td>${avgCost ? '$'+avgCost.toFixed(2) : '-'}</td>
+              <td>$${totalPurchaseValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+
+        updatePurchaseValues();
+      } catch (e) {
+        console.warn('loadFinishedGoods failed:', e);
+        tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Finished goods not available yet.</td></tr>`;
+        updatePurchaseValues();
+      }
+    }
+
+    function refreshFinishedFromInputs() {
+      const seller = (document.getElementById("sellerName")?.value || '').trim()
+                  || (document.getElementById('invDefaultSeller')?.value || '').trim();
+      if (seller) loadFinishedGoods(seller);
+    }
+    /* ===================================================== */
 
     async function renderRecentMovements(seller, material) {
       if (!seller || !material) return;
@@ -553,6 +556,8 @@
 
       await listContracts();
       renderRecentMovements(seller, material);
+      // NEW: refresh finished goods after reservation
+      refreshFinishedFromInputs();
     }
 
     async function listContracts() {
@@ -644,6 +649,9 @@
       } catch {
         document.getElementById('invUploadMsg').innerText = txt;
       }
+
+      // NEW: refresh finished goods after import
+      refreshFinishedFromInputs();
     }
 
     async function manualAddInventory() {
@@ -671,10 +679,21 @@
 
       alert('Inventory updated.');
       renderRecentMovements(seller, sku);
+      // NEW: refresh finished goods after manual add
+      refreshFinishedFromInputs();
     }
 
     document.addEventListener("DOMContentLoaded", wireSellerUI);
     document.addEventListener('DOMContentLoaded', () => {
+      // Try to seed seller input from header on first paint, then load
+      const userEl = document.getElementById("current-user");
+      const sellerEl = document.getElementById("sellerName");
+      if (userEl && sellerEl) {
+        const u = (userEl.textContent || '').replace("User:", "").trim();
+        if (u && u !== "Guest") sellerEl.value = u;
+      }
+      refreshFinishedFromInputs();
+
       document.getElementById('uploadInvBtn')?.addEventListener('click', uploadInvFile);
       document.getElementById('manualAddBtn')?.addEventListener('click', manualAddInventory);
       document.getElementById('dlTemplateBtn')?.addEventListener('click', (e) => {
@@ -703,6 +722,11 @@
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
         document.getElementById("current-user").innerText = `User: ${username}`;
+        // NEW: seed seller box and reload finished goods on login
+        const sellerEl = document.getElementById("sellerName");
+        if (sellerEl) sellerEl.value = username;
+        refreshFinishedFromInputs();
+
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
         if (data?.redirect) window.location.href = data.redirect;
       } catch (err) {
