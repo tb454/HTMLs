@@ -40,6 +40,7 @@ import structlog, time
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware  
 
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -66,6 +67,15 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
+
+# =====  rate limiting =====
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)  # <- add this
+
+@app.exception_handler(RateLimitExceeded)
+async def ratelimit_handler(request, exc):
+    return PlainTextResponse("Too Many Requests", status_code=429)
 
 # === Prices endpoint (after app is defined) ===
 @app.get(
