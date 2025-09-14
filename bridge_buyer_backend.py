@@ -759,13 +759,12 @@ async def _ensure_contracts_bols_schema():
         except Exception as e:
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 
-# -------- Inventory: Bulk Upsert (HMAC remains ON in prod) --------
+# -------- Inventory: Bulk Upsert (unit-aware, HMAC in prod, replay guard, logs) --------
 @app.post(
     "/inventory/bulk_upsert",
     tags=["Inventory"],
-    summary="Bulk upsert inventory items",
-    description="Partners push absolute qty_on_hand per SKU for a seller. Records delta in movements.",
-    response_model=dict,
+    summary="Bulk upsert inventory items (absolute, unit-aware)",
+    description="Partners push absolute qty_on_hand per (seller, sku). Uses HMAC in PROD; writes movements and ingest log.",
     status_code=200
 )
 @limiter.limit("60/minute")
@@ -775,15 +774,26 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
     if not (source and seller and isinstance(items, list)):
-        raise HTTPException(400, "invalid payload")
+        raise HTTPException(400, "invalid payload: require source, seller, items[]")
 
-    # HMAC only in production
+    raw = await request.body()
+    sig = request.headers.get("X-Signature", "")
+    # HMAC + anti-replay only in production
     if _require_hmac_in_this_env():
-        raw = await request.body()
-        sig = request.headers.get("X-Signature", "")
-        if not (sig and verify_sig(raw, sig, INVENTORY_SECRET_ENV)):
-            raise HTTPException(401, "Bad signature")
+        if not sig or is_replay(sig) or not verify_sig(raw, sig, INVENTORY_SECRET_ENV):
+            # log failure
+            try:
+                await database.execute("""
+                  INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
+                  VALUES (:src, :seller, 0, NULL, :sp, FALSE, :ip, :ua)
+                """, {"src": "bulk_upsert", "seller": seller, "sp": bool(sig),
+                      "ip": request.client.host if request.client else None,
+                      "ua": request.headers.get("user-agent")})
+            except Exception:
+                pass
+            raise HTTPException(401, "invalid or missing signature")
 
+    upserted = 0
     async with database.transaction():
         for it in items:
             sku = (it.get("sku") or "").strip()
@@ -792,51 +802,31 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             desc = it.get("description")
             uom  = it.get("uom") or "ton"
             loc  = it.get("location")
-            qty_raw = float(it.get("qty_on_hand") or 0.0)
-            qty = _to_tons(qty_raw, uom)
+            qty_raw  = float(it.get("qty_on_hand") or 0.0)
+            qty_tons = _to_tons(qty_raw, uom)
 
-            # ensure row exists (no-op if present)
+            await _manual_upsert_absolute_tx(
+                seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
+                uom=uom, location=loc, description=desc,
+                source=source, movement_reason="bulk_upsert",
+                idem_key=it.get("idem_key")
+            )
+            upserted += 1
+
+        # success ingest log
+        try:
             await database.execute("""
-                INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source, external_id)
-                VALUES (:seller,:sku,:description,:uom,:location,0,:source,:external_id)
-                ON CONFLICT (seller, sku) DO NOTHING
-            """, {
-                "seller": seller, "sku": sku, "description": desc, "uom": uom, "location": loc,
-                "source": source, "external_id": it.get("external_id")
-            })
+              INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
+              VALUES (:src, :seller, :cnt, :idem, :sp, TRUE, :ip, :ua)
+            """, {"src": "bulk_upsert", "seller": seller, "cnt": upserted,
+                  "idem": (items[0].get("idem_key") if items else None),
+                  "sp": bool(sig),
+                  "ip": request.client.host if request.client else None,
+                  "ua": request.headers.get("user-agent")})
+        except Exception:
+            pass
 
-            # lock & read old quantity
-            prev = await database.fetch_one("""
-                SELECT qty_on_hand FROM inventory_items
-                WHERE seller=:seller AND sku=:sku
-                FOR UPDATE
-            """, {"seller": seller, "sku": sku})
-            old = float(prev["qty_on_hand"]) if prev else 0.0
-            delta = qty - old
-
-            # update absolute qty_on_hand
-            await database.execute("""
-                UPDATE inventory_items
-                   SET qty_on_hand = :new,
-                       updated_at  = NOW(),
-                       source      = :source
-                 WHERE seller=:seller AND sku=:sku
-            """, {"new": qty, "source": source, "seller": seller, "sku": sku})
-
-            # record movement (meta as jsonb; fallback to text if needed)
-            meta_json = json.dumps({"from": old, "to": qty})
-            try:
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
-                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-            except Exception:
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
-                """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-
-    return {"ok": True, "count": len(items)}
+    return {"ok": True, "upserted": upserted}
 
 # -------- Inventory: Manual Add/Set (gated + unit-aware) --------
 @app.post(
@@ -976,6 +966,83 @@ async def inventory_import_excel(
                 upserted += 1
             except Exception as e:
                 errors.append({"row": i, "error": str(e)})
+
+    return {"ok": True, "upserted": upserted, "errors": errors}
+
+# -------- Inventory: Generic adapter (field mapping; HMAC in prod) --------
+@app.post(
+    "/inventory/ingest/generic",
+    tags=["Inventory"],
+    summary="Generic adapter: map external fields → BRidge schema (HMAC in PROD)",
+    status_code=200
+)
+async def inventory_ingest_generic(
+    body: 'GenericIngestBody',
+    request: Request,
+    x_signature: Optional[str] = Header(None)
+):
+    raw = await request.body()
+    if _require_hmac_in_this_env():
+        if not x_signature or is_replay(x_signature) or not verify_sig(raw, x_signature, INVENTORY_SECRET_ENV):
+            try:
+                await database.execute("""
+                  INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
+                  VALUES (:src, :seller, 0, :idem, :sp, FALSE, :ip, :ua)
+                """, {"src": "ingest_generic",
+                      "seller": None,
+                      "idem": body.idem_key,
+                      "sp": bool(x_signature),
+                      "ip": request.client.host if request.client else None,
+                      "ua": request.headers.get("user-agent")})
+            except Exception:
+                pass
+            raise HTTPException(401, "invalid or missing signature")
+
+    # Build a picker from mapping
+    m = {str(k): str(v) for k, v in (body.mapping or {}).items()}
+    def pick(rec: dict, key: str, default=None):
+        src = m.get(key)
+        return rec.get(src) if src and (src in rec) else default
+
+    upserted, errors = 0, []
+    async with database.transaction():
+        for i, rec in enumerate(body.records or [], start=1):
+            try:
+                seller = (pick(rec, "seller", body.seller_default) or "").strip()
+                sku    = (pick(rec, "sku", None) or "").strip()
+                if not (seller and sku):
+                    raise ValueError("missing seller or sku")
+
+                uom      = pick(rec, "uom", body.uom_default or "ton")
+                qty_raw  = pick(rec, "qty_on_hand", 0.0)
+                qty_tons = _to_tons(float(qty_raw or 0.0), uom)
+
+                await _manual_upsert_absolute_tx(
+                    seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
+                    uom=uom,
+                    location=pick(rec, "location", None),
+                    description=pick(rec, "description", None),
+                    source=(body.source or "generic"),
+                    movement_reason="ingest_generic",
+                    idem_key=body.idem_key
+                )
+                upserted += 1
+            except Exception as e:
+                errors.append({"idx": i, "error": str(e)})
+
+        try:
+            await database.execute("""
+              INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
+              VALUES (:src, :seller, :cnt, :idem, :sp, TRUE, :ip, :ua)
+            """, {"src": "ingest_generic",
+                  "seller": (body.seller_default or None),
+                  "cnt": upserted,
+                  "idem": body.idem_key,
+                  "sp": bool(x_signature),
+                  "ip": request.client.host if request.client else None,
+                  "ua": request.headers.get("user-agent")})
+        except Exception:
+            pass
 
     return {"ok": True, "upserted": upserted, "errors": errors}
 
@@ -1407,7 +1474,7 @@ async def get_all_bols_pg(
                 "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
             },
             "delivery_signature": (
-                {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
+                {"base4": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
                 if d.get("delivery_signature_base64") is not None else None
             ),
             "pickup_time": d.get("pickup_time"),
@@ -1583,7 +1650,7 @@ async def export_contracts_csv():
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="contracts_export_{datetime.utcnow().isoformat()}.csv"'}
+        headers={"Content-Disposition": f'attachment; filename=\"contracts_export_{datetime.utcnow().isoformat()}.csv\"'}
     )
 
 @app.patch(
@@ -2418,7 +2485,7 @@ async def export_orders_csv(day: str = Query(..., description="YYYY-MM-DD")):
     return StreamingResponse(
         iter([out.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="orders_{day}.csv"'}
+        headers={"Content-Disposition": f'attachment; filename=\"orders_{day}.csv\"'}
     )
 
 @trade_router.get("/trades/export", summary="Export trades by day (CSV)")
@@ -2442,7 +2509,7 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
     return StreamingResponse(
         iter([out.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="trades_{day}.csv"'}
+        headers={"Content-Disposition": f'attachment; filename=\"trades_{day}.csv\"'}
     )
 
 app.include_router(trade_router)
