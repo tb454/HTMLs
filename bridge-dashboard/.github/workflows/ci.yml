@@ -15,37 +15,43 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd="pg_isready -U postgres"
-          --health-interval=5s --health-timeout=5s --health-retries=20
+          --health-interval=5s --health-timeout=5s --health-retries=30
 
     env:
       ENV: ci
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
-      SESSION_SECRET: test-secret
+      # psql convenience vars:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: bridge
+      PGUSER: postgres
+      PGPASSWORD: postgres
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          # If you have a requirements.txt, this will use it; otherwise we install what tests need.
           pip install -r requirements.txt || true
-          pip install pytest fastapi sqlalchemy "databases[postgres]" \
-                      asyncpg "psycopg[binary]" passlib[bcrypt] \
-                      python-dotenv requests reportlab itsdangerous \
-                      slowapi structlog prometheus-client python-multipart
+          pip install pytest fastapi sqlalchemy "databases[postgres]" asyncpg \
+                     "psycopg[binary]" passlib[bcrypt] python-dotenv requests \
+                     reportlab itsdangerous slowapi structlog prometheus-client \
+                     python-multipart uvicorn
 
-      - name: Bootstrap CI DB
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap schema with psql (users/contracts/bols + extensions)
         run: |
-          python - <<'PY'
-          import os
-          from passlib.hash import bcrypt
-          import psycopg
+          # Ensure extension available (pgcrypto exists in postgres:16)
+          psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-          dsn = os.environ["DATABASE_URL"]
-
-          SCHEMA_SQL = """
+          # Create tables (id uses gen_random_uuid())
+          psql -v ON_ERROR_STOP=1 <<'SQL'
           CREATE TABLE IF NOT EXISTS users (
             id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             email         text UNIQUE NOT NULL,
@@ -53,6 +59,7 @@ jobs:
             role          text NOT NULL CHECK (role IN ('admin','seller','buyer')),
             created_at    timestamptz NOT NULL DEFAULT now()
           );
+
           CREATE TABLE IF NOT EXISTS contracts (
             id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             buyer        text NOT NULL,
@@ -63,6 +70,7 @@ jobs:
             created_at   timestamptz NOT NULL DEFAULT now(),
             updated_at   timestamptz NOT NULL DEFAULT now()
           );
+
           CREATE TABLE IF NOT EXISTS bols (
             id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             contract_id  uuid REFERENCES contracts(id) ON DELETE CASCADE,
@@ -70,10 +78,12 @@ jobs:
             status       text NOT NULL DEFAULT 'Created',
             created_at   timestamptz NOT NULL DEFAULT now()
           );
+
           CREATE TABLE IF NOT EXISTS idempotency_keys (
             key         text PRIMARY KEY,
             created_at  timestamptz NOT NULL DEFAULT now()
           );
+
           CREATE TABLE IF NOT EXISTS webhook_events (
             id               bigserial PRIMARY KEY,
             source           text,
@@ -82,20 +92,15 @@ jobs:
             signature_valid  boolean,
             created_at       timestamptz NOT NULL DEFAULT now()
           );
-          """
-          EXTENSIONS_SQL = "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-          with psycopg.connect(dsn, autocommit=True) as con:
-              con.execute(EXTENSIONS_SQL)
-              con.execute(SCHEMA_SQL)
-              email, pw, role = "admin@example.com", bcrypt.hash("admin123"), "admin"
-              con.execute("""
-                INSERT INTO users (email, password_hash, role)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (email) DO NOTHING;
-              """, (email, pw, role))
-          print("CI DB bootstrap complete.")
-          PY
+          -- Seed admin (idempotent)
+          INSERT INTO users (email, password_hash, role)
+          VALUES ('admin@example.com', '$2b$12$2Gm2pTprQFOi6eZy8XgY2e4qz4Q4rE9o7QbP1m1o6K6a8y8vQ0a6i', 'admin')
+          ON CONFLICT (email) DO NOTHING;
+          SQL
+
+      - name: Show tables (debug)
+        run: psql -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;"
 
       - name: Run tests
         run: pytest -q

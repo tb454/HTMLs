@@ -1135,6 +1135,16 @@ class BOLOut(BOLIn):
             "pickup_time":"2025-09-01T12:15:00Z",
             "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
+        
+# === INSERT: Generic IMS adapter request model ===
+class GenericIngestBody(BaseModel):
+    mapping: dict                 # {"seller":"yardName","sku":"code","qty_on_hand":"qoh","uom":"unit", ...}
+    records: List[dict]
+    seller_default: Optional[str] = None
+    uom_default: Optional[str] = "ton"
+    source: Optional[str] = "generic"
+    idem_key: Optional[str] = None
+# === /INSERT ===
 
 # Optional tighter typing for updates
 ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
