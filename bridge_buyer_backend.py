@@ -106,7 +106,14 @@ if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "3ZzQmVoYqNQk5t8R7yJ1xw0uHgBFh9dXea2MUpnCKlGTsvr4OjWPZ6LAiEbNYDf"))
+# (Hardened session cookie in prod)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
+    https_only=prod,
+    same_site="lax",
+    max_age=60*60*8
+)
 
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
@@ -559,6 +566,74 @@ async def _ensure_inventory_schema():
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 
+# ---------- Inventory helpers (role check, unit conversion, upsert core) ----------
+def _is_admin_or_seller(request: Request) -> bool:
+    try:
+        return (request.session.get("role") or "").lower() in {"admin", "seller"}
+    except Exception:
+        return False
+
+def _to_tons(qty: float, uom: str | None) -> float:
+    q = float(qty or 0.0)
+    u = (uom or "ton").strip().lower()
+    if u.startswith("lb"):  # lb, lbs, pounds
+        return q / 2000.0
+    return q  # assume tons by default
+
+async def _manual_upsert_absolute_tx(
+    *, seller: str, sku: str, qty_on_hand_tons: float,
+    uom: str | None = "ton", location: str | None = None,
+    description: str | None = None, source: str | None = None,
+    movement_reason: str = "manual_add", idem_key: str | None = None,
+):
+    s, k = seller.strip(), sku.strip()
+
+    cur = await database.fetch_one(
+        "SELECT qty_on_hand FROM inventory_items WHERE seller=:s AND sku=:k FOR UPDATE",
+        {"s": s, "k": k}
+    )
+    if cur is None:
+        await database.execute("""
+          INSERT INTO inventory_items (seller, sku, description, uom, location,
+                                       qty_on_hand, qty_reserved, qty_committed, source, updated_at)
+          VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW())
+          ON CONFLICT (seller, sku) DO NOTHING
+        """, {"s": s, "k": k, "d": description, "u": (uom or "ton"),
+              "loc": location, "src": source or "manual"})
+        cur = await database.fetch_one(
+            "SELECT qty_on_hand FROM inventory_items WHERE seller=:s AND sku=:k FOR UPDATE",
+            {"s": s, "k": k}
+        )
+
+    old = float(cur["qty_on_hand"]) if cur else 0.0
+    new_qty = float(qty_on_hand_tons)
+    delta = new_qty - old
+
+    await database.execute("""
+      UPDATE inventory_items
+         SET qty_on_hand=:new, updated_at=NOW(),
+             uom=:u, location=COALESCE(:loc, location),
+             description=COALESCE(:desc, description),
+             source=COALESCE(:src, source)
+       WHERE seller=:s AND sku=:k
+    """, {"new": new_qty, "u": (uom or "ton"), "loc": location, "desc": description,
+          "src": (source or "manual"), "s": s, "k": k})
+
+    meta_json = json.dumps({"from": old, "to": new_qty, "reason": movement_reason, "idem_key": idem_key})
+    try:
+        await database.execute("""
+          INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+          VALUES (:s,:k,'upsert',:q,NULL, :m::jsonb)
+        """, {"s": s, "k": k, "q": delta, "m": meta_json})
+    except Exception:
+        await database.execute("""
+          INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+          VALUES (:s,:k,'upsert',:q,NULL, :m)
+        """, {"s": s, "k": k, "q": delta, "m": meta_json})
+
+    return old, new_qty, delta
+# ---------- /helpers ----------
+
 class InventoryRowOut(BaseModel):
     seller: str
     sku: str
@@ -575,7 +650,7 @@ class InventoryRowOut(BaseModel):
     "/inventory",
     tags=["Inventory"],
     summary="List inventory (available view)",
-    response_model=List[InventoryRowOut],   # <-- change _List -> List
+    response_model=List[InventoryRowOut],
     status_code=200
 )
 async def list_inventory(
@@ -674,7 +749,7 @@ async def _ensure_contracts_bols_schema():
         except Exception as e:
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 
-# -------- Inventory: Bulk Upsert (NEW) --------
+# -------- Inventory: Bulk Upsert (HMAC remains ON in prod) --------
 @app.post(
     "/inventory/bulk_upsert",
     tags=["Inventory"],
@@ -683,6 +758,7 @@ async def _ensure_contracts_bols_schema():
     response_model=dict,
     status_code=200
 )
+@limiter.limit("60/minute")
 async def inventory_bulk_upsert(body: dict, request: Request):
     # Minimal validation
     source = (body.get("source") or "").strip()
@@ -706,7 +782,8 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             desc = it.get("description")
             uom  = it.get("uom") or "ton"
             loc  = it.get("location")
-            qty  = float(it.get("qty_on_hand") or 0.0)
+            qty_raw = float(it.get("qty_on_hand") or 0.0)
+            qty = _to_tons(qty_raw, uom)
 
             # ensure row exists (no-op if present)
             await database.execute("""
@@ -751,6 +828,147 @@ async def inventory_bulk_upsert(body: dict, request: Request):
 
     return {"ok": True, "count": len(items)}
 
+# -------- Inventory: Manual Add/Set (gated + unit-aware) --------
+@app.post(
+    "/inventory/manual_add",
+    tags=["Inventory"],
+    summary="Manual add/set qty_on_hand for a SKU (absolute set, unit-aware)",
+    response_model=dict,
+    status_code=200
+)
+@limiter.limit("60/minute")
+async def inventory_manual_add(payload: dict, request: Request):
+    # In PROD require seller/admin session
+    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        raise HTTPException(401, "login required")
+
+    seller = (payload.get("seller") or "").strip()
+    sku    = (payload.get("sku") or "").strip()
+    if not (seller and sku):
+        raise HTTPException(400, "seller and sku are required")
+
+    uom     = (payload.get("uom") or "ton")
+    loc     = payload.get("location")
+    desc    = payload.get("description")
+    source  = payload.get("source") or "manual"
+    idem    = payload.get("idem_key")
+    qty_raw = float(payload.get("qty_on_hand") or 0.0)
+    qty_tons = _to_tons(qty_raw, uom)
+
+    async with database.transaction():
+        old, new_qty, delta = await _manual_upsert_absolute_tx(
+            seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
+            uom=uom, location=loc, description=desc, source=source,
+            movement_reason="manual_add", idem_key=idem
+        )
+    return {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
+
+# -------- Inventory: CSV template --------
+@app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
+async def inventory_template_csv():
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["seller","sku","qty_on_hand","description","uom","location","external_id"])
+    w.writerow(["Winski Brothers","SHRED","100.0","Shred Steel","ton","Yard-A",""])
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="inventory_template.csv"'})
+
+# -------- Inventory: Import CSV (gated + unit-aware) --------
+@app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)")
+@limiter.limit("30/minute")
+async def inventory_import_csv(
+    file: UploadFile = File(...),
+    seller: Optional[str] = Form(None),
+    request: Request = None
+):
+    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        raise HTTPException(401, "login required")
+
+    text = (await file.read()).decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    upserted, errors = 0, []
+
+    async with database.transaction():
+        for i, row in enumerate(reader, start=2):  # header at line 1
+            try:
+                s = (seller or row.get("seller") or "").strip()
+                k = (row.get("sku") or "").strip()
+                if not (s and k):
+                    raise ValueError("missing seller or sku")
+
+                uom = row.get("uom") or "ton"
+                qty_raw = float(row.get("qty_on_hand") or 0.0)
+                qty_tons = _to_tons(qty_raw, uom)
+
+                await _manual_upsert_absolute_tx(
+                    seller=s, sku=k, qty_on_hand_tons=qty_tons,
+                    uom=uom,
+                    location=row.get("location"),
+                    description=row.get("description"),
+                    source="import_csv",
+                    movement_reason="import_csv"
+                )
+                upserted += 1
+            except Exception as e:
+                errors.append({"line": i, "error": str(e)})
+
+    return {"ok": True, "upserted": upserted, "errors": errors}
+
+# -------- Inventory: Import Excel (gated + unit-aware) --------
+@app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)")
+@limiter.limit("15/minute")
+async def inventory_import_excel(
+    file: UploadFile = File(...),
+    seller: Optional[str] = Form(None),
+    request: Request = None
+):
+    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        raise HTTPException(401, "login required")
+
+    try:
+        import pandas as pd  # openpyxl required underneath
+    except Exception:
+        raise HTTPException(400, "Excel import requires pandas+openpyxl; upload CSV instead.")
+
+    data = await file.read()
+    try:
+        df = pd.read_excel(io.BytesIO(data))
+    except Exception as e:
+        raise HTTPException(400, f"Could not read Excel: {e}")
+
+    cols_lower = {str(c).strip().lower() for c in df.columns}
+    required = {"sku", "qty_on_hand"}
+    if not required.issubset(cols_lower):
+        raise HTTPException(400, "Excel must include columns: sku, qty_on_hand (plus optional seller, description, uom, location, external_id)")
+
+    upserted, errors = 0, []
+    async with database.transaction():
+        for i, rec in enumerate(df.to_dict(orient="records"), start=2):
+            try:
+                s = (seller or rec.get("seller") or rec.get("Seller") or "").strip()
+                k = (rec.get("sku") or rec.get("SKU") or "").strip()
+                if not (s and k):
+                    raise ValueError("missing seller or sku")
+
+                uom = rec.get("uom") or rec.get("UOM") or "ton"
+                qty_raw = rec.get("qty_on_hand") or rec.get("Qty_On_Hand") or 0.0
+                qty_tons = _to_tons(float(qty_raw or 0.0), uom)
+
+                await _manual_upsert_absolute_tx(
+                    seller=s, sku=k, qty_on_hand_tons=qty_tons,
+                    uom=uom,
+                    location=rec.get("location") or rec.get("Location"),
+                    description=rec.get("description") or rec.get("Description"),
+                    source="import_excel",
+                    movement_reason="import_excel"
+                )
+                upserted += 1
+            except Exception as e:
+                errors.append({"row": i, "error": str(e)})
+
+    return {"ok": True, "upserted": upserted, "errors": errors}
+
 @app.on_event("startup")
 async def _ensure_pgcrypto():
     try:
@@ -772,148 +990,19 @@ async def _ensure_perf_indexes():
         except Exception as e:
             logger.warn('index_bootstrap_failed', sql=s[:80], err=str(e))
 
-# -------- Inventory: Manual Add/Set --------
-@app.post(
-    "/inventory/manual_add",
-    tags=["Inventory"],
-    summary="Manual add/set qty_on_hand for a SKU",
-    response_model=dict,
-    status_code=200
-)
-async def inventory_manual_add(payload: dict):
-    seller = (payload.get("seller") or "").strip()
-    sku    = (payload.get("sku") or "").strip()
-    if not (seller and sku):
-        raise HTTPException(400, "seller and sku are required")
-
-    new_qty = float(payload.get("qty_on_hand") or 0.0)
-    uom     = payload.get("uom") or "ton"
-    loc     = payload.get("location")
-    desc    = payload.get("description")
-    source  = payload.get("source") or "manual"
-
-    async with database.transaction():
-        # ensure row
-        await database.execute("""
-            INSERT INTO inventory_items (seller, sku, description, uom, location, qty_on_hand, source)
-            VALUES (:seller,:sku,:desc,:uom,:loc,0,:source)
-            ON CONFLICT (seller, sku) DO NOTHING
-        """, {"seller": seller, "sku": sku, "desc": desc, "uom": uom, "loc": loc, "source": source})
-
-        # lock & read old
-        prev = await database.fetch_one("""
-            SELECT qty_on_hand FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
-            FOR UPDATE
-        """, {"seller": seller, "sku": sku})
-        old = float(prev["qty_on_hand"]) if prev else 0.0
-        delta = new_qty - old
-
-        # set absolute
-        await database.execute("""
-            UPDATE inventory_items
-               SET qty_on_hand=:new, updated_at=NOW(), uom=:uom, location=COALESCE(:loc, location), description=COALESCE(:desc, description), source=:source
-             WHERE seller=:seller AND sku=:sku
-        """, {"new": new_qty, "uom": uom, "loc": loc, "desc": desc, "source": source, "seller": seller, "sku": sku})
-
-        # movement
-        meta_json = json.dumps({"from": old, "to": new_qty})
+# DB safety checks (non-negative inventory quantities)
+@app.on_event("startup")
+async def _ensure_inventory_constraints():
+    ddl = [
+      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_on_hand_nonneg CHECK (qty_on_hand >= 0)",
+      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_reserved_nonneg CHECK (qty_reserved >= 0)",
+      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_committed_nonneg CHECK (qty_committed >= 0)"
+    ]
+    for s in ddl:
         try:
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller,:sku,'upsert',:qty,NULL, :meta::jsonb)
-            """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-        except Exception:
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller,:sku,'upsert',:qty,NULL, :meta)
-            """, {"seller": seller, "sku": sku, "qty": delta, "meta": meta_json})
-
-    return {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta}
-
-
-# -------- Inventory: CSV template --------
-@app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
-async def inventory_template_csv():
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["seller","sku","qty_on_hand","description","uom","location","external_id"])
-    w.writerow(["Winski Brothers","SHRED","100.0","Shred Steel","ton","Yard-A",""])
-    buf.seek(0)
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
-                             headers={"Content-Disposition": 'attachment; filename="inventory_template.csv"'})
-
-
-# -------- Inventory: Import CSV --------
-@app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV")
-async def inventory_import_csv(file: UploadFile = File(...), seller: Optional[str] = Form(None)):
-    text = (await file.read()).decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    upserted, errors = 0, []
-
-    async with database.transaction():
-        for i, row in enumerate(reader, start=2):  # header at line 1
-            try:
-                s = (seller or row.get("seller") or "").strip()
-                sku = (row.get("sku") or "").strip()
-                if not (s and sku):
-                    raise ValueError("missing seller or sku")
-                qty = float(row.get("qty_on_hand") or 0.0)
-                payload = {
-                    "seller": s, "sku": sku, "qty_on_hand": qty,
-                    "uom": row.get("uom") or "ton",
-                    "location": row.get("location"),
-                    "description": row.get("description"),
-                    "source": "import_csv",
-                }
-                await inventory_manual_add(payload)  # reuse logic
-                upserted += 1
-            except Exception as e:
-                errors.append({"line": i, "error": str(e)})
-
-    return {"ok": True, "upserted": upserted, "errors": errors}
-
-
-# -------- Inventory: Import Excel (optional; requires openpyxl) --------
-@app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX")
-async def inventory_import_excel(file: UploadFile = File(...), seller: Optional[str] = Form(None)):
-    try:
-        import pandas as pd  # openpyxl must be available for .xlsx parsing
-    except Exception:
-        raise HTTPException(400, "Excel import requires pandas+openpyxl; upload CSV instead.")
-
-    data = await file.read()
-    try:
-        df = pd.read_excel(io.BytesIO(data))
-    except Exception as e:
-        raise HTTPException(400, f"Could not read Excel: {e}")
-
-    required = {"sku","qty_on_hand"}
-    if not required.issubset({c.lower() for c in df.columns}):
-        raise HTTPException(400, "Excel must include at least: sku, qty_on_hand (+ optional seller, description, uom, location, external_id)")
-
-    upserted, errors = 0, []
-    async with database.transaction():
-        for i, rec in enumerate(df.to_dict(orient="records"), start=2):
-            try:
-                s = (seller or rec.get("seller") or rec.get("Seller") or "").strip()
-                sku = (rec.get("sku") or rec.get("SKU") or "").strip()
-                if not (s and sku):
-                    raise ValueError("missing seller or sku")
-                qty = float(rec.get("qty_on_hand") or rec.get("Qty_On_Hand") or 0.0)
-                payload = {
-                    "seller": s, "sku": sku, "qty_on_hand": qty,
-                    "uom": rec.get("uom") or rec.get("UOM") or "ton",
-                    "location": rec.get("location") or rec.get("Location"),
-                    "description": rec.get("description") or rec.get("Description"),
-                    "source": "import_excel",
-                }
-                await inventory_manual_add(payload)
-                upserted += 1
-            except Exception as e:
-                errors.append({"row": i, "error": str(e)})
-
-    return {"ok": True, "upserted": upserted, "errors": errors}
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("inventory_constraints_bootstrap_failed", sql=s[:100], err=str(e))
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -1263,20 +1352,13 @@ async def get_all_bols_pg(
 ):
     q = "SELECT * FROM bols"
     cond, vals = [], {}
-    if buyer:
-        cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
-    if seller:
-        cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
-    if material:
-        cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
-    if status:
-        cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
-    if contract_id:
-        cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
-    if start:
-        cond.append("pickup_time >= :start");        vals["start"] = start
-    if end:
-        cond.append("pickup_time <= :end");          vals["end"] = end
+    if buyer:       cond.append("buyer ILIKE :buyer");           vals["buyer"] = f"%{buyer}%"
+    if seller:      cond.append("seller ILIKE :seller");         vals["seller"] = f"%{seller}%"
+    if material:    cond.append("material ILIKE :material");     vals["material"] = f"%{material}%"
+    if status:      cond.append("status ILIKE :status");         vals["status"] = f"%{status}%"
+    if contract_id: cond.append("contract_id = :contract_id");   vals["contract_id"] = contract_id
+    if start:       cond.append("pickup_time >= :start");        vals["start"] = start
+    if end:         cond.append("pickup_time <= :end");          vals["end"] = end
     if cond:
         q += " WHERE " + " AND ".join(cond)
     q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
@@ -1314,7 +1396,7 @@ async def get_all_bols_pg(
         })
     return out
 
-# -------- Public ticker (NEW, ungated) --------
+# -------- Public ticker (ungated) --------
 @app.get("/ticker", tags=["Market"], summary="Public ticker snapshot")
 async def public_ticker(listing_id: str):
     last = await database.fetch_one("""
