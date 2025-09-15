@@ -437,7 +437,7 @@ async def login(body: LoginIn, request: Request):
 ALLOW_PUBLIC_SELLER_SIGNUP = os.getenv("ALLOW_PUBLIC_SELLER_SIGNUP", "0").lower() in ("1","true","yes")
 
 class SignupIn(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     role: Literal["buyer","seller"] = "buyer"
 
