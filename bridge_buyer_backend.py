@@ -1051,6 +1051,19 @@ async def inventory_import_excel(
 
     return {"ok": True, "upserted": upserted, "errors": errors}
 
+# === INSERT: GenericIngestBody model (place this with your other models, ABOVE any routes) ===
+class GenericIngestBody(BaseModel):
+    # maps external field names to BRidge schema keys
+    # e.g. {"seller":"yardName","sku":"code","qty_on_hand":"qoh","uom":"unit"}
+    mapping: dict
+    records: List[dict]
+    seller_default: Optional[str] = None
+    uom_default: Optional[str] = "ton"
+    source: Optional[str] = "generic"
+    idem_key: Optional[str] = None
+# === /INSERT ===
+
+
 # -------- Inventory: Generic adapter (field mapping; HMAC in prod) --------
 @app.post(
     "/inventory/ingest/generic",
@@ -1059,7 +1072,7 @@ async def inventory_import_excel(
     status_code=200
 )
 async def inventory_ingest_generic(
-    body: 'GenericIngestBody',
+    body: GenericIngestBody,              # <-- no quotes; class is defined above
     request: Request,
     x_signature: Optional[str] = Header(None)
 ):
