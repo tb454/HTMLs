@@ -1072,10 +1072,16 @@ class GenericIngestBody(BaseModel):
     status_code=200
 )
 async def inventory_ingest_generic(
-    body: GenericIngestBody,              # <-- no quotes; class is defined above
+    body: dict,                      # <-- use dict to avoid any forward-ref issues
     request: Request,
     x_signature: Optional[str] = Header(None)
 ):
+    # Optional: validate with the Pydantic model explicitly
+    try:
+        parsed = GenericIngestBody(**body)
+    except Exception as e:
+        raise HTTPException(422, f"invalid payload: {e}")
+
     raw = await request.body()
     if _require_hmac_in_this_env():
         if not x_signature or is_replay(x_signature) or not verify_sig(raw, x_signature, INVENTORY_SECRET_ENV):
@@ -1085,7 +1091,7 @@ async def inventory_ingest_generic(
                   VALUES (:src, :seller, 0, :idem, :sp, FALSE, :ip, :ua)
                 """, {"src": "ingest_generic",
                       "seller": None,
-                      "idem": body.idem_key,
+                      "idem": parsed.idem_key,
                       "sp": bool(x_signature),
                       "ip": request.client.host if request.client else None,
                       "ua": request.headers.get("user-agent")})
@@ -1094,21 +1100,21 @@ async def inventory_ingest_generic(
             raise HTTPException(401, "invalid or missing signature")
 
     # Build a picker from mapping
-    m = {str(k): str(v) for k, v in (body.mapping or {}).items()}
+    m = {str(k): str(v) for k, v in (parsed.mapping or {}).items()}
     def pick(rec: dict, key: str, default=None):
         src = m.get(key)
         return rec.get(src) if src and (src in rec) else default
 
     upserted, errors = 0, []
     async with database.transaction():
-        for i, rec in enumerate(body.records or [], start=1):
+        for i, rec in enumerate(parsed.records or [], start=1):
             try:
-                seller = (pick(rec, "seller", body.seller_default) or "").strip()
+                seller = (pick(rec, "seller", parsed.seller_default) or "").strip()
                 sku    = (pick(rec, "sku", None) or "").strip()
                 if not (seller and sku):
                     raise ValueError("missing seller or sku")
 
-                uom      = pick(rec, "uom", body.uom_default or "ton")
+                uom      = pick(rec, "uom", parsed.uom_default or "ton")
                 qty_raw  = pick(rec, "qty_on_hand", 0.0)
                 qty_tons = _to_tons(float(qty_raw or 0.0), uom)
 
@@ -1117,9 +1123,9 @@ async def inventory_ingest_generic(
                     uom=uom,
                     location=pick(rec, "location", None),
                     description=pick(rec, "description", None),
-                    source=(body.source or "generic"),
+                    source=(parsed.source or "generic"),
                     movement_reason="ingest_generic",
-                    idem_key=body.idem_key
+                    idem_key=parsed.idem_key
                 )
                 upserted += 1
             except Exception as e:
@@ -1130,9 +1136,9 @@ async def inventory_ingest_generic(
               INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
               VALUES (:src, :seller, :cnt, :idem, :sp, TRUE, :ip, :ua)
             """, {"src": "ingest_generic",
-                  "seller": (body.seller_default or None),
+                  "seller": (parsed.seller_default or None),
                   "cnt": upserted,
-                  "idem": body.idem_key,
+                  "idem": parsed.idem_key,
                   "sp": bool(x_signature),
                   "ip": request.client.host if request.client else None,
                   "ua": request.headers.get("user-agent")})
