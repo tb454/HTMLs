@@ -1334,6 +1334,7 @@ async def _ensure_inventory_constraints():
 ALLOWED_ORIGINS = [
     "https://scrapfutures.com",
     "https://www.scrapfutures.com",
+    "https://bridge.scrapfutures.com",
     "https://bridge-buyer.onrender.com",
 ]
 app.add_middleware(
@@ -1343,6 +1344,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# -------- Host header protection --------
+ALLOWED_HOSTS = [
+    "scrapfutures.com",
+    "www.scrapfutures.com",
+    "bridge.scrapfutures.com",
+    "bridge-buyer.onrender.com",  
+    "localhost",
+    "127.0.0.1",
+]
 
 # -------- Models (+ OpenAPI examples) --------
 class CarrierInfo(BaseModel):
