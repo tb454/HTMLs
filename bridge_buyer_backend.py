@@ -180,6 +180,13 @@ async def security_headers_mw(request, call_next):
 
 app.middleware("http")(security_headers_mw)
 
+@app.middleware("http")
+async def hsts_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+# ===== /Security headers =====
+
 # =====  request-id + structured logs =====
 logger = structlog.get_logger()
 
@@ -331,7 +338,7 @@ async def logout(request: Request):
     return {"ok": True}
 # ======= /AUTH ========
 
-# ===== HMAC gating for inventory endpoints (missing helpers added) =====
+# ===== HMAC gating for inventory endpoints =====
 INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
 
 def _require_hmac_in_this_env() -> bool:
@@ -842,6 +849,24 @@ async def _ensure_contracts_bols_schema():
         except Exception as e:
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 
+@app.on_event("startup")
+async def _ensure_audit_log_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        actor TEXT,
+        action TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        details JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("audit_log_bootstrap_failed", err=str(e))
+# ======================================================================
+
 # -------- Inventory: Bulk Upsert (unit-aware, HMAC in prod, replay guard, logs) --------
 @app.post(
     "/inventory/bulk_upsert",
@@ -1264,7 +1289,7 @@ def _is_admin_session(request: Request) -> bool:
     except Exception:
         return False
 
-# ===== Admin gate helper (NEW) =====
+# ===== Admin gate helper  =====
 def _require_admin(request: Request):
     # Only enforce in production so local dev stays easy
     if os.getenv("ENV","").lower()=="production" and request.session.get("role")!="admin":
@@ -1292,6 +1317,41 @@ def is_replay(sig: str | None) -> bool:
         return True
     REPLAY_CACHE[sig] = now
     return False
+
+# ===== Audit logging =====
+async def log_action(actor: str, action: str, entity_id: str, details: dict):
+    """Write an audit entry to audit_log."""
+    await database.execute(
+        """
+        INSERT INTO audit_log (actor, action, entity_id, details)
+        VALUES (:actor, :action, :entity_id, :details)
+        """,
+        {
+            "actor": actor,
+            "action": action,
+            "entity_id": entity_id,
+            "details": json.dumps(details),
+        },
+    )
+
+# ===== ICE webhook signature verifier =====
+LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
+
+def verify_sig_ice(raw_body: bytes, given_sig: str) -> bool:
+    """Verify ICE webhook signatures. Pass-through if no secret is set (dev/CI)."""
+    if not LINK_SIGNING_SECRET:  # dev/staging/CI mode
+        return True
+    mac = hmac.new(LINK_SIGNING_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(mac, given_sig)
+
+@app.post("/ice-digital-trade", tags=["ICE"], summary="ICE Digital Trade webhook (stub)")
+async def ice_trade_webhook(request: Request):
+    sig = request.headers.get("X-Signature", "")
+    body = await request.body()
+    if not verify_sig_ice(body, sig):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    # TODO: parse/process payload here (idempotency, persistence, audit)
+    return {"ok": True}
 
 # ===== Link signing (itsdangerous) =====
 LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", os.getenv("SESSION_SECRET", "dev-only-secret"))
@@ -1662,6 +1722,15 @@ async def update_contract(contract_id: str, update: ContractUpdate):
     """, {"id": contract_id, "status": update.status, "signature": update.signature})
     if not row:
         raise HTTPException(status_code=404, detail="Contract not found")
+     # audit log
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    try:
+        await log_action(actor or "system", "contract.update", str(contract_id), {
+            "status": update.status,
+            "signature_present": update.signature is not None
+        })
+    except Exception:
+        pass
     return row
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
@@ -1768,6 +1837,79 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
     if idem:
         _idem_cache[idem] = resp
+
+    # ---- audit log 
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    try:
+        await log_action(actor or "system", "contract.purchase", str(contract_id), {
+            "new_status": "Signed",
+            "bol_id": bol_id
+        })
+    except Exception:
+        pass
+
+    return resp
+
+@app.post(
+    "/bols",
+    response_model=BOLOut,
+    tags=["BOLs"],
+    summary="Create BOL",
+    status_code=201
+)
+async def create_bol_pg(bol: BOLIn, request: Request):
+    # Optional idempotency
+    idem_key = request.headers.get("Idempotency-Key")
+    if idem_key and idem_key in _idem_cache:
+        return _idem_cache[idem_key]
+
+    row = await database.fetch_one("""
+        INSERT INTO bols (
+            bol_id, contract_id, buyer, seller, material, weight_tons,
+            price_per_unit, total_value,
+            carrier_name, carrier_driver, carrier_truck_vin,
+            pickup_signature_base64, pickup_signature_time,
+            pickup_time, status
+        )
+        VALUES (
+            :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
+            :price_per_unit, :total_value,
+            :carrier_name, :carrier_driver, :carrier_truck_vin,
+            :pickup_sig_b64, :pickup_sig_time,
+            :pickup_time, 'Scheduled'
+        )
+        RETURNING *
+    """, {
+        "bol_id": str(uuid.uuid4()),
+        "contract_id": str(bol.contract_id),
+        "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
+        "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
+        "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
+        "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
+        "pickup_time": bol.pickup_time
+    })
+
+    resp = {
+        **bol.dict(),
+        "bol_id": row["bol_id"],
+        "status": row["status"],
+        "delivery_signature": None,
+        "delivery_time": None
+    }
+
+    # ---- audit log (best-effort; won't break request on failure)
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    try:
+        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
+            "contract_id": str(bol.contract_id),
+            "material": bol.material,
+            "weight_tons": bol.weight_tons
+        })
+    except Exception:
+        pass
+
+    if idem_key:
+        _idem_cache[idem_key] = resp
     return resp
 
 @app.post(
@@ -2370,7 +2512,7 @@ async def modify_order(order_id: str, body: ModifyOrderIn):
         new_open  = new_total - filled
 
         delta_open = new_open - old_open
-        # Early initial-margin check on increased exposure (NEW)
+        # Early initial-margin check on increased exposure 
         if delta_open > 0:
             params = await _get_margin_params(account_id)
             if params.get("is_blocked"):
