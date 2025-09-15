@@ -12,13 +12,8 @@ sys.path.insert(0, str(HTMLS_ROOT))
 # Ensure non-production env so TrustedHost allows 'testserver'
 os.environ.setdefault("ENV", "ci")
 
-# IMPORTANT: DATABASE_URL must point to your staging DB before running tests
-# Example:
-# os.environ.setdefault("DATABASE_URL", "postgresql://postgres:PASS@HOST.supabase.co:5432/postgres")
-
 # Import your FastAPI app from the real filename
-from bridge_buyer_backend import app  # <-- your file is bridge_buyer_backend.py
-
+from bridge_buyer_backend import app  
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:
