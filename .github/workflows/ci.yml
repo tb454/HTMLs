@@ -16,7 +16,6 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U postgres"
           --health-interval=5s --health-timeout=5s --health-retries=20
-
     env:
       ENV: ci
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
@@ -36,7 +35,6 @@ jobs:
                       reportlab itsdangerous slowapi structlog \
                       prometheus-client sentry-sdk python-multipart uvicorn \
                       "databases[postgres]" passlib[bcrypt] python-dotenv requests
-
       - name: Bootstrap CI DB
         run: |
           python - <<'PY'
@@ -51,6 +49,5 @@ jobs:
               );
               """)
           PY
-
       - name: Run tests
         run: pytest -q
