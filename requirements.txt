@@ -10,7 +10,6 @@ pyjwt
 requests
 aiokafka
 prometheus-fastapi-instrumentator
-web3
 numpy
 python-multipart
 databases
