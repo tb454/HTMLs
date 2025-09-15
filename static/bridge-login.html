@@ -25,21 +25,50 @@
   </style>
 </head>
 <body>
-  <div class="login-box">
-    <h3 class="mb-4 text-center">🔐 BRidge Login</h3>
-    <form id="loginForm">
-      <div class="mb-3">
-        <label for="username" class="form-label">Username</label>
-        <input type="text" class="form-control" id="username" required />
-      </div>
-      <div class="mb-3">
-        <label for="password" class="form-label">Password</label>
-        <input type="password" class="form-control" id="password" required />
-      </div>
-      <button type="submit" class="btn btn-primary w-100">Login</button>
-    </form>
-    <div id="error" class="mt-3 text-danger text-center" style="display:none;">Invalid credentials. Try again.</div>
-  </div>
+<div class="login-box">
+  <h3 class="mb-4 text-center">🔐 BRidge Login</h3>
+
+  <form id="loginForm">
+    <div class="mb-3">
+      <label for="username" class="form-label">Username</label>
+      <input type="text" class="form-control" id="username" required />
+    </div>
+    <div class="mb-3">
+      <label for="password" class="form-label">Password</label>
+      <input type="password" class="form-control" id="password" required />
+    </div>
+    <button type="submit" class="btn btn-primary w-100">Login</button>
+  </form>
+
+  <!-- Create Account -->
+  <button class="btn btn-link w-100 mt-3" id="showSignup">Create an Account</button>
+
+  <!-- Public Signup (buyers by default) -->
+  <form id="signupForm" style="display:none; margin-top:20px;">
+    <div class="mb-3">
+      <label for="signupEmail" class="form-label">Email</label>
+      <input type="email" class="form-control" id="signupEmail" required />
+    </div>
+    <div class="mb-3">
+      <label for="signupPassword" class="form-label">Password</label>
+      <input type="password" class="form-control" id="signupPassword" minlength="8" required />
+      <div class="form-text">At least 8 characters.</div>
+    </div>
+    <div class="mb-3">
+      <label for="signupRole" class="form-label">Role</label>
+      <select class="form-select" id="signupRole">
+        <option value="buyer" selected>Buyer</option>
+        <option value="seller">Seller</option>
+      </select>
+      <div class="form-text">Sellers may be restricted unless enabled by the admin.</div>
+    </div>
+    <button type="submit" class="btn btn-success w-100">Create Account</button>
+    <button type="button" class="btn btn-outline-secondary w-100 mt-2" id="backToLogin">Back to Login</button>
+  </form>
+
+  <div id="error" class="mt-3 text-danger text-center" style="display:none;"></div>
+  <div id="success" class="mt-3 text-success text-center" style="display:none;"></div>
+</div>
 
 <script>
   const endpoint = "https://bridge-buyer.onrender.com";

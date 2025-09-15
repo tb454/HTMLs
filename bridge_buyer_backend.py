@@ -395,41 +395,150 @@ async def shutdown_disconnect():
         pass
 
 # ======= AUTH ========
+from pydantic import BaseModel
+from fastapi import Request
+
 class LoginIn(BaseModel):
-    username: str
+    username: str   # can be email OR username
     password: str
 
-@app.post(
-    "/login",
-    tags=["Auth"],
-    summary="Login",
-    description="Authenticate via DB-side bcrypt using pgcrypto: crypt(:password, password_hash)"
-)
+class LoginOut(BaseModel):
+    ok: bool
+    role: str
+    redirect: str | None = None
+
+@app.post("/login", tags=["Auth"], response_model=LoginOut, summary="Login with email or username")
 async def login(body: LoginIn, request: Request):
-    username = (body.username or "").strip()
-    password = body.password or ""
+    ident = (body.username or "").strip().lower()
+    pwd   = body.password or ""
 
     row = await database.fetch_one(
         """
-        SELECT username, role
-        FROM users
-        WHERE username = :u
-          AND password_hash = crypt(:p, password_hash)
-          AND COALESCE(is_active, TRUE) = TRUE
+        SELECT id, email, COALESCE(username, '') AS username, role
+        FROM public.users
+        WHERE (LOWER(email) = :ident OR LOWER(COALESCE(username, '')) = :ident)
+          AND password_hash = crypt(:pwd, password_hash)
+        LIMIT 1
         """,
-        {"u": username, "p": password}
+        {"ident": ident, "pwd": pwd},
     )
     if not row:
-        raise HTTPException(status_code=401, detail="Invalid credentials.")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     role = (row["role"] or "").lower()
     if role == "yard":  # back-compat
         role = "seller"
 
-    request.session["username"] = row["username"]
+    request.session["username"] = (row["username"] or row["email"])
     request.session["role"] = role
 
-    return {"role": role, "redirect": f"/{role}"}
+    return LoginOut(ok=True, role=role, redirect=f"/{role}")
+
+ALLOW_PUBLIC_SELLER_SIGNUP = os.getenv("ALLOW_PUBLIC_SELLER_SIGNUP", "0").lower() in ("1","true","yes")
+
+class SignupIn(BaseModel):
+    email: EmailStr
+    password: str
+    role: Literal["buyer","seller"] = "buyer"
+
+class SignupOut(BaseModel):
+    ok: bool
+    created: bool
+    email: str
+    role: str
+    redirect: str | None = None
+
+@app.post(
+    "/signup",
+    tags=["Auth"],
+    summary="Create an account (public: buyers; sellers optional via env)",
+    response_model=SignupOut,
+)
+@limiter.limit("10/minute")
+async def public_signup(payload: SignupIn):
+    email = payload.email.strip().lower()
+    pwd   = payload.password.strip()
+
+    if len(pwd) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    req_role = (payload.role or "buyer").lower()
+    if req_role not in ("buyer","seller"):
+        req_role = "buyer"
+    if req_role == "seller" and not ALLOW_PUBLIC_SELLER_SIGNUP:
+        req_role = "buyer"
+
+    # Idempotent on email
+    existing = await database.fetch_one(
+        "SELECT email, role FROM public.users WHERE lower(email) = :e",
+        {"e": email},
+    )
+    if existing:
+        return SignupOut(ok=True, created=False, email=existing["email"], role=existing["role"], redirect="/buyer")
+
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+
+    base_username = email.split("@",1)[0][:64]
+    username = base_username
+
+    async def _insert_with_username(u: str) -> bool:
+        try:
+            await database.execute(
+                """
+                INSERT INTO public.users (email, username, password_hash, role, is_active)
+                VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role, TRUE)
+                """,
+                {"email": email, "username": u, "pwd": pwd, "role": req_role},
+            )
+            return True
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate key" in msg or "unique constraint" in msg:
+                return False
+            raise  # likely column mismatch (e.g., no is_active)
+
+    try:
+        if await _insert_with_username(username):
+            return SignupOut(ok=True, created=True, email=email, role=req_role, redirect=f"/{req_role}")
+
+        for i in range(1, 6):
+            cand = (base_username[:58] + f"-{i}") if len(base_username) > 58 else f"{base_username}-{i}"
+            if await _insert_with_username(cand):
+                return SignupOut(ok=True, created=True, email=email, role=req_role, redirect=f"/{req_role}")
+
+        # username but no is_active
+        try:
+            await database.execute(
+                """
+                INSERT INTO public.users (email, username, password_hash, role)
+                VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role)
+                """,
+                {"email": email, "username": username, "pwd": pwd, "role": req_role},
+            )
+            return SignupOut(ok=True, created=True, email=email, role=req_role, redirect=f"/{req_role}")
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                return SignupOut(ok=True, created=False, email=email, role=req_role, redirect="/buyer")
+            raise
+
+    except Exception:
+        # no username column at all
+        try:
+            await database.execute(
+                """
+                INSERT INTO public.users (email, password_hash, role)
+                VALUES (:email, crypt(:pwd, gen_salt('bf')), :role)
+                """,
+                {"email": email, "pwd": pwd, "role": req_role},
+            )
+            return SignupOut(ok=True, created=True, email=email, role=req_role, redirect=f"/{req_role}")
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                return SignupOut(ok=True, created=False, email=email, role=req_role, redirect="/buyer")
+            raise
 
 @app.post("/logout", tags=["Auth"], summary="Logout", description="Clears session cookie")
 async def logout(request: Request):
