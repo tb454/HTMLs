@@ -754,36 +754,41 @@ class FinishedRow(BaseModel):
     "/inventory/finished_goods",
     tags=["Inventory"],
     summary="Finished goods by SKU for a seller (in pounds)",
-    status_code=200
+    response_model=List[FinishedRow],
+    status_code=200,
 )
-async def finished_goods(seller: str = Query(..., description="Seller (yard) name")) -> List[FinishedRow]:
+async def finished_goods(seller: str = Query(..., description="Seller (yard) name")):
     """
     Available finished = max(qty_on_hand - qty_reserved - qty_committed, 0) in TONS → return as POUNDS.
     wip_lbs is 0 until you split WIP tracking.
     """
     rows = await database.fetch_all(
         """
-        SELECT sku,
-               GREATEST(qty_on_hand - qty_reserved - qty_committed, 0) AS available_tons
-          FROM inventory_items
-         WHERE seller = :seller
-           AND (qty_on_hand - qty_reserved - qty_committed) > 0
-         ORDER BY sku
+        SELECT
+            sku,
+            0::int AS wip_lbs,
+            CAST(ROUND(GREATEST(
+                COALESCE(qty_on_hand, 0)
+              - COALESCE(qty_reserved, 0)
+              - COALESCE(qty_committed, 0), 0
+            ) * 2000) AS int) AS finished_lbs,
+            NULL::float AS avg_cost_per_lb
+        FROM inventory_items
+        WHERE LOWER(seller) = LOWER(:seller)
+        ORDER BY sku;
         """,
-        {"seller": seller}
+        {"seller": seller},
     )
 
-    out: List[FinishedRow] = []
-    for r in rows:
-        avail_tons = float(r["available_tons"] or 0.0)
-        avail_lbs = int(round(avail_tons * 2000.0))
-        out.append(FinishedRow(
+    return [
+        FinishedRow(
             sku=r["sku"],
-            wip_lbs=0,
-            finished_lbs=max(0, avail_lbs),
-            avg_cost_per_lb=None
-        ))
-    return out
+            wip_lbs=int(r["wip_lbs"]),
+            finished_lbs=int(r["finished_lbs"]),
+            avg_cost_per_lb=r["avg_cost_per_lb"],
+        )
+        for r in rows
+    ]
 
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
 @app.on_event("startup")
