@@ -1051,10 +1051,8 @@ async def inventory_import_excel(
 
     return {"ok": True, "upserted": upserted, "errors": errors}
 
-# === INSERT: GenericIngestBody model (place this with your other models, ABOVE any routes) ===
-class GenericIngestBody(BaseModel):
-    # maps external field names to BRidge schema keys
-    # e.g. {"seller":"yardName","sku":"code","qty_on_hand":"qoh","uom":"unit"}
+# === INSERT: GenericIngestBody model 
+    
     mapping: dict
     records: List[dict]
     seller_default: Optional[str] = None
@@ -1063,89 +1061,6 @@ class GenericIngestBody(BaseModel):
     idem_key: Optional[str] = None
 # === /INSERT ===
 
-
-# -------- Inventory: Generic adapter (field mapping; HMAC in prod) --------
-@app.post(
-    "/inventory/ingest/generic",
-    tags=["Inventory"],
-    summary="Generic adapter: map external fields → BRidge schema (HMAC in PROD)",
-    status_code=200
-)
-async def inventory_ingest_generic(
-    body: dict,                      # <-- use dict to avoid any forward-ref issues
-    request: Request,
-    x_signature: Optional[str] = Header(None)
-):
-    # Optional: validate with the Pydantic model explicitly
-    try:
-        parsed = GenericIngestBody(**body)
-    except Exception as e:
-        raise HTTPException(422, f"invalid payload: {e}")
-
-    raw = await request.body()
-    if _require_hmac_in_this_env():
-        if not x_signature or is_replay(x_signature) or not verify_sig(raw, x_signature, INVENTORY_SECRET_ENV):
-            try:
-                await database.execute("""
-                  INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
-                  VALUES (:src, :seller, 0, :idem, :sp, FALSE, :ip, :ua)
-                """, {"src": "ingest_generic",
-                      "seller": None,
-                      "idem": parsed.idem_key,
-                      "sp": bool(x_signature),
-                      "ip": request.client.host if request.client else None,
-                      "ua": request.headers.get("user-agent")})
-            except Exception:
-                pass
-            raise HTTPException(401, "invalid or missing signature")
-
-    # Build a picker from mapping
-    m = {str(k): str(v) for k, v in (parsed.mapping or {}).items()}
-    def pick(rec: dict, key: str, default=None):
-        src = m.get(key)
-        return rec.get(src) if src and (src in rec) else default
-
-    upserted, errors = 0, []
-    async with database.transaction():
-        for i, rec in enumerate(parsed.records or [], start=1):
-            try:
-                seller = (pick(rec, "seller", parsed.seller_default) or "").strip()
-                sku    = (pick(rec, "sku", None) or "").strip()
-                if not (seller and sku):
-                    raise ValueError("missing seller or sku")
-
-                uom      = pick(rec, "uom", parsed.uom_default or "ton")
-                qty_raw  = pick(rec, "qty_on_hand", 0.0)
-                qty_tons = _to_tons(float(qty_raw or 0.0), uom)
-
-                await _manual_upsert_absolute_tx(
-                    seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
-                    uom=uom,
-                    location=pick(rec, "location", None),
-                    description=pick(rec, "description", None),
-                    source=(parsed.source or "generic"),
-                    movement_reason="ingest_generic",
-                    idem_key=parsed.idem_key
-                )
-                upserted += 1
-            except Exception as e:
-                errors.append({"idx": i, "error": str(e)})
-
-        try:
-            await database.execute("""
-              INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
-              VALUES (:src, :seller, :cnt, :idem, :sp, TRUE, :ip, :ua)
-            """, {"src": "ingest_generic",
-                  "seller": (parsed.seller_default or None),
-                  "cnt": upserted,
-                  "idem": parsed.idem_key,
-                  "sp": bool(x_signature),
-                  "ip": request.client.host if request.client else None,
-                  "ua": request.headers.get("user-agent")})
-        except Exception:
-            pass
-
-    return {"ok": True, "upserted": upserted, "errors": errors}
 
 @app.on_event("startup")
 async def _ensure_pgcrypto():
@@ -1304,16 +1219,6 @@ class BOLOut(BOLIn):
             "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
         
-# === INSERT: Generic IMS adapter request model ===
-class GenericIngestBody(BaseModel):
-    mapping: dict                 # {"seller":"yardName","sku":"code","qty_on_hand":"qoh","uom":"unit", ...}
-    records: List[dict]
-    seller_default: Optional[str] = None
-    uom_default: Optional[str] = "ton"
-    source: Optional[str] = "generic"
-    idem_key: Optional[str] = None
-# === /INSERT ===
-
 # Optional tighter typing for updates
 ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
 
