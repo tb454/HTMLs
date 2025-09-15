@@ -287,6 +287,105 @@ async def startup_bootstrap_and_connect():
         await database.connect()
     except Exception as e:
         print(f"[startup] database connect failed: {e}")
+# ==== Quick user creation (admin-only bootstrap) =========================
+import os
+from typing import Literal
+from pydantic import BaseModel
+from fastapi import Header, HTTPException
+
+ADMIN_SETUP_TOKEN = os.getenv("ADMIN_SETUP_TOKEN", "")
+
+class NewUserIn(BaseModel):
+    email: str
+    password: str
+    role: Literal["admin", "buyer", "seller"]
+
+class NewUserOut(BaseModel):
+    ok: bool
+    email: str
+    role: str
+    created: bool  # False if it already existed or raced
+
+@app.post(
+    "/admin/create_user",
+    tags=["Auth"],
+    include_in_schema=False,
+    summary="Create a user (bootstrap only)",
+    response_model=NewUserOut,
+)
+async def create_user(
+    payload: NewUserIn,
+    x_setup_token: str = Header(default="", alias="X-Setup-Token"),
+):
+    if not ADMIN_SETUP_TOKEN or x_setup_token != ADMIN_SETUP_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid setup token")
+
+    email = (payload.email or "").strip().lower()
+    base_username = email.split("@", 1)[0][:64]
+    username = base_username
+
+    # idempotent: skip if exists
+    existing = await database.fetch_one(
+        "SELECT email, role FROM public.users WHERE email = :e",
+        {"e": email},
+    )
+    if existing:
+        return NewUserOut(ok=True, email=existing["email"], role=existing["role"], created=False)
+
+    # best-effort: enable pgcrypto; ignore perms errors
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+
+    async def _try_insert_with_username(u: str) -> bool:
+        try:
+            # path 1: has username + is_active
+            await database.execute("""
+                INSERT INTO public.users (email, username, password_hash, role, is_active)
+                VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role, TRUE)
+            """, {"email": email, "username": u, "pwd": payload.password, "role": payload.role})
+            return True
+        except Exception as e:
+            # username unique conflict? try a different suffix; otherwise bubble up
+            msg = str(e).lower()
+            if "duplicate key" in msg or "unique constraint" in msg:
+                return False
+            raise
+
+    # 1) Try richest shape; vary username if unique-conflict
+    try:
+        if await _try_insert_with_username(username):
+            return NewUserOut(ok=True, email=email, role=payload.role, created=True)
+        for i in range(1, 6):
+            candidate = (base_username[:58] + f"-{i}") if len(base_username) > 58 else f"{base_username}-{i}"
+            if await _try_insert_with_username(candidate):
+                return NewUserOut(ok=True, email=email, role=payload.role, created=True)
+        # 2) No is_active column but username exists
+        try:
+            await database.execute("""
+                INSERT INTO public.users (email, username, password_hash, role)
+                VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role)
+            """, {"email": email, "username": username, "pwd": payload.password, "role": payload.role})
+            return NewUserOut(ok=True, email=email, role=payload.role, created=True)
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                return NewUserOut(ok=True, email=email, role=payload.role, created=False)
+            raise
+    except Exception:
+        # 3) No username column at all
+        try:
+            await database.execute("""
+                INSERT INTO public.users (email, password_hash, role)
+                VALUES (:email, crypt(:pwd, gen_salt('bf')), :role)
+            """, {"email": email, "pwd": payload.password, "role": payload.role})
+            return NewUserOut(ok=True, email=email, role=payload.role, created=True)
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                return NewUserOut(ok=True, email=email, role=payload.role, created=False)
+            raise
+
+    return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
 @app.on_event("shutdown")
 async def shutdown_disconnect():
