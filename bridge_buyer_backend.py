@@ -455,10 +455,10 @@ class SignupOut(BaseModel):
     response_model=SignupOut,
 )
 @limiter.limit("10/minute")
-async def public_signup(payload: SignupIn):
+async def public_signup(payload: SignupIn, request: Request):
     email = payload.email.strip().lower()
     pwd   = payload.password.strip()
-
+  
     if len(pwd) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
