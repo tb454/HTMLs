@@ -68,7 +68,7 @@ instrumentator = Instrumentator()
 instrumentator.instrument(app)
 
 # ===== Trusted hosts + session cookie =====
-allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
 prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
