@@ -1348,7 +1348,7 @@ app.add_middleware(
 ALLOWED_HOSTS = [
     "scrapfutures.com",
     "www.scrapfutures.com",
-    "https://bridge.scrapfutures.com";
+    "bridge.scrapfutures.com";
     "bridge-buyer.onrender.com",  
     "localhost",
     "127.0.0.1",
