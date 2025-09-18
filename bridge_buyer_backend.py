@@ -66,6 +66,7 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
+app.include_router(admin_exports)
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
@@ -1384,6 +1385,7 @@ async def inventory_import_excel(
     uom_default: Optional[str] = "ton"
     source: Optional[str] = "generic"
     idem_key: Optional[str] = None
+
 # === /INSERT ===
 
 
@@ -2148,6 +2150,100 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
     if idem:
         _idem_cache[idem] = resp
 
+# === INSERT: Back-compat aliases for older UI buttons ===
+@app.get("/admin/export_all", include_in_schema=False)
+def _alias_export_all():
+    return RedirectResponse(url="/admin/exports/all.zip", status_code=307)
+
+@app.get("/contracts/export_csv", include_in_schema=False)
+def _alias_export_csv():
+    return RedirectResponse(url="/admin/exports/contracts.csv", status_code=307)
+# === /INSERT ===
+
+# ========== Admin Exports router ==========
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse, RedirectResponse
+from sqlalchemy import text as _sqltext
+import io, csv, zipfile
+
+admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
+
+@admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
+def export_contracts_csv_admin():
+    with engine.begin() as conn:
+        rows = conn.execute(_sqltext("""
+            SELECT 
+              id, buyer, seller, material, sku, weight_tons, price_per_ton,
+              total_value, status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC NULLS LAST, id DESC
+        """)).mappings().all()
+        cols = rows[0].keys() if rows else []
+
+        def _iter():
+            buf = io.StringIO(); w = csv.writer(buf)
+            if cols: w.writerow(cols); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+            for r in rows:
+                w.writerow([r.get(c) for c in cols])
+                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+        return StreamingResponse(
+            _iter(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+
+@admin_exports.get("/all.zip", summary="All core tables as CSV (ZIP)")
+def export_all_zip_admin():
+    queries = {
+        "contracts.csv": """
+            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
+                   total_value, status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC NULLS LAST, id DESC
+        """,
+        "bols.csv": """
+            SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
+                   pickup_time, delivery_time, total_value
+            FROM bols
+            ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+        """,
+        "inventory_items.csv": """
+            SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
+                   qty_committed, source, external_id, updated_at
+            FROM inventory_items
+            ORDER BY seller, sku
+        """,
+        "inventory_movements.csv": """
+            SELECT seller, sku, movement_type, qty, ref_contract, created_at
+            FROM inventory_movements
+            ORDER BY created_at DESC
+        """
+    }
+
+    with engine.begin() as conn:
+        mem = io.BytesIO()
+        with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fname, sql in queries.items():
+                rows = conn.execute(_sqltext(sql)).mappings().all()
+                cols = rows[0].keys() if rows else []
+                s = io.StringIO(); w = csv.writer(s)
+                if cols: w.writerow(cols)
+                for r in rows:
+                    w.writerow([r.get(c) for c in cols])
+                zf.writestr(fname, s.getvalue())
+        mem.seek(0)
+        return StreamingResponse(
+            mem,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
+        )
+
+# mount router (place once, near where you include other routers)
+app.include_router(admin_exports)
+
+# ========== /Admin Exports router ==========
+
     # ---- audit log 
     actor = request.session.get("username") if hasattr(request, "session") else None
     try:
@@ -2206,6 +2302,86 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
+from sqlalchemy import text as _sqltext
+# === INSERT: Admin Exports router ===
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse, RedirectResponse
+import io, csv, zipfile
+
+admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
+
+@admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
+def export_contracts_csv_admin():
+    with engine.begin() as conn:
+        rows = conn.execute(_sqltext("""
+            SELECT 
+              id, buyer, seller, material, sku, weight_tons, price_per_ton,
+              total_value, status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC NULLS LAST, id DESC
+        """)).mappings().all()
+        cols = rows[0].keys() if rows else []
+
+        def _iter():
+            buf = io.StringIO(); w = csv.writer(buf)
+            if cols:
+                w.writerow(cols); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+            for r in rows:
+                w.writerow([r.get(c) for c in cols])
+                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+        return StreamingResponse(
+            _iter(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+
+@admin_exports.get("/all.zip", summary="All core tables as CSV (ZIP)")
+def export_all_zip_admin():
+    queries = {
+        "contracts.csv": """
+            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
+                   total_value, status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC NULLS LAST, id DESC
+        """,
+        "bols.csv": """
+            SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
+                   pickup_time, delivery_time, total_value
+            FROM bols
+            ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+        """,
+        "inventory_items.csv": """
+            SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
+                   qty_committed, source, external_id, updated_at
+            FROM inventory_items
+            ORDER BY seller, sku
+        """,
+        "inventory_movements.csv": """
+            SELECT seller, sku, movement_type, qty, ref_contract, created_at
+            FROM inventory_movements
+            ORDER BY created_at DESC
+        """
+    }
+
+    with engine.begin() as conn:
+        mem = io.BytesIO()
+        with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fname, sql in queries.items():
+                rows = conn.execute(_sqltext(sql)).mappings().all()
+                cols = rows[0].keys() if rows else []
+                s = io.StringIO(); w = csv.writer(s)
+                if cols: w.writerow(cols)
+                for r in rows:
+                    w.writerow([r.get(c) for c in cols])
+                zf.writestr(fname, s.getvalue())
+        mem.seek(0)
+        return StreamingResponse(
+            mem,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
+        )
+# === /INSERT ===
 
     # ---- audit log (best-effort; won't break request on failure)
     actor = request.session.get("username") if hasattr(request, "session") else None
@@ -2493,8 +2669,20 @@ async def publish_mark(body: PublishMarkIn):
 
 @futures_router.get("/products", response_model=List[ProductOut], summary="List products")
 async def list_products():
-    rows = await database.fetch_all("SELECT * FROM futures_products ORDER BY symbol_root")
-    return rows
+   rows = await database.fetch_all("""
+    SELECT 
+      id::text AS id,
+      symbol_root,
+      material,
+      delivery_location,
+      contract_size_tons,
+      tick_size,
+      currency,
+      price_method
+    FROM futures_products
+    ORDER BY created_at DESC
+""")
+return [dict(r) for r in rows]
 
 @futures_router.get("/series", response_model=List[ListingOut], summary="List series")
 async def list_series_admin(product_id: Optional[str] = Query(None), status: Optional[str] = Query(None)):
