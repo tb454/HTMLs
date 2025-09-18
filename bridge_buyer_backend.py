@@ -2034,7 +2034,7 @@ async def update_contract(contract_id: str, update: ContractUpdate):
     """, {"id": contract_id, "status": update.status, "signature": update.signature})
     if not row:
         raise HTTPException(status_code=404, detail="Contract not found")
-     # audit log
+         # audit log
     actor = request.session.get("username") if hasattr(request, "session") else None
     try:
         await log_action(actor or "system", "contract.update", str(contract_id), {
@@ -2043,7 +2043,9 @@ async def update_contract(contract_id: str, update: ContractUpdate):
         })
     except Exception:
         pass
+
     return row
+
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
@@ -2670,20 +2672,20 @@ async def publish_mark(body: PublishMarkIn):
 
 @futures_router.get("/products", response_model=List[ProductOut], summary="List products")
 async def list_products():
-   rows = await database.fetch_all("""
-    SELECT 
-      id::text AS id,
-      symbol_root,
-      material,
-      delivery_location,
-      contract_size_tons,
-      tick_size,
-      currency,
-      price_method
-    FROM futures_products
-    ORDER BY created_at DESC
-""")
-return [dict(r) for r in rows]
+    rows = await database.fetch_all("""
+        SELECT 
+          id::text AS id,
+          symbol_root,
+          material,
+          delivery_location,
+          contract_size_tons,
+          tick_size,
+          currency,
+          price_method
+        FROM futures_products
+        ORDER BY created_at DESC
+    """)
+    return [dict(r) for r in rows]
 
 @futures_router.get("/series", response_model=List[ListingOut], summary="List series")
 async def list_series_admin(product_id: Optional[str] = Query(None), status: Optional[str] = Query(None)):
