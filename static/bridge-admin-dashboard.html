@@ -46,8 +46,12 @@
           <div class="col-md-3">
             <input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" />
           </div>
+
           <div class="col-md-3">
             <button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-outline-dark w-100" onclick="downloadAll()">📦 Download All (ZIP)</button>
           </div>
         </div>
 
@@ -295,7 +299,8 @@
       try { return isoString ? new Date(isoString).toLocaleString() : "—"; } catch { return "—"; }
     }
 
-    function downloadCSV() { window.open(`${endpoint}/contracts/export_csv`, "_blank"); }
+    function downloadCSV()  { window.open(`${endpoint}/contracts/export_csv`, "_blank"); }
+    function downloadAll()  { window.open(`${endpoint}/admin/export_all`, "_blank"); }
     function downloadPDF(bolId) { window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank"); }
     function viewBOLsFor(contractId) {
       const qs = new URLSearchParams();
@@ -360,7 +365,7 @@
     adminPrevBtn?.addEventListener("click", () => { aOffset = Math.max(0, aOffset - aLimit); loadBOLsAdmin(); });
     adminNextBtn?.addEventListener("click", () => { aOffset = aOffset + aLimit; loadBOLsAdmin(); });
 
-    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(() => fn(...a), ms); }; }
     startDate.addEventListener("change",   () => { aOffset = 0; loadBOLsAdmin(); });
     endDate.addEventListener("change",     () => { aOffset = 0; loadBOLsAdmin(); });
     buyerFilter.addEventListener("input",  debounce(() => { aOffset = 0; loadBOLsAdmin(); }));

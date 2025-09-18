@@ -546,6 +546,98 @@ async def logout(request: Request):
     return {"ok": True}
 # ======= /AUTH ========
 
+# --- CSV export (contracts) ---
+from fastapi.responses import StreamingResponse
+import csv, io
+from sqlalchemy import text as _sqltext
+
+@app.get("/contracts/export_csv", tags=["Admin"], summary="Export all contracts as CSV")
+def export_contracts_csv():
+    # If you use a global SQLAlchemy engine:
+    conn = engine.connect()
+    try:
+        # Pull the columns you actually have (adjust names if different)
+        q = _sqltext("""
+            SELECT 
+              id, buyer, seller, material, sku, weight_tons, price_per_ton, total_value,
+              status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC, id DESC
+        """)
+        rows = conn.execute(q).fetchall()
+        cols = rows[0].keys() if rows else [
+            "id","buyer","seller","material","sku","weight_tons","price_per_ton",
+            "total_value","status","contract_date","pickup_time","delivery_time","currency"
+        ]
+
+        def _iter_csv():
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(cols)
+            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+            for r in rows:
+                w.writerow([r.get(c, None) if hasattr(r, "get") else getattr(r, c, None) for c in cols])
+                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+        filename = "contracts.csv"
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return StreamingResponse(_iter_csv(), media_type="text/csv", headers=headers)
+    finally:
+        conn.close()
+
+# --- ZIP export (all core data) ---
+from fastapi.responses import StreamingResponse
+import zipfile, io, csv
+from sqlalchemy import text as _sqltext
+
+@app.get("/admin/export_all", tags=["Admin"], summary="Download ZIP of all CSVs")
+def admin_export_all():
+    exports = {
+        "contracts.csv": """
+            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
+                   total_value, status, contract_date, pickup_time, delivery_time, currency
+            FROM contracts
+            ORDER BY contract_date DESC NULLS LAST, id DESC
+        """,
+        "bols.csv": """
+            SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
+                   pickup_time, delivery_time, total_value
+            FROM bols
+            ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+        """,
+        "inventory_items.csv": """
+            SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
+                   qty_committed, source, external_id, updated_at
+            FROM inventory_items
+            ORDER BY seller, sku
+        """,
+        "inventory_movements.csv": """
+            SELECT seller, sku, movement_type, qty, ref_contract, created_at
+            FROM inventory_movements
+            ORDER BY created_at DESC
+        """,
+    }
+
+    with engine.begin() as conn:
+        mem = io.BytesIO()
+        with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fname, sql in exports.items():
+                rows = conn.execute(_sqltext(sql)).fetchall()
+                cols = rows[0].keys() if rows else []
+                s = io.StringIO()
+                w = csv.writer(s)
+                if cols: w.writerow(cols)
+                for r in rows:
+                    # handle Row/RowMapping and plain tuples
+                    if hasattr(r, "keys"):
+                        w.writerow([r[c] for c in cols])
+                    else:
+                        w.writerow(list(r))
+                zf.writestr(fname, s.getvalue())
+        mem.seek(0)
+        headers = {"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
+        return StreamingResponse(mem, media_type="application/zip", headers=headers)
+
 # ===== HMAC gating for inventory endpoints =====
 INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
 
