@@ -2245,16 +2245,16 @@ app.include_router(admin_exports)
 # ========== /Admin Exports router ==========
 
     # ---- audit log 
-    actor = request.session.get("username") if hasattr(request, "session") else None
-    try:
+actor = request.session.get("username") if hasattr(request, "session") else None
+try:
         await log_action(actor or "system", "contract.purchase", str(contract_id), {
             "new_status": "Signed",
             "bol_id": bol_id
         })
-    except Exception:
+except Exception:
         pass
 
-    return resp
+return resp
 
 @app.post(
     "/bols",
@@ -2302,10 +2302,9 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
-from sqlalchemy import text as _sqltext
-# === INSERT: Admin Exports router ===
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
+from sqlalchemy import text as _sqltext
 import io, csv, zipfile
 
 admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
@@ -2381,6 +2380,7 @@ def export_all_zip_admin():
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
+
 # === /INSERT ===
 
     # ---- audit log (best-effort; won't break request on failure)
@@ -2440,6 +2440,7 @@ async def cancel_contract(contract_id: str):
               "meta": json.dumps({"reason": "cancel"})})
 
     return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
+
 
 # =============== FUTURES (Admin) ===============
 futures_router = APIRouter(
