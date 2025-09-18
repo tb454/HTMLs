@@ -14,6 +14,7 @@
     .form-hint { font-size: 0.85rem; color: #6c757d; }
     .badge-pill { border-radius: 50rem; padding: 0.35em 0.6em; }
     .muted { color: #6c757d; }
+    code.small { font-size: .8rem; }
   </style>
 </head>
 <body>
@@ -53,6 +54,12 @@
           <div class="col-md-3">
             <button class="btn btn-outline-dark w-100" onclick="downloadAll()">📦 Download All (ZIP)</button>
           </div>
+          <div class="col-md-3">
+            <button class="btn btn-outline-secondary w-100" onclick="openOpenAPI()">📜 OpenAPI</button>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-outline-success w-100" onclick="openHealth()">🟢 Health</button>
+          </div>
         </div>
 
         <!-- Admin pagination controls -->
@@ -75,8 +82,8 @@
                 <th>Pickup Time</th>
                 <th>Delivery Time</th>
                 <th>Total Value</th>
-                <th>Download</th>
-                <th>View</th>
+                <th>PDF</th>
+                <th>ICE</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -260,6 +267,31 @@
     </div>
   </div>
 
+  <!-- Delivery Log Modal -->
+  <div class="modal fade" id="deliveryLogModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Delivery Log — <span id="logBolId"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="logStats" class="small text-muted mb-2"></div>
+        <table class="table table-sm table-striped">
+          <thead><tr>
+            <th>Attempt</th><th>When (UTC)</th><th>Status</th><th>Latency (ms)</th><th>Response</th>
+          </tr></thead>
+          <tbody id="logTbody"></tbody>
+        </table>
+        <div id="hashRow" class="small text-muted"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-primary" id="btnResend">↻ Re-send</button>
+        <button class="btn btn-outline-secondary" id="btnTest">🧪 Test Ping</button>
+        <button class="btn btn-outline-danger" id="btnRotate">🔑 Rotate Secret</button>
+      </div>
+    </div></div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     const endpoint = "https://bridge.scrapfutures.com";
@@ -270,7 +302,7 @@
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     }
-    function toast(msg) { console.log(msg); } // you can swap for a nicer toast later
+    function toast(msg) { console.log(msg); } // swap for nicer toast later
 
     // ----------------- BOLs JS -----------------
     let aOffset = 0, aLimit = 100;
@@ -299,9 +331,13 @@
       try { return isoString ? new Date(isoString).toLocaleString() : "—"; } catch { return "—"; }
     }
 
-    function downloadCSV()  { window.open(`${endpoint}/contracts/export_csv`, "_blank"); }
-    function downloadAll()  { window.open(`${endpoint}/admin/export_all`, "_blank"); }
+    // Same-tab to ensure session cookies apply
+    function downloadCSV()  { window.location.href = `${endpoint}/contracts/export_csv`; }
+    function downloadAll()  { window.location.href = `${endpoint}/admin/export_all`; }
+    function openOpenAPI()  { window.open(`${endpoint}/openapi.json`, "_blank"); }
+    function openHealth()   { window.open(`${endpoint}/health`, "_blank"); }
     function downloadPDF(bolId) { window.open(`${endpoint}/bol/${bolId}/pdf`, "_blank"); }
+
     function viewBOLsFor(contractId) {
       const qs = new URLSearchParams();
       qs.set("contract_id", contractId);
@@ -345,6 +381,7 @@
 
       rows.forEach(bol => {
         const tr = document.createElement("tr");
+        const hashHtml = bol.pdf_sha256 ? `<div class="small text-muted">SHA-256: <code class="small">${String(bol.pdf_sha256).slice(0,12)}…</code></div>` : ``;
         tr.innerHTML = `
           <td>${bol.bol_id}</td>
           <td>${bol.contract_id}</td>
@@ -355,8 +392,15 @@
           <td>${formatTime(bol.pickup_time)}</td>
           <td>${formatTime(bol.delivery_time)}</td>
           <td>$${Number(bol.total_value || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-          <td><button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button></td>
-          <td><button class="btn btn-sm btn-outline-primary" onclick="viewBOLsFor('${bol.contract_id}')">View BOLs</button></td>
+          <td>
+            <button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button>
+            ${hashHtml}
+          </td>
+          <td>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary" onclick="showDeliveryLog('${bol.bol_id}')">🚚 Log</button>
+            </div>
+          </td>
         `;
         tbody.appendChild(tr);
       });
@@ -370,6 +414,42 @@
     endDate.addEventListener("change",     () => { aOffset = 0; loadBOLsAdmin(); });
     buyerFilter.addEventListener("input",  debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
     materialFilter.addEventListener("input", debounce(() => { aOffset = 0; loadBOLsAdmin(); }));
+
+    // ---- Delivery Log modal wiring ----
+    async function showDeliveryLog(bolId){
+      document.getElementById("logBolId").textContent = bolId;
+      const modal = new bootstrap.Modal(document.getElementById('deliveryLogModal'));
+      try {
+        const log = await fetchJSON(`${endpoint}/admin/ice/logs?bol_id=${encodeURIComponent(bolId)}`);
+        const tb = document.getElementById("logTbody"); tb.innerHTML = "";
+        (log.entries||[]).forEach((e,i)=>{
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${i+1}</td><td>${e.when_utc||"—"}</td><td>${e.http_status||"—"}</td>
+            <td>${e.ms||"—"}</td><td><code class="small">${(e.response||"").slice(0,160)}</code></td>`;
+          tb.appendChild(tr);
+        });
+        document.getElementById("logStats").textContent =
+          `Delivered: ${log.delivered_count||0} • Pending: ${log.pending_count||0} • Failed: ${log.failed_count||0}`;
+        document.getElementById("hashRow").innerHTML =
+          log.pdf_sha256 ? `PDF SHA-256: <code class="small">${String(log.pdf_sha256)}</code>` : "";
+
+        document.getElementById("btnResend").onclick = ()=> fetchJSON(`${endpoint}/admin/ice/resend`, {
+          method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ bol_id: bolId })
+        }).then(()=>showDeliveryLog(bolId)).catch(e=>alert(e.message));
+
+        document.getElementById("btnTest").onclick = ()=> fetchJSON(`${endpoint}/admin/ice/test_ping`, {
+          method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ bol_id: bolId })
+        }).then(()=>showDeliveryLog(bolId)).catch(e=>alert(e.message));
+
+        document.getElementById("btnRotate").onclick = ()=> fetchJSON(`${endpoint}/admin/ice/rotate_secret`, {
+          method:"POST"
+        }).then(()=>alert("Secret rotated.")).catch(e=>alert(e.message));
+
+        modal.show();
+      } catch(e){ alert("Failed to load log: " + e.message); }
+    }
 
     // ----------------- FUTURES JS -----------------
     const api = `${endpoint}/admin/futures`;
@@ -444,7 +524,6 @@
 
     async function createProduct(form) {
       const body = Object.fromEntries(new FormData(form));
-      // numeric fields
       body.contract_size_tons = parseFloat(body.contract_size_tons);
       body.tick_size = parseFloat(body.tick_size);
       try {
@@ -563,26 +642,6 @@
       });
     }
 
-    // Pricing form handler
-    async function submitPricing() {
-      const symbol_root = pricingSymbolSel.value;
-      const body = {
-        lookback_days: parseInt(document.getElementById("pricingLookback").value || "14", 10),
-        basis_adjustment: parseFloat(document.getElementById("pricingBasis").value || "0"),
-        carry_per_month: parseFloat(document.getElementById("pricingCarry").value || "0"),
-        manual_mark: document.getElementById("pricingManual").value ? parseFloat(document.getElementById("pricingManual").value) : null
-      };
-      await setPricing(symbol_root, body);
-      alert("Pricing saved.");
-    }
-
-    // Series form handler
-    async function submitGenerateSeries() {
-      const pid = seriesProductSel.value;
-      if (!pid) { alert("Select a product."); return; }
-      await generateSeries(pid);
-    }
-
     // Filters
     filterSeriesProdSel?.addEventListener("change", refreshSeries);
     filterSeriesStatus?.addEventListener("change", refreshSeries);
@@ -591,7 +650,7 @@
     loadBOLsAdmin();
     setInterval(loadBOLsAdmin, 10000);
 
-    // Only load futures data when the tab is shown (and once at start)
+    // Load futures when tab shown
     let futuresLoadedOnce = false;
     document.getElementById("futures-tab").addEventListener("shown.bs.tab", async () => {
       if (!futuresLoadedOnce) {
