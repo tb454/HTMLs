@@ -66,7 +66,6 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
-app.include_router(admin_exports)
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
@@ -2248,13 +2247,14 @@ app.include_router(admin_exports)
 
     # ---- audit log 
 actor = request.session.get("username") if hasattr(request, "session") else None
+payload = {"new_status": "Signed", "bol_id": bol_id}
+
 try:
-        await log_action(actor or "system", "contract.purchase", str(contract_id), {
-            "new_status": "Signed",
-            "bol_id": bol_id
-        })
+    _res = log_action(actor or "system", "contract.purchase", str(contract_id), payload)
+    if inspect.isawaitable(_res):
+        asyncio.create_task(_res)
 except Exception:
-        pass
+    pass
 
 return resp
 
