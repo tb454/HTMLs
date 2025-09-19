@@ -31,6 +31,7 @@ from datetime import date as _date
 import asyncio
 import inspect
 from fastapi import Request
+from typing import Iterable
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -548,45 +549,6 @@ async def logout(request: Request):
     request.session.clear()
     return {"ok": True}
 # ======= /AUTH ========
-
-# --- CSV export (contracts) ---
-from fastapi.responses import StreamingResponse
-import csv, io
-from sqlalchemy import text as _sqltext
-
-@app.get("/contracts/export_csv", tags=["Admin"], summary="Export all contracts as CSV")
-def export_contracts_csv():
-    # If you use a global SQLAlchemy engine:
-    conn = engine.connect()
-    try:
-        # Pull the columns you actually have (adjust names if different)
-        q = _sqltext("""
-            SELECT 
-              id, buyer, seller, material, sku, weight_tons, price_per_ton, total_value,
-              status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC, id DESC
-        """)
-        rows = conn.execute(q).fetchall()
-        cols = rows[0].keys() if rows else [
-            "id","buyer","seller","material","sku","weight_tons","price_per_ton",
-            "total_value","status","contract_date","pickup_time","delivery_time","currency"
-        ]
-
-        def _iter_csv():
-            buf = io.StringIO()
-            w = csv.writer(buf)
-            w.writerow(cols)
-            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-            for r in rows:
-                w.writerow([r.get(c, None) if hasattr(r, "get") else getattr(r, c, None) for c in cols])
-                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-
-        filename = "contracts.csv"
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-        return StreamingResponse(_iter_csv(), media_type="text/csv", headers=headers)
-    finally:
-        conn.close()
 
 # --- ZIP export (all core data) ---
 from fastapi.responses import StreamingResponse
@@ -1558,7 +1520,7 @@ class BOLOut(BOLIn):
             "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
         }}
         
-# Optional tighter typing for updates
+# Tighter typing for updates
 ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
 
 class ContractUpdate(BaseModel):
@@ -1574,6 +1536,28 @@ class ContractUpdate(BaseModel):
 _idem_cache = {}
 
 # ===== Admin export helpers =====
+
+# --- helpers (for CSV/ZIP safety) ---
+def _safe(v):
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    return v
+
+def _iter_csv(rows: Iterable[dict], fieldnames: list[str]):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    yield buf.getvalue()
+    buf.seek(0); buf.truncate(0)
+    for r in rows:
+        writer.writerow({k: _safe(r.get(k)) for k in fieldnames})
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+
 def _normalize(v):
     if isinstance(v, (datetime, date)):
         return v.isoformat()
@@ -2090,22 +2074,18 @@ async def update_contract(
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
     rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["ID","Buyer","Seller","Material","Weight (tons)","Price/ton","Status","Created","Signed","Signature"])
-    for r in rows:
-        writer.writerow([
-            r["id"], r["buyer"], r["seller"], r["material"],
-            r["weight_tons"], r["price_per_ton"], r["status"],
-            r["created_at"].isoformat(),
-            r["signed_at"].isoformat() if r["signed_at"] else "",
-            r["signature"] or ""
-        ])
-    output.seek(0)
+    rows = [dict(r) for r in rows]
+    if not rows:
+        return StreamingResponse(
+            iter(["id\n"]),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+    fieldnames = list(rows[0].keys())
     return StreamingResponse(
-        iter([output.getvalue()]),
+        _iter_csv(rows, fieldnames),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename=\"contracts_export_{datetime.utcnow().isoformat()}.csv\"'}
+        headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
     )
 
 @app.patch(
