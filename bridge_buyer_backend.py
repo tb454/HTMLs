@@ -28,6 +28,9 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter
 from datetime import date as _date
+import asyncio
+import inspect
+from fastapi import Request
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -2021,30 +2024,53 @@ async def get_contract_by_id(contract_id: str):
         raise HTTPException(status_code=404, detail="Contract not found")
     return row
 
-@app.put("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Update Contract", status_code=200)
-async def update_contract(contract_id: str, update: ContractUpdate):
-    row = await database.fetch_one("""
+@app.put(
+    "/contracts/{contract_id}",
+    response_model=ContractOut,
+    tags=["Contracts"],
+    summary="Update Contract",
+    status_code=200
+)
+async def update_contract(
+    contract_id: str,
+    update: ContractUpdate,
+    request: Request   # ✅ add this so request is available
+):
+    row = await database.fetch_one(
+        """
         UPDATE contracts
         SET status = :status,
             signature = :signature,
             signed_at = CASE WHEN :signature IS NOT NULL THEN NOW() ELSE signed_at END
         WHERE id = :id
         RETURNING *
-    """, {"id": contract_id, "status": update.status, "signature": update.signature})
+        """,
+        {
+            "id": contract_id,
+            "status": update.status,
+            "signature": update.signature
+        }
+    )
+
     if not row:
         raise HTTPException(status_code=404, detail="Contract not found")
-         # audit log
+
+    # ---- audit log
     actor = request.session.get("username") if hasattr(request, "session") else None
     try:
-        await log_action(actor or "system", "contract.update", str(contract_id), {
-            "status": update.status,
-            "signature_present": update.signature is not None
-        })
+        await log_action(
+            actor or "system",
+            "contract.update",
+            str(contract_id),
+            {
+                "status": update.status,
+                "signature_present": update.signature is not None,
+            }
+        )
     except Exception:
         pass
 
-    return row
-
+    return row  
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
@@ -2244,20 +2270,35 @@ def export_all_zip_admin():
 app.include_router(admin_exports)
 
 # ========== /Admin Exports router ==========
+# near the top of the file, make sure these exist:
+import asyncio
+import inspect
+from fastapi import Request
 
-    # ---- audit log 
-actor = request.session.get("username") if hasattr(request, "session") else None
-payload = {"new_status": "Signed", "bol_id": bol_id}
+@app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
+async def sign_contract(contract_id: str, request: Request):
+    # whatever signing logic you need goes here (DB updates, signature, etc.)
+    # For now, we just return OK and log.
+    resp = {"status": "ok", "contract_id": contract_id}
 
-try:
-    _res = log_action(actor or "system", "contract.purchase", str(contract_id), payload)
-    if inspect.isawaitable(_res):
-        asyncio.create_task(_res)
-except Exception:
-    pass
+    # ---- audit log (INSIDE the function)
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    # define bol_id somehow; if you don't have it yet, keep None or read from query/body
+    bol_id = request.query_params.get("bol_id")  # None if not provided
 
-return resp
+    payload = {"new_status": "Signed", "bol_id": bol_id}
 
+    try:
+        _res = log_action(actor or "system", "contract.purchase", str(contract_id), payload)
+        if inspect.isawaitable(_res):
+            # don't block the request; fire-and-forget
+            asyncio.create_task(_res)
+    except Exception:
+        # never let logging break the main flow
+        pass
+
+    return resp
+# -------- BOLs (with PDF generation) --------
 @app.post(
     "/bols",
     response_model=BOLOut,
