@@ -1798,6 +1798,21 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         _idem_cache[idem_key] = resp
     return resp
 
+    # ---- audit log (best-effort; won't break request on failure)
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    try:
+        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
+            "contract_id": str(bol.contract_id),
+            "material": bol.material,
+            "weight_tons": bol.weight_tons
+        })
+    except Exception:
+        pass
+
+    if idem_key:
+        _idem_cache[idem_key] = resp
+    return resp
+
 @app.get(
     "/bols",
     response_model=List[BOLOut],
@@ -2426,20 +2441,7 @@ def export_all_zip_admin():
 
 # === /INSERT ===
 
-    # ---- audit log (best-effort; won't break request on failure)
-    actor = request.session.get("username") if hasattr(request, "session") else None
-    try:
-        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
-            "contract_id": str(bol.contract_id),
-            "material": bol.material,
-            "weight_tons": bol.weight_tons
-        })
-    except Exception:
-        pass
 
-    if idem_key:
-        _idem_cache[idem_key] = resp
-    return resp
 
 @app.post(
     "/contracts/{contract_id}/cancel",
