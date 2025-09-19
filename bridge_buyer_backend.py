@@ -79,8 +79,6 @@ allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
-
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
@@ -92,6 +90,7 @@ app.add_middleware(
 # Make client IP visible behind proxies/CDN so SlowAPI uses the real address
 if prod:
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 
 # =====  rate limiting (init AFTER ProxyHeaders; keep ONLY this block) =====
 limiter = Limiter(key_func=get_remote_address)
