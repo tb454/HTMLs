@@ -36,6 +36,10 @@ from statistics import mean, stdev
 from collections import defaultdict
 from typing import Optional
 from fastapi import HTTPException
+import io, os, csv, zipfile, datetime
+from typing import Dict, Any, List
+import httpx
+from fastapi import BackgroundTasks
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -75,8 +79,13 @@ app = FastAPI(
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
 
+# Moves docs under /api/v1 but keep existing endpoints untouched
+app.docs_url = "/api/v1/docs"
+app.redoc_url = None
+app.openapi_url = "/api/v1/openapi.json"
+
 # ===== Trusted hosts + session cookie =====
-allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
 
 prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
@@ -1537,6 +1546,19 @@ class ContractUpdate(BaseModel):
 
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
+
+@app.post("/admin/run_snapshot_now", tags=["Admin"], summary="Build & upload a snapshot now (blocking)")
+async def admin_run_snapshot_now(storage: str = "supabase"):
+    try:
+        res = await run_daily_snapshot(storage=storage)
+        return {"ok": True, **res}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/admin/run_snapshot_bg", tags=["Admin"], summary="Queue a snapshot upload (background) and return immediately")
+async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase"):
+    background.add_task(run_daily_snapshot, storage)
+    return {"ok": True, "queued": True}
 
 # ===== Admin export helpers =====
 
@@ -3342,6 +3364,92 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
 
 app.include_router(trade_router)
 # =================== /TRADING (Order Book) =====================
+async def _fetch_csv_rows(query: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    rows = await database.fetch_all(query, params or {})
+    return [dict(r) for r in rows]
+
+async def build_export_zip() -> bytes:
+    """
+    Builds a ZIP with CSVs for contracts, bols, inventory, users, index_snapshots.
+    Mirrors /admin/export_all.zip behavior but returns bytes for reuse (cron/upload).
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        exports = {
+            "contracts.csv": """
+                SELECT id, seller, buyer, sku, price_per_unit, currency, status, created_at, updated_at
+                FROM contracts ORDER BY created_at DESC
+            """,
+            "bols.csv": """
+                SELECT id, contract_id, material, weight_tons, carrier, status, created_at, updated_at
+                FROM bols ORDER BY created_at DESC
+            """,
+            "inventory_movements.csv": """
+                SELECT id, seller, sku, qty, uom, movement_type, created_at
+                FROM inventory_movements ORDER BY created_at DESC
+            """,
+            "users.csv": """
+                SELECT id, username, role, tenant_id, created_at
+                FROM users ORDER BY created_at DESC
+            """,
+            "index_snapshots.csv": """
+                SELECT id, region, sku, avg_price, snapshot_date
+                FROM index_snapshots ORDER BY snapshot_date DESC
+            """
+        }
+        for fname, sql in exports.items():
+            rows = await _fetch_csv_rows(sql)
+            mem = io.StringIO()
+            if rows:
+                writer = csv.DictWriter(mem, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(rows)
+            else:
+                mem.write("")  # empty file is fine
+            zf.writestr(fname, mem.getvalue().encode("utf-8"))
+    return buf.getvalue()
+
+async def _upload_to_supabase(path: str, data: bytes) -> Dict[str, Any]:
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE")
+    bucket = os.getenv("SUPABASE_BUCKET", "backups")
+    if not (supabase_url and supabase_service_key):
+        raise RuntimeError("Supabase env vars missing")
+
+    # Supabase Storage REST: POST /storage/v1/object/{bucket}/{path}
+    api = f"{supabase_url}/storage/v1/object/{bucket}/{path}"
+    headers = {
+        "Authorization": f"Bearer {supabase_service_key}",
+        "Content-Type": "application/zip",
+        "x-upsert": "true",
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(api, headers=headers, content=data)
+        r.raise_for_status()
+        return {"ok": True, "path": path, "status_code": r.status_code}
+
+async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
+    import boto3
+    s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+    bucket = os.getenv("S3_BUCKET")
+    if not bucket:
+        raise RuntimeError("S3_BUCKET missing")
+    s3.put_object(Bucket=bucket, Key=path, Body=data, ContentType="application/zip")
+    return {"ok": True, "path": f"s3://{bucket}/{path}"}
+
+async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
+    data = await build_export_zip()
+    now = datetime.datetime.utcnow()
+    day = now.strftime("%Y-%m-%d")
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{stamp}_export_all.zip"
+    path = f"{day}/{filename}"
+
+    if storage == "s3":
+        return await _upload_to_s3(path, data)
+    else:
+        return await _upload_to_supabase(path, data)
+
 
 # ===================== CLEARING (Margin & Variation) =====================
 clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])
