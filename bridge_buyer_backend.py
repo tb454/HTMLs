@@ -32,6 +32,8 @@ import asyncio
 import inspect
 from fastapi import Request
 from typing import Iterable
+from statistics import mean, stdev
+from collections import defaultdict
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -2180,6 +2182,84 @@ def _alias_export_all():
 def _alias_export_csv():
     return RedirectResponse(url="/admin/exports/contracts.csv", status_code=307)
 # === /INSERT ===
+
+@app.get("/analytics/material_price_history", tags=["Analytics"], summary="Get historical contract prices by SKU", description="Returns time-series data of contract prices for a specific material.")
+async def material_price_history(sku: str, seller: Optional[str] = None):
+    query = contracts.select().where(contracts.c.sku == sku)
+    if seller:
+        query = query.where(contracts.c.seller == seller)
+    rows = await database.fetch_all(query)
+    prices_by_date = defaultdict(list)
+    for row in rows:
+        prices_by_date[str(row["created_at"].date())].append(row["price_per_unit"])
+    result = [
+        {"date": date, "avg_price": round(mean(prices), 2)}
+        for date, prices in sorted(prices_by_date.items())
+    ]
+    return result
+
+@app.get("/analytics/price_band_estimates", tags=["Analytics"], summary="Get price band stats for a material", description="Returns min, max, avg, and std deviation for contract prices of a specific SKU.")
+async def price_band_estimates(sku: str):
+    query = contracts.select().where(contracts.c.sku == sku)
+    rows = await database.fetch_all(query)
+    prices = [r["price_per_unit"] for r in rows if r["price_per_unit"]]
+    if not prices:
+        raise HTTPException(status_code=404, detail="No prices found.")
+    return {
+        "sku": sku,
+        "min": round(min(prices), 2),
+        "max": round(max(prices), 2),
+        "average": round(mean(prices), 2),
+        "std_dev": round(stdev(prices), 2) if len(prices) > 1 else 0.0
+    }
+
+@app.get("/analytics/delta_anomalies", tags=["Analytics"], summary="Flag outlier contracts by price deviation", description="Returns contracts where price_per_unit is outside the average ± 2*std_dev.")
+async def delta_anomalies(sku: str):
+    query = contracts.select().where(contracts.c.sku == sku)
+    rows = await database.fetch_all(query)
+    prices = [r["price_per_unit"] for r in rows if r["price_per_unit"]]
+    if len(prices) < 2:
+        return []
+    avg = mean(prices)
+    sd = stdev(prices)
+    lower, upper = avg - 2 * sd, avg + 2 * sd
+    anomalies = [r for r in rows if r["price_per_unit"] < lower or r["price_per_unit"] > upper]
+    return anomalies
+
+@app.get("/indices", tags=["Analytics"], summary="Return latest BRidge scrap index values", description="Shows the most recent average price snapshot for tracked materials in each region.")
+async def get_latest_indices():
+    query = """
+        SELECT DISTINCT ON (region, sku)
+               region, sku, avg_price, snapshot_date
+        FROM index_snapshots
+        ORDER BY region, sku, snapshot_date DESC;
+    """
+    rows = await database.fetch_all(query)
+    result = {
+        f"{row['region'].lower()}_{row['sku'].lower()}_index": float(row["avg_price"])
+        for row in rows
+    }
+    return result
+
+@app.post("/indices/generate_snapshot", tags=["Admin"], summary="Manually generate an index snapshot", description="Aggregates avg price per SKU + region from contracts table and stores it as a snapshot.")
+async def generate_snapshot():
+    query = """
+        SELECT
+            LOWER(seller) as region,
+            sku,
+            AVG(price_per_unit) as avg_price
+        FROM contracts
+        WHERE price_per_unit IS NOT NULL
+        GROUP BY region, sku;
+    """
+    rows = await database.fetch_all(query)
+    for row in rows:
+        await database.execute(index_snapshots.insert().values(
+            region=row["region"],
+            sku=row["sku"],
+            avg_price=row["avg_price"]
+        ))
+    return {"ok": True, "snapshots_created": len(rows)}
 
 # ========== Admin Exports router ==========
 from fastapi import APIRouter
