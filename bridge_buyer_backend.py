@@ -1510,6 +1510,21 @@ class ContractIn(BaseModel):
             "material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
 
+class ContractOut(ContractIn):
+    id: uuid.UUID
+    status: str
+    created_at: datetime
+    signed_at: Optional[datetime]
+    signature: Optional[str]
+    class Config:
+        schema_extra = {"example": {
+            "id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+            "buyer":"Lewis Salvage","seller":"Winski Brothers",
+            "material":"Shred Steel","weight_tons":40,"price_per_ton":245.00,
+            "status":"Signed","created_at":"2025-09-01T10:00:00Z",
+            "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
+        }}
+
 @app.post(
     "/contracts",
     response_model=ContractOut,
@@ -1596,21 +1611,6 @@ class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
     expected_status: Literal["Pending"] = "Pending"
     idempotency_key: Optional[str] = None
-
-class ContractOut(ContractIn):
-    id: uuid.UUID
-    status: str
-    created_at: datetime
-    signed_at: Optional[datetime]
-    signature: Optional[str]
-    class Config:
-        schema_extra = {"example": {
-            "id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
-            "buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40,"price_per_ton":245.00,
-            "status":"Signed","created_at":"2025-09-01T10:00:00Z",
-            "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
-        }}
 
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
