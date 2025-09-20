@@ -34,6 +34,8 @@ from fastapi import Request
 from typing import Iterable
 from statistics import mean, stdev
 from collections import defaultdict
+from typing import Optional
+from fastapi import HTTPException
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -2183,49 +2185,96 @@ def _alias_export_csv():
     return RedirectResponse(url="/admin/exports/contracts.csv", status_code=307)
 # === /INSERT ===
 
+# --- MATERIAL PRICE HISTORY ---
 @app.get("/analytics/material_price_history", tags=["Analytics"], summary="Get historical contract prices by SKU", description="Returns time-series data of contract prices for a specific material.")
 async def material_price_history(sku: str, seller: Optional[str] = None):
-    query = contracts.select().where(contracts.c.sku == sku)
     if seller:
-        query = query.where(contracts.c.seller == seller)
-    rows = await database.fetch_all(query)
+        query = """
+            SELECT (created_at AT TIME ZONE 'utc')::date AS d, price_per_unit
+            FROM contracts
+            WHERE sku = :sku AND seller = :seller AND price_per_unit IS NOT NULL
+            ORDER BY d;
+        """
+        rows = await database.fetch_all(query, {"sku": sku, "seller": seller})
+    else:
+        query = """
+            SELECT (created_at AT TIME ZONE 'utc')::date AS d, price_per_unit
+            FROM contracts
+            WHERE sku = :sku AND price_per_unit IS NOT NULL
+            ORDER BY d;
+        """
+        rows = await database.fetch_all(query, {"sku": sku})
+
     prices_by_date = defaultdict(list)
-    for row in rows:
-        prices_by_date[str(row["created_at"].date())].append(row["price_per_unit"])
+    for r in rows:
+        prices_by_date[str(r["d"])].append(r["price_per_unit"])
+
     result = [
-        {"date": date, "avg_price": round(mean(prices), 2)}
-        for date, prices in sorted(prices_by_date.items())
+        {"date": d, "avg_price": round(mean(prices), 2)}
+        for d, prices in sorted(prices_by_date.items())
     ]
     return result
 
+
+# --- PRICE BAND ESTIMATES ---
 @app.get("/analytics/price_band_estimates", tags=["Analytics"], summary="Get price band stats for a material", description="Returns min, max, avg, and std deviation for contract prices of a specific SKU.")
 async def price_band_estimates(sku: str):
-    query = contracts.select().where(contracts.c.sku == sku)
-    rows = await database.fetch_all(query)
-    prices = [r["price_per_unit"] for r in rows if r["price_per_unit"]]
-    if not prices:
+    query = """
+        SELECT
+            MIN(price_per_unit) AS min_p,
+            MAX(price_per_unit) AS max_p,
+            AVG(price_per_unit) AS avg_p,
+            COALESCE(stddev_samp(price_per_unit), 0) AS sd_p
+        FROM contracts
+        WHERE sku = :sku AND price_per_unit IS NOT NULL;
+    """
+    row = await database.fetch_one(query, {"sku": sku})
+    if not row or row["min_p"] is None:
         raise HTTPException(status_code=404, detail="No prices found.")
     return {
         "sku": sku,
-        "min": round(min(prices), 2),
-        "max": round(max(prices), 2),
-        "average": round(mean(prices), 2),
-        "std_dev": round(stdev(prices), 2) if len(prices) > 1 else 0.0
+        "min": round(float(row["min_p"]), 2),
+        "max": round(float(row["max_p"]), 2),
+        "average": round(float(row["avg_p"]), 2),
+        "std_dev": round(float(row["sd_p"]), 2),
     }
 
+
+# --- DELTA ANOMALIES ---
 @app.get("/analytics/delta_anomalies", tags=["Analytics"], summary="Flag outlier contracts by price deviation", description="Returns contracts where price_per_unit is outside the average ± 2*std_dev.")
 async def delta_anomalies(sku: str):
-    query = contracts.select().where(contracts.c.sku == sku)
-    rows = await database.fetch_all(query)
-    prices = [r["price_per_unit"] for r in rows if r["price_per_unit"]]
-    if len(prices) < 2:
+    stats_q = """
+        SELECT
+            AVG(price_per_unit) AS avg_p,
+            COALESCE(stddev_samp(price_per_unit), 0) AS sd_p
+        FROM contracts
+        WHERE sku = :sku AND price_per_unit IS NOT NULL;
+    """
+    stats = await database.fetch_one(stats_q, {"sku": sku})
+    if not stats or stats["avg_p"] is None:
         return []
-    avg = mean(prices)
-    sd = stdev(prices)
-    lower, upper = avg - 2 * sd, avg + 2 * sd
-    anomalies = [r for r in rows if r["price_per_unit"] < lower or r["price_per_unit"] > upper]
-    return anomalies
+    avg_p = float(stats["avg_p"])
+    sd_p = float(stats["sd_p"])
+    if sd_p == 0:
+        return []
 
+    lower = avg_p - 2 * sd_p
+    upper = avg_p + 2 * sd_p
+
+    # return the offending rows
+    anomalies_q = """
+        SELECT id, sku, seller, price_per_unit, created_at
+        FROM contracts
+        WHERE sku = :sku
+          AND price_per_unit IS NOT NULL
+          AND (price_per_unit < :lower OR price_per_unit > :upper)
+        ORDER BY created_at DESC
+        LIMIT 200;
+    """
+    rows = await database.fetch_all(anomalies_q, {"sku": sku, "lower": lower, "upper": upper})
+    return [dict(r) for r in rows]
+
+# --- INDICES FEED ---
 @app.get("/indices", tags=["Analytics"], summary="Return latest BRidge scrap index values", description="Shows the most recent average price snapshot for tracked materials in each region.")
 async def get_latest_indices():
     query = """
@@ -2235,31 +2284,33 @@ async def get_latest_indices():
         ORDER BY region, sku, snapshot_date DESC;
     """
     rows = await database.fetch_all(query)
-    result = {
-        f"{row['region'].lower()}_{row['sku'].lower()}_index": float(row["avg_price"])
-        for row in rows
+    return {
+        f"{r['region'].lower()}_{r['sku'].lower()}_index": float(r["avg_price"])
+        for r in rows
     }
-    return result
 
+# --- MANUAL SNAPSHOT GENERATOR (TEMP/ADMIN) ---
 @app.post("/indices/generate_snapshot", tags=["Admin"], summary="Manually generate an index snapshot", description="Aggregates avg price per SKU + region from contracts table and stores it as a snapshot.")
 async def generate_snapshot():
-    query = """
-        SELECT
-            LOWER(seller) as region,
-            sku,
-            AVG(price_per_unit) as avg_price
+    agg_q = """
+        SELECT LOWER(seller) AS region, sku, AVG(price_per_unit) AS avg_price
         FROM contracts
         WHERE price_per_unit IS NOT NULL
         GROUP BY region, sku;
     """
-    rows = await database.fetch_all(query)
-    for row in rows:
-        await database.execute(index_snapshots.insert().values(
-            region=row["region"],
-            sku=row["sku"],
-            avg_price=row["avg_price"]
-        ))
-    return {"ok": True, "snapshots_created": len(rows)}
+    rows = await database.fetch_all(agg_q)
+    if not rows:
+        return {"ok": True, "snapshots_created": 0}
+
+    insert_q = """
+        INSERT INTO index_snapshots (region, sku, avg_price)
+        VALUES (:region, :sku, :avg_price);
+    """
+    count = 0
+    for r in rows:
+        await database.execute(insert_q, {"region": r["region"], "sku": r["sku"], "avg_price": r["avg_price"]})
+        count += 1
+    return {"ok": True, "snapshots_created": count}
 
 # ========== Admin Exports router ==========
 from fastapi import APIRouter
