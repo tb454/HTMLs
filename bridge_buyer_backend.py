@@ -1510,38 +1510,88 @@ class ContractIn(BaseModel):
             "material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
 
-@app.post("/contracts", tags=["Contracts"], summary="Create a contract")
+@app.post(
+    "/contracts",
+    response_model=ContractOut,
+    tags=["Contracts"],
+    summary="Create Contract",
+    description="Creates a Pending contract and reserves inventory (qty_reserved += weight_tons).",
+    status_code=201
+)
 async def create_contract(contract: ContractIn):
-    # Build insert (SQLAlchemy Core)
-    insert_query = contracts.insert().values(
-        id=str(uuid.uuid4()),
-        seller=contract.seller,
-        buyer=contract.buyer,
-        sku=contract.sku,
-        price_per_unit=contract.price_per_unit,
-        currency=contract.currency or "USD",
-        status="open",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
+    qty   = float(contract.weight_tons)
+    seller = contract.seller.strip()
+    sku    = contract.material.strip()  # we store material in contracts, sku in inventory
 
-    row_id = await database.execute(insert_query)  
+    cid = str(uuid.uuid4())
 
+    async with database.transaction():
+        # ensure inventory row exists
+        await database.execute("""
+            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
+            VALUES (:seller, :sku, 0, 0, 0)
+            ON CONFLICT (seller, sku) DO NOTHING
+        """, {"seller": seller, "sku": sku})
+
+        # check availability and reserve
+        inv = await database.fetch_one("""
+            SELECT qty_on_hand, qty_reserved, qty_committed
+            FROM inventory_items
+            WHERE seller=:seller AND sku=:sku
+            FOR UPDATE
+        """, {"seller": seller, "sku": sku})
+        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
+        reserved  = float(inv["qty_reserved"]) if inv else 0.0
+        committed = float(inv["qty_committed"]) if inv else 0.0
+        available = on_hand - reserved - committed
+        if available < qty:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)."
+            )
+
+        await database.execute("""
+            UPDATE inventory_items
+               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+             WHERE seller=:seller AND sku=:sku
+        """, {"q": qty, "seller": seller, "sku": sku})
+
+        # movement link
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
+              "meta": json.dumps({"reason": "contract_create"})})
+
+        # create contract row (matches your contracts schema)
+        row = await database.fetch_one("""
+            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, created_at)
+            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending', NOW())
+            RETURNING *
+        """, {
+            "id": cid,
+            "buyer": contract.buyer,
+            "seller": contract.seller,
+            "material": contract.material,
+            "weight_tons": contract.weight_tons,
+            "price_per_ton": contract.price_per_ton
+        })
+
+    # optional webhook
     try:
         await emit_event("contract.created", {
-            "contract_id": str(row_id),
-            "seller": contract.seller,
-            "buyer": contract.buyer,
-            "sku": contract.sku,
-            "price_per_unit": contract.price_per_unit,
-            "currency": contract.currency or "USD",
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "contract_id": str(row["id"]),
+            "seller": row["seller"],
+            "buyer": row["buyer"],
+            "sku": row["material"],                         # expose as sku to receivers
+            "price_per_unit": float(row["price_per_ton"]),
+            "currency": "USD",
+            "created_at": (row["created_at"] or datetime.utcnow()).isoformat()
         })
     except Exception:
-        pass  
+        pass
 
-    return {"ok": True, "id": str(row_id)}
-
+    return row
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
     expected_status: Literal["Pending"] = "Pending"
