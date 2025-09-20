@@ -26,7 +26,7 @@ import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter
-from datetime import date as _date, date, datetime, dt
+from datetime import date as _date, date
 import asyncio
 import inspect
 from fastapi import Request
@@ -1521,8 +1521,8 @@ async def create_contract(contract: ContractIn):
         price_per_unit=contract.price_per_unit,
         currency=contract.currency or "USD",
         status="open",
-        created_at=dt.datetime.utcnow(),
-        updated_at=dt.datetime.utcnow(),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
     )
 
     row_id = await database.execute(insert_query)  
@@ -1535,7 +1535,7 @@ async def create_contract(contract: ContractIn):
             "sku": contract.sku,
             "price_per_unit": contract.price_per_unit,
             "currency": contract.currency or "USD",
-            "created_at": dt.datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.utcnow().isoformat() + "Z",
         })
     except Exception:
         pass  
@@ -2534,7 +2534,7 @@ async def sign_contract(contract_id: str, request: Request):
             "bol_id": str(bol_id) if bol_id else None,
             "signed_by": signed_by,
             "ip": signer_ip,
-            "timestamp": dt.datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         })
     except Exception:
         pass  
