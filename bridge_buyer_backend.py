@@ -5,7 +5,6 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, EmailStr 
 from typing import List, Optional, Literal
-from datetime import datetime, date
 from sqlalchemy import create_engine, Table, MetaData, and_, select
 import os
 import databases
@@ -27,7 +26,7 @@ import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter
-from datetime import date as _date
+from datetime import date as _date, date, datetime, dt
 import asyncio
 import inspect
 from fastapi import Request
@@ -40,6 +39,11 @@ import io, os, csv, zipfile, datetime
 from typing import Dict, Any, List
 import httpx
 from fastapi import BackgroundTasks
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from babel.numbers import format_currency as _babel_fmt  # optional; will fallback if not installed
+from typing import Literal
+from fastapi import Header, HTTPException
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -304,11 +308,6 @@ async def startup_bootstrap_and_connect():
     except Exception as e:
         print(f"[startup] database connect failed: {e}")
 # ==== Quick user creation (admin-only bootstrap) =========================
-import os
-from typing import Literal
-from pydantic import BaseModel
-from fastapi import Header, HTTPException
-
 ADMIN_SETUP_TOKEN = os.getenv("ADMIN_SETUP_TOKEN", "")
 
 class NewUserIn(BaseModel):
@@ -411,7 +410,6 @@ async def shutdown_disconnect():
         pass
 
 # ======= AUTH ========
-from pydantic import BaseModel
 from fastapi import Request
 
 class LoginIn(BaseModel):
@@ -962,6 +960,46 @@ async def _manual_upsert_absolute_tx(
         """, {"s": s, "k": k, "q": delta, "m": meta_json})
 
     return old, new_qty, delta
+
+import hmac, hashlib, base64, time, json
+
+def _sign_payload(secret: str, body_bytes: bytes, ts: str) -> str:
+    msg = ts.encode("utf-8") + b"." + body_bytes
+    mac = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).digest()
+    return base64.b64encode(mac).decode("ascii")
+
+async def emit_event(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    url_env = {
+        "contract.created": os.getenv("WEBHOOK_CONTRACT_CREATED"),
+        "bol.updated": os.getenv("WEBHOOK_BOL_UPDATED"),
+        "inventory.movement": os.getenv("WEBHOOK_INVENTORY_MOVED"),
+        "signature.received": os.getenv("WEBHOOK_SIGNATURE_RECEIVED"),
+    }
+    url = url_env.get(event_type)
+    if not url:
+        return {"ok": True, "skipped": True, "reason": "no webhook url configured"}
+
+    body = json.dumps({
+        "event": event_type,
+        "timestamp": int(time.time()),
+        "payload": payload,
+    }, default=str).encode("utf-8")
+
+    ts = str(int(time.time()))
+    secret = os.getenv("WEBHOOK_SECRET", "")
+    sig = _sign_payload(secret, body, ts) if secret else ""
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Bridge-Event": event_type,
+        "X-Bridge-Timestamp": ts,
+        "X-Bridge-Signature": sig,
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(url, headers=headers, content=body)
+        ok = 200 <= r.status_code < 300
+        return {"ok": ok, "status_code": r.status_code, "response": r.text}
+
 # ---------- /helpers ----------
 
 class InventoryRowOut(BaseModel):
@@ -1471,6 +1509,38 @@ class ContractIn(BaseModel):
             "buyer":"Lewis Salvage","seller":"Winski Brothers",
             "material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
         }}
+
+@app.post("/contracts", tags=["Contracts"], summary="Create a contract")
+async def create_contract(contract: ContractIn):
+    # Build insert (SQLAlchemy Core)
+    insert_query = contracts.insert().values(
+        id=str(uuid.uuid4()),
+        seller=contract.seller,
+        buyer=contract.buyer,
+        sku=contract.sku,
+        price_per_unit=contract.price_per_unit,
+        currency=contract.currency or "USD",
+        status="open",
+        created_at=dt.datetime.utcnow(),
+        updated_at=dt.datetime.utcnow(),
+    )
+
+    row_id = await database.execute(insert_query)  
+
+    try:
+        await emit_event("contract.created", {
+            "contract_id": str(row_id),
+            "seller": contract.seller,
+            "buyer": contract.buyer,
+            "sku": contract.sku,
+            "price_per_unit": contract.price_per_unit,
+            "currency": contract.currency or "USD",
+            "created_at": dt.datetime.utcnow().isoformat() + "Z",
+        })
+    except Exception:
+        pass  
+
+    return {"ok": True, "id": str(row_id)}
 
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
@@ -2207,54 +2277,67 @@ def _alias_export_csv():
     return RedirectResponse(url="/admin/exports/contracts.csv", status_code=307)
 # === /INSERT ===
 
-# --- MATERIAL PRICE HISTORY ---
-@app.get("/analytics/material_price_history", tags=["Analytics"], summary="Get historical contract prices by SKU", description="Returns time-series data of contract prices for a specific material.")
-async def material_price_history(sku: str, seller: Optional[str] = None):
+from typing import Optional
+from fastapi import HTTPException
+
+# --- MATERIAL PRICE HISTORY (by day, avg) ---
+@app.get(
+    "/analytics/material_price_history",
+    tags=["Analytics"],
+    summary="Get historical contract prices by material",
+    description="Returns daily average price_per_ton for a material (optionally filtered by seller)."
+)
+async def material_price_history(material: str, seller: Optional[str] = None):
     if seller:
-        query = """
-            SELECT (created_at AT TIME ZONE 'utc')::date AS d, price_per_unit
+        q = """
+            SELECT (created_at AT TIME ZONE 'utc')::date AS d,
+                   ROUND(AVG(price_per_ton)::numeric, 2) AS avg_price
             FROM contracts
-            WHERE sku = :sku AND seller = :seller AND price_per_unit IS NOT NULL
+            WHERE material = :material
+              AND seller = :seller
+              AND price_per_ton IS NOT NULL
+            GROUP BY d
             ORDER BY d;
         """
-        rows = await database.fetch_all(query, {"sku": sku, "seller": seller})
+        rows = await database.fetch_all(q, {"material": material, "seller": seller})
     else:
-        query = """
-            SELECT (created_at AT TIME ZONE 'utc')::date AS d, price_per_unit
+        q = """
+            SELECT (created_at AT TIME ZONE 'utc')::date AS d,
+                   ROUND(AVG(price_per_ton)::numeric, 2) AS avg_price
             FROM contracts
-            WHERE sku = :sku AND price_per_unit IS NOT NULL
+            WHERE material = :material
+              AND price_per_ton IS NOT NULL
+            GROUP BY d
             ORDER BY d;
         """
-        rows = await database.fetch_all(query, {"sku": sku})
+        rows = await database.fetch_all(q, {"material": material})
 
-    prices_by_date = defaultdict(list)
-    for r in rows:
-        prices_by_date[str(r["d"])].append(r["price_per_unit"])
-
-    result = [
-        {"date": d, "avg_price": round(mean(prices), 2)}
-        for d, prices in sorted(prices_by_date.items())
-    ]
-    return result
+    return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
 
 
-# --- PRICE BAND ESTIMATES ---
-@app.get("/analytics/price_band_estimates", tags=["Analytics"], summary="Get price band stats for a material", description="Returns min, max, avg, and std deviation for contract prices of a specific SKU.")
-async def price_band_estimates(sku: str):
-    query = """
+# --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
+@app.get(
+    "/analytics/price_band_estimates",
+    tags=["Analytics"],
+    summary="Get price band stats for a material",
+    description="Returns min, max, avg, and std deviation of price_per_ton for the material."
+)
+async def price_band_estimates(material: str):
+    q = """
         SELECT
-            MIN(price_per_unit) AS min_p,
-            MAX(price_per_unit) AS max_p,
-            AVG(price_per_unit) AS avg_p,
-            COALESCE(stddev_samp(price_per_unit), 0) AS sd_p
+            MIN(price_per_ton) AS min_p,
+            MAX(price_per_ton) AS max_p,
+            AVG(price_per_ton) AS avg_p,
+            COALESCE(stddev_samp(price_per_ton), 0) AS sd_p
         FROM contracts
-        WHERE sku = :sku AND price_per_unit IS NOT NULL;
+        WHERE material = :material
+          AND price_per_ton IS NOT NULL;
     """
-    row = await database.fetch_one(query, {"sku": sku})
+    row = await database.fetch_one(q, {"material": material})
     if not row or row["min_p"] is None:
-        raise HTTPException(status_code=404, detail="No prices found.")
+        raise HTTPException(status_code=404, detail="No prices found for that material.")
     return {
-        "sku": sku,
+        "material": material,
         "min": round(float(row["min_p"]), 2),
         "max": round(float(row["max_p"]), 2),
         "average": round(float(row["avg_p"]), 2),
@@ -2262,38 +2345,43 @@ async def price_band_estimates(sku: str):
     }
 
 
-# --- DELTA ANOMALIES ---
-@app.get("/analytics/delta_anomalies", tags=["Analytics"], summary="Flag outlier contracts by price deviation", description="Returns contracts where price_per_unit is outside the average ± 2*std_dev.")
-async def delta_anomalies(sku: str):
+# --- DELTA ANOMALIES (outside avg ± 2*stddev) ---
+@app.get(
+    "/analytics/delta_anomalies",
+    tags=["Analytics"],
+    summary="Flag outlier contracts by price deviation",
+    description="Returns contracts where price_per_ton is outside average ± 2*std_dev for the material."
+)
+async def delta_anomalies(material: str):
     stats_q = """
         SELECT
-            AVG(price_per_unit) AS avg_p,
-            COALESCE(stddev_samp(price_per_unit), 0) AS sd_p
+            AVG(price_per_ton) AS avg_p,
+            COALESCE(stddev_samp(price_per_ton), 0) AS sd_p
         FROM contracts
-        WHERE sku = :sku AND price_per_unit IS NOT NULL;
+        WHERE material = :material
+          AND price_per_ton IS NOT NULL;
     """
-    stats = await database.fetch_one(stats_q, {"sku": sku})
+    stats = await database.fetch_one(stats_q, {"material": material})
     if not stats or stats["avg_p"] is None:
         return []
+
     avg_p = float(stats["avg_p"])
-    sd_p = float(stats["sd_p"])
+    sd_p  = float(stats["sd_p"])
     if sd_p == 0:
         return []
 
-    lower = avg_p - 2 * sd_p
-    upper = avg_p + 2 * sd_p
+    lower, upper = avg_p - 2 * sd_p, avg_p + 2 * sd_p
 
-    # return the offending rows
     anomalies_q = """
-        SELECT id, sku, seller, price_per_unit, created_at
+        SELECT id, material, seller, price_per_ton, created_at
         FROM contracts
-        WHERE sku = :sku
-          AND price_per_unit IS NOT NULL
-          AND (price_per_unit < :lower OR price_per_unit > :upper)
+        WHERE material = :material
+          AND price_per_ton IS NOT NULL
+          AND (price_per_ton < :lower OR price_per_ton > :upper)
         ORDER BY created_at DESC
         LIMIT 200;
     """
-    rows = await database.fetch_all(anomalies_q, {"sku": sku, "lower": lower, "upper": upper})
+    rows = await database.fetch_all(anomalies_q, {"material": material, "lower": lower, "upper": upper})
     return [dict(r) for r in rows]
 
 # --- INDICES FEED ---
@@ -2417,32 +2505,41 @@ def export_all_zip_admin():
 app.include_router(admin_exports)
 
 # ========== /Admin Exports router ==========
-# near the top of the file, make sure these exist:
 import asyncio
 import inspect
 from fastapi import Request
 
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
-    # whatever signing logic you need goes here (DB updates, signature, etc.)
-    # For now, we just return OK and log.
     resp = {"status": "ok", "contract_id": contract_id}
 
-    # ---- audit log (INSIDE the function)
+    # ---- audit log 
     actor = request.session.get("username") if hasattr(request, "session") else None
-    # define bol_id somehow; if you don't have it yet, keep None or read from query/body
     bol_id = request.query_params.get("bol_id")  # None if not provided
-
+    signer_ip = request.client.host if request.client else None
+    signed_by = actor or "unknown"
     payload = {"new_status": "Signed", "bol_id": bol_id}
 
     try:
         _res = log_action(actor or "system", "contract.purchase", str(contract_id), payload)
         if inspect.isawaitable(_res):
-            # don't block the request; fire-and-forget
             asyncio.create_task(_res)
     except Exception:
-        # never let logging break the main flow
         pass
+
+# ---- webhook emit (signature.received)
+    try:
+        await emit_event("signature.received", {
+            "contract_id": str(contract_id),
+            "bol_id": str(bol_id) if bol_id else None,
+            "signed_by": signed_by,
+            "ip": signer_ip,
+            "timestamp": dt.datetime.utcnow().isoformat() + "Z",
+        })
+    except Exception:
+        pass  
+
+    return {"status": "ok", "contract_id": contract_id}
 
     return resp
 # -------- BOLs (with PDF generation) --------
@@ -2496,8 +2593,6 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
 import io, csv, zipfile
-
-admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
 
 @admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
 def export_contracts_csv_admin():
@@ -3375,29 +3470,44 @@ async def build_export_zip() -> bytes:
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        exports = {
-            "contracts.csv": """
-                SELECT id, seller, buyer, sku, price_per_unit, currency, status, created_at, updated_at
-                FROM contracts ORDER BY created_at DESC
-            """,
-            "bols.csv": """
-                SELECT id, contract_id, material, weight_tons, carrier, status, created_at, updated_at
-                FROM bols ORDER BY created_at DESC
-            """,
-            "inventory_movements.csv": """
-                SELECT id, seller, sku, qty, uom, movement_type, created_at
-                FROM inventory_movements ORDER BY created_at DESC
-            """,
-            "users.csv": """
-                SELECT id, username, role, tenant_id, created_at
-                FROM users ORDER BY created_at DESC
-            """,
-            "index_snapshots.csv": """
-                SELECT id, region, sku, avg_price, snapshot_date
-                FROM index_snapshots ORDER BY snapshot_date DESC
-            """
-        }
-        for fname, sql in exports.items():
+       exports = {
+    # contracts table: id, buyer, seller, material, weight_tons, price_per_ton, ...
+    "contracts.csv": """
+        SELECT id, buyer, seller, material, weight_tons, price_per_ton,
+               status, created_at, signed_at, signature
+        FROM contracts
+        ORDER BY created_at DESC
+    """,
+    # bols table: bol_id (not id) and detailed columns you actually store
+    "bols.csv": """
+        SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
+               price_per_unit, total_value,
+               carrier_name, carrier_driver, carrier_truck_vin,
+               pickup_signature_base64, pickup_signature_time,
+               pickup_time, delivery_signature_base64, delivery_signature_time,
+               delivery_time, status
+        FROM bols
+        ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+    """,
+    "inventory_movements.csv": """
+        SELECT seller, sku, movement_type, qty, ref_contract, created_at
+        FROM inventory_movements
+        ORDER BY created_at DESC
+    """,
+    # users table is public.users in your bootstrap; include username if present
+    "users.csv": """
+        SELECT id, email, COALESCE(username, '') AS username, role, created_at
+        FROM public.users
+        ORDER BY created_at DESC
+    """,
+    "index_snapshots.csv": """
+        SELECT id, region, sku, avg_price, snapshot_date
+        FROM index_snapshots
+        ORDER BY snapshot_date DESC
+    """
+}
+
+    for fname, sql in exports.items():
             rows = await _fetch_csv_rows(sql)
             mem = io.StringIO()
             if rows:
@@ -3439,7 +3549,7 @@ async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
 
 async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
     data = await build_export_zip()
-    now = datetime.datetime.utcnow()
+    now = datetime.utcnow()
     day = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{stamp}_export_all.zip"
