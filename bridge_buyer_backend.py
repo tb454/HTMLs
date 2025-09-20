@@ -1392,17 +1392,6 @@ async def inventory_import_excel(
 
     return {"ok": True, "upserted": upserted, "errors": errors}
 
-# === INSERT: GenericIngestBody model 
-    mapping: dict
-    records: List[dict]
-    seller_default: Optional[str] = None
-    uom_default: Optional[str] = "ton"
-    source: Optional[str] = "generic"
-    idem_key: Optional[str] = None
-
-# === /INSERT ===
-
-
 @app.on_event("startup")
 async def _ensure_pgcrypto():
     try:
