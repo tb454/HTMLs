@@ -1513,7 +1513,7 @@ class ContractOut(ContractIn):
             "status":"Signed","created_at":"2025-09-01T10:00:00Z",
             "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
-
+        
 @app.post(
     "/contracts",
     response_model=ContractOut,
