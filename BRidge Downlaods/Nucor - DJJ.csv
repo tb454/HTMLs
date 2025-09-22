@@ -1,0 +1,62 @@
+"Date","Type","Ref no.","Contact","Due date","Balance","Total amount","Memo","Last modified date"
+"09/03/2025","Deposit","","The David J. Joseph Company","","$0.00","$6,099.75","","Sep 3, 2025, 7:36 AM",
+"09/03/2025","Payment","5010236100","The David J. Joseph Company","","$0.00","$6,099.75","","Sep 3, 2025, 7:36 AM",
+"08/29/2025","Deposit","","The David J. Joseph Company","","$0.00","$5,350.64","","Aug 29, 2025, 9:07 AM",
+"08/29/2025","Payment","5010235259","The David J. Joseph Company","","$0.00","$5,350.64","","Aug 29, 2025, 9:07 AM",
+"08/28/2025","Invoice","4382","The David J. Joseph Company","09/27/2025","$0.00","$6,099.75","Greenspark 196","Sep 3, 2025, 7:36 AM",
+"08/26/2025","Invoice","4375","The David J. Joseph Company","09/25/2025","$0.00","$5,350.64","Greenspark #193","Aug 29, 2025, 11:22 AM",
+"08/26/2025","Deposit","","The David J. Joseph Company","","$0.00","$6,099.75","","Aug 26, 2025, 8:09 AM",
+"08/26/2025","Payment","5010234385","The David J. Joseph Company","","$0.00","$6,099.75","","Aug 26, 2025, 8:09 AM",
+"08/25/2025","Deposit","","The David J. Joseph Company","","$0.00","$5,745.02","","Aug 25, 2025, 7:48 AM",
+"08/25/2025","Payment","5010234073","The David J. Joseph Company","","$0.00","$5,745.02","","Aug 25, 2025, 7:48 AM",
+"08/21/2025","Invoice","4367","The David J. Joseph Company","09/20/2025","$0.00","$6,099.75","Greenspark #187","Aug 26, 2025, 8:09 AM",
+"08/20/2025","Invoice","4363","The David J. Joseph Company","09/19/2025","$0.00","$5,745.02","Greenspark #185","Aug 25, 2025, 7:47 AM",
+"08/20/2025","Deposit","","The David J. Joseph Company","","$0.00","$5,262.76","","Aug 20, 2025, 7:27 AM",
+"08/20/2025","Payment","5010232964","The David J. Joseph Company","","$0.00","$5,262.76","","Aug 20, 2025, 7:27 AM",
+"08/15/2025","Invoice","4349","The David J. Joseph Company","09/14/2025","$0.00","$5,262.76","Greenspark #177","Aug 20, 2025, 7:26 AM",
+"06/04/2025","Deposit","","The David J. Joseph Company","","$0.00","$3,933.74","","Jun 4, 2025, 7:39 AM",
+"06/04/2025","Payment","5010214794","The David J. Joseph Company","","$0.00","$3,933.74","","Jun 4, 2025, 7:39 AM",
+"05/30/2025","Invoice","4139","The David J. Joseph Company","06/29/2025","$0.00","$3,933.74","","Jun 4, 2025, 7:39 AM",
+"05/27/2025","Deposit","","The David J. Joseph Company","","$0.00","$17,091.43","","May 28, 2025, 4:31 PM",
+"05/27/2025","Payment","5010212555","The David J. Joseph Company","","$0.00","$17,091.43","","May 28, 2025, 4:31 PM",
+"05/22/2025","Deposit","","The David J. Joseph Company","","$0.00","$8,950.60","","May 22, 2025, 9:18 AM",
+"05/22/2025","Payment","480432-1-1","The David J. Joseph Company","","$0.00","$8,950.60","","May 22, 2025, 9:18 AM",
+"05/21/2025","Invoice","4126","The David J. Joseph Company","06/20/2025","$0.00","$4,515.95","Greenspark #110
+Nucor Weight ticket#28082","May 28, 2025, 4:30 PM",
+"05/21/2025","Invoice","4125","The David J. Joseph Company","06/20/2025","$0.00","$3,986.52","Greenspark #110
+Nucor Weight ticket#28080","May 28, 2025, 4:30 PM",
+"05/21/2025","Invoice","4124","The David J. Joseph Company","06/20/2025","$0.00","$4,576.24","Greenspark #106
+Nucor Weight ticket#27070","May 28, 2025, 4:30 PM",
+"05/21/2025","Deposit","","The David J. Joseph Company","","$0.00","$9,489.78","","May 21, 2025, 10:06 AM",
+"05/21/2025","Payment","5010211735","The David J. Joseph Company","","$0.00","$9,489.78","","May 21, 2025, 10:06 AM",
+"05/21/2025","Invoice","4123","The David J. Joseph Company","06/20/2025","$0.00","$4,012.72","Greenspark #108
+Nucor Weight ticket#27964","May 28, 2025, 4:30 PM",
+"05/20/2025","Deposit","","The David J. Joseph Company","","$0.00","$9,607.72","","May 20, 2025, 9:59 AM",
+"05/20/2025","Payment","5010211453","The David J. Joseph Company","","$0.00","$9,607.72","","May 20, 2025, 9:59 AM",
+"05/19/2025","Invoice","4118","The David J. Joseph Company","06/18/2025","$0.00","$4,442.51","Greenspark #106
+Nucor Weight ticket#27070","May 22, 2025, 9:17 AM",
+"05/19/2025","Invoice","4117","The David J. Joseph Company","06/18/2025","$0.00","$4,508.09","Greenspark #105
+Nucor Weight ticket#27069","May 22, 2025, 9:17 AM",
+"05/16/2025","Invoice","4116","The David J. Joseph Company","06/15/2025","$0.00","$5,053.17","Greenspark #104
+Nucor Weight ticket#26403","May 21, 2025, 10:03 AM",
+"05/16/2025","Invoice","4115","The David J. Joseph Company","06/15/2025","$0.00","$4,436.61","Greenspark #103
+Nucor Weight ticket#26399","May 21, 2025, 10:03 AM",
+"05/14/2025","Invoice","4110","The David J. Joseph Company","06/13/2025","$0.00","$4,895.63","Greenspark #100
+Nucor Weight ticket#25789","May 20, 2025, 9:59 AM",
+"05/14/2025","Deposit","","The David J. Joseph Company","","$0.00","$7,569.04","","May 14, 2025, 7:40 AM",
+"05/14/2025","Payment","5010210115","The David J. Joseph Company","","$0.00","$7,569.04","","May 14, 2025, 7:40 AM",
+"05/14/2025","Invoice","4109","The David J. Joseph Company","06/13/2025","$0.00","$4,712.09","Greenspark #99
+Weight Ticket #25714","May 20, 2025, 9:59 AM",
+"05/09/2025","Invoice","4101","The David J. Joseph Company","06/08/2025","$0.00","$3,899.63","Greenspark #96","May 14, 2025, 7:40 AM",
+"05/09/2025","Invoice","4100","The David J. Joseph Company","06/08/2025","$0.00","$3,669.41","Greenspark #95","May 14, 2025, 7:40 AM",
+"04/03/2025","Deposit","","The David J. Joseph Company","","$0.00","$7,439.21","","May 5, 2025, 8:43 AM",
+"04/03/2025","Payment","5010200468","The David J. Joseph Company","","$0.00","$7,439.21","","Apr 3, 2025, 10:42 AM",
+"03/31/2025","Invoice","4003","The David J. Joseph Company","04/30/2025","$0.00","$7,439.21","","Apr 3, 2025, 10:42 AM",
+"01/10/2025","Deposit","","The David J. Joseph Company","","$0.00","$27,238.94","","Feb 5, 2025, 7:54 AM",
+"01/10/2025","Payment","5010183299","The David J. Joseph Company","","$0.00","$27,238.94","","Jan 10, 2025, 1:21 PM",
+"12/31/2024","Invoice","3807","The David J. Joseph Company","01/30/2025","$0.00","$5,573.03","","Jan 10, 2025, 1:20 PM",
+"12/30/2024","Invoice","3806","The David J. Joseph Company","01/29/2025","$0.00","$3,657.71","","Jan 10, 2025, 1:20 PM",
+"12/30/2024","Invoice","3805","The David J. Joseph Company","01/29/2025","$0.00","$4,813.33","","Jan 10, 2025, 1:20 PM",
+"12/27/2024","Invoice","3803","The David J. Joseph Company","01/26/2025","$0.00","$5,088.64","","Jan 10, 2025, 1:20 PM",
+"12/27/2024","Invoice","3802","The David J. Joseph Company","01/26/2025","$0.00","$4,065.33","","Jan 10, 2025, 1:20 PM",
+"12/27/2024","Invoice","3801","The David J. Joseph Company","01/26/2025","$0.00","$4,040.90","","Jan 10, 2025, 1:20 PM",
