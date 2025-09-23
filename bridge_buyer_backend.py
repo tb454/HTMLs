@@ -61,6 +61,10 @@ from slowapi.middleware import SlowAPIMiddleware
 
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter
+METRICS_CONTRACTS_CREATED = Counter("bridge_contracts_created_total", "Contracts created")
+METRICS_BOLS_CREATED      = Counter("bridge_bols_created_total", "BOLs created")
+METRICS_INDICES_SNAPSHOTS = Counter("bridge_indices_snapshots_total", "Index snapshots generated")
 import sentry_sdk
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
@@ -2786,6 +2790,37 @@ async def create_contract(contract: ContractInExtended, request: Request):
                     :pricing_formula, :reference_symbol, :reference_price, :reference_source, :reference_timestamp, :currency)
             RETURNING *
         """, payload)
+# --- Internal ref snapshot if caller didn't pass one ---
+        if not (contract.reference_price and contract.reference_source):
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=6) as c:
+                    r = await c.get(f"{request.base_url}prices/copper_last")
+                    if 200 <= r.status_code < 300:
+                        j = r.json()
+                        contract.reference_price = float(j.get("last"))
+                        contract.reference_source = "COMEX (derived/internal, delayed)"
+                        contract.reference_symbol = "HG=F"
+                        contract.reference_timestamp = datetime.utcnow()
+                        contract.pricing_formula = contract.pricing_formula or "COMEX_Cu - 0.25"
+            except Exception:
+                pass  # keep creating contract even if the fetch fails
+
+        payload = {
+            "id": cid,
+            "buyer": contract.buyer,
+            "seller": contract.seller,
+            "material": contract.material,
+            "weight_tons": contract.weight_tons,
+            "price_per_ton": contract.price_per_ton,
+            "status": "Pending",
+            "pricing_formula": contract.pricing_formula,
+            "reference_symbol": contract.reference_symbol,
+            "reference_price": contract.reference_price,
+            "reference_source": contract.reference_source,
+            "reference_timestamp": contract.reference_timestamp,
+            "currency": contract.currency or "USD",
+        }
 
     # audit disclaimer (internal-only reference pricing)
     try:
@@ -2795,14 +2830,13 @@ async def create_contract(contract: ContractInExtended, request: Request):
         })
     except Exception:
         pass
-
     return row
 
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
     resp = {"status": "ok", "contract_id": contract_id}
 
-    # ---- audit log 
+    # ---- audit log
     actor = request.session.get("username") if hasattr(request, "session") else None
     bol_id = request.query_params.get("bol_id")  # None if not provided
     signer_ip = request.client.host if request.client else None
@@ -2816,9 +2850,9 @@ async def sign_contract(contract_id: str, request: Request):
     except Exception:
         pass
 
-# ---- webhook emit (signature.received)
+    # ---- webhook emit (signature.received)
     try:
-        await emit_event("signature.received", {
+        await emit_event_safe("signature.received", {
             "contract_id": str(contract_id),
             "bol_id": str(bol_id) if bol_id else None,
             "signed_by": signed_by,
@@ -2826,11 +2860,41 @@ async def sign_contract(contract_id: str, request: Request):
             "timestamp": datetime.utcnow().isoformat() + "Z",
         })
     except Exception:
-        pass  
+        pass
+    try:
+        await emit_event_safe("contract.updated", {"contract_id": str(contract_id), "status": "Signed"})
+    except Exception:
+        pass
 
     return {"status": "ok", "contract_id": contract_id}
 
-    return resp
+async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        res = await emit_event(event_type, payload)
+        if not res.get("ok"):
+            try:
+                await database.execute("""
+                  INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
+                  VALUES (:e, :p::jsonb, :sc, :rt)
+                """, {
+                    "e": event_type,
+                    "p": json.dumps(payload),
+                    "sc": res.get("status_code"),
+                    "rt": res.get("response")
+                })
+            except Exception:
+                pass
+        return res
+    except Exception:
+        try:
+            await database.execute("""
+              INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
+              VALUES (:e, :p::jsonb, NULL, 'exception')
+            """, {"e": event_type, "p": json.dumps(payload)})
+        except Exception:
+            pass
+        return {"ok": False, "status_code": None, "response": "exception"}
+
 # -------- BOLs (with PDF generation) --------
 @app.post(
     "/bols",
