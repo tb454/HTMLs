@@ -111,7 +111,7 @@ if prod:
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 
-# =====  rate limiting (init AFTER ProxyHeaders; keep ONLY this block) =====
+# =====  rate limiting =====
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
@@ -120,7 +120,16 @@ app.add_middleware(SlowAPIMiddleware)
 async def ratelimit_handler(request, exc):
     return PlainTextResponse("Too Many Requests", status_code=429)
 
-# === Prices endpoint (after app is defined) ===
+SNAPSHOT_AUTH = os.getenv("SNAPSHOT_AUTH", "")
+
+@app.post("/admin/run_snapshot_bg", tags=["Admin"], summary="Queue a snapshot upload (background)")
+async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase", x_auth: str = Header(default="")):
+    if SNAPSHOT_AUTH and x_auth != SNAPSHOT_AUTH:
+        raise HTTPException(401, "bad auth")
+    background.add_task(run_daily_snapshot, storage)
+    return {"ok": True, "queued": True}
+
+# === Prices endpoint ===
 @app.get(
     "/prices/copper_last",
     tags=["Prices"],
@@ -1517,6 +1526,7 @@ ALLOWED_ORIGINS = [
     "https://www.scrapfutures.com",
     "https://bridge.scrapfutures.com",
     "https://bridge-buyer.onrender.com",
+    "https://indices.scrapfutures.com",
 ]
 app.add_middleware(
     CORSMiddleware,

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BRidge Indices</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    header { margin-bottom: 12px; }
+    label { margin-right: 8px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; margin: 12px 0; }
+    canvas { max-width: 100%; }
+    .method { margin-top: 24px; font-size: 0.95rem; line-height: 1.5; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+</head>
+<body>
+  <header>
+    <h1>BRidge Regional Scrap Indices</h1>
+    <div class="row">
+      <div>
+        <label>Region</label>
+        <select id="region">
+          <option value="midwest" selected>Midwest</option>
+          <option value="south">South</option>
+          <option value="west">West</option>
+          <option value="northeast">Northeast</option>
+        </select>
+      </div>
+      <div>
+        <label>Material</label>
+        <select id="material">
+          <option>Shred</option>
+          <option>P&S</option>
+          <option>HMS</option>
+          <option>Copper</option>
+          <option>Aluminum</option>
+        </select>
+      </div>
+      <div>
+        <label>Range</label>
+        <select id="range">
+          <option value="30">30 days</option>
+          <option value="90" selected>90 days</option>
+          <option value="365">365 days</option>
+        </select>
+      </div>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+
+  <canvas id="chart" height="100"></canvas>
+
+  <section class="method">
+    <h3>About / Methodology</h3>
+    <p>
+      The BRidge Index is a daily regional average of executed contract prices recorded on BRidge.
+      Each snapshot aggregates <em>price_per_ton</em> by material and region for all contracts executed that day.
+      Preliminary values may be revised if late contracts arrive. BRidge indices are provided for internal analytics,
+      without redistribution of any licensed reference feeds; all reference prices used for contract pricing are
+      strictly internal and not rebroadcast.
+    </p>
+  </section>
+
+<script>
+const API = "https://bridge.scrapfutures.com";
+
+const ctx = document.getElementById('chart').getContext('2d');
+let chart;
+
+async function fetchSeries(days, region, material) {
+  const url = `${API}/public/indices/daily.json?days=${days}&region=${encodeURIComponent(region)}&material=${encodeURIComponent(material)}`;
+  const res = await fetch(url, { mode: 'cors' });
+  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+  const data = await res.json();
+  // data is [{as_of_date, region, material, avg_price, volume_tons}]
+  // Collapse by date (already daily)
+  const labels = data.map(d => d.as_of_date).reverse();
+  const prices = data.map(d => Number(d.avg_price)).reverse();
+  return { labels, prices };
+}
+
+async function draw() {
+  const days = document.getElementById('range').value;
+  const region = document.getElementById('region').value;
+  const material = document.getElementById('material').value;
+
+  const { labels, prices } = await fetchSeries(days, region, material);
+
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: `${region} · ${material}`, data: prices }]
+    },
+    options: {
+      responsive: true,
+      scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 12 } } }
+    }
+  });
+}
+
+document.getElementById('refresh').addEventListener('click', draw);
+
+// initial
+draw().catch(err => alert(err.message));
+</script>
+</body>
+</html>
