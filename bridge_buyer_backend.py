@@ -26,7 +26,7 @@ import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter
-from datetime import date as _date, date
+from datetime import date as _date, date, timedelta
 import asyncio
 import inspect
 from fastapi import Request
@@ -44,6 +44,8 @@ from zoneinfo import ZoneInfo
 from babel.numbers import format_currency as _babel_fmt  # optional; will fallback if not installed
 from typing import Literal
 from fastapi import Header, HTTPException
+import gzip
+from decimal import InvalidOperation
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -294,6 +296,21 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 database = databases.Database(DATABASE_URL)
 
 @app.on_event("startup")
+async def _nightly_index_cron():
+    async def _runner():
+        while True:
+            now = datetime.utcnow()
+            target = now.replace(hour=1, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            try:
+                await indices_generate_snapshot()
+            except Exception:
+                pass
+    asyncio.create_task(_runner())
+
+@app.on_event("startup")
 async def startup_bootstrap_and_connect():
     # Auto-create minimal schema outside prod, or when explicitly requested
     env = os.getenv("ENV", "").lower()
@@ -307,6 +324,73 @@ async def startup_bootstrap_and_connect():
         await database.connect()
     except Exception as e:
         print(f"[startup] database connect failed: {e}")
+
+# ===== /Contracts CSV Import =====
+REQUIRED_IMPORT_COLS = ["seller","buyer","material","price_per_ton","weight_tons","created_at"]
+
+def _rows_from_csv_bytes(raw_bytes: bytes):
+    # auto-handle gzip vs plain text
+    try:
+        text = io.TextIOWrapper(gzip.GzipFile(fileobj=io.BytesIO(raw_bytes))).read()
+    except OSError:
+        text = raw_bytes.decode("utf-8", errors="ignore")
+    rdr = csv.DictReader(io.StringIO(text))
+    for r in rdr:
+        try:
+            seller   = (r["seller"] or "").strip()
+            buyer    = (r["buyer"] or "").strip()
+            material = (r["material"] or "").strip()
+
+            # $/lb → $/ton if price_per_lb present
+            if "price_per_lb" in r and str(r["price_per_lb"]).strip():
+                price_per_ton = Decimal(str(r["price_per_lb"])) * Decimal("2000")
+            else:
+                price_per_ton = Decimal(str(r["price_per_ton"]))
+
+            # lbs → tons if weight_lbs present
+            if "weight_lbs" in r and str(r["weight_lbs"]).strip():
+                weight_tons = Decimal(str(r["weight_lbs"])) / Decimal("2000")
+            else:
+                weight_tons = Decimal(str(r["weight_tons"]))
+
+            ts = (r["created_at"] or "").strip().replace("Z", "+00:00")
+            created_at = datetime.fromisoformat(ts)
+
+            raw_key = f"{seller}|{buyer}|{material}|{price_per_ton}|{weight_tons}|{created_at.isoformat()}"
+            dedupe_key = hashlib.sha256(raw_key.encode()).hexdigest()
+
+            yield {
+                "seller": seller, "buyer": buyer, "material": material,
+                "price_per_ton": price_per_ton, "weight_tons": weight_tons,
+                "created_at": created_at, "dedupe_key": dedupe_key
+            }
+        except (KeyError, InvalidOperation, ValueError):
+            continue
+
+@app.post("/import/contracts_csv", tags=["Data"], summary="Bulk import normalized contracts CSV (gzip or csv)")
+async def import_contracts_csv(
+    file: UploadFile = File(...),
+    database_dep = Depends(lambda: database)
+):
+    raw = await file.read()
+    rows = list(_rows_from_csv_bytes(raw))
+    if not rows:
+        return {"imported": 0}
+
+    q = """
+    INSERT INTO contracts (seller,buyer,material,price_per_ton,weight_tons,created_at,dedupe_key)
+    VALUES (:seller,:buyer,:material,:price_per_ton,:weight_tons,:created_at,:dedupe_key)
+    ON CONFLICT (dedupe_key) DO NOTHING
+    """
+    CHUNK = 3000
+    total = 0
+    for i in range(0, len(rows), CHUNK):
+        batch = rows[i:i+CHUNK]
+        await database_dep.execute_many(query=q, values=batch)
+        total += len(batch)
+    return {"imported": total}
+# ===== /Contracts CSV Import =====
+
 # ==== Quick user creation (admin-only bootstrap) =========================
 ADMIN_SETUP_TOKEN = os.getenv("ADMIN_SETUP_TOKEN", "")
 
@@ -2353,6 +2437,65 @@ async def material_price_history(material: str, seller: Optional[str] = None):
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
 
+@app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
+async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
+    d = (snapshot_date or date.today()).isoformat()
+    q = """
+    INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
+    SELECT :d::date AS as_of_date,
+           LOWER(seller) AS region,
+           material,
+           AVG(price_per_ton) AS avg_price,
+           SUM(weight_tons)  AS volume_tons
+      FROM contracts
+     WHERE created_at >= :d::date
+       AND created_at  < (:d::date + INTERVAL '1 day')
+     GROUP BY region, material
+    ON CONFLICT (as_of_date, region, material) DO UPDATE
+      SET avg_price  = EXCLUDED.avg_price,
+          volume_tons= EXCLUDED.volume_tons
+    """
+    await database.execute(q, {"d": d})
+    try:
+        await emit_event("index.snapshot.created", {"as_of_date": d})
+    except Exception:
+        pass
+    return {"ok": True, "date": d}
+
+@app.post("/indices/backfill", tags=["Analytics"], summary="Backfill indices for a date range (inclusive)")
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    day = start; n = 0
+    while day <= end:
+        await indices_generate_snapshot(snapshot_date=day)
+        day += timedelta(days=1); n += 1
+    return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+
+@app.get("/public/indices/daily.json", tags=["Analytics"], summary="Public daily index JSON")
+async def public_indices_json(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+    q = """
+    SELECT as_of_date, region, material, avg_price, volume_tons
+      FROM indices_daily
+     WHERE as_of_date >= CURRENT_DATE - (:days || ' days')::interval
+    """
+    vals = {"days": days}
+    if region:   q += " AND region = :region";   vals["region"] = region.lower()
+    if material: q += " AND material = :material"; vals["material"] = material
+    q += " ORDER BY as_of_date DESC, region, material"
+    rows = await database.fetch_all(q, vals)
+    return [{"as_of_date": r["as_of_date"].isoformat(),
+             "region": r["region"], "material": r["material"],
+             "avg_price": float(r["avg_price"]), "volume_tons": float(r["volume_tons"])} for r in rows]
+
+@app.get("/public/indices/daily.csv", tags=["Analytics"], summary="Public daily index CSV")
+async def public_indices_csv(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+    data = await public_indices_json(days=days, region=region, material=material)
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["as_of_date","region","material","avg_price","volume_tons"])
+    for r in data:
+        w.writerow([r["as_of_date"], r["region"], r["material"], r["avg_price"], r["volume_tons"]])
+    out.seek(0)
+    return StreamingResponse(iter([out.read()]), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
 @app.get(
@@ -2437,6 +2580,19 @@ async def get_latest_indices():
         f"{r['region'].lower()}_{r['sku'].lower()}_index": float(r["avg_price"])
         for r in rows
     }
+
+@app.get("/export/tax_lookup", tags=["Compliance"], summary="Duty/Tax lookup by HS + destination")
+async def tax_lookup(hs_code: str, dest: str):
+    row = await database.fetch_one("""
+      SELECT duty_usd, tax_pct
+        FROM export_rules
+       WHERE :hs LIKE hs_prefix || '%' AND dest = :dest
+       ORDER BY length(hs_prefix) DESC
+       LIMIT 1
+    """, {"hs": hs_code.strip(), "dest": dest.upper()})
+    return {"hs_code": hs_code.strip(), "dest": dest.upper(),
+            "tax_pct": float(row["tax_pct"]) if row else 0.0,
+            "duty_usd": float(row["duty_usd"]) if row else 0.0}
 
 # --- MANUAL SNAPSHOT GENERATOR (TEMP/ADMIN) ---
 @app.post("/indices/generate_snapshot", tags=["Admin"], summary="Manually generate an index snapshot", description="Aggregates avg price per SKU + region from contracts table and stores it as a snapshot.")
@@ -2547,6 +2703,90 @@ app.include_router(admin_exports)
 import asyncio
 import inspect
 from fastapi import Request
+
+class ContractInExtended(ContractIn):
+    pricing_formula: Optional[str] = None
+    reference_symbol: Optional[str] = None
+    reference_price: Optional[float] = None
+    reference_source: Optional[str] = None
+    reference_timestamp: Optional[datetime] = None
+    currency: Optional[str] = "USD"
+
+@app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
+async def create_contract(contract: ContractInExtended, request: Request):
+    qty   = float(contract.weight_tons)
+    seller = contract.seller.strip()
+    sku    = contract.material.strip()
+    cid = str(uuid.uuid4())
+
+    async with database.transaction():
+        # ensure inventory row exists
+        await database.execute("""
+            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
+            VALUES (:seller, :sku, 0, 0, 0)
+            ON CONFLICT (seller, sku) DO NOTHING
+        """, {"seller": seller, "sku": sku})
+
+        # check availability & reserve
+        inv = await database.fetch_one("""
+            SELECT qty_on_hand, qty_reserved, qty_committed
+            FROM inventory_items
+            WHERE seller=:seller AND sku=:sku
+            FOR UPDATE
+        """, {"seller": seller, "sku": sku})
+        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
+        reserved  = float(inv["qty_reserved"]) if inv else 0.0
+        committed = float(inv["qty_committed"]) if inv else 0.0
+        available = on_hand - reserved - committed
+        if available < qty:
+            raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+
+        await database.execute("""
+            UPDATE inventory_items
+               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+             WHERE seller=:seller AND sku=:sku
+        """, {"q": qty, "seller": seller, "sku": sku})
+
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
+              "meta": json.dumps({"reason": "contract_create"})})
+
+        # INSERT with pricing fields (internal-only)
+        payload = {
+            "id": cid,
+            "buyer": contract.buyer,
+            "seller": contract.seller,
+            "material": contract.material,
+            "weight_tons": contract.weight_tons,
+            "price_per_ton": contract.price_per_ton,
+            "status": "Pending",
+            "pricing_formula": contract.pricing_formula,
+            "reference_symbol": contract.reference_symbol,
+            "reference_price": contract.reference_price,
+            "reference_source": contract.reference_source,
+            "reference_timestamp": contract.reference_timestamp,
+            "currency": contract.currency or "USD",
+        }
+        row = await database.fetch_one("""
+            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status,
+                                   pricing_formula, reference_symbol, reference_price, reference_source, reference_timestamp, currency)
+            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, :status,
+                    :pricing_formula, :reference_symbol, :reference_price, :reference_source, :reference_timestamp, :currency)
+            RETURNING *
+        """, payload)
+
+    # audit disclaimer (internal-only reference pricing)
+    try:
+        actor = request.session.get("username") if hasattr(request, "session") else None
+        await log_action(actor or "system", "contract.create", str(row["id"]), {
+            "pricing_disclaimer": "Reference prices are used internally; not rebroadcast."
+        })
+    except Exception:
+        pass
+
+    return row
 
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
@@ -2706,8 +2946,6 @@ def export_all_zip_admin():
         )
 
 # === /INSERT ===
-
-
 
 @app.post(
     "/contracts/{contract_id}/cancel",
