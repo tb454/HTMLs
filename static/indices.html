@@ -5,36 +5,55 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>BRidge Indices Dashboard</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 20px; background:#f7fafc; }
-  .row { display:flex; gap:16px; align-items:flex-start; }
-  .card { border:1px solid #e5e7eb; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,0.04); background:#fff; }
-  table { width:100%; border-collapse:collapse; }
-  th, td { padding:10px; border-bottom:1px solid #eee; font-size:14px; }
-  th { background:#f9fafb; text-align:left; position:sticky; top:0; }
-  .btn { padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#f8fafc; cursor:pointer; }
-  .btn:hover { background:#eef2ff; }
-  .muted { color:#6b7280; font-size:12px; }
-  .positive { color:#047857; } .negative { color:#b91c1c; }
-  #chart, #forecastChart { width:100%; height:280px; background:#fff; border:1px solid #eee; border-radius:12px; }
-  .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
-  .grid { display:grid; grid-template-columns: 2fr 1fr; gap:16px; }
-  @media (max-width: 1000px){ .grid{ grid-template-columns: 1fr; } }
+  :root{
+    --brand:#0f62fe; --ink:#111827; --muted:#6b7280; --bg:#f7fafc; --card:#fff; --line:#e5e7eb;
+    --ring: rgba(15,98,254,.15);
+  }
+  *{box-sizing:border-box}
+  body{font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:24px; background:var(--bg); color:var(--ink)}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand h1{font-size:20px;margin:0}
+  .muted{color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}
+  @media (max-width: 1000px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .btn{padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer}
+  .btn:hover{background:#f3f6ff}
+  .btn[data-busy="1"]{opacity:.6;pointer-events:none}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:10px;border-bottom:1px solid #eee;font-size:14px}
+  th{background:#f9fafb;text-align:left;position:sticky;top:0;z-index:1}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:#fff}
+  .positive{color:#047857}.negative{color:#b91c1c}
+  #chart,#forecastChart{width:100%;height:280px;background:#fff;border:1px solid #eee;border-radius:12px}
+  .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.25);font-size:13px;display:none}
+  .toast[data-show="1"]{display:block}
 </style>
 </head>
 <body>
-  <h1>BRidge Scrap Indices™</h1>
-  <p class="muted">Transparent scrap benchmarks with forecast curves. Data in USD/lb.</p>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 12h16M4 6h10M4 18h10" stroke="#0f62fe" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <h1>BRidge Scrap Indices™</h1>
+    </div>
+    <div class="muted">USD/lb • daily closes & forecast overlay</div>
+  </div>
 
   <div class="grid">
     <div class="card">
-      <div class="toolbar" style="margin-bottom:10px;">
+      <div class="toolbar">
         <button class="btn" id="refreshAll">Refresh</button>
         <button class="btn" id="exportUniverse">Export Universe CSV</button>
         <!-- Admin-only controls (visible to all here; gate via role if needed) -->
         <button class="btn" id="pullRefs">Pull Refs</button>
         <button class="btn" id="runIndices">Build Indices</button>
         <button class="btn" id="runForecasts">Run Forecasts</button>
-        <span id="msg" class="muted"></span>
       </div>
       <table id="universeTbl">
         <thead>
@@ -63,19 +82,31 @@
     </div>
   </div>
 
+  <!-- Toast + minimal helpers (loaded before main script) -->
+  <div id="toast" class="toast"></div>
+  <script>
+    // Guarded globals to avoid double-definitions if this is included elsewhere
+    window.$ ??= (sel) => document.querySelector(sel);
+    window.toast ??= (t) => {
+      const el = document.getElementById('toast');
+      el.textContent = t;
+      el.setAttribute('data-show','1');
+      setTimeout(()=>el.removeAttribute('data-show'), 2500);
+    };
+    window.setBusy ??= (btn, busy) => btn && btn.setAttribute('data-busy', busy ? '1' : '0');
+  </script>
+
 <script>
 // ------- helpers -------
-const $ = sel => document.querySelector(sel);
-const msg = t => { $('#msg').textContent = t; setTimeout(()=>$('#msg').textContent='', 3000); };
+async function getJSON(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function post(url){ const r = await fetch(url,{method:'POST'}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
 function csvDownload(filename, rows){
   const headers = Object.keys(rows[0]||{});
   const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>JSON.stringify(r[h] ?? '')).join(','))).join('\n');
   const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
 }
-
-async function getJSON(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
-async function post(url){ const r = await fetch(url,{method:'POST'}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
 // ------- state -------
 let universe = [];
@@ -95,7 +126,7 @@ function drawLine(canvas, series, options={}){
   const ys = series.map(d=>+d.value);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const y0 = minY - (maxY-minY)*0.05, y1 = maxY + (maxY-minY)*0.05 || minY+1;
+  const y0 = minY - (maxY-minY)*0.05, y1 = (maxY + (maxY-minY)*0.05) || (minY+1);
 
   const xPix = t => pad + (W-2*pad)*( (t-minX)/(maxX-minX || 1) );
   const yPix = v => H-pad - (H-2*pad)*( (v-y0)/(y1-y0 || 1) );
@@ -150,7 +181,8 @@ async function loadUniverse(){
     let last=null, prev=null, updated=null;
     try{
       const hist = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
-      if(hist.length){ last = hist[hist.length-1]?.close_price;
+      if(hist.length){
+        last = hist[hist.length-1]?.close_price;
         if(hist.length>1) prev = hist[hist.length-2]?.close_price;
         updated = hist[hist.length-1]?.dt;
       }
@@ -204,26 +236,26 @@ $('#toggleForecast').onclick = ()=>{ showForecast = !showForecast; if(selectedSy
 // exports
 $('#exportUniverse').onclick = ()=> {
   const rows = universe.map(r=>({symbol:r.symbol, method:r.method, factor:r.factor, base_symbol:r.base_symbol}));
-  if(!rows.length) return msg('No data.');
+  if(!rows.length) return toast('No data.');
   csvDownload('bridge_index_universe.csv', rows);
 };
 $('#exportHistory').onclick = async ()=>{
-  if(!selectedSymbol) return msg('Select a ticker first.');
+  if(!selectedSymbol) return toast('Select a ticker first.');
   const rows = await getJSON(`/indices/history?symbol=${encodeURIComponent(selectedSymbol)}`);
-  if(!rows.length) return msg('No history.');
+  if(!rows.length) return toast('No history.');
   csvDownload(`${selectedSymbol}_history.csv`, rows);
 };
 $('#exportForecast').onclick = async ()=>{
-  if(!selectedSymbol) return msg('Select a ticker first.');
+  if(!selectedSymbol) return toast('Select a ticker first.');
   const rows = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
-  if(!rows.length) return msg('No forecast.');
+  if(!rows.length) return toast('No forecast.');
   csvDownload(`${selectedSymbol}_forecast90.csv`, rows);
 };
 
-// admin action buttons
-$('#pullRefs').onclick = async ()=>{ try{ await post('/reference_prices/pull_now_all'); msg('✓ Refs pulled'); }catch(e){ msg('✗ '+e.message); } };
-$('#runIndices').onclick = async ()=>{ try{ await post('/indices/run'); msg('✓ Indices built'); if(selectedSymbol) viewSymbol(selectedSymbol); }catch(e){ msg('✗ '+e.message); } };
-$('#runForecasts').onclick = async ()=>{ try{ await post('/forecasts/run'); msg('✓ Forecasts done'); if(selectedSymbol) viewSymbol(selectedSymbol); }catch(e){ msg('✗ '+e.message); } };
+// admin action buttons (with busy state + toast)
+$('#pullRefs').onclick = async (e)=>{ setBusy(e.target,true); try{ await post('/reference_prices/pull_now_all'); toast('✓ Reference prices pulled'); }catch(err){ toast('✗ '+err.message);} finally{ setBusy(e.target,false);} };
+$('#runIndices').onclick = async (e)=>{ setBusy(e.target,true); try{ await post('/indices/run'); toast('✓ Indices built'); if(selectedSymbol) viewSymbol(selectedSymbol); }catch(err){ toast('✗ '+err.message);} finally{ setBusy(e.target,false);} };
+$('#runForecasts').onclick = async (e)=>{ setBusy(e.target,true); try{ await post('/forecasts/run'); toast('✓ Forecasts complete'); if(selectedSymbol) viewSymbol(selectedSymbol);}catch(err){ toast('✗ '+err.message);} finally{ setBusy(e.target,false);} };
 
 // initial load
 $('#refreshAll').onclick = loadUniverse;

@@ -418,25 +418,41 @@
     });
 
  // Pricing widget wire-up
-    document.addEventListener('DOMContentLoaded', () => {
-      const btn = document.getElementById('btnQuote');
-      if (btn) {
-        btn.onclick = async ()=>{
-          const cat = document.getElementById('catSel').value;
-          const mat = document.getElementById('matInput').value.trim();
-          if(!mat) return;
-          const el = document.getElementById('quoteOut');
-          try {
-            const r = await fetch(`${endpoint}/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
-            if(!r.ok){ el.textContent = 'No price available (check spelling & supported list).'; return; }
-            const j = await r.json();
-            el.textContent = `${j.category} / ${j.material} → $${(+j.price_per_lb).toFixed(4)} per lb`;
-          } catch (e) {
-            el.textContent = 'Quote failed.';
+ 
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('btnQuote');
+    if (btn) {
+      btn.onclick = async () => {
+        const cat = document.getElementById('catSel').value;
+        const mat = document.getElementById('matInput').value.trim();
+        if (!mat) return;
+
+        const el = document.getElementById('quoteOut');
+        // Disable during fetch
+        btn.disabled = true; 
+        btn.textContent = 'Quoting…';
+
+        try {
+          const r = await fetch(`${endpoint}/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
+          if (!r.ok) { 
+            el.innerHTML = `<span class="badge bg-warning text-dark">No price (check spelling)</span>`;
+            return; 
           }
-        };
-      }
-    });
+          const j = await r.json();
+          el.innerHTML = `
+            <span class="badge bg-primary">${j.category} / ${j.material}</span>
+            <span class="badge bg-light text-dark ms-2">$${(+j.price_per_lb).toFixed(4)} / lb</span>
+          `;
+        } catch (e) {
+          el.innerHTML = `<span class="badge bg-danger">Quote failed</span>`;
+        } finally {
+          // Re-enable
+          btn.disabled = false; 
+          btn.textContent = 'Quote';
+        }
+      };
+    }
+  });
 
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');

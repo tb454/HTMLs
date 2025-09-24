@@ -433,12 +433,10 @@ async def latest_index(symbol: str):
     return dict(row)
 
 @router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
-async def indices_backfill(start: date = Query(...), end: date = Query(...)):
-    # Reuse your existing snapshot builder for each day
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):  
     day = start
     n = 0
-    while day <= end:
-        # you already have indices_generate_snapshot() wired above
+    while day <= end:        
         await indices_generate_snapshot(snapshot_date=day)
         day += timedelta(days=1)
         n += 1
@@ -456,14 +454,12 @@ async def history(symbol: str, start: date | None = None, end: date | None = Non
     return [dict(r) for r in rows]
 
 @router_idx.get("/universe", summary="List available index symbols (DB or defaults)")
-async def universe():
-    # prefer DB definitions
+async def universe():   
     rows = await app.state.db_pool.fetch(
         "SELECT symbol, method, factor, base_symbol, enabled FROM bridge_index_definitions ORDER BY symbol"
     )
     if rows:
-        return [dict(r) for r in rows]
-    # fallback to defaults in code
+        return [dict(r) for r in rows]    
     from indices_builder import DEFAULT_INDEX_SET
     return [{"symbol": d["symbol"], "method": d["method"], "factor": d["factor"], "base_symbol": d["base_symbol"], "enabled": True} for d in DEFAULT_INDEX_SET]
 
@@ -499,17 +495,16 @@ async def _nightly_index_cron():
             await asyncio.sleep((target - now).total_seconds())
             try:
                 await indices_generate_snapshot()
-            except Exception:
-                # don't crash the loop on transient errors
+            except Exception:                
                 pass
     asyncio.create_task(_runner())
+
 async def _daily_indices_job():
     while True:
         try:
             await run_indices_builder()
         except Exception:
-            pass
-        # sleep until next UTC day boundary
+            pass        
         from datetime import datetime, timezone, timedelta
         now = datetime.now(timezone.utc)
         tomorrow = (now + timedelta(days=1)).date()
@@ -799,7 +794,7 @@ async def login(body: LoginIn, request: Request):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     role = (row["role"] or "").lower()
-    if role == "yard":  # back-compat
+    if role == "yard":  
         role = "seller"
 
     request.session["username"] = (row["username"] or row["email"])
@@ -871,7 +866,7 @@ async def public_signup(payload: SignupIn, request: Request):
             msg = str(e).lower()
             if "duplicate key" in msg or "unique constraint" in msg:
                 return False
-            raise  # likely column mismatch (e.g., no is_active)
+            raise  
 
     try:
         if await _insert_with_username(username):
@@ -897,8 +892,7 @@ async def public_signup(payload: SignupIn, request: Request):
                 return SignupOut(ok=True, created=False, email=email, role=req_role, redirect="/buyer")
             raise
 
-    except Exception:
-        # no username column at all
+    except Exception:       
         try:
             await database.execute(
                 """
@@ -961,8 +955,7 @@ def admin_export_all():
                 s = io.StringIO()
                 w = csv.writer(s)
                 if cols: w.writerow(cols)
-                for r in rows:
-                    # handle Row/RowMapping and plain tuples
+                for r in rows:                    
                     if hasattr(r, "keys"):
                         w.writerow([r[c] for c in cols])
                     else:
@@ -975,8 +968,7 @@ def admin_export_all():
 # ===== HMAC gating for inventory endpoints =====
 INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
 
-def _require_hmac_in_this_env() -> bool:
-    # Require HMAC only in production and only if a secret is set
+def _require_hmac_in_this_env() -> bool:    
     return os.getenv("ENV", "").lower() == "production" and bool(os.getenv(INVENTORY_SECRET_ENV))
 # ======================================================================
 
@@ -1470,7 +1462,7 @@ class FinishedRow(BaseModel):
     sku: str
     wip_lbs: int
     finished_lbs: int
-    avg_cost_per_lb: Optional[float] = None  # placeholder until costing is wired
+    avg_cost_per_lb: Optional[float] = None  
 
 @app.get(
     "/inventory/finished_goods",
@@ -1598,8 +1590,7 @@ async def _ensure_audit_log_schema():
     status_code=200
 )
 @limiter.limit("60/minute")
-async def inventory_bulk_upsert(body: dict, request: Request):
-    # Minimal validation
+async def inventory_bulk_upsert(body: dict, request: Request):    
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
@@ -1607,8 +1598,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
         raise HTTPException(400, "invalid payload: require source, seller, items[]")
 
     raw = await request.body()
-    sig = request.headers.get("X-Signature", "")
-    # HMAC + anti-replay only in production
+    sig = request.headers.get("X-Signature", "")    
     if _require_hmac_in_this_env():
         if not sig or is_replay(sig) or not verify_sig(raw, sig, INVENTORY_SECRET_ENV):
             # log failure
@@ -1667,8 +1657,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     status_code=200
 )
 @limiter.limit("60/minute")
-async def inventory_manual_add(payload: dict, request: Request):
-    # In PROD require seller/admin session
+async def inventory_manual_add(payload: dict, request: Request):    
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
 
