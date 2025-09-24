@@ -46,6 +46,11 @@ from typing import Literal
 from fastapi import Header, HTTPException
 import gzip
 from decimal import InvalidOperation
+from pricing_engine import compute_material_price
+from price_sources import pull_comexlive_once, latest_price
+from price_sources import pull_comex_home_once
+from forecast_job import run_all as _forecast_run_all
+from indices_builder import run_indices_builder
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -312,15 +317,156 @@ async def healthz():
     except Exception as e:
         return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
 
-# -------- Database setup (non-fatal, with bootstrap in CI/staging) --------
+# --- Pricing & Indices wiring (drop-in) --------------------------------------
+import os, asyncio
+from datetime import datetime, timedelta
+import asyncpg
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import create_engine
+import databases  
+
+# Your modules
+from pricing_engine import compute_material_price
+from price_sources import (
+    pull_comexlive_once,
+    pull_lme_once,
+    pull_comex_home_once,  
+    latest_price,
+)
+# Nightly index builder
+from indices_builder import run_indices_builder as indices_generate_snapshot
+# -----------------------------------------------------------------------------
+
+# -------- Database setup (non-fatal, with bootstrap in CI/staging) -----------
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if not DATABASE_URL:
-    # local dev fallback only; CI sets DATABASE_URL
     DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-database = databases.Database(DATABASE_URL)
+database = databases.Database(DATABASE_URL)  # optional convenience layer
 
+@app.on_event("startup")
+async def _startup_prices():
+    if not hasattr(app.state, "db_pool"):
+        app.state.db_pool = await asyncpg.create_pool(DATABASE_URL, max_size=10)
+
+async def _fetch_base(symbol: str):
+    return await latest_price(app.state.db_pool, symbol)
+
+# Routers
+router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
+router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
+
+@router_prices.post("/pull_now_all", summary="Pull COMEX & LME reference prices (best-effort)")
+async def pull_now_all():
+    await pull_comex_home_once(app.state.db_pool)
+    await pull_comexlive_once(app.state.db_pool)
+    await pull_lme_once(app.state.db_pool)
+    return {"ok": True}
+
+@router_prices.get("/latest", summary="Get latest stored reference price")
+async def get_latest(symbol: str):
+    row = await latest_price(app.state.db_pool, symbol)
+    if not row:
+        raise HTTPException(status_code=404, detail="No price yet for symbol")
+    return row
+
+@router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
+async def pull_home():
+    await pull_comex_home_once(app.state.db_pool)
+    return {"ok": True}
+
+@router_pricing.get("/quote", summary="Compute material price using internal formulas")
+async def quote(category: str, material: str):
+    price = await compute_material_price(_fetch_base, category, material)
+    if price is None:
+        raise HTTPException(status_code=404, detail="No price available for that category/material")
+    return {
+        "category": category,
+        "material": material,
+        "price_per_lb": round(float(price), 4),
+        "notes": "Internal-only; bases use COMEX/LME with Cu rule (COMEX − $0.10).",
+    }
+router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
+
+@router_fc.post("/run", summary="Run nightly forecast for all symbols")
+async def run_forecast_now():
+    await _forecast_run_all()
+    return {"ok": True}
+
+@router_fc.get("/latest", summary="Get latest forecast curve for a symbol")
+async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
+    q = """SELECT forecast_date, predicted_price, conf_low, conf_high, model_name
+           FROM bridge_forecasts
+           WHERE symbol=$1 AND horizon_days=$2
+           ORDER BY forecast_date"""
+    rows = await app.state.db_pool.fetch(q, symbol, horizon_days)
+    if not rows:
+        raise HTTPException(404, "No forecasts available")
+    return [dict(r) for r in rows]
+router_idx = APIRouter(prefix="/indices", tags=["Indices"])
+
+@router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
+async def run_indices_now():
+    await run_indices_builder()
+    return {"ok": True}
+
+@router_idx.get("/latest", summary="Latest close for an index symbol")
+async def latest_index(symbol: str):
+    q = """SELECT dt, close_price, unit, currency, source_note
+           FROM bridge_index_history
+           WHERE symbol=$1
+           ORDER BY dt DESC
+           LIMIT 1"""
+    row = await app.state.db_pool.fetchrow(q, symbol)
+    if not row:
+        raise HTTPException(404, "No index history for that symbol")
+    return dict(row)
+
+@router_idx.get("/history", summary="Historical closes for an index symbol")
+async def history(symbol: str, start: date | None = None, end: date | None = None):
+    q = """SELECT dt, close_price
+           FROM bridge_index_history
+           WHERE symbol=$1
+             AND ($2::date IS NULL OR dt >= $2)
+             AND ($3::date IS NULL OR dt <= $3)
+           ORDER BY dt"""
+    rows = await app.state.db_pool.fetch(q, symbol, start, end)
+    return [dict(r) for r in rows]
+
+@router_idx.get("/universe", summary="List available index symbols (DB or defaults)")
+async def universe():
+    # prefer DB definitions
+    rows = await app.state.db_pool.fetch(
+        "SELECT symbol, method, factor, base_symbol, enabled FROM bridge_index_definitions ORDER BY symbol"
+    )
+    if rows:
+        return [dict(r) for r in rows]
+    # fallback to defaults in code
+    from indices_builder import DEFAULT_INDEX_SET
+    return [{"symbol": d["symbol"], "method": d["method"], "factor": d["factor"], "base_symbol": d["base_symbol"], "enabled": True} for d in DEFAULT_INDEX_SET]
+
+app.include_router(router_idx)
+app.include_router(router_fc)
+app.include_router(router_prices)
+app.include_router(router_pricing)
+
+# Optional 3-minute refresher loop (best-effort)
+async def _price_refresher():
+    while True:
+        try:
+            await pull_comex_home_once(app.state.db_pool)
+            await pull_comexlive_once(app.state.db_pool)
+            await pull_lme_once(app.state.db_pool)
+        except Exception:
+            pass
+        await asyncio.sleep(180)  # every 3 minutes
+
+@app.on_event("startup")
+async def _kickoff_refresher():
+    asyncio.create_task(_price_refresher())
+
+# Nightly index close snapshot at ~01:00 UTC
 @app.on_event("startup")
 async def _nightly_index_cron():
     async def _runner():
@@ -333,12 +479,92 @@ async def _nightly_index_cron():
             try:
                 await indices_generate_snapshot()
             except Exception:
+                # don't crash the loop on transient errors
                 pass
     asyncio.create_task(_runner())
+async def _daily_indices_job():
+    while True:
+        try:
+            await run_indices_builder()
+        except Exception:
+            pass
+        # sleep until next UTC day boundary
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        tomorrow = (now + timedelta(days=1)).date()
+        next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
+        await asyncio.sleep((next_run - now).total_seconds())
+
+@app.on_event("startup")
+async def _start_daily_indices():
+    asyncio.create_task(_daily_indices_job())
+
+# Optional bootstrap for CI/staging/local: create minimal schema if missing
+def _bootstrap_schema_if_needed(sqlalchemy_engine):
+    with sqlalchemy_engine.begin() as conn:
+        conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS reference_prices (
+            id bigserial PRIMARY KEY,
+            symbol text NOT NULL,
+            source text NOT NULL,
+            price numeric(16,6) NOT NULL,
+            ts_market timestamptz NULL,
+            ts_server timestamptz NOT NULL DEFAULT now(),
+            raw_snippet text
+        );
+        CREATE INDEX IF NOT EXISTS idx_refprices_symbol_ts ON reference_prices(symbol, ts_server DESC);
+
+        CREATE TABLE IF NOT EXISTS bridge_index_history (
+            id bigserial PRIMARY KEY,
+            symbol text NOT NULL,
+            dt date NOT NULL,
+            close_price numeric(16,6) NOT NULL,
+            unit text DEFAULT 'USD/lb',
+            currency text DEFAULT 'USD',
+            source_note text,
+            created_at timestamptz DEFAULT now(),
+            UNIQUE(symbol, dt)
+        );
+
+        CREATE TABLE IF NOT EXISTS bridge_index_definitions (
+            id bigserial PRIMARY KEY,
+            symbol text UNIQUE NOT NULL,
+            method text NOT NULL,
+            factor numeric(16,6) NOT NULL,
+            base_symbol text NOT NULL,
+            notes text,
+            enabled boolean DEFAULT true
+        );
+
+        CREATE TABLE IF NOT EXISTS model_runs (
+            id bigserial PRIMARY KEY,
+            model_name text NOT NULL,
+            symbol text NOT NULL,
+            train_start date NOT NULL,
+            train_end date NOT NULL,
+            features_used jsonb,
+            backtest_mae numeric(16,6),
+            backtest_mape numeric(16,6),
+            created_at timestamptz DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS bridge_forecasts (
+            id bigserial PRIMARY KEY,
+            symbol text NOT NULL,
+            horizon_days int NOT NULL,
+            forecast_date date NOT NULL,
+            predicted_price numeric(16,6) NOT NULL,
+            conf_low numeric(16,6),
+            conf_high numeric(16,6),
+            model_name text NOT NULL,
+            run_id bigint,
+            generated_at timestamptz DEFAULT now(),
+            UNIQUE(symbol, horizon_days, forecast_date, model_name)
+        );
+        """)
 
 @app.on_event("startup")
 async def startup_bootstrap_and_connect():
-    # Auto-create minimal schema outside prod, or when explicitly requested
     env = os.getenv("ENV", "").lower()
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
     if env in {"ci", "test", "staging"} or init_flag:
@@ -347,9 +573,11 @@ async def startup_bootstrap_and_connect():
         except Exception as e:
             print(f"[bootstrap] non-fatal init error: {e}")
     try:
-        await database.connect()
+        await database.connect() 
     except Exception as e:
         print(f"[startup] database connect failed: {e}")
+# ---------------------------------------------------------------------------
+
 
 # ===== /Contracts CSV Import =====
 REQUIRED_IMPORT_COLS = ["seller","buyer","material","price_per_ton","weight_tons","created_at"]
