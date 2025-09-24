@@ -300,6 +300,10 @@ async def admin_page():
 async def seller_page():
     return FileResponse("static/seller.html")
 
+@app.get("/indices-dashboard", include_in_schema=False)
+async def indices_page():
+    return FileResponse("static/indices.html")
+
 # alias: support any old links that hit /yard
 @app.get("/yard", include_in_schema=False)
 async def yard_alias():
@@ -361,6 +365,8 @@ async def _fetch_base(symbol: str):
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
+router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
+router_idx = APIRouter(prefix="/indices", tags=["Indices"])
 
 @router_prices.post("/pull_now_all", summary="Pull COMEX & LME reference prices (best-effort)")
 async def pull_now_all():
@@ -392,7 +398,6 @@ async def quote(category: str, material: str):
         "price_per_lb": round(float(price), 4),
         "notes": "Internal-only; bases use COMEX/LME with Cu rule (COMEX − $0.10).",
     }
-router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
 
 @router_fc.post("/run", summary="Run nightly forecast for all symbols")
 async def run_forecast_now():
@@ -409,7 +414,6 @@ async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
     if not rows:
         raise HTTPException(404, "No forecasts available")
     return [dict(r) for r in rows]
-router_idx = APIRouter(prefix="/indices", tags=["Indices"])
 
 @router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
 async def run_indices_now():
@@ -427,6 +431,18 @@ async def latest_index(symbol: str):
     if not row:
         raise HTTPException(404, "No index history for that symbol")
     return dict(row)
+
+@router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    # Reuse your existing snapshot builder for each day
+    day = start
+    n = 0
+    while day <= end:
+        # you already have indices_generate_snapshot() wired above
+        await indices_generate_snapshot(snapshot_date=day)
+        day += timedelta(days=1)
+        n += 1
+    return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
 
 @router_idx.get("/history", summary="Historical closes for an index symbol")
 async def history(symbol: str, start: date | None = None, end: date | None = None):
