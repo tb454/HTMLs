@@ -12,7 +12,7 @@ sys.path.insert(0, str(HTMLS_ROOT))
 # Ensure non-production env so TrustedHost allows 'testserver'
 os.environ.setdefault("ENV", "ci")
 
-# Import your FastAPI app from the real filename
+# Import FastAPI app from the filename
 from bridge_buyer_backend import app  
 @pytest.fixture(scope="session")
 def client():
