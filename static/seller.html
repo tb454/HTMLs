@@ -170,7 +170,24 @@
         </div>
       </div>
     </section>
-
+<!-- Price This Material (inserted) -->
+    <section class="section">
+      <div class="section-title">Price This Material</div>
+      <div class="card" style="margin-top:12px; padding:12px;">
+        <label>Category:
+          <select id="catSel" class="form-select" style="max-width:220px; display:inline-block; margin-right:8px;">
+            <option>Copper</option><option>Aluminum</option><option>Brass</option>
+            <option>Insulated Wire</option><option>Misc Product</option><option>Radiator Product</option>
+            <option>Lead</option><option>Stainless</option>
+          </select>
+        </label>
+        <label>Material:
+          <input id="matInput" class="form-control" placeholder="e.g., #1 or AL6063_OldExtrusion" style="width:260px; display:inline-block; margin: 0 8px;"/>
+        </label>
+        <button class="btn btn-primary" id="btnQuote">Quote</button>
+        <div id="quoteOut" class="text-muted" style="margin-top:8px;"></div>
+      </div>
+    </section>
     <!-- Finished Goods Inventory -->
     <section class="section">
       <div class="section-title">Finished Goods Inventory</div>
@@ -398,6 +415,27 @@
 
       // Build inventory table (real data) + totals (will populate when seller is known)
       refreshFinishedFromInputs();
+    });
+
+ // Pricing widget wire-up
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('btnQuote');
+      if (btn) {
+        btn.onclick = async ()=>{
+          const cat = document.getElementById('catSel').value;
+          const mat = document.getElementById('matInput').value.trim();
+          if(!mat) return;
+          const el = document.getElementById('quoteOut');
+          try {
+            const r = await fetch(`/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
+            if(!r.ok){ el.textContent = 'No price available (check spelling & supported list).'; return; }
+            const j = await r.json();
+            el.textContent = `${j.category} / ${j.material} → $${(+j.price_per_lb).toFixed(4)} per lb`;
+          } catch (e) {
+            el.textContent = 'Quote failed.';
+          }
+        };
+      }
     });
 
     function updatePurchaseValues() {

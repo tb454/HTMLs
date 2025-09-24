@@ -32,6 +32,45 @@
     </ul>
 
     <div class="tab-content" id="adminTabsContent">
+
+      <!-- BR-Indices Controls (added/kept, now with Bootstrap buttons) -->
+      <div class="card" style="padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:10px;">
+        <h3 style="margin:0 0 8px 0;">BR-Indices Controls</h3>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-outline-secondary btn-sm" id="btnPullRefs">Pull Reference Prices</button>
+          <button class="btn btn-outline-secondary btn-sm" id="btnBuildIndices">Build Today's Indices</button>
+          <button class="btn btn-outline-secondary btn-sm" id="btnRunForecasts">Run Forecasts</button>
+          <a class="btn btn-link btn-sm" href="/static/bridge-indices.html">Open Indices Dashboard →</a>
+        </div>
+        <div id="idxCtlMsg" class="mt-2 small text-muted"></div>
+      </div>
+
+      <script>
+      async function postJSON(url){ 
+        const r = await fetch(url,{method:'POST'}); 
+        if(!r.ok) throw new Error((await r.text())||r.status);
+        return r.json();
+      }
+      document.getElementById('btnPullRefs').onclick = async ()=>{
+        const el = document.getElementById('idxCtlMsg');
+        el.textContent = 'Pulling reference prices...';
+        try { await postJSON('/reference_prices/pull_now_all'); el.textContent='✓ Reference prices pulled.'; }
+        catch(e){ el.textContent='✗ Failed: '+e.message; }
+      };
+      document.getElementById('btnBuildIndices').onclick = async ()=>{
+        const el = document.getElementById('idxCtlMsg');
+        el.textContent = 'Building indices...';
+        try { await postJSON('/indices/run'); el.textContent='✓ Indices built.'; }
+        catch(e){ el.textContent='✗ Failed: '+e.message; }
+      };
+      document.getElementById('btnRunForecasts').onclick = async ()=>{
+        const el = document.getElementById('idxCtlMsg');
+        el.textContent = 'Running forecasts...';
+        try { await postJSON('/forecasts/run'); el.textContent='✓ Forecasts complete.'; }
+        catch(e){ el.textContent='✗ Failed: '+e.message; }
+      };
+      </script>
+  
       <!-- ====================== BOLs TAB ====================== -->
       <div class="tab-pane fade show active" id="bols-pane" role="tabpanel" aria-labelledby="bols-tab">
         <div class="filters row g-3">

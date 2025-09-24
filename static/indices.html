@@ -1,110 +1,236 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>BRidge Indices</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 24px; }
-    header { margin-bottom: 12px; }
-    label { margin-right: 8px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; margin: 12px 0; }
-    canvas { max-width: 100%; }
-    .method { margin-top: 24px; font-size: 0.95rem; line-height: 1.5; }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BRidge Indices Dashboard</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 20px; background:#f7fafc; }
+  .row { display:flex; gap:16px; align-items:flex-start; }
+  .card { border:1px solid #e5e7eb; border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,0.04); background:#fff; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:10px; border-bottom:1px solid #eee; font-size:14px; }
+  th { background:#f9fafb; text-align:left; position:sticky; top:0; }
+  .btn { padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#f8fafc; cursor:pointer; }
+  .btn:hover { background:#eef2ff; }
+  .muted { color:#6b7280; font-size:12px; }
+  .positive { color:#047857; } .negative { color:#b91c1c; }
+  #chart, #forecastChart { width:100%; height:280px; background:#fff; border:1px solid #eee; border-radius:12px; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+  .grid { display:grid; grid-template-columns: 2fr 1fr; gap:16px; }
+  @media (max-width: 1000px){ .grid{ grid-template-columns: 1fr; } }
+</style>
 </head>
 <body>
-  <header>
-    <h1>BRidge Regional Scrap Indices</h1>
-    <div class="row">
-      <div>
-        <label>Region</label>
-        <select id="region">
-          <option value="midwest" selected>Midwest</option>
-          <option value="south">South</option>
-          <option value="west">West</option>
-          <option value="northeast">Northeast</option>
-        </select>
+  <h1>BRidge Scrap Indices™</h1>
+  <p class="muted">Transparent scrap benchmarks with forecast curves. Data in USD/lb.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="toolbar" style="margin-bottom:10px;">
+        <button class="btn" id="refreshAll">Refresh</button>
+        <button class="btn" id="exportUniverse">Export Universe CSV</button>
+        <!-- Admin-only controls (visible to all here; gate via role if needed) -->
+        <button class="btn" id="pullRefs">Pull Refs</button>
+        <button class="btn" id="runIndices">Build Indices</button>
+        <button class="btn" id="runForecasts">Run Forecasts</button>
+        <span id="msg" class="muted"></span>
       </div>
-      <div>
-        <label>Material</label>
-        <select id="material">
-          <option>Shred</option>
-          <option>P&S</option>
-          <option>HMS</option>
-          <option>Copper</option>
-          <option>Aluminum</option>
-        </select>
-      </div>
-      <div>
-        <label>Range</label>
-        <select id="range">
-          <option value="30">30 days</option>
-          <option value="90" selected>90 days</option>
-          <option value="365">365 days</option>
-        </select>
-      </div>
-      <button id="refresh">Refresh</button>
+      <table id="universeTbl">
+        <thead>
+          <tr>
+            <th>Ticker</th><th>Method</th><th>Factor</th><th>Base</th><th>Last</th><th>Δ</th><th>Updated</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </div>
-  </header>
 
-  <canvas id="chart" height="100"></canvas>
-
-  <section class="method">
-    <h3>About / Methodology</h3>
-    <p>
-      The BRidge Index is a daily regional average of executed contract prices recorded on BRidge.
-      Each snapshot aggregates <em>price_per_ton</em> by material and region for all contracts executed that day.
-      Preliminary values may be revised if late contracts arrive. BRidge indices are provided for internal analytics,
-      without redistribution of any licensed reference feeds; all reference prices used for contract pricing are
-      strictly internal and not rebroadcast.
-    </p>
-  </section>
+    <div class="card">
+      <h3 id="detailTitle" style="margin-top:0;">Details</h3>
+      <div class="muted" id="detailNote"></div>
+      <div style="margin:8px 0;">
+        <button class="btn" data-days="30">30d</button>
+        <button class="btn" data-days="90">90d</button>
+        <button class="btn" id="toggleForecast">Toggle Forecast Overlay</button>
+      </div>
+      <canvas id="chart"></canvas>
+      <canvas id="forecastChart" style="margin-top:10px; display:none;"></canvas>
+      <div style="margin-top:10px;">
+        <button class="btn" id="exportHistory">Export History CSV</button>
+        <button class="btn" id="exportForecast">Export Forecast CSV</button>
+      </div>
+    </div>
+  </div>
 
 <script>
-const API = "https://bridge.scrapfutures.com";
-
-const ctx = document.getElementById('chart').getContext('2d');
-let chart;
-
-async function fetchSeries(days, region, material) {
-  const url = `${API}/public/indices/daily.json?days=${days}&region=${encodeURIComponent(region)}&material=${encodeURIComponent(material)}`;
-  const res = await fetch(url, { mode: 'cors' });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  const data = await res.json();
-  // data is [{as_of_date, region, material, avg_price, volume_tons}]
-  // Collapse by date (already daily)
-  const labels = data.map(d => d.as_of_date).reverse();
-  const prices = data.map(d => Number(d.avg_price)).reverse();
-  return { labels, prices };
+// ------- helpers -------
+const $ = sel => document.querySelector(sel);
+const msg = t => { $('#msg').textContent = t; setTimeout(()=>$('#msg').textContent='', 3000); };
+function csvDownload(filename, rows){
+  const headers = Object.keys(rows[0]||{});
+  const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>JSON.stringify(r[h] ?? '')).join(','))).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
 }
 
-async function draw() {
-  const days = document.getElementById('range').value;
-  const region = document.getElementById('region').value;
-  const material = document.getElementById('material').value;
+async function getJSON(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function post(url){ const r = await fetch(url,{method:'POST'}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
-  const { labels, prices } = await fetchSeries(days, region, material);
+// ------- state -------
+let universe = [];
+let selectedSymbol = null;
+let historyDays = 30;
+let showForecast = false;
 
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{ label: `${region} · ${material}`, data: prices }]
-    },
-    options: {
-      responsive: true,
-      scales: { x: { ticks: { autoSkip: true, maxTicksLimit: 12 } } }
-    }
+// ------- draw line chart (mini, no deps) -------
+function drawLine(canvas, series, options={}){
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width = canvas.clientWidth;
+  const H = canvas.height = canvas.clientHeight;
+  ctx.clearRect(0,0,W,H);
+  if(!series.length) return;
+  const pad = 28;
+  const xs = series.map(d=>new Date(d.dt).getTime());
+  const ys = series.map(d=>+d.value);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const y0 = minY - (maxY-minY)*0.05, y1 = maxY + (maxY-minY)*0.05 || minY+1;
+
+  const xPix = t => pad + (W-2*pad)*( (t-minX)/(maxX-minX || 1) );
+  const yPix = v => H-pad - (H-2*pad)*( (v-y0)/(y1-y0 || 1) );
+
+  // axes
+  ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad, pad); ctx.lineTo(pad, H-pad); ctx.lineTo(W-pad, H-pad); ctx.stroke();
+
+  // grid y
+  ctx.fillStyle = '#6b7280';
+  const ticks = 5;
+  for(let i=0;i<=ticks;i++){
+    const val = y0 + (y1-y0)*i/ticks;
+    const y = yPix(val);
+    ctx.strokeStyle = '#f3f4f6'; ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
+    ctx.fillText(val.toFixed(3), 4, y+3);
+  }
+
+  // line
+  ctx.strokeStyle = options.color || '#2563eb'; ctx.lineWidth=2;
+  ctx.beginPath();
+  series.forEach((d,idx)=>{
+    const x = xPix(new Date(d.dt).getTime()), y = yPix(d.value);
+    if(idx===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
   });
+  ctx.stroke();
+
+  // optional CI band
+  if(options.ci){
+    const lows  = options.ci.map(d=>({dt:d.dt, value:d.low}));
+    const highs = options.ci.map(d=>({dt:d.dt, value:d.high}));
+    ctx.fillStyle = 'rgba(37, 99, 235, 0.12)';
+    ctx.beginPath();
+    highs.forEach((d,idx)=>{
+      const x = xPix(new Date(d.dt).getTime()), y = yPix(d.value);
+      if(idx===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    for(let i=lows.length-1;i>=0;i--){
+      const d = lows[i]; const x = xPix(new Date(d.dt).getTime()), y = yPix(d.value);
+      ctx.lineTo(x,y);
+    }
+    ctx.closePath(); ctx.fill();
+  }
 }
 
-document.getElementById('refresh').addEventListener('click', draw);
+// ------- load universe -------
+async function loadUniverse(){
+  universe = await getJSON('/indices/universe');
+  const tbody = $('#universeTbl tbody'); tbody.innerHTML='';
+  for(const row of universe){
+    const sym = row.symbol;
+    let last=null, prev=null, updated=null;
+    try{
+      const hist = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
+      if(hist.length){ last = hist[hist.length-1]?.close_price;
+        if(hist.length>1) prev = hist[hist.length-2]?.close_price;
+        updated = hist[hist.length-1]?.dt;
+      }
+    }catch(e){}
+    const delta = (last!=null && prev!=null) ? (last - prev) : null;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><b>${sym}</b></td>
+      <td>${row.method}</td>
+      <td>${(+row.factor).toFixed(4)}</td>
+      <td>${row.base_symbol}</td>
+      <td>${last!=null ? (+last).toFixed(4) : '-'}</td>
+      <td class="${delta>0?'positive':delta<0?'negative':''}">${delta!=null ? (delta>0?'+':'')+delta.toFixed(4) : '-'}</td>
+      <td class="muted">${updated || '-'}</td>
+      <td><button class="btn" data-view="${sym}">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
 
-// initial
-draw().catch(err => alert(err.message));
+// ------- select symbol & render detail -------
+async function viewSymbol(sym){
+  selectedSymbol = sym;
+  $('#detailTitle').textContent = sym;
+  $('#detailNote').textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d.';
+  const days = historyDays;
+  const hist = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
+  const trim = hist.slice(-days).map(r=>({dt:r.dt, value:+r.close_price}));
+  drawLine($('#chart'), trim, {color:'#111827'});
+  if(showForecast){
+    const fc = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
+    const series = fc.map(r=>({dt:r.forecast_date, value:+r.predicted_price}));
+    const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.conf_low ?? r.predicted_price), high:+(r.conf_high ?? r.predicted_price)}));
+    $('#forecastChart').style.display = '';
+    drawLine($('#forecastChart'), series, {color:'#2563eb', ci});
+  } else {
+    $('#forecastChart').style.display = 'none';
+  }
+}
+
+$('#universeTbl').addEventListener('click', (e)=>{
+  const b = e.target.closest('button[data-view]');
+  if(b){ viewSymbol(b.getAttribute('data-view')); }
+});
+
+document.querySelectorAll('button[data-days]').forEach(b=>{
+  b.onclick = ()=>{ historyDays = +b.dataset.days; if(selectedSymbol) viewSymbol(selectedSymbol); };
+});
+$('#toggleForecast').onclick = ()=>{ showForecast = !showForecast; if(selectedSymbol) viewSymbol(selectedSymbol); };
+
+// exports
+$('#exportUniverse').onclick = ()=> {
+  const rows = universe.map(r=>({symbol:r.symbol, method:r.method, factor:r.factor, base_symbol:r.base_symbol}));
+  if(!rows.length) return msg('No data.');
+  csvDownload('bridge_index_universe.csv', rows);
+};
+$('#exportHistory').onclick = async ()=>{
+  if(!selectedSymbol) return msg('Select a ticker first.');
+  const rows = await getJSON(`/indices/history?symbol=${encodeURIComponent(selectedSymbol)}`);
+  if(!rows.length) return msg('No history.');
+  csvDownload(`${selectedSymbol}_history.csv`, rows);
+};
+$('#exportForecast').onclick = async ()=>{
+  if(!selectedSymbol) return msg('Select a ticker first.');
+  const rows = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
+  if(!rows.length) return msg('No forecast.');
+  csvDownload(`${selectedSymbol}_forecast90.csv`, rows);
+};
+
+// admin action buttons
+$('#pullRefs').onclick = async ()=>{ try{ await post('/reference_prices/pull_now_all'); msg('✓ Refs pulled'); }catch(e){ msg('✗ '+e.message); } };
+$('#runIndices').onclick = async ()=>{ try{ await post('/indices/run'); msg('✓ Indices built'); if(selectedSymbol) viewSymbol(selectedSymbol); }catch(e){ msg('✗ '+e.message); } };
+$('#runForecasts').onclick = async ()=>{ try{ await post('/forecasts/run'); msg('✓ Forecasts done'); if(selectedSymbol) viewSymbol(selectedSymbol); }catch(e){ msg('✗ '+e.message); } };
+
+// initial load
+$('#refreshAll').onclick = loadUniverse;
+loadUniverse().then(()=> {
+  const first = universe[0]?.symbol;
+  if(first) viewSymbol(first);
+});
 </script>
 </body>
 </html>
