@@ -1304,6 +1304,18 @@ async def _manual_upsert_absolute_tx(
 
     return old, new_qty, delta
 
+try:
+    await emit_event_safe("inventory.movement", {
+        "seller": s,
+        "sku": k,
+        "delta": delta,
+        "new_qty": new_qty,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    })
+except Exception:
+    pass
+
+
 import hmac, hashlib, base64, time, json
 
 def _sign_payload(secret: str, body_bytes: bytes, ts: str) -> str:
