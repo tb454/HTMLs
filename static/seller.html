@@ -427,7 +427,7 @@
           if(!mat) return;
           const el = document.getElementById('quoteOut');
           try {
-            const r = await fetch(`/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
+            const r = await fetch(`${endpoint}/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
             if(!r.ok){ el.textContent = 'No price available (check spelling & supported list).'; return; }
             const j = await r.json();
             el.textContent = `${j.category} / ${j.material} → $${(+j.price_per_lb).toFixed(4)} per lb`;

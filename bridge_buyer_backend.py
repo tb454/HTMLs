@@ -1302,6 +1302,18 @@ async def _manual_upsert_absolute_tx(
           VALUES (:s,:k,'upsert',:q,NULL, :m)
         """, {"s": s, "k": k, "q": delta, "m": meta_json})
 
+    # --- webhook emit (inventory.movement)
+    try:
+        await emit_event_safe("inventory.movement", {
+            "seller": s,
+            "sku": k,
+            "delta": delta,
+            "new_qty": new_qty,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        })
+    except Exception:
+        pass
+
     return old, new_qty, delta
 
 async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1330,25 +1342,6 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
         except Exception:
             pass
         return {"ok": False, "status_code": None, "response": "exception"}
-
-# Define seller, k, delta, new_qty before using them
-# Example placeholder values (replace with actual context as needed)
-seller = "example_seller"
-k = "example_sku"
-delta = 0.0
-new_qty = 0.0
-
-import asyncio
-try:
-    asyncio.create_task(emit_event_safe("inventory.movement", {
-        "seller": seller,
-        "sku": k,
-        "delta": delta,
-        "new_qty": new_qty,
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }))
-except Exception:
-    pass
 
 
 import hmac, hashlib, base64, time, json
@@ -1546,7 +1539,15 @@ async def _ensure_contracts_bols_schema():
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_bols_contract ON bols(contract_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON bols(pickup_time DESC);"
+        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON bols(pickup_time DESC);",
+
+        # --- Export/compliance fields (idempotent ALTERs) ---
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS origin_country TEXT",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS destination_country TEXT",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS port_code TEXT",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS hs_code TEXT",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC",
     ]
     for s in ddl:
         try:
@@ -2044,15 +2045,31 @@ class BOLIn(BaseModel):
     carrier: CarrierInfo
     pickup_signature: Signature
     pickup_time: datetime
+
+    # --- NEW export/compliance fields ---
+    origin_country: Optional[str] = None
+    destination_country: Optional[str] = None
+    port_code: Optional[str] = None
+    hs_code: Optional[str] = None
+    duty_usd: Optional[float] = None
+    tax_pct: Optional[float] = None
+
     class Config:
         schema_extra = {"example": {
-            "contract_id":"1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
-            "buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40,"price_per_unit":245.00,
-            "total_value":9800.00,
-            "carrier":{"name":"ABC Trucking Co.","driver":"John Driver","truck_vin":"1FDUF5GY3KDA12345"},
-            "pickup_signature":{"base64":"data:image/png;base64,iVBOR...","timestamp":"2025-09-01T12:00:00Z"},
-            "pickup_time":"2025-09-01T12:15:00Z"
+            "contract_id": "1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
+            "buyer": "Lewis Salvage", "seller": "Winski Brothers",
+            "material": "Shred Steel", "weight_tons": 40, "price_per_unit": 245.00,
+            "total_value": 9800.00,
+            "carrier": {"name": "ABC Trucking Co.", "driver": "John Driver", "truck_vin": "1FDUF5GY3KDA12345"},
+            "pickup_signature": {"base64": "data:image/png;base64,iVBOR...", "timestamp": "2025-09-01T12:00:00Z"},
+            "pickup_time": "2025-09-01T12:15:00Z",
+            # new example fields
+            "origin_country": "US",
+            "destination_country": "MX",
+            "port_code": "LAX",
+            "hs_code": "7404",
+            "duty_usd": 125.50,
+            "tax_pct": 5.0
         }}
 
 class BOLOut(BOLIn):
@@ -2060,17 +2077,25 @@ class BOLOut(BOLIn):
     status: str
     delivery_signature: Optional[Signature] = None
     delivery_time: Optional[datetime] = None
+
     class Config:
         schema_extra = {"example": {
-            "bol_id":"9fd89221-4247-4f93-bf4b-df9473ed8e57",
-            "contract_id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
-            "buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40,
-            "price_per_unit":245.0,"total_value":9800.0,
-            "carrier":{"name":"ABC Trucking Co.","driver":"Jane Doe","truck_vin":"1FTSW21P34ED12345"},
-            "pickup_signature":{"base64":"data:image/png;base64,iVBOR...","timestamp":"2025-09-01T12:00:00Z"},
-            "pickup_time":"2025-09-01T12:15:00Z",
-            "delivery_signature":None,"delivery_time":None,"status":"BOL Issued"
+            "bol_id": "9fd89221-4247-4f93-bf4b-df9473ed8e57",
+            "contract_id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+            "buyer": "Lewis Salvage", "seller": "Winski Brothers",
+            "material": "Shred Steel", "weight_tons": 40,
+            "price_per_unit": 245.0, "total_value": 9800.0,
+            "carrier": {"name": "ABC Trucking Co.", "driver": "Jane Doe", "truck_vin": "1FTSW21P34ED12345"},
+            "pickup_signature": {"base64": "data:image/png;base64,iVBOR...", "timestamp": "2025-09-01T12:00:00Z"},
+            "pickup_time": "2025-09-01T12:15:00Z",
+            "delivery_signature": None, "delivery_time": None, "status": "BOL Issued",
+            # new example fields
+            "origin_country": "US",
+            "destination_country": "MX",
+            "port_code": "LAX",
+            "hs_code": "7404",
+            "duty_usd": 125.50,
+            "tax_pct": 5.0
         }}
         
 # Tighter typing for updates
@@ -2279,6 +2304,14 @@ async def generate_bol_pdf(bol_id: str):
     draw("Carrier Name", row["carrier_name"])
     draw("Driver", row["carrier_driver"])
     draw("Truck VIN", row["carrier_truck_vin"])
+    draw("Origin Country", row.get("origin_country") or "—")
+    draw("Destination Country", row.get("destination_country") or "—")
+    draw("Port Code", row.get("port_code") or "—")
+    draw("HS Code", row.get("hs_code") or "—")
+    if row.get("duty_usd") is not None:
+        draw("Duty (USD)", f"${float(row['duty_usd']):.2f}")
+    if row.get("tax_pct") is not None:
+        draw("Tax (%)", f"{float(row['tax_pct']):.2f}%")
 
     y -= line_height
     c.setFont("Helvetica-Oblique", 10)
@@ -3274,9 +3307,9 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
     tags=["BOLs"],
     summary="Create BOL",
     status_code=201
-)
+    )
 async def create_bol_pg(bol: BOLIn, request: Request):
-    # Optional idempotency
+   # Optional idempotency
     idem_key = request.headers.get("Idempotency-Key")
     if idem_key and idem_key in _idem_cache:
         return _idem_cache[idem_key]
@@ -3287,14 +3320,16 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             price_per_unit, total_value,
             carrier_name, carrier_driver, carrier_truck_vin,
             pickup_signature_base64, pickup_signature_time,
-            pickup_time, status
+            pickup_time, status,
+            origin_country, destination_country, port_code, hs_code, duty_usd, tax_pct
         )
         VALUES (
             :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
             :price_per_unit, :total_value,
             :carrier_name, :carrier_driver, :carrier_truck_vin,
             :pickup_sig_b64, :pickup_sig_time,
-            :pickup_time, 'Scheduled'
+            :pickup_time, 'Scheduled',
+            :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct
         )
         RETURNING *
     """, {
@@ -3304,8 +3339,15 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
         "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
         "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
-        "pickup_time": bol.pickup_time
+        "pickup_time": bol.pickup_time,
+        "origin_country": bol.origin_country,
+        "destination_country": bol.destination_country,
+        "port_code": bol.port_code,
+        "hs_code": bol.hs_code,
+        "duty_usd": bol.duty_usd,
+        "tax_pct": bol.tax_pct,
     })
+
 
     resp = {
         **bol.dict(),
