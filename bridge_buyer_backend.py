@@ -72,6 +72,19 @@ PRICE_TTL_SEC = 300  # 5 minutes
 
 load_dotenv()
 
+# ---- SaaS soft quotas (optional) ----
+MAX_CONTRACTS_PER_DAY = int(os.getenv("MAX_CONTRACTS_PER_DAY", "0"))  # 0 = disabled
+
+async def _check_contract_quota():
+    if MAX_CONTRACTS_PER_DAY <= 0:
+        return
+    row = await database.fetch_one(
+        "SELECT COUNT(*) AS c FROM contracts WHERE created_at >= NOW() - INTERVAL '1 day'"
+    )
+    if int(row["c"]) >= MAX_CONTRACTS_PER_DAY:
+        raise HTTPException(429, "daily contract quota exceeded; contact sales")
+# -------------------------------------
+
 app = FastAPI(
     title="BRidge API",
     description="A secure, auditable contract and logistics platform for real-world commodity trading. Built for ICE, Nasdaq, and global counterparties.",
@@ -1524,6 +1537,47 @@ async def _ensure_inventory_constraints():
         except Exception as e:
             logger.warn("inventory_constraints_bootstrap_failed", sql=s[:100], err=str(e))
 
+#-------- Dead Letter Startup --------
+
+@app.on_event("startup")
+async def _ensure_dead_letters():
+    try:
+        await database.execute("""
+        CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+        CREATE TABLE IF NOT EXISTS webhook_dead_letters (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event TEXT NOT NULL,
+          payload JSONB NOT NULL,
+          status_code INT,
+          response_text TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+    except Exception:
+        pass
+#-------- Dead Letter Startup --------
+
+#------- Dossier HR Sync -------
+@app.on_event("startup")
+async def _nightly_dossier_sync():
+    if os.getenv("DOSSIER_SYNC", "").lower() not in ("1","true","yes"):
+        return
+    async def _runner():
+        while True:
+            now = datetime.utcnow()
+            target = now.replace(hour=2, minute=5, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
+            try:
+                # Build events: late shipments, weight deltas, unsigned BOL aging
+                # (Stub – fill with your own queries & POST to Dossier)
+                pass
+            except Exception:
+                pass
+    asyncio.create_task(_runner())
+# ------- Dossier HR Sync -------
+
 # -------- CORS --------
 ALLOWED_ORIGINS = [
     "https://scrapfutures.com",
@@ -2451,6 +2505,28 @@ async def material_price_history(material: str, seller: Optional[str] = None):
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
 
+@app.get("/analytics/rolling_bands", tags=["Analytics"], summary="Rolling 7/30/90d bands per material")
+async def rolling_bands(material: str, days: int = 365):
+    q = """
+    WITH d AS (
+      SELECT (created_at AT TIME ZONE 'utc')::date AS d, AVG(price_per_ton) AS avg_p
+      FROM contracts
+      WHERE material = :m
+        AND price_per_ton IS NOT NULL
+        AND created_at >= NOW() - make_interval(days => :days)
+      GROUP BY 1
+      ORDER BY 1
+    )
+    SELECT d::date AS date,
+           avg_p   AS avg_price,
+           AVG(avg_p) OVER (ORDER BY d ROWS BETWEEN 6  PRECEDING AND CURRENT ROW) AS band_7,
+           AVG(avg_p) OVER (ORDER BY d ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) AS band_30,
+           AVG(avg_p) OVER (ORDER BY d ROWS BETWEEN 89 PRECEDING AND CURRENT ROW) AS band_90
+    FROM d;
+    """
+    rows = await database.fetch_all(q, {"m": material, "days": days})
+    return [dict(r) for r in rows]
+
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
     d = (snapshot_date or date.today()).isoformat()
@@ -2474,6 +2550,7 @@ async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
         await emit_event("index.snapshot.created", {"as_of_date": d})
     except Exception:
         pass
+    METRICS_INDICES_SNAPSHOTS.inc()
     return {"ok": True, "date": d}
 
 @app.post("/indices/backfill", tags=["Analytics"], summary="Backfill indices for a date range (inclusive)")
@@ -2728,6 +2805,7 @@ class ContractInExtended(ContractIn):
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request):
+    await _check_contract_quota()
     qty    = float(contract.weight_tons)
     seller = contract.seller.strip()
     sku    = contract.material.strip()
@@ -2956,6 +3034,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
+
     # ---- audit
     try:
         actor = request.session.get("username") if hasattr(request, "session") else None
@@ -2972,10 +3051,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         await emit_event_safe("bol.created", {
             "bol_id": row["bol_id"],
             "contract_id": row["contract_id"],
-            "seller": row["seller"],
-            "buyer": row["buyer"],
-            "material": row["material"],
-            "weight_tons": float(row["weight_tons"]),
+            "seller": row["seller"], "buyer": row["buyer"],
+            "material": row["material"], "weight_tons": float(row["weight_tons"]),
             "status": row["status"]
         })
     except Exception:
@@ -2987,9 +3064,10 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if idem_key:
         _idem_cache[idem_key] = resp
     return resp
-
 # -------- BOLs (with PDF generation) --------
-#     
+
+# =============== Admin Exports (core tables) ===============
+   
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
