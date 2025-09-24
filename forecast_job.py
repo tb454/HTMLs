@@ -1,4 +1,3 @@
-# forecast_job.py
 import os, asyncio, asyncpg, math, warnings
 import numpy as np
 import pandas as pd
