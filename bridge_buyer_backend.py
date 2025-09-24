@@ -1304,14 +1304,49 @@ async def _manual_upsert_absolute_tx(
 
     return old, new_qty, delta
 
+async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        res = await emit_event(event_type, payload)
+        if not res.get("ok"):
+            try:
+                await database.execute("""
+                  INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
+                  VALUES (:e, :p::jsonb, :sc, :rt)
+                """, {
+                    "e": event_type,
+                    "p": json.dumps(payload),
+                    "sc": res.get("status_code"),
+                    "rt": res.get("response")
+                })
+            except Exception:
+                pass
+        return res
+    except Exception:
+        try:
+            await database.execute("""
+              INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
+              VALUES (:e, :p::jsonb, NULL, 'exception')
+            """, {"e": event_type, "p": json.dumps(payload)})
+        except Exception:
+            pass
+        return {"ok": False, "status_code": None, "response": "exception"}
+
+# Define seller, k, delta, new_qty before using them
+# Example placeholder values (replace with actual context as needed)
+seller = "example_seller"
+k = "example_sku"
+delta = 0.0
+new_qty = 0.0
+
+import asyncio
 try:
-    await emit_event_safe("inventory.movement", {
-        "seller": s,
+    asyncio.create_task(emit_event_safe("inventory.movement", {
+        "seller": seller,
         "sku": k,
         "delta": delta,
         "new_qty": new_qty,
         "timestamp": datetime.utcnow().isoformat() + "Z"
-    })
+    }))
 except Exception:
     pass
 
