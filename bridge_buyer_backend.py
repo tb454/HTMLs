@@ -51,11 +51,11 @@ from fastapi import Header, HTTPException
 import gzip
 from decimal import InvalidOperation
 from pricing_engine import compute_material_price
-from prices_sources import pull_comexlive_once, latest_price
+from price_sources import pull_comexlive_once, latest_price
 from price_sources import pull_comex_home_once
 from forecast_job import run_all as _forecast_run_all
 from indices_builder import run_indices_builder
-from prices_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
+from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
