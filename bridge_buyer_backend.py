@@ -95,7 +95,7 @@ app.redoc_url = None
 app.openapi_url = "/api/v1/openapi.json"
 
 # ===== Trusted hosts + session cookie =====
-allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge-buyer.onrender.com"]
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
 prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
@@ -2728,10 +2728,10 @@ class ContractInExtended(ContractIn):
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request):
-    qty   = float(contract.weight_tons)
+    qty    = float(contract.weight_tons)
     seller = contract.seller.strip()
     sku    = contract.material.strip()
-    cid = str(uuid.uuid4())
+    cid    = str(uuid.uuid4())
 
     async with database.transaction():
         # ensure inventory row exists
@@ -2767,7 +2767,23 @@ async def create_contract(contract: ContractInExtended, request: Request):
         """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
               "meta": json.dumps({"reason": "contract_create"})})
 
-        # INSERT with pricing fields (internal-only)
+        # --- Internal ref snapshot if caller didn't pass one (BEFORE INSERT) ---
+        if not (contract.reference_price and contract.reference_source):
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=6) as c:
+                    r = await c.get(f"{request.base_url}prices/copper_last")
+                    if 200 <= r.status_code < 300:
+                        j = r.json()
+                        contract.reference_price = float(j.get("last"))
+                        contract.reference_source = "COMEX (derived/internal, delayed)"
+                        contract.reference_symbol = "HG=F"
+                        contract.reference_timestamp = datetime.utcnow()
+                        contract.pricing_formula = contract.pricing_formula or "COMEX_Cu - 0.25"
+            except Exception:
+                pass
+
+        # INSERT with pricing fields (single payload)
         payload = {
             "id": cid,
             "buyer": contract.buyer,
@@ -2790,39 +2806,8 @@ async def create_contract(contract: ContractInExtended, request: Request):
                     :pricing_formula, :reference_symbol, :reference_price, :reference_source, :reference_timestamp, :currency)
             RETURNING *
         """, payload)
-# --- Internal ref snapshot if caller didn't pass one ---
-        if not (contract.reference_price and contract.reference_source):
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=6) as c:
-                    r = await c.get(f"{request.base_url}prices/copper_last")
-                    if 200 <= r.status_code < 300:
-                        j = r.json()
-                        contract.reference_price = float(j.get("last"))
-                        contract.reference_source = "COMEX (derived/internal, delayed)"
-                        contract.reference_symbol = "HG=F"
-                        contract.reference_timestamp = datetime.utcnow()
-                        contract.pricing_formula = contract.pricing_formula or "COMEX_Cu - 0.25"
-            except Exception:
-                pass  # keep creating contract even if the fetch fails
 
-        payload = {
-            "id": cid,
-            "buyer": contract.buyer,
-            "seller": contract.seller,
-            "material": contract.material,
-            "weight_tons": contract.weight_tons,
-            "price_per_ton": contract.price_per_ton,
-            "status": "Pending",
-            "pricing_formula": contract.pricing_formula,
-            "reference_symbol": contract.reference_symbol,
-            "reference_price": contract.reference_price,
-            "reference_source": contract.reference_source,
-            "reference_timestamp": contract.reference_timestamp,
-            "currency": contract.currency or "USD",
-        }
-
-    # audit disclaimer (internal-only reference pricing)
+    # audit (disclaimer)
     try:
         actor = request.session.get("username") if hasattr(request, "session") else None
         await log_action(actor or "system", "contract.create", str(row["id"]), {
@@ -2830,11 +2815,39 @@ async def create_contract(contract: ContractInExtended, request: Request):
         })
     except Exception:
         pass
+
+    # metric + webhook
+    METRICS_CONTRACTS_CREATED.inc()
+    try:
+        await emit_event_safe("contract.updated", {
+            "contract_id": str(row["id"]),
+            "status": row["status"],
+            "seller": row["seller"],
+            "buyer": row["buyer"],
+            "material": row["material"],
+            "weight_tons": float(row["weight_tons"]),
+            "price_per_ton": float(row["price_per_ton"]),
+            "currency": (row.get("currency") if isinstance(row, dict) else None) or "USD",
+        })
+    except Exception:
+        pass
+
     return row
 
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
-    resp = {"status": "ok", "contract_id": contract_id}
+    # Flip status to Signed (idempotent-ish)
+    _ = await database.fetch_one("""
+      UPDATE contracts
+         SET status='Signed', signed_at = COALESCE(signed_at, NOW())
+       WHERE id=:id AND status <> 'Signed'
+       RETURNING id
+    """, {"id": contract_id})
+
+    actor = request.session.get("username") if hasattr(request, "session") else None
+    bol_id = request.query_params.get("bol_id")
+    signer_ip = request.client.host if request.client else None
+    signed_by = actor or "unknown"
 
     # ---- audit log
     actor = request.session.get("username") if hasattr(request, "session") else None
@@ -2894,6 +2907,7 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
         except Exception:
             pass
         return {"ok": False, "status_code": None, "response": "exception"}
+# ========== /Admin Exports router ==========
 
 # -------- BOLs (with PDF generation) --------
 @app.post(
@@ -2942,6 +2956,40 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
+    # ---- audit
+    try:
+        actor = request.session.get("username") if hasattr(request, "session") else None
+        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
+            "contract_id": str(bol.contract_id),
+            "material": bol.material,
+            "weight_tons": bol.weight_tons
+        })
+    except Exception:
+        pass
+
+    # ---- webhook
+    try:
+        await emit_event_safe("bol.created", {
+            "bol_id": row["bol_id"],
+            "contract_id": row["contract_id"],
+            "seller": row["seller"],
+            "buyer": row["buyer"],
+            "material": row["material"],
+            "weight_tons": float(row["weight_tons"]),
+            "status": row["status"]
+        })
+    except Exception:
+        pass
+
+    # ---- metric
+    METRICS_BOLS_CREATED.inc()
+
+    if idem_key:
+        _idem_cache[idem_key] = resp
+    return resp
+
+# -------- BOLs (with PDF generation) --------
+#     
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
