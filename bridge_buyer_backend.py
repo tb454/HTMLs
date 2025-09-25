@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, EmailStr 
+from pydantic import BaseModel, EmailStr, Field 
 from typing import List, Optional, Literal
 from sqlalchemy import create_engine, Table, MetaData, and_, select
 import os
@@ -3303,7 +3303,82 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
         except Exception:
             pass
         return {"ok": False, "status_code": None, "response": "exception"}
-# ========== /Admin Exports router ==========
+    
+class YardSignupIn(BaseModel):
+    yard_name: str
+    contact_name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
+    website: Optional[str] = None
+    monthly_volume_tons: Optional[int] = None
+    materials: Optional[str] = None
+    current_buyers: Optional[str] = None   
+    plan: str = Field(pattern=r"^(starter|standard|enterprise)$")
+    ref_code: Optional[str] = None
+    notes: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_medium: Optional[str] = None
+
+class YardSignupOut(BaseModel):
+    signup_id: str
+    status: str
+    message: str
+
+@app.post(
+    "/public/yard_signup",
+    tags=["Public"],
+    summary="Public yard signup",
+    description="Collects yard onboarding info and stores a pending signup for admin review/provisioning.",
+    response_model=YardSignupOut,
+    status_code=201,
+)
+async def public_yard_signup(payload: YardSignupIn, request: Request):
+    signup_id = str(uuid.uuid4())
+
+    # Basic duplicate control: same email + yard within 24h
+    existing = await database.fetch_one(
+        """
+        SELECT signup_id FROM tenant_signups
+        WHERE email = :email AND yard_name = :yard_name
+          AND created_at > (now() - interval '24 hours')
+        LIMIT 1
+        """,
+        {"email": payload.email, "yard_name": payload.yard_name},
+    )
+    if existing:
+        return YardSignupOut(
+            signup_id=str(existing["signup_id"]),
+            status="pending",
+            message="Signup already received. We'll reach out shortly.",
+        )
+
+    await database.execute(
+        """
+        INSERT INTO tenant_signups (
+          signup_id, yard_name, contact_name, email, phone, address, city, region, website,
+          monthly_volume_tons, materials, current_buyers, plan, ref_code, notes,
+          utm_source, utm_campaign, utm_medium
+        ) VALUES (
+          :signup_id, :yard_name, :contact_name, :email, :phone, :address, :city, :region, :website,
+          :monthly_volume_tons, :materials, :current_buyers, :plan, :ref_code, :notes,
+          :utm_source, :utm_campaign, :utm_medium
+        )
+        """,
+        {"signup_id": signup_id, **payload.model_dump()},
+    )
+
+    # audit log (best-effort; ignore failures)
+    try:
+        actor = getattr(request, "session", {}).get("username") if hasattr(request, "session") else None
+        await log_action(actor or "public", "signup.create", signup_id, payload.model_dump())
+    except Exception:
+        pass
+    return YardSignupOut(signup_id=signup_id, status="pending", message="Signup received.")
+
 
 # -------- BOLs (with PDF generation) --------
 @app.post(

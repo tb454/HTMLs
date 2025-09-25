@@ -1,0 +1,77 @@
+<html lang="en">
+$('phone').value = '317-555-0199';
+$('address').value = '123 Industrial Way';
+$('city').value = 'Anderson';
+$('region').value = 'IN';
+$('website').value = 'https://farnsworthmetals.com';
+$('monthly_volume_tons').value = 1800;
+$('materials').value = 'Shred, 5\' HMS, P&S, #1 HMS, Insulated Wire, Stainless';
+$('current_buyers').value = 'Nucor, C&Y Global, Lewis Salvage';
+$('plan').value = 'standard';
+$('notes').value = 'Ready to move 5’ P&S; wants ICE settlement later.';
+$('agree').checked = true;
+});
+
+
+function showAlert(kind, msg){
+const box = $('alert');
+box.className = kind === 'success' ? 'success' : 'error';
+box.textContent = msg; box.classList.remove('hidden');
+window.scrollTo({top:0,behavior:'smooth'});
+}
+
+
+function payloadFromForm(){
+const required = ['yard_name','contact_name','email','plan'];
+for(const id of required){ if(!$(id).value){ showAlert('error','Please complete required fields.'); return null; } }
+if(!$('agree').checked){ showAlert('error','Please accept the Terms & Privacy.'); return null; }
+const data = {
+yard_name: $('yard_name').value.trim(),
+contact_name: $('contact_name').value.trim(),
+email: $('email').value.trim(),
+phone: $('phone').value.trim(),
+address: $('address').value.trim(),
+city: $('city').value.trim(),
+region: $('region').value.trim(),
+website: $('website').value.trim(),
+monthly_volume_tons: $('monthly_volume_tons').value ? parseInt($('monthly_volume_tons').value,10) : null,
+materials: $('materials').value.trim(),
+current_buyers: $('current_buyers').value.trim(),
+plan: $('plan').value,
+ref_code: $('ref_code').value.trim(),
+notes: $('notes').value.trim(),
+utm_source: qs.get('utm_source')||null,
+utm_campaign: qs.get('utm_campaign')||null,
+utm_medium: qs.get('utm_medium')||null
+};
+return data;
+}
+
+
+$('signupForm').addEventListener('submit', async (e)=>{
+e.preventDefault();
+const data = payloadFromForm(); if(!data) return;
+const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting...';
+try{
+const res = await fetch('/public/yard_signup', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify(data)
+});
+if(!res.ok){
+const t = await res.text();
+throw new Error(t || 'Request failed');
+}
+showAlert('success', 'Thanks! We\'ll provision your tenant and send credentials shortly.');
+$('signupForm').reset();
+}catch(err){
+console.error(err);
+showAlert('error', 'Could not submit signup. Please try again or email support@scrapfutures.com');
+}finally{
+btn.disabled = false; btn.textContent = 'Start Free Trial';
+}
+});
+})();
+</script>
+</body>
+</html>
