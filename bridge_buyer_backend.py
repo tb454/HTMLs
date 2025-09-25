@@ -3303,83 +3303,138 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
         except Exception:
             pass
         return {"ok": False, "status_code": None, "response": "exception"}
-    
-class YardSignupIn(BaseModel):
-    yard_name: str
-    contact_name: str
-    email: EmailStr
-    phone: Optional[str] = None
+class ApplicationIn(BaseModel):
+    # use Field(pattern=...) for Pydantic v2; if on v1, switch to constr(regex=...)
+    entity_type: str = Field(pattern=r"^(yard|mill|industrial|manufacturer|broker)$")
+    role: str = Field(pattern=r"^(buyer|seller|both)$")
+    org_name: str
+    ein: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     region: Optional[str] = None
     website: Optional[str] = None
     monthly_volume_tons: Optional[int] = None
-    materials: Optional[str] = None
-    current_buyers: Optional[str] = None   
-    plan: str = Field(pattern=r"^(starter|standard|enterprise)$")
+    contact_name: str
+    email: EmailStr
+    phone: Optional[str] = None
     ref_code: Optional[str] = None
+    materials_buy: Optional[str] = None
+    materials_sell: Optional[str] = None
+    lanes: Optional[str] = None
+    compliance_notes: Optional[str] = None
+    plan: str = Field(pattern=r"^(starter|standard|enterprise)$")
     notes: Optional[str] = None
     utm_source: Optional[str] = None
     utm_campaign: Optional[str] = None
     utm_medium: Optional[str] = None
 
-class YardSignupOut(BaseModel):
-    signup_id: str
+class ApplicationOut(BaseModel):
+    application_id: str
     status: str
     message: str
 
+# --- Public endpoint (replaces /public/yard_signup) ---
 @app.post(
-    "/public/yard_signup",
+    "/public/apply",
     tags=["Public"],
-    summary="Public yard signup",
-    description="Collects yard onboarding info and stores a pending signup for admin review/provisioning.",
-    response_model=YardSignupOut,
+    summary="Public application (multi-entity)",
+    description="Collects onboarding applications from yards, mills, industrial generators, manufacturers, and brokers.",
+    response_model=ApplicationOut,
     status_code=201,
 )
-async def public_yard_signup(payload: YardSignupIn, request: Request):
-    signup_id = str(uuid.uuid4())
+async def public_apply(payload: ApplicationIn, request: Request):
+    application_id = str(uuid.uuid4())
 
-    # Basic duplicate control: same email + yard within 24h
+    # Prevent spam/dupes for 24h by org+email
     existing = await database.fetch_one(
         """
-        SELECT signup_id FROM tenant_signups
-        WHERE email = :email AND yard_name = :yard_name
+        SELECT application_id FROM tenant_applications
+        WHERE email = :email AND org_name = :org_name
           AND created_at > (now() - interval '24 hours')
         LIMIT 1
         """,
-        {"email": payload.email, "yard_name": payload.yard_name},
+        {"email": payload.email, "org_name": payload.org_name},
     )
     if existing:
-        return YardSignupOut(
-            signup_id=str(existing["signup_id"]),
+        return ApplicationOut(
+            application_id=str(existing["application_id"]),
             status="pending",
-            message="Signup already received. We'll reach out shortly.",
+            message="Application already received. We'll reach out shortly.",
         )
 
     await database.execute(
         """
-        INSERT INTO tenant_signups (
-          signup_id, yard_name, contact_name, email, phone, address, city, region, website,
-          monthly_volume_tons, materials, current_buyers, plan, ref_code, notes,
-          utm_source, utm_campaign, utm_medium
+        INSERT INTO tenant_applications (
+          application_id, entity_type, role, org_name, ein, address, city, region, website,
+          monthly_volume_tons, contact_name, email, phone, ref_code, materials_buy, materials_sell,
+          lanes, compliance_notes, plan, notes, utm_source, utm_campaign, utm_medium
         ) VALUES (
-          :signup_id, :yard_name, :contact_name, :email, :phone, :address, :city, :region, :website,
-          :monthly_volume_tons, :materials, :current_buyers, :plan, :ref_code, :notes,
-          :utm_source, :utm_campaign, :utm_medium
+          :application_id, :entity_type, :role, :org_name, :ein, :address, :city, :region, :website,
+          :monthly_volume_tons, :contact_name, :email, :phone, :ref_code, :materials_buy, :materials_sell,
+          :lanes, :compliance_notes, :plan, :notes, :utm_source, :utm_campaign, :utm_medium
         )
         """,
-        {"signup_id": signup_id, **payload.model_dump()},
+        {"application_id": application_id, **payload.model_dump()},
     )
 
-    # audit log (best-effort; ignore failures)
+    # Best-effort audit (ignore failures)
     try:
         actor = getattr(request, "session", {}).get("username") if hasattr(request, "session") else None
-        await log_action(actor or "public", "signup.create", signup_id, payload.model_dump())
+        await log_action(actor or "public", "application.create", application_id, payload.model_dump())
     except Exception:
         pass
-    return YardSignupOut(signup_id=signup_id, status="pending", message="Signup received.")
 
+    return ApplicationOut(application_id=application_id, status="pending", message="Application received.")
 
+# --- Admin listings/approve/export ---
+class ApplicationRow(BaseModel):
+    application_id: str
+    created_at: datetime
+    status: str
+    entity_type: str
+    role: str
+    org_name: str
+    email: EmailStr
+    contact_name: str
+    monthly_volume_tons: Optional[int] = None
+    plan: str
+    ref_code: Optional[str] = None
+
+@app.get("/admin/applications", tags=["Admin"], response_model=List[ApplicationRow], summary="List applications")
+async def list_applications(limit: int = 200):
+    rows = await database.fetch_all(
+        """
+        SELECT application_id, created_at, status, entity_type, role, org_name, email,
+               contact_name, monthly_volume_tons, plan, ref_code
+        FROM tenant_applications
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [ApplicationRow(**dict(r)) for r in rows]
+
+@app.post("/admin/applications/{application_id}/approve", tags=["Admin"], summary="Approve application")
+async def approve_application(application_id: str):
+    await database.execute(
+        "UPDATE tenant_applications SET status='approved' WHERE application_id=:id",
+        {"id": application_id},
+    )
+    return {"ok": True, "application_id": application_id}
+
+@app.get("/admin/applications/export_csv", tags=["Admin"], summary="Export applications CSV")
+async def export_applications_csv():
+    rows = await database.fetch_all("SELECT * FROM tenant_applications ORDER BY created_at DESC")
+    out = io.StringIO()
+    if rows:
+        headers = list(rows[0].keys())
+        w = csv.writer(out); w.writerow(headers)
+        for r in rows:
+            w.writerow([r[h] for h in headers])
+    data = out.getvalue().encode()
+    return StreamingResponse(io.BytesIO(data), media_type="text/csv", headers={
+        "Content-Disposition": "attachment; filename=tenant_applications.csv"
+    })
 # -------- BOLs (with PDF generation) --------
 @app.post(
     "/bols",

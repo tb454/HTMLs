@@ -1,75 +1,74 @@
 <html lang="en">
-$('phone').value = '317-555-0199';
-$('address').value = '123 Industrial Way';
-$('city').value = 'Anderson';
-$('region').value = 'IN';
-$('website').value = 'https://farnsworthmetals.com';
-$('monthly_volume_tons').value = 1800;
-$('materials').value = 'Shred, 5\' HMS, P&S, #1 HMS, Insulated Wire, Stainless';
-$('current_buyers').value = 'Nucor, C&Y Global, Lewis Salvage';
-$('plan').value = 'standard';
-$('notes').value = 'Ready to move 5’ P&S; wants ICE settlement later.';
-$('agree').checked = true;
-});
+(function(){
+const $ = (id)=>document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+function setVal(id,v){ const el=$(id); if(el) el.value=v; }
 
 
-function showAlert(kind, msg){
-const box = $('alert');
-box.className = kind === 'success' ? 'success' : 'error';
-box.textContent = msg; box.classList.remove('hidden');
-window.scrollTo({top:0,behavior:'smooth'});
-}
-
-
-function payloadFromForm(){
-const required = ['yard_name','contact_name','email','plan'];
-for(const id of required){ if(!$(id).value){ showAlert('error','Please complete required fields.'); return null; } }
-if(!$('agree').checked){ showAlert('error','Please accept the Terms & Privacy.'); return null; }
-const data = {
-yard_name: $('yard_name').value.trim(),
-contact_name: $('contact_name').value.trim(),
-email: $('email').value.trim(),
-phone: $('phone').value.trim(),
-address: $('address').value.trim(),
-city: $('city').value.trim(),
-region: $('region').value.trim(),
-website: $('website').value.trim(),
-monthly_volume_tons: $('monthly_volume_tons').value ? parseInt($('monthly_volume_tons').value,10) : null,
-materials: $('materials').value.trim(),
-current_buyers: $('current_buyers').value.trim(),
-plan: $('plan').value,
-ref_code: $('ref_code').value.trim(),
-notes: $('notes').value.trim(),
+// Prefill referral/utm
+setVal('ref_code', qs.get('ref')||'');
+const utm = {
 utm_source: qs.get('utm_source')||null,
 utm_campaign: qs.get('utm_campaign')||null,
 utm_medium: qs.get('utm_medium')||null
 };
-return data;
-}
 
 
-$('signupForm').addEventListener('submit', async (e)=>{
-e.preventDefault();
-const data = payloadFromForm(); if(!data) return;
-const btn = $('submitBtn'); btn.disabled = true; btn.textContent = 'Submitting...';
-try{
-const res = await fetch('/public/yard_signup', {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify(data)
+// Test fill
+$('testFill').addEventListener('click', ()=>{
+setVal('entity_type','yard'); setVal('role','both'); setVal('org_name','Farnsworth Metals');
+setVal('ein','12-3456789'); setVal('address','123 Industrial Way'); setVal('city','Anderson'); setVal('region','IN');
+setVal('website','https://farnsworthmetals.com'); setVal('monthly_volume_tons','1800');
+setVal('contact_name','Alex Miller'); setVal('email','alex@farnsworthmetals.com'); setVal('phone','317-555-0199');
+setVal('materials_buy',"Shred, 5' HMS, #1 Copper, 6063"); setVal('materials_sell','P&S, #2 Copper, Zorba');
+setVal('lanes','IN→OH'); setVal('compliance_notes','EPA stormwater permit on file');
+setVal('plan','standard'); setVal('notes','Ready to move 5’ P&S; ICE settlement later.');
+$('agree').checked = true;
 });
-if(!res.ok){
-const t = await res.text();
-throw new Error(t || 'Request failed');
-}
-showAlert('success', 'Thanks! We\'ll provision your tenant and send credentials shortly.');
-$('signupForm').reset();
-}catch(err){
-console.error(err);
-showAlert('error', 'Could not submit signup. Please try again or email support@scrapfutures.com');
-}finally{
-btn.disabled = false; btn.textContent = 'Start Free Trial';
-}
+
+
+function show(kind,msg){ const box=$('alert'); box.className = kind==='ok'?'ok':'err'; box.textContent=msg; box.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
+
+
+function required(ids){ for(const id of ids){ const el=$(id); if(!el || !el.value){ return false; } } return true; }
+
+
+$('submitBtn').addEventListener('click', async ()=>{
+if(!required(['entity_type','role','org_name','contact_name','email','plan'])){ show('err','Please complete required fields.'); return; }
+if(!$('agree').checked){ show('err','Please accept the Terms & Privacy.'); return; }
+
+
+const payload = {
+entity_type: $('entity_type').value,
+role: $('role').value,
+org_name: $('org_name').value.trim(),
+ein: $('ein').value.trim()||null,
+address: $('address').value.trim()||null,
+city: $('city').value.trim()||null,
+region: $('region').value.trim()||null,
+website: $('website').value.trim()||null,
+monthly_volume_tons: $('monthly_volume_tons').value?parseInt($('monthly_volume_tons').value,10):null,
+contact_name: $('contact_name').value.trim(),
+email: $('email').value.trim(),
+phone: $('phone').value.trim()||null,
+ref_code: $('ref_code').value.trim()||null,
+materials_buy: $('materials_buy').value.trim()||null,
+materials_sell: $('materials_sell').value.trim()||null,
+lanes: $('lanes').value.trim()||null,
+compliance_notes: $('compliance_notes').value.trim()||null,
+plan: $('plan').value,
+notes: $('notes').value.trim()||null,
+...utm
+};
+
+
+const btn=$('submitBtn'); btn.disabled=true; btn.textContent='Submitting...';
+try{
+const res = await fetch('/public/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+if(!res.ok) throw new Error(await res.text());
+show('ok','Thanks! Your application has been received. We\'ll email you after review.');
+}catch(e){ console.error(e); show('err','Could not submit application. Please retry or email support@scrapfutures.com'); }
+finally{ btn.disabled=false; btn.textContent='Submit Application'; }
 });
 })();
 </script>
