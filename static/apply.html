@@ -1,76 +1,327 @@
+<!DOCTYPE html>
 <html lang="en">
-(function(){
-const $ = (id)=>document.getElementById(id);
-const qs = new URLSearchParams(location.search);
-function setVal(id,v){ const el=$(id); if(el) el.value=v; }
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>BRidge — Apply for Access</title>
+  <link rel="icon" href="/static/favicon.ico">
+  <meta name="color-scheme" content="light dark">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    body{background:#f7f9fb}
+    .card{border:1px solid #e5e7eb;box-shadow:0 4px 14px rgba(0,0,0,.04)}
+    .badge-live{font:12px system-ui;color:#6b7280}
+    .badge-live[data-ok="1"]{color:#10b981}
+    .req::after{content:" *"; color:#e11d48}
+    .form-hint{font-size:.85rem;color:#6b7280}
+    button:disabled{opacity:.6;cursor:not-allowed}
+  </style>
 
+  <!-- Toast + endpoint + api helper -->
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+  <script>
+    // Unified API base
+    window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
-// Prefill referral/utm
-setVal('ref_code', qs.get('ref')||'');
-const utm = {
-utm_source: qs.get('utm_source')||null,
-utm_campaign: qs.get('utm_campaign')||null,
-utm_medium: qs.get('utm_medium')||null
-};
+    function toast(msg, ms=2800){
+      const t=document.getElementById('toast'); if(!t){ alert(msg); return; }
+      t.textContent=typeof msg==='string'?msg:(msg?.message||'');
+      t.style.display='block'; setTimeout(()=>t.style.display='none', ms);
+    }
+    async function api(path, opts={}){
+      const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
+      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      if(res.status===401){
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = `/static/bridge-login.html?next=${next}`;
+        throw new Error('Unauthorized');
+      }
+      if(!res.ok){
+        let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ try{ m=await res.clone().text()||m; }catch{} }
+        throw new Error(m);
+      }
+      return res;
+    }
+  </script>
+</head>
+<body>
+  <div class="container py-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div class="d-flex align-items-center gap-2">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 12h16M4 6h10M4 18h10" stroke="#0f62fe" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h1 class="h4 m-0">BRidge — Apply for Access</h1>
+      </div>
+      <span class="badge-live" data-health>● Checking…</span>
+    </div>
 
+    <div id="alert" class="alert d-none" role="status" aria-live="polite"></div>
 
-// Test fill
-$('testFill').addEventListener('click', ()=>{
-setVal('entity_type','yard'); setVal('role','both'); setVal('org_name','Farnsworth Metals');
-setVal('ein','12-3456789'); setVal('address','123 Industrial Way'); setVal('city','Anderson'); setVal('region','IN');
-setVal('website','https://farnsworthmetals.com'); setVal('monthly_volume_tons','1800');
-setVal('contact_name','Alex Miller'); setVal('email','alex@farnsworthmetals.com'); setVal('phone','317-555-0199');
-setVal('materials_buy',"Shred, 5' HMS, #1 Copper, 6063"); setVal('materials_sell','P&S, #2 Copper, Zorba');
-setVal('lanes','IN→OH'); setVal('compliance_notes','EPA stormwater permit on file');
-setVal('plan','standard'); setVal('notes','Ready to move 5’ P&S; ICE settlement later.');
-$('agree').checked = true;
-});
+    <div class="card p-3 p-md-4">
+      <form id="applyForm" novalidate>
+        <div class="row g-3">
+          <!-- Org & role -->
+          <div class="col-md-4">
+            <label class="form-label req" for="entity_type">Entity Type</label>
+            <select id="entity_type" class="form-select" required aria-required="true" name="entity_type">
+              <option value="">Select…</option>
+              <option value="yard">Scrap Yard</option>
+              <option value="buyer">Buyer / Mill</option>
+              <option value="broker">Broker</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label req" for="role">Role</label>
+            <select id="role" class="form-select" required aria-required="true" name="role">
+              <option value="">Select…</option>
+              <option value="buyer">Buyer</option>
+              <option value="seller">Seller</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label req" for="org_name">Organization</label>
+            <input id="org_name" name="organization" autocomplete="organization" class="form-control" placeholder="Company / Yard name" required aria-required="true">
+          </div>
 
+          <!-- Company details -->
+          <div class="col-md-4">
+            <label class="form-label" for="ein">EIN</label>
+            <input id="ein" name="ein" class="form-control" pattern="^\d{2}-\d{7}$" placeholder="12-3456789">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="website">Website</label>
+            <input id="website" name="website" class="form-control" inputmode="url" autocomplete="url" placeholder="https://example.com">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" for="monthly_volume_tons">Monthly Volume (tons)</label>
+            <input id="monthly_volume_tons" name="monthly_volume_tons" type="number" min="0" step="1" class="form-control" placeholder="e.g., 1200">
+          </div>
 
-function show(kind,msg){ const box=$('alert'); box.className = kind==='ok'?'ok':'err'; box.textContent=msg; box.classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); }
+          <!-- Address -->
+          <div class="col-md-6">
+            <label class="form-label" for="address">Address</label>
+            <input id="address" name="street-address" autocomplete="street-address" class="form-control" placeholder="Street">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="city">City</label>
+            <input id="city" name="address-level2" autocomplete="address-level2" class="form-control" placeholder="City">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" for="region">State/Region</label>
+            <input id="region" name="address-level1" autocomplete="address-level1" class="form-control" placeholder="IN">
+          </div>
 
+          <!-- Contact -->
+          <div class="col-md-4">
+            <label class="form-label req" for="contact_name">Contact Name</label>
+            <input id="contact_name" name="name" autocomplete="name" class="form-control" placeholder="Full name" required aria-required="true">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label req" for="email">Email</label>
+            <input id="email" name="email" type="email" class="form-control" autocomplete="email" placeholder="name@company.com" required aria-required="true">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="phone">Phone</label>
+            <input id="phone" name="tel" inputmode="tel" autocomplete="tel" class="form-control" placeholder="(555) 555-5555">
+          </div>
 
-function required(ids){ for(const id of ids){ const el=$(id); if(!el || !el.value){ return false; } } return true; }
+          <!-- Honeypot anti-spam -->
+          <div style="position:absolute;left:-9999px" aria-hidden="true">
+            <label>Fax</label><input id="fax_hp" tabindex="-1" autocomplete="off">
+          </div>
 
+          <!-- Referral / UTM -->
+          <div class="col-md-4">
+            <label class="form-label" for="ref_code">Referral Code</label>
+            <input id="ref_code" name="ref_code" class="form-control" placeholder="(optional)">
+          </div>
 
-$('submitBtn').addEventListener('click', async ()=>{
-if(!required(['entity_type','role','org_name','contact_name','email','plan'])){ show('err','Please complete required fields.'); return; }
-if(!$('agree').checked){ show('err','Please accept the Terms & Privacy.'); return; }
+          <!-- Materials / lanes / compliance -->
+          <div class="col-md-6">
+            <label class="form-label" for="materials_buy">Materials Buying</label>
+            <input id="materials_buy" name="materials_buy" class="form-control" placeholder="e.g., Shred, 5' HMS, #1 Copper">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="materials_sell">Materials Selling</label>
+            <input id="materials_sell" name="materials_sell" class="form-control" placeholder="e.g., P&S, #2 Copper, Zorba">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="lanes">Primary Lanes</label>
+            <input id="lanes" name="lanes" class="form-control" placeholder="e.g., IN→OH">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="compliance_notes">Compliance Notes</label>
+            <input id="compliance_notes" name="compliance_notes" class="form-control" placeholder="EPA permits, etc.">
+          </div>
 
+          <!-- Plan + notes -->
+          <div class="col-md-4">
+            <label class="form-label req" for="plan">Plan</label>
+            <select id="plan" name="plan" class="form-select" required aria-required="true">
+              <option value="">Select…</option>
+              <option value="starter">Starter</option>
+              <option value="standard">Standard</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label" for="notes">Notes</label>
+            <input id="notes" name="notes" class="form-control" placeholder="Anything else we should know?">
+          </div>
 
-const payload = {
-entity_type: $('entity_type').value,
-role: $('role').value,
-org_name: $('org_name').value.trim(),
-ein: $('ein').value.trim()||null,
-address: $('address').value.trim()||null,
-city: $('city').value.trim()||null,
-region: $('region').value.trim()||null,
-website: $('website').value.trim()||null,
-monthly_volume_tons: $('monthly_volume_tons').value?parseInt($('monthly_volume_tons').value,10):null,
-contact_name: $('contact_name').value.trim(),
-email: $('email').value.trim(),
-phone: $('phone').value.trim()||null,
-ref_code: $('ref_code').value.trim()||null,
-materials_buy: $('materials_buy').value.trim()||null,
-materials_sell: $('materials_sell').value.trim()||null,
-lanes: $('lanes').value.trim()||null,
-compliance_notes: $('compliance_notes').value.trim()||null,
-plan: $('plan').value,
-notes: $('notes').value.trim()||null,
-...utm
-};
+          <!-- Terms -->
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="agree">
+              <label class="form-check-label" for="agree">
+                I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy</a>.
+              </label>
+            </div>
+          </div>
+        </div>
 
+        <div class="d-flex gap-2 mt-3">
+          <button type="button" id="testFill" class="btn btn-outline-secondary">Test Fill</button>
+          <button type="submit" id="submitBtn" class="btn btn-primary">Submit Application</button>
+        </div>
+        <div class="form-hint mt-2">Fields marked with <span class="text-danger">*</span> are required.</div>
+      </form>
+    </div>
 
-const btn=$('submitBtn'); btn.disabled=true; btn.textContent='Submitting...';
-try{
-const res = await fetch('/public/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-if(!res.ok) throw new Error(await res.text());
-show('ok','Thanks! Your application has been received. We\'ll email you after review.');
-}catch(e){ console.error(e); show('err','Could not submit application. Please retry or email support@scrapfutures.com'); }
-finally{ btn.disabled=false; btn.textContent='Submit Application'; }
-});
-})();
-</script>
+    <footer class="text-center text-muted mt-4" style="font-size:.9rem">
+      <hr>
+      <div><strong>BRidge Platform</strong> — Powered by ScrapFutures.com</div>
+      <div>Need help? <a href="mailto:support@scrapfutures.com">support@scrapfutures.com</a></div>
+    </footer>
+  </div>
+
+  <script>
+    // Health badge
+    (async ()=>{ const el=document.querySelector('[data-health]'); if(!el) return;
+      try{ await api('/health'); el.textContent='● Live'; el.setAttribute('data-ok','1'); }
+      catch{ el.textContent='● Degraded'; }
+    })();
+
+    const $ = (id)=>document.getElementById(id);
+    const qs = new URLSearchParams(location.search);
+    function setVal(id,v){ const el=$(id); if(el!=null) el.value = v; }
+    function show(kind,msg){
+      const box=$('alert');
+      box.className = 'alert ' + (kind==='ok' ? 'alert-success' : 'alert-danger');
+      box.textContent = msg;
+      box.classList.remove('d-none');
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+
+    // Prefill referral/utm
+    setVal('ref_code', qs.get('ref') || '');
+    const utm = {
+      utm_source:  qs.get('utm_source')  || null,
+      utm_campaign:qs.get('utm_campaign')|| null,
+      utm_medium:  qs.get('utm_medium')  || null
+    };
+
+    // Draft autosave/restore
+    const KEY='bridge_apply_draft_v1';
+    const form=$('applyForm');
+    form.addEventListener('input', ()=> {
+      const data = Object.fromEntries(new FormData(form).entries());
+      localStorage.setItem(KEY, JSON.stringify(data));
+    });
+    (function restore(){
+      const raw=localStorage.getItem(KEY); if(!raw) return;
+      try{
+        const data=JSON.parse(raw);
+        Object.entries(data).forEach(([k,v])=>{
+          // Prefer name= match (most fields), fall back to id=
+          const byName = form.querySelector(`[name="${CSS.escape(k)}"]`);
+          if (byName) { byName.value = v; return; }
+          const byId = document.getElementById(k);
+          if (byId) byId.value = v;
+        });
+      }catch{}
+    })();
+
+    // Test fill
+    $('testFill').addEventListener('click', ()=>{
+      setVal('entity_type','yard'); setVal('role','both'); setVal('org_name','Farnsworth Metals');
+      setVal('ein','12-3456789'); setVal('address','123 Industrial Way'); setVal('city','Anderson'); setVal('region','IN');
+      setVal('website','https://farnsworthmetals.com'); setVal('monthly_volume_tons','1800');
+      setVal('contact_name','Alex Miller'); setVal('email','alex@farnsworthmetals.com'); setVal('phone','317-555-0199');
+      setVal('materials_buy',"Shred, 5' HMS, #1 Copper, 6063"); setVal('materials_sell','P&S, #2 Copper, Zorba');
+      setVal('lanes','IN→OH'); setVal('compliance_notes','EPA stormwater permit on file');
+      setVal('plan','standard'); setVal('notes','Ready to move 5’ P&S; ICE settlement later.');
+      $('agree').checked = true;
+      toast('Sample data filled');
+    });
+
+    function required(ids){ for(const id of ids){ const el=$(id); if(!el || !el.value){ return false; } } return true; }
+
+    // Submit
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      $('alert').classList.add('d-none');
+
+      if(!form.checkValidity()){
+        const bad=form.querySelector(':invalid'); bad?.focus();
+        show('err','Please fix the highlighted fields.');
+        toast('Fix highlighted fields');
+        return;
+      }
+      if(!required(['entity_type','role','org_name','contact_name','email','plan'])){
+        show('err','Please complete required fields.'); toast('Missing required fields'); return;
+      }
+      if(!$('agree').checked){ show('err','Please accept the Terms & Privacy.'); toast('Accept Terms & Privacy'); return; }
+      if(($('fax_hp')?.value||'').trim()){ show('err','Submission blocked.'); return; }
+
+      // Build backend-shaped payload from form names (map autofill names to API keys)
+      const fd = new FormData(form);
+      const payload = {
+        entity_type:            fd.get('entity_type') || null,
+        role:                   fd.get('role') || null,
+        org_name:               (fd.get('organization') || fd.get('org_name') || '').trim() || null,
+        ein:                    (fd.get('ein') || '').trim() || null,
+        address:                (fd.get('street-address') || fd.get('address') || '').trim() || null,
+        city:                   (fd.get('address-level2') || fd.get('city') || '').trim() || null,
+        region:                 (fd.get('address-level1') || fd.get('region') || '').trim() || null,
+        website:                (fd.get('website') || '').trim() || null,
+        monthly_volume_tons:    fd.get('monthly_volume_tons') ? parseInt(fd.get('monthly_volume_tons'),10) : null,
+        contact_name:           (fd.get('name') || fd.get('contact_name') || '').trim() || null,
+        email:                  (fd.get('email') || '').trim() || null,
+        phone:                  (fd.get('tel') || fd.get('phone') || '').trim() || null,
+        ref_code:               (fd.get('ref_code') || '').trim() || null,
+        materials_buy:          (fd.get('materials_buy') || '').trim() || null,
+        materials_sell:         (fd.get('materials_sell') || '').trim() || null,
+        lanes:                  (fd.get('lanes') || '').trim() || null,
+        compliance_notes:       (fd.get('compliance_notes') || '').trim() || null,
+        plan:                   fd.get('plan') || null,
+        notes:                  (fd.get('notes') || '').trim() || null,
+        ...utm
+      };
+
+      const btn=$('submitBtn'); btn.disabled=true; const old=btn.textContent; btn.textContent='Submitting…';
+      try{
+        await api('/public/apply', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        show('ok',"Thanks! Your application has been received. We'll email you after review.");
+        toast('✓ Application submitted');
+        localStorage.removeItem(KEY);
+        form.reset(); $('agree').checked=false;
+      }catch(err){
+        let msg='Could not submit application. Please retry or email support@scrapfutures.com';
+        if(err?.message && err.message.length < 500) msg = err.message;
+        show('err', msg);
+        toast(msg);
+      }finally{
+        btn.disabled=false; btn.textContent=old;
+      }
+    });
+  </script>
 </body>
 </html>
