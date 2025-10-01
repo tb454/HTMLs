@@ -25,7 +25,6 @@ prometheus-fastapi-instrumentator==7.1.0
 # DB stack
 SQLAlchemy==2.0.43
 databases==0.9.0
-psycopg2==2.9.7
 asyncpg==0.30.0
 psycopg[binary]==3.2.10
 python-dotenv==1.1.1

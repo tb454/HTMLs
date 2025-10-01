@@ -347,9 +347,16 @@ from indices_builder import run_indices_builder as indices_generate_snapshot
 # -----------------------------------------------------------------------------
 
 # -------- Database setup (non-fatal, with bootstrap in CI/staging) -----------
+import os
+
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-if not DATABASE_URL:
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL and "+psycopg" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 database = databases.Database(DATABASE_URL)  # optional convenience layer
