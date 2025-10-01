@@ -112,7 +112,7 @@ app = FastAPI(
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
 
-# Moves docs under /api/v1 but keep existing endpoints untouched
+# Move docs under /api/v1 but keep existing endpoints 
 app.docs_url = "/api/v1/docs"
 app.redoc_url = None
 app.openapi_url = "/api/v1/openapi.json"
@@ -347,24 +347,32 @@ from indices_builder import run_indices_builder as indices_generate_snapshot
 # -----------------------------------------------------------------------------
 
 # -------- Database setup (non-fatal, with bootstrap in CI/staging) -----------
-import os
+BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# Normalize base
+if BASE_DATABASE_URL.startswith("postgres://"):
+    BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Build sync URL for SQLAlchemy (psycopg v3)
+SYNC_DATABASE_URL = BASE_DATABASE_URL
+if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL and "+asyncpg" not in SYNC_DATABASE_URL:
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-if DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL and "+psycopg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+# Build async URL for asyncpg/databases (NO "+psycopg" here)
+ASYNC_DATABASE_URL = BASE_DATABASE_URL
+if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
 
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-database = databases.Database(DATABASE_URL)  # optional convenience layer
+# Engines/clients
+engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, future=True)
+database = databases.Database(ASYNC_DATABASE_URL)
 
 @app.on_event("startup")
 async def _startup_prices():
     if not hasattr(app.state, "db_pool"):
-        app.state.db_pool = await asyncpg.create_pool(DATABASE_URL, max_size=10)
+        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 
 async def _fetch_base(symbol: str):
     return await latest_price(app.state.db_pool, symbol)
@@ -2782,6 +2790,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
     if idem:
         _idem_cache[idem] = resp
+    return resp 
 
 # === INSERT: Back-compat aliases for older UI buttons ===
 @app.get("/admin/export_all", include_in_schema=False)
