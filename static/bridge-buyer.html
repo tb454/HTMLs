@@ -2,23 +2,85 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>BRidge Buyer Portal</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="icon" href="/static/favicon.ico">
+  <meta name="color-scheme" content="light dark">
   <style>
     body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
     .cardy{background:#fff;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,.06);padding:18px;margin-bottom:16px}
+    .health-badge{font:12px/1 system-ui;color:#6b7280}
+    .health-badge[data-ok="1"]{color:#10b981}
+    /* skeletons */
+    .skeleton{ display:block; width:100%; height:14px; border-radius:6px;
+      background:linear-gradient(90deg,#ececec,#f6f7f8,#ececec); background-size:200% 100%;
+      animation:sk 1.1s linear infinite; }
+    @keyframes sk{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+    button:disabled{opacity:.6;cursor:not-allowed}
   </style>
+
+  <!-- Global endpoint + toast + api helper -->
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+  <script>
+    // Single source of truth for API base (same-origin in prod; localhost in dev)
+    window.endpoint = window.endpoint || (
+      location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin
+    );
+
+    function toast(msg, ms=2800){
+      const t = document.getElementById('toast');
+      if(!t){ alert(msg); return; }
+      t.textContent = typeof msg === 'string' ? msg : (msg?.message || 'Error');
+      t.style.display = 'block';
+      setTimeout(()=>{ t.style.display = 'none'; }, ms);
+    }
+
+    // Uniform fetch with JSON Accept + 401→login + error→toast
+    async function api(path, opts={}){
+      const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
+      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      if(res.status === 401){
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = `/static/bridge-login.html?next=${next}`;
+        throw new Error('Unauthorized');
+      }
+      if(!res.ok){
+        let msg = 'Request failed';
+        try{ msg = (await res.clone().json()).detail || msg; } catch { try { msg = await res.clone().text() || msg; } catch {} }
+        toast(msg);
+        throw new Error(msg);
+      }
+      return res;
+    }
+
+    // Tiny health check badge for “live” feel
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      const el = document.querySelector('[data-health-badge]');
+      if(!el) return;
+      try{ await api('/health'); el.textContent = '● Live'; el.setAttribute('data-ok','1'); }
+      catch{ el.textContent = '● Degraded'; el.removeAttribute('data-ok'); }
+    });
+  </script>
 </head>
 <body>
   <div class="container">
-    <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
+    <div class="d-flex align-items-center justify-content-between">
+      <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
+      <span class="health-badge" data-health-badge>● Checking…</span>
+    </div>
+
     <div class="d-flex gap-2 mb-3">
       <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)">
       <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)">
       <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">Refresh</button>
     </div>
+
+    <!-- live region for loading text (a11y) -->
+    <div id="loadingStatus" class="visually-hidden" role="status" aria-live="polite"></div>
+
     <div id="list"></div>
+
     <div class="d-flex gap-2 mt-2">
       <button class="btn btn-outline-secondary btn-sm" id="prevBtn">◀ Prev</button>
       <button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next ▶</button>
@@ -27,71 +89,148 @@
   </div>
 
   <script>
-    const endpoint = "https://scrapfutures.com";
-    let offset = 0, limit = 100;
+    const endpoint = window.endpoint;           // unified base
+    let offset = 0, limit = 100;                // pagination
 
-    async function loadOpenContracts() {
-      const q = new URLSearchParams({ status: "Pending", limit, offset });
+    // Role guard: hide Buy if not buyer
+    function currentRole(){
+      try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
+      catch{ return ''; }
+    }
 
-      const buyer = document.getElementById("buyerFilter").value.trim();
-      if (buyer) q.set("buyer", buyer);
+    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
 
-      const material = document.getElementById("materialFilter").value.trim();
-      if (material) q.set("material", material);
-
-      const res = await fetch(`${endpoint}/contracts?` + q.toString());
-      if (!res.ok) { console.error(await res.text()); return; }
-      const rows = await res.json();
-
-      const root = document.getElementById("list");
-      root.innerHTML = "";
-      if (rows.length === 0) {
-        root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
-        document.getElementById("pageInfo").textContent = `Showing 0 • offset ${offset}`;
-        return;
-      }
-      rows.forEach(r => {
-        const div = document.createElement("div");
-        div.className = "cardy";
-        const total = (Number(r.weight_tons) * Number(r.price_per_ton)).toLocaleString(
-          undefined,{minimumFractionDigits:2}
-        );
+    function showSkeletonCards(n=5){
+      const root = document.getElementById('list');
+      root.innerHTML = '';
+      for(let i=0;i<n;i++){
+        const div = document.createElement('div');
+        div.className = 'cardy';
         div.innerHTML = `
           <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <h5 class="mb-1">${r.material}</h5>
-              <div class="text-muted small">Seller: ${r.seller}</div>
-              <div class="text-muted small">Buyer: ${r.buyer}</div>
-              <div class="small">Tons: <b>${r.weight_tons}</b> @ $<b>${r.price_per_ton}</b>/ton · Total $<b>${total}</b></div>
-              <div class="small text-muted">Created: ${r.created_at ?? ""}</div>
+            <div style="flex:1; padding-right:12px;">
+              <div class="skeleton" style="width:40%; margin-bottom:10px;"></div>
+              <div class="skeleton" style="width:60%; margin-bottom:8px;"></div>
+              <div class="skeleton" style="width:55%; margin-bottom:6px;"></div>
+              <div class="skeleton" style="width:50%;"></div>
             </div>
-            <div class="text-end">
-              <button class="btn btn-primary btn-sm" onclick="buy('${r.id}')">Buy</button>
-            </div>
+            <div style="width:90px;"><div class="skeleton"></div></div>
           </div>`;
         root.appendChild(div);
-      });
-      document.getElementById("pageInfo").textContent = `Showing ${rows.length} • offset ${offset}`;
+      }
     }
 
-    async function buy(id) {
-      const res = await fetch(`${endpoint}/contracts/${id}/purchase`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ op: "purchase", expected_status: "Pending" })
-      });
-      if (!res.ok) { alert("Purchase failed: " + (await res.text())); return; }
-      const data = await res.json();
-      alert(`Purchased. BOL ${data.bol_id} created.`);
-      loadOpenContracts();
+    function _syncQuery(params){
+      const u = new URL(location.href);
+      for (const [k,v] of Object.entries(params)) {
+        if (v === '' || v == null) u.searchParams.delete(k);
+        else u.searchParams.set(k, v);
+      }
+      history.replaceState({}, '', u);
     }
 
-    document.getElementById("refreshBtn").addEventListener("click", () => { offset = 0; loadOpenContracts(); });
-    document.getElementById("buyerFilter").addEventListener("input", () => { offset = 0; loadOpenContracts(); });
-    document.getElementById("materialFilter").addEventListener("input", () => { offset = 0; loadOpenContracts(); });
-    document.getElementById("prevBtn").addEventListener("click", () => { offset = Math.max(0, offset - limit); loadOpenContracts(); });
-    document.getElementById("nextBtn").addEventListener("click", () => { offset += limit; loadOpenContracts(); });
+    async function loadOpenContracts(){
+      const root = document.getElementById('list');
+      const ls = document.getElementById('loadingStatus');
+      ls.textContent = 'Loading contracts…';
+      showSkeletonCards(5);
 
+      const q = new URLSearchParams({ status: 'Pending', limit, offset });
+      const buyerVal = document.getElementById('buyerFilter').value.trim();
+      const matVal = document.getElementById('materialFilter').value.trim();
+      if (buyerVal) q.set('buyer', buyerVal);
+      if (matVal)   q.set('material', matVal);
+
+      // save filters/page to URL
+      const page = Math.floor(offset/limit)+1;
+      _syncQuery({ buyer: buyerVal || '', material: matVal || '', page });
+
+      try{
+        const res  = await api(`/contracts?` + q.toString());
+        const rows = await res.json();
+
+        root.innerHTML = '';
+        if (rows.length === 0) {
+          root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
+          document.getElementById('pageInfo').textContent = `Showing 0 • offset ${offset}`;
+          ls.textContent = 'Loaded.'; 
+          return;
+        }
+
+        const role = currentRole();
+        rows.forEach(r=>{
+          const div = document.createElement('div');
+          div.className = 'cardy';
+          const total = (Number(r.weight_tons) * Number(r.price_per_ton));
+          const buyBtn = (role === 'buyer')
+            ? `<button class="btn btn-primary btn-sm" data-id="${r.id}" onclick="buy(event,'${r.id}')">Buy</button>`
+            : `<button class="btn btn-secondary btn-sm" disabled title="Login as Buyer to purchase">Buy</button>`;
+          div.innerHTML = `
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h5 class="mb-1">${r.material}</h5>
+                <div class="text-muted small">Seller: ${r.seller}</div>
+                <div class="text-muted small">Buyer: ${r.buyer}</div>
+                <div class="small">Tons: <b>${r.weight_tons}</b> @ $<b>${r.price_per_ton}</b>/ton · Total $<b>${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
+                <div class="small text-muted">Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</div>
+              </div>
+              <div class="text-end">
+                ${buyBtn}
+              </div>
+            </div>`;
+          root.appendChild(div);
+        });
+
+        document.getElementById('pageInfo').textContent = `Showing ${rows.length} • offset ${offset}`;
+      } catch(e){
+        // api() already toasted; keep skeleton until next refresh
+      } finally {
+        ls.textContent = 'Loaded.';
+      }
+    }
+
+    async function buy(ev, id){
+      const btn = ev?.currentTarget;
+      if (btn){ btn.disabled = true; btn.textContent = 'Purchasing…'; }
+      try{
+        const res = await api(`/contracts/${id}/purchase`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': crypto.randomUUID()
+          },
+          body: JSON.stringify({ op:'purchase', expected_status:'Pending' })
+        });
+        const data = await res.json();
+        toast(`Purchased. BOL ${data.bol_id} created.`);
+        loadOpenContracts();
+      }catch(e){
+        // api() already showed toast
+      }finally{
+        if (btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+      }
+    }
+    window.buy = buy; // expose for inline onclick
+
+    // Wire UI
+    document.getElementById('refreshBtn').addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
+    document.getElementById('buyerFilter').addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
+    document.getElementById('materialFilter').addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
+    document.getElementById('prevBtn').addEventListener('click', ()=>{ offset = Math.max(0, offset - limit); loadOpenContracts(); });
+    document.getElementById('nextBtn').addEventListener('click', ()=>{ offset += limit; loadOpenContracts(); });
+
+    // Hydrate filters/page from URL on first load
+    (function hydrateFromURL(){
+      const q = new URL(location.href).searchParams;
+      const buyer = q.get('buyer') || '';
+      const material = q.get('material') || '';
+      const page = Math.max(1, parseInt(q.get('page')||'1', 10));
+      document.getElementById('buyerFilter').value = buyer;
+      document.getElementById('materialFilter').value = material;
+      offset = (page - 1) * limit;
+    })();
+
+    // Initial load + periodic refresh
     loadOpenContracts();
     setInterval(loadOpenContracts, 10000);
   </script>
