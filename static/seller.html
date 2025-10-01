@@ -2,29 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>BRidge Dashboard</title>
-
-  <script>
-    const u = JSON.parse(localStorage.getItem('bridgeUser') || '{}');
-    const role = (u.role || '').toLowerCase();
-    if (role !== 'seller' && role !== 'yard') {
-      window.location.href = '/static/bridge-login.html';
-    }
-  </script>
-
-  <!-- Deployed API base -->
-  <script>
-    window.endpoint = "https://bridge-buyer.onrender.com";
-  </script>
-
-  <!-- Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-
-  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="icon" href="/static/favicon.ico">
 
   <style>
     body{font-family:'Roboto',sans-serif;background:#f4f6f8;margin:0;padding:20px;color:#333}
@@ -32,7 +15,7 @@
     header.header{background:linear-gradient(90deg,#2c3e50,#34495e);color:#fff;padding:15px 20px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
     header.header h1{font-size:28px;margin:0}
     .user-info{font-size:14px}
-    .user-info button{margin:0 10px;padding:6px 14px;border:none;background:#e74c3c;color:#fff;border-radius:4px;cursor:pointer;transition:background-color .3s}
+    .user-info button{margin:0 6px;padding:6px 14px;border:none;background:#e74c3c;color:#fff;border-radius:4px;cursor:pointer;transition:background-color .3s}
     .user-info button:hover{background:#c0392b}
     section.section{background:#fff;padding:20px;margin-bottom:20px;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,.05)}
     .section-title{font-weight:700;margin-bottom:15px;font-size:20px;border-bottom:3px solid #3498db;padding-bottom:5px;text-transform:uppercase;letter-spacing:1px;color:#3498db}
@@ -40,80 +23,32 @@
     .card-custom{flex:1;min-width:250px;background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:20px;text-align:center;cursor:pointer;transition:transform .3s,box-shadow .3s;display:flex;flex-direction:column}
     .card-custom:hover{transform:translateY(-3px);box-shadow:0 8px 16px rgba(0,0,0,.1)}
     table{width:100%;border-collapse:collapse;margin-bottom:10px}
+    thead.sticky{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 rgba(0,0,0,.06)}
     th,td{padding:12px 15px;border-bottom:1px solid #e1e4e8;text-align:left}
     th{background:#f7f7f7;font-weight:500}
-    tr:hover{background:#f9f9f9;cursor:pointer}
-    tr.group-header{background:#e9ecef;cursor:pointer}
-    tr.group-header td{font-weight:bold}
-    .action-btn{padding:10px 20px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:15px;transition:background-color .3s}
+    tr:hover{background:#f9f9f9}
+    tr.group-header{background:#e9ecef}
+    .action-btn{padding:10px 20px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:15px;transition:.3s}
     .action-btn:hover{background:#2980b9}
-    .secondary-btn,.danger-btn{padding:6px 12px;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:14px;transition:background-color .3s;margin-right:5px}
-    .secondary-btn{background:#27ae60}
-    .secondary-btn:hover{background:#1e8449}
-    .danger-btn{background:#e74c3c}
-    .danger-btn:hover{background:#c0392b}
+    .secondary-btn,.danger-btn{padding:6px 12px;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:14px;transition:.3s;margin-right:5px}
+    .secondary-btn{background:#27ae60}.secondary-btn:hover{background:#1e8449}
+    .danger-btn{background:#e74c3c}.danger-btn:hover{background:#c0392b}
     select,input[type="number"],input[type="date"]{margin-right:8px;padding:8px;font-size:14px;border:1px solid #ced4da;border-radius:4px}
     .chart-container{background:#fff;padding:20px;border-radius:8px;border:1px solid #e1e4e8;box-shadow:0 4px 8px rgba(0,0,0,.05)}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .health-badge{font:12px/1 system-ui;color:#cfe9d0}
+    .health-badge[data-ok="1"]{color:#10b981}
+    .skeleton-row td{height:14px}
+    .skeleton{display:block;width:100%;height:10px;border-radius:6px;background:linear-gradient(90deg,#eee,#f6f7f8,#eee);background-size:200% 100%;animation:sk 1.1s linear infinite}
+    @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
   </style>
 
- <!-- Live Copper Base (Cu last - $0.25) -->
+  <!-- Gate by role early -->
   <script>
-    window.copperBaseUSD = null;
-    async function fetchCopperBase() {
-      try {
-        const r = await fetch(`${window.endpoint || 'https://bridge-buyer.onrender.com'}/prices/copper_last`);
-        if (!r.ok) throw new Error(`bad resp ${r.status}`);
-        const j = await r.json();
-        window.copperBaseUSD = j.base_minus_025; // USD/lb
-        console.log("Copper base (last - 0.25):", window.copperBaseUSD);
-      } catch (e) {
-        window.copperBaseUSD = 4.19 - 0.25;
-        console.warn("Copper price fallback used:", window.copperBaseUSD, e);
-      }
-    }
-  </script>
-
-  <!-- Material arrays + pricing (kept; not used to fabricate inventory anymore) -->
-  <script>
-    const copperMaterials = ["Barley","#1","#2","#3"];
-    const aluminumMaterials = ["AL6061_NewBareExtrusion","AL6061_ClipPlatePipe","AL6063_Secondary","AL6063_OldExtrusion","AL6063_Extrusion10/10","AL_PAS_Baled","AL_Cast_Clean","AL_RADS_CleanBaled","AL_RADS_DirtyBaled","AL_Sheet_CleanBaled","AL_WheelAuto_Clean","AL_WheelChrome_Clean","TruckWheel_Clean","AL_Wire_BareCATV","AL_Wire_NeopreneACSR","AL_Wire_ECPrepared","AL_MLC_Prepared"];
-    const brassMaterials = ["Brass_Hard","Brass_Red_Ebony","Brass_Red_Semi","Brass_Shaving_AlBronze","Brass_Shaving_BrassRed","Brass_Shell","Brass_Special","Brass_YellowRegular"];
-    const leadMaterials = ["Lead_Clean","Lead_Range"];
-    const stainlessMaterials = ["SS304","SS316"];
-    const eScrapMaterials = ["E_Scrap_Board"];
-    const insulatedWireMaterials = ["ICW_LowGrade_ChristmasLights","ICW_LowGrade_ComputerWire25","ICW_LowGrade_CuCATV","ICW_LowGrade_ExtCords35Up","ICW_LowGrade_MixedWire40Up","ICW1_Heliax57_OpenEyeBaled","ICW1_MCM85HG","ICW1_Romex65_NoWeatherProof","ICW1_THHN80","ICW2_50Cat5TelWire","ICW2_HarnessWireNoFuseBoxes","ICW2_BX_Cable_AL","ICW2_BX_Cable_FE24"];
-
-    const steelMaterials = ["SHRED","CLIPS","BUSHELING","HMS","PS"];
-    function steelPrice(){return 300/2000} // $/lb placeholder
-
-    function copperPrice(grade){
-      const base = (typeof window.copperBaseUSD === 'number') ? window.copperBaseUSD : (4.19 - 0.25);
-      const mults = {Barley:.94,"#1":.91,"#2":.85,"#3":.83};
-      return mults[grade] ? base*mults[grade] : null;
-    }
-    function aluminumPrice(p){const x={"AL6061_NewBareExtrusion":.84,"AL6061_ClipPlatePipe":.78,"AL6063_Secondary":.78,"AL6063_OldExtrusion":.95,"AL6063_Extrusion10/10":.85,"AL_PAS_Baled":.82,"AL_Cast_Clean":.72,"AL_RADS_CleanBaled":.67,"AL_RADS_DirtyBaled":.46,"AL_Sheet_CleanBaled":.75,"AL_WheelAuto_Clean":.93,"AL_WheelChrome_Clean":.80,"TruckWheel_Clean":.72,"AL_Wire_BareCATV":.43,"AL_Wire_NeopreneACSR":.54,"AL_Wire_ECPrepared":1.03,"AL_MLC_Prepared":.84};return 1.25*(x[p]??null);}
-    function brassPrice(p){const m={"Brass_Hard":.81,"Brass_Red_Ebony":.77,"Brass_Red_Semi":.72,"Brass_Shaving_AlBronze":.57,"Brass_Shaving_BrassRed":.61,"Brass_Shell":.60,"Brass_Special":.64,"Brass_YellowRegular":.61};return 4.19*(m[p]??null);}
-    function leadPrice(p){if(p==='Lead_Clean')return (2034/2000)*.718;if(p==='Lead_Range')return (2034/2000)*.728;return null;}
-    function stainlessPrice(p){if(p==='SS304')return (15675/2000)*.0638;if(p==='SS316')return (15675/2000)*.1174;return null;}
-    function eScrapPrice(){return .5;}
-    function insulatedWirePrice(p){const m={"ICW_LowGrade_ChristmasLights":.528,"ICW_LowGrade_ComputerWire25":.448,"ICW_LowGrade_CuCATV":1.008,"ICW_LowGrade_ExtCords35Up":.92,"ICW_LowGrade_MixedWire40Up":1.08,"ICW1_Heliax57_OpenEyeBaled":1.536,"ICW1_MCM85HG":2.536,"ICW1_Romex65_NoWeatherProof":1.904,"ICW1_THHN80":2.36,"ICW2_50Cat5TelWire":1.384,"ICW2_HarnessWireNoFuseBoxes":1.408,"ICW2_BX_Cable_FE24":.6};return 1.25*(m[p]??null);}
-
-    /* === (Old) computed group mapping left in case you want grouping later; not used for inventory rows === */
-    const computedCategoriesMapping = {
-      "Copper":         { materials: copperMaterials,        pricingFunc: copperPrice },
-      "Aluminum":       { materials: aluminumMaterials,      pricingFunc: aluminumPrice },
-      "Brass":          { materials: brassMaterials,         pricingFunc: brassPrice },
-      "Lead":           { materials: leadMaterials,          pricingFunc: leadPrice },
-      "Stainless":      { materials: stainlessMaterials,     pricingFunc: stainlessPrice },
-      "E-Scrap":        { materials: eScrapMaterials,        pricingFunc: eScrapPrice },
-      "Insulated Wire": { materials: insulatedWireMaterials, pricingFunc: insulatedWirePrice },
-      "Steel":          { materials: steelMaterials,         pricingFunc: steelPrice }
-    };
-
-    function toggleGroup(category) {
-      document.querySelectorAll(`tr.group-sub[data-group='${category}']`).forEach(row => {
-        row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
-      });
+    const u = JSON.parse(localStorage.getItem('bridgeUser') || '{}');
+    const role = (u.role || '').toLowerCase();
+    if (role !== 'seller' && role !== 'yard' && role !== 'admin') {
+      window.location.href = '/static/bridge-login.html';
     }
   </script>
 </head>
@@ -132,6 +67,7 @@
         <button onclick="window.location.href='/static/Contract-specs.html'">Contract Specs</button>
         <button onclick="window.location.href='/static/mixed-load.html'">Mixed Load</button>
         <span id="header-date">—</span>
+        <span class="health-badge" data-health-badge>● Checking…</span>
       </div>
     </header>
 
@@ -156,21 +92,22 @@
             <strong class="me-2">Market Snapshot</strong>
             <span id="copperBaseBadge" class="badge bg-info text-dark"></span>
           </div>
-          <div id="price-Copper">Copper: $9,500.00</div>
-          <div id="price-BushelingSteel">Busheling Steel: $700.00</div>
-          <div id="price-Brass">Brass: $7,500.00</div>
-          <div id="price-Aluminum">Aluminum: $2,200.00</div>
-          <div id="price-ElectricMotors">Electric Motors: $900.00</div>
-          <div id="price-InsulatedCopperWire">Insulated Copper Wire: $3,600.00</div>
-          <div id="price-Lead">Lead: $1,500.00</div>
-          <div id="price-HMSSteel2">HMS Steel #2: $500.00</div>
-          <div id="price-CuRadiator50Cu50Brass">Cu Radiator (50Cu/50Brass): $5,600.00</div>
-          <div id="price-Carbide">Carbide: $20,000.00</div>
-          <div id="price-StainlessSteel">Stainless Steel: $1,600.00</div>
+          <div id="price-Copper">Copper: —</div>
+          <div id="price-BushelingSteel">Busheling Steel: —</div>
+          <div id="price-Brass">Brass: —</div>
+          <div id="price-Aluminum">Aluminum: —</div>
+          <div id="price-ElectricMotors">Electric Motors: —</div>
+          <div id="price-InsulatedCopperWire">Insulated Copper Wire: —</div>
+          <div id="price-Lead">Lead: —</div>
+          <div id="price-HMSSteel2">HMS Steel #2: —</div>
+          <div id="price-CuRadiator50Cu50Brass">Cu Radiator (50Cu/50Brass): —</div>
+          <div id="price-Carbide">Carbide: —</div>
+          <div id="price-StainlessSteel">Stainless Steel: —</div>
         </div>
       </div>
     </section>
-<!-- Price This Material (inserted) -->
+
+    <!-- Price This Material -->
     <section class="section">
       <div class="section-title">Price This Material</div>
       <div class="card" style="margin-top:12px; padding:12px;">
@@ -188,12 +125,13 @@
         <div id="quoteOut" class="text-muted" style="margin-top:8px;"></div>
       </div>
     </section>
+
     <!-- Finished Goods Inventory -->
     <section class="section">
       <div class="section-title">Finished Goods Inventory</div>
       <div class="table-responsive">
         <table id="greenspark-table" class="table">
-          <thead>
+          <thead class="sticky">
             <tr>
               <th>Commodities</th>
               <th>WIP (lbs)</th>
@@ -221,7 +159,6 @@
     <!-- Inventory Import & Manual Add -->
     <section class="section">
       <div class="section-title">Inventory Import & Manual Add</div>
-
       <div class="row g-2 align-items-end">
         <div class="col-md-4">
           <label class="form-label">CSV / XLSX File</label>
@@ -261,7 +198,7 @@
         <div class="col-md-2"><input id="price" type="number" class="form-control" placeholder="$/ton" step="0.01"></div>
       </div>
       <div>
-        <button class="action-btn" id="createContractBtn">Create Contract</button>
+        <button class="action-btn" id="createContractBtn" data-role="seller">Create Contract</button>
         <small class="text-muted ms-2">Creates a real contract via POST /contracts</small>
       </div>
     </section>
@@ -276,7 +213,6 @@
     <!-- My Contracts -->
     <section class="section">
       <div class="section-title">My Contracts</div>
-
       <div class="row g-2 mb-2">
         <div class="col-md-3"><input id="filterStatus" class="form-control form-control-sm" placeholder="Status (e.g., Pending)"></div>
         <div class="col-md-3"><input id="filterStart" type="date" class="form-control form-control-sm" placeholder="Start (ISO)"></div>
@@ -289,7 +225,7 @@
 
       <div class="table-responsive">
         <table class="table table-sm" id="sellerContractsTable">
-          <thead>
+          <thead class="sticky">
             <tr>
               <th>ID</th><th>Buyer</th><th>Material</th><th>Tons</th><th>$/ton</th><th>Status</th><th>Created</th>
             </tr>
@@ -305,19 +241,20 @@
       </div>
     </section>
 
-    <!-- (Optional placeholders kept) -->
+    <!-- Trade Log (placeholder) -->
     <section class="section">
       <div class="section-title">Trade Log</div>
       <table id="trade-log-table" class="table">
-        <thead><tr><th>Time</th><th>Material</th><th>Quantity (tons)</th><th>Price/ton</th><th>Total Contract Value</th><th>Location</th></tr></thead>
+        <thead class="sticky"><tr><th>Time</th><th>Material</th><th>Quantity (tons)</th><th>Price/ton</th><th>Total Contract Value</th><th>Location</th></tr></thead>
         <tbody></tbody>
       </table>
     </section>
 
+    <!-- Metals Market Overview (static demo) -->
     <section class="section">
       <div class="section-title">Metals Market Overview</div>
       <table id="metals-market-table" class="table">
-        <thead><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
+        <thead class="sticky"><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
         <tbody>
           <tr><td>GCJ25</td><td>Gold (Apr '25)</td><td>2,953.25</td><td>-2.90</td><td>2,957.50</td><td>2,964.70</td><td>2,920.00</td><td>155,552</td><td>02/21/25</td></tr>
           <tr><td>ICWR25</td><td>Insulated Copper Wire (Apr '25)</td><td>23.95</td><td>+0.10</td><td>23.85</td><td>24.20</td><td>23.65</td><td>80,334</td><td>02/21/25</td></tr>
@@ -357,25 +294,35 @@
     </div></div>
   </div>
 
-  <!-- Bootstrap & Chart.js -->
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- Charts + totals + header date -->
   <script>
+    // endpoint + api + toast + health
+    window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
+    function toast(msg, ms=2800){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+    async function api(path, opts={}) {
+      const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
+      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      if (res.status === 401) { const next = encodeURIComponent(location.pathname + location.search); location.href = `/static/bridge-login.html?next=${next}`; throw new Error('Unauthorized'); }
+      if (!res.ok) { let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ m=await res.text()||m; } toast(m); throw new Error(m); }
+      return res;
+    }
+    window.addEventListener('DOMContentLoaded', async ()=>{ try{ const r=await api('/health'); if(r.ok){ const b=document.querySelector('[data-health-badge]'); b.textContent='● Live'; b.setAttribute('data-ok','1'); } }catch{} });
+
+    const endpoint = window.endpoint;
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => { el.style.borderColor = accentColor; el.style.color = accentColor; });
 
-    let activeContractsChart;
+    let activeContractsChart, finishedGoodsChart, kpiChart;
     const activeContractsChangeHistory = [], activeContractsChartLabels = [];
-    let finishedGoodsChart, finishedGoodsChartLabels = [], finishedGoodsChartData = [];
-    let kpiChart, kpiChartLabels = [], kpiChartData = [];
+    let finishedGoodsChartLabels = [], finishedGoodsChartData = [];
+    let kpiChartLabels = [], kpiChartData = [];
 
     document.addEventListener('DOMContentLoaded', async () => {
-      // header date
       const hd = document.getElementById('header-date'); if (hd) hd.textContent = new Date().toLocaleDateString();
-
-      await fetchCopperBase();
 
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
@@ -385,7 +332,6 @@
           options: { scales: { y: { beginAtZero: true } } }
         });
       }
-
       const finishedCanvas = document.getElementById('finishedGoodsChart');
       if (finishedCanvas) {
         finishedGoodsChart = new Chart(finishedCanvas.getContext('2d'), {
@@ -394,7 +340,6 @@
           options: { scales: { y: { beginAtZero: true } } }
         });
       }
-
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
@@ -413,46 +358,33 @@
         });
       }
 
-      // Build inventory table (real data) + totals (will populate when seller is known)
       refreshFinishedFromInputs();
     });
 
- // Pricing widget wire-up
-
-  document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('btnQuote');
-    if (btn) {
+    // Pricing widget
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('btnQuote');
+      if (!btn) return;
       btn.onclick = async () => {
         const cat = document.getElementById('catSel').value;
         const mat = document.getElementById('matInput').value.trim();
         if (!mat) return;
-
         const el = document.getElementById('quoteOut');
-        // Disable during fetch
-        btn.disabled = true; 
-        btn.textContent = 'Quoting…';
-
+        btn.disabled = true; btn.textContent = 'Quoting…';
         try {
-          const r = await fetch(`${endpoint}/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
-          if (!r.ok) { 
-            el.innerHTML = `<span class="badge bg-warning text-dark">No price (check spelling)</span>`;
-            return; 
-          }
+          const r = await api(`/pricing/quote?category=${encodeURIComponent(cat)}&material=${encodeURIComponent(mat)}`);
           const j = await r.json();
           el.innerHTML = `
             <span class="badge bg-primary">${j.category} / ${j.material}</span>
             <span class="badge bg-light text-dark ms-2">$${(+j.price_per_lb).toFixed(4)} / lb</span>
           `;
-        } catch (e) {
-          el.innerHTML = `<span class="badge bg-danger">Quote failed</span>`;
+        } catch {
+          el.innerHTML = `<span class="badge bg-warning text-dark">No price (check spelling)</span>`;
         } finally {
-          // Re-enable
-          btn.disabled = false; 
-          btn.textContent = 'Quote';
+          btn.disabled = false; btn.textContent = 'Quote';
         }
       };
-    }
-  });
+    });
 
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
@@ -489,26 +421,21 @@
         }
       }
     }
-  </script>
 
-  <!-- Real SELLER logic -->
-  <script>
-    const endpoint = window.endpoint || "https://bridge-buyer.onrender.com";
+    // Seller logic
     let offset = 0, limit = 50;
     const toISO = (d) => d ? new Date(d).toISOString() : undefined;
 
-    /* ==== NEW: finished-goods loader wired to backend ==== */
     async function loadFinishedGoods(seller) {
-      if (!seller) return;
-
       const tbody = document.querySelector('#greenspark-table tbody');
-      tbody.innerHTML = '';
+      if (!seller) { tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Enter seller to load finished goods.</td></tr>`; return; }
+      // skeleton
+      tbody.innerHTML = ''; for(let i=0;i<5;i++){ const tr=document.createElement('tr'); tr.className='group-sub'; tr.innerHTML = '<td colspan="6"><span class="skeleton" style="height:12px;display:block"></span></td>'; tbody.appendChild(tr); }
 
       try {
-        const r = await fetch(`${endpoint}/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
-        if (!r.ok) throw new Error(await r.text());
+        const r = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
         const rows = await r.json();
-
+        tbody.innerHTML = '';
         if (!rows.length) {
           tbody.innerHTML = `<tr><td colspan="6" class="text-muted">No finished goods on file.</td></tr>`;
         } else {
@@ -519,7 +446,6 @@
             const total = wip + finished;
             const avgCost = Number(item.avg_cost_per_lb ?? 0) || 0;
             const totalPurchaseValue = total * avgCost;
-
             const tr = document.createElement('tr');
             tr.classList.add('group-sub');
             tr.innerHTML = `
@@ -533,10 +459,8 @@
             tbody.appendChild(tr);
           });
         }
-
         updatePurchaseValues();
       } catch (e) {
-        console.warn('loadFinishedGoods failed:', e);
         tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Finished goods not available yet.</td></tr>`;
         updatePurchaseValues();
       }
@@ -547,23 +471,19 @@
                   || (document.getElementById('invDefaultSeller')?.value || '').trim();
       if (seller) loadFinishedGoods(seller);
     }
-    /* ===================================================== */
 
     async function renderRecentMovements(seller, material) {
       if (!seller || !material) return;
-      const url = `${endpoint}/inventory/movements/list?seller=${encodeURIComponent(seller)}&sku=${encodeURIComponent(material)}&limit=5`;
+      const url = `/inventory/movements/list?seller=${encodeURIComponent(seller)}&sku=${encodeURIComponent(material)}&limit=5`;
       try {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(await r.text());
+        const r = await api(url);
         const rows = await r.json();
-
         const ul = document.getElementById("recentMovements");
         ul.innerHTML = "";
         if (!rows.length) {
           ul.innerHTML = `<li class="list-group-item text-muted">No recent movements.</li>`;
           return;
         }
-
         rows.forEach(mv => {
           const li = document.createElement("li");
           li.className = "list-group-item d-flex justify-content-between align-items-center";
@@ -577,9 +497,7 @@
             <span class="badge bg-secondary rounded-pill">${qty}</span>`;
           ul.appendChild(li);
         });
-      } catch (e) {
-        console.warn("recent movements fetch failed:", e);
-      }
+      } catch (e) {}
     }
 
     async function createContract() {
@@ -590,50 +508,42 @@
       const price_per_ton = parseFloat(document.getElementById("price").value);
 
       if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
-        alert("Fill all fields (seller, buyer, material, tons, $/ton).");
+        toast("Fill all fields (seller, buyer, material, tons, $/ton).");
         return;
       }
 
-      const res = await fetch(`${endpoint}/contracts`, {
+      const res = await api(`/contracts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seller, buyer, material, weight_tons, price_per_ton })
       });
 
-      if (!res.ok) {
-        const txt = await res.text();
-        alert(`Create failed: ${res.status} ${txt}`);
-        return;
-      }
-
-      alert(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
-
+      toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
       await listContracts();
       renderRecentMovements(seller, material);
-      // NEW: refresh finished goods after reservation
       refreshFinishedFromInputs();
     }
 
     async function listContracts() {
       const seller = document.getElementById("sellerName").value.trim();
       if (!seller) return;
-
       const status = document.getElementById("filterStatus").value.trim();
-      const start  = toISO(document.getElementById("filterStart").value);
-      const end    = toISO(document.getElementById("filterEnd").value);
+      const start  = document.getElementById("filterStart").value;
+      const end    = document.getElementById("filterEnd").value;
 
       const qs = new URLSearchParams({ seller, limit, offset });
       if (status) qs.set("status", status);
-      if (start)  qs.set("start", start);
-      if (end)    qs.set("end", end);
-
-      const res = await fetch(`${endpoint}/contracts?${qs.toString()}`);
-      if (!res.ok) { console.error(await res.text()); return; }
-      const rows = await res.json();
+      if (start)  qs.set("start", new Date(start).toISOString());
+      if (end)    qs.set("end",   new Date(end).toISOString());
 
       const tbody = document.querySelector("#sellerContractsTable tbody");
-      tbody.innerHTML = "";
+      // skeleton
+      tbody.innerHTML=''; for(let i=0;i<5;i++){ const tr=document.createElement('tr'); tr.className='skeleton-row'; tr.innerHTML=Array.from({length:7},()=>'<td><span class="skeleton"></span></td>').join(''); tbody.appendChild(tr); }
 
+      const res = await api(`/contracts?${qs.toString()}`);
+      const rows = await res.json();
+
+      tbody.innerHTML = "";
       if (!rows.length) {
         const tr = document.createElement("tr");
         tr.innerHTML = `<td colspan="7" class="text-muted text-center py-3">No contracts match your filters.</td>`;
@@ -653,8 +563,16 @@
           tbody.appendChild(tr);
         });
       }
-
       document.getElementById("pageInfo").textContent = `Showing ${rows.length} • offset ${offset}`;
+    }
+
+    // saved filters in URL
+    function _syncQuery(params){
+      const u = new URL(location.href);
+      for (const [k,v] of Object.entries(params)) {
+        if (v === '' || v == null) u.searchParams.delete(k); else u.searchParams.set(k, v);
+      }
+      history.replaceState({}, '', u);
     }
 
     function wireSellerUI() {
@@ -666,45 +584,38 @@
       }
 
       document.getElementById("createContractBtn")?.addEventListener("click", createContract);
-      document.getElementById("refreshContractsBtn")?.addEventListener("click", () => { offset = 0; listContracts(); });
+      document.getElementById("refreshContractsBtn")?.addEventListener("click", () => {
+        offset = 0;
+        _syncQuery({
+          status: document.getElementById("filterStatus").value.trim(),
+          start:  document.getElementById("filterStart").value,
+          end:    document.getElementById("filterEnd").value,
+          page:   1
+        });
+        listContracts();
+      });
       document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
         document.getElementById("filterStatus").value = "";
-        document.getElementById("filterStart").value = "";
-        document.getElementById("filterEnd").value = "";
-        offset = 0; listContracts();
+        document.getElementById("filterStart").value  = "";
+        document.getElementById("filterEnd").value    = "";
+        offset = 0; _syncQuery({status:'',start:'',end:'',page:1}); listContracts();
       });
-      document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); listContracts(); });
-      document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; listContracts(); });
+      document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
+      document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
 
       setTimeout(listContracts, 200);
     }
 
-    // Inventory import + manual add hooks
     async function uploadInvFile() {
       const f = document.getElementById('invFile').files[0];
-      if (!f) { alert('Choose a CSV or XLSX file'); return; }
+      if (!f) { toast('Choose a CSV or XLSX file'); return; }
       const sellerDefault = document.getElementById('invDefaultSeller').value.trim();
-
-      const fd = new FormData();
-      fd.append('file', f);
-      if (sellerDefault) fd.append('seller', sellerDefault);
-
+      const fd = new FormData(); fd.append('file', f); if (sellerDefault) fd.append('seller', sellerDefault);
       const isXlsx = /\.xlsx?$/i.test(f.name);
-      const url = `${endpoint}/inventory/import/${isXlsx ? 'excel' : 'csv'}`;
-
-      const r = await fetch(url, { method: 'POST', body: fd });
+      const r = await api(`/inventory/import/${isXlsx ? 'excel' : 'csv'}`, { method:'POST', body: fd });
       const txt = await r.text();
-      if (!r.ok) { alert(`Import failed: ${r.status} ${txt}`); return; }
-
-      try {
-        const j = JSON.parse(txt);
-        document.getElementById('invUploadMsg').innerText =
-          `Upserted ${j.upserted}. Errors: ${(j.errors||[]).length}`;
-      } catch {
-        document.getElementById('invUploadMsg').innerText = txt;
-      }
-
-      // NEW: refresh finished goods after import
+      try { const j = JSON.parse(txt); document.getElementById('invUploadMsg').innerText = `Upserted ${j.upserted}. Errors: ${(j.errors||[]).length}`; }
+      catch { document.getElementById('invUploadMsg').innerText = txt; }
       refreshFinishedFromInputs();
     }
 
@@ -716,11 +627,9 @@
       const location = document.getElementById('invLocation').value.trim();
       const description = document.getElementById('invDesc').value.trim();
 
-      if (!seller || !sku || !Number.isFinite(qty)) {
-        alert('Seller, SKU, and Qty are required.'); return;
-      }
+      if (!seller || !sku || !Number.isFinite(qty)) { toast('Seller, SKU, and Qty are required.'); return; }
 
-      const resp = await fetch(`${endpoint}/inventory/manual_add`, {
+      const resp = await api(`/inventory/manual_add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -729,63 +638,68 @@
           source: 'manual'
         })
       });
-      if (!resp.ok) { alert(`Manual add failed: ${resp.status} ${await resp.text()}`); return; }
-
-      alert('Inventory updated.');
+      toast('Inventory updated.');
       renderRecentMovements(seller, sku);
-      // NEW: refresh finished goods after manual add
       refreshFinishedFromInputs();
     }
 
     document.addEventListener("DOMContentLoaded", wireSellerUI);
     document.addEventListener('DOMContentLoaded', () => {
-      // Try to seed seller input from header on first paint, then load
       const userEl = document.getElementById("current-user");
       const sellerEl = document.getElementById("sellerName");
       if (userEl && sellerEl) {
         const u = (userEl.textContent || '').replace("User:", "").trim();
         if (u && u !== "Guest") sellerEl.value = u;
       }
-      refreshFinishedFromInputs();
+      // hydrate filters from URL
+      const q = new URL(location.href).searchParams;
+      const s = q.get('status') || ''; const st = q.get('start') || ''; const en = q.get('end') || '';
+      const page = +(q.get('page')||'1');
+      document.getElementById("filterStatus").value = s;
+      document.getElementById("filterStart").value  = st;
+      document.getElementById("filterEnd").value    = en;
+      offset = Math.max(0,(page-1))*limit;
 
+      refreshFinishedFromInputs();
       document.getElementById('uploadInvBtn')?.addEventListener('click', uploadInvFile);
       document.getElementById('manualAddBtn')?.addEventListener('click', manualAddInventory);
-      document.getElementById('dlTemplateBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        window.open(`${endpoint}/inventory/template.csv`, '_blank');
-      });
+      document.getElementById('dlTemplateBtn')?.addEventListener('click', (e) => { e.preventDefault(); window.open(`/inventory/template.csv`, '_blank'); });
     });
-  </script>
 
-  <script>
-    // Login modal wired to /login
+    // Login modal + focus restore
+    let loginTriggerBtn = null;
     function showLoginModal() {
-      const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
-      loginModal.show();
+      loginTriggerBtn = document.activeElement;
+      const modalEl = document.getElementById('loginModal');
+      const modal = new bootstrap.Modal(modalEl, { focus:true, backdrop:'static', keyboard:false });
+      modalEl.addEventListener('hidden.bs.modal', ()=>{ loginTriggerBtn?.focus(); }, { once:true });
+      modal.show();
     }
     document.getElementById("login-form")?.addEventListener("submit", async function(e) {
       e.preventDefault();
       const username = document.getElementById("username").value.trim();
       const password = document.getElementById("password").value.trim();
       try {
-        const resp = await fetch(`${window.endpoint || 'https://bridge-buyer.onrender.com'}/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify({ username, password })
-        });
-        if (!resp.ok) throw new Error(await resp.text());
+        const resp = await api(`/login`, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ username, password }) });
         const data = await resp.json();
         document.getElementById("current-user").innerText = `User: ${username}`;
-        // NEW: seed seller box and reload finished goods on login
         const sellerEl = document.getElementById("sellerName");
         if (sellerEl) sellerEl.value = username;
+        localStorage.setItem('bridgeUser', JSON.stringify({ role: (data.role||'').toLowerCase()==='yard' ? 'seller' : (data.role||'buyer') }));
         refreshFinishedFromInputs();
-
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
         if (data?.redirect) window.location.href = data.redirect;
       } catch (err) {
         document.getElementById("login-error").innerText = (err?.message || "Login failed");
       }
+    });
+
+    // Role-guard examples
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role || '').toLowerCase();
+      document.querySelectorAll('[data-role="admin"]').forEach(el => el.style.display = (role==='admin') ? '' : 'none');
+      document.querySelectorAll('[data-role="seller"]').forEach(el => el.style.display = (role==='seller'||role==='admin') ? '' : 'none');
+      document.querySelectorAll('[data-role="buyer"]').forEach(el => el.style.display = (role==='buyer') ? '' : 'none');
     });
   </script>
 
