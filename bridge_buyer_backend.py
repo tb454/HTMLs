@@ -230,16 +230,6 @@ async def prices_copper_last():
         last = 4.19
         return {"last": last, "base_minus_025": round(last - 0.25, 4), "note": f"fallback: {e.__class__.__name__}"}
 
-@app.get(
-    "/prices/copper_last",
-    tags=["Prices"],
-    summary="COMEX copper last trade (USD/lb)",
-    description="Scrapes https://comexlive.org/copper/ for the 'last trade' price and returns base = last - 0.25",
-    status_code=200
-)
-async def prices_copper_last():
-    ...
-
 @app.get("/fx/convert", tags=["Global"], summary="Convert amount between currencies (static FX)")
 async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
     try:
@@ -3032,56 +3022,6 @@ async def generate_bol_pdf(bol_id: str):
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
 
-@app.post(
-    "/bols",
-    response_model=BOLOut,
-    tags=["BOLs"],
-    summary="Create BOL",
-    status_code=201
-)
-async def create_bol_pg(bol: BOLIn, request: Request):
-    # Optional idempotency
-    idem_key = request.headers.get("Idempotency-Key")
-    if idem_key and idem_key in _idem_cache:
-        return _idem_cache[idem_key]
-
-    row = await database.fetch_one("""
-        INSERT INTO bols (
-            bol_id, contract_id, buyer, seller, material, weight_tons,
-            price_per_unit, total_value,
-            carrier_name, carrier_driver, carrier_truck_vin,
-            pickup_signature_base64, pickup_signature_time,
-            pickup_time, status
-        )
-        VALUES (
-            :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
-            :price_per_unit, :total_value,
-            :carrier_name, :carrier_driver, :carrier_truck_vin,
-            :pickup_sig_b64, :pickup_sig_time,
-            :pickup_time, 'Scheduled'
-        )
-        RETURNING *
-    """, {
-        "bol_id": str(uuid.uuid4()),
-        "contract_id": str(bol.contract_id),
-        "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
-        "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
-        "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
-        "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
-        "pickup_time": bol.pickup_time
-    })
-
-    resp = {
-        **bol.dict(),
-        "bol_id": row["bol_id"],
-        "status": row["status"],
-        "delivery_signature": None,
-        "delivery_time": None
-    }
-    if idem_key:
-        _idem_cache[idem_key] = resp
-    return resp
-
 # -------- Receipts lifecycle --------
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -5566,7 +5506,7 @@ async def settle_publish(symbol: str, as_of: date, method: str = "vwap_last60m")
     return {"symbol": symbol, "as_of": str(as_of), "settle": round(vwap, 5), "method": method}
 
 @app.post("/index/contracts/expire", tags=["Settlement"], summary="Expire monthly index futures to BR-Settle")
-async def expire_month(tradable_symbol: str, as_of: date, request: Request | None = None):
+async def expire_month(tradable_symbol: str, as_of: date, request: Request):
     # _require_admin(request)  # uncomment to gate in production
 
     ic = await database.fetch_one(

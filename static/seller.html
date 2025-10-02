@@ -203,6 +203,22 @@
       </div>
     </section>
 
+<!-- RFQ (two-click) -->
+<div class="card p-3 mt-3" style="max-width:520px">
+  <div class="d-flex gap-2">
+    <select id="rfqSym" class="form-select">
+      <option>CU-SHRED-1M</option>
+      <option>AL-6061-1M</option>
+    </select>
+    <select id="rfqSide" class="form-select">
+      <option>buy</option>
+      <option>sell</option>
+    </select>
+    <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)">
+    <button id="rfqGo" class="btn btn-primary">RFQ</button>
+  </div>
+</div>
+
     <!-- Recent Movements -->
     <section class="section" id="recentMovementsSection">
       <div class="section-title">Recent Inventory Movements</div>
@@ -702,6 +718,26 @@
       document.querySelectorAll('[data-role="buyer"]').forEach(el => el.style.display = (role==='buyer') ? '' : 'none');
     });
   </script>
+<script>
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const btn = document.getElementById('rfqGo');
+    if(!btn) return;
+    btn.onclick = async ()=>{
+      const s   = document.getElementById('rfqSym').value;
+      const side= document.getElementById('rfqSide').value;
+      const q   = +document.getElementById('rfqQty').value;
+      if (!q) return toast('Enter qty');
+      const exp = new Date(Date.now() + 20*60*1000).toISOString();
+      const r = await api('/rfq', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
+      });
+      toast('RFQ posted');
+      try { console.log(await r.json()); } catch {}
+    };
+  });
+</script>
 
   <footer style="margin-top:40px;padding:20px;text-align:center;font-size:14px;color:#777">
     <hr style="margin-bottom:15px;">
