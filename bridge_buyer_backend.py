@@ -397,7 +397,7 @@ async def _ensure_anomaly_scores_schema():
     CREATE INDEX IF NOT EXISTS idx_anom_asof ON public.anomaly_scores (as_of);
     """
     try:
-        await database.execute(ddl)
+        await run_ddl_multi(ddl)
     except Exception as e:
         logger.warn("anomaly_scores_bootstrap_failed", err=str(e))
 # ----- Anomaly scores -----
@@ -1530,6 +1530,7 @@ async def _ensure_trading_schema():
 # ===== TRADING HARDENING: risk limits, audit, trading status =====
 @app.on_event("startup")
 async def _ensure_trading_hardening():
+    # 1) columns / tables (safe to run every boot)
     ddl = [
         """
         ALTER TABLE margin_accounts
@@ -1546,17 +1547,26 @@ async def _ensure_trading_hardening():
           at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
-        """
-        ALTER TABLE futures_listings
-        ADD COLUMN IF NOT EXISTS trading_status TEXT NOT NULL DEFAULT 'Trading',
-        ADD CONSTRAINT chk_trading_status CHECK (trading_status IN ('Trading','Halted','Expired'));
-        """
+        # split the column add from the named constraint add
+        "ALTER TABLE futures_listings ADD COLUMN IF NOT EXISTS trading_status TEXT NOT NULL DEFAULT 'Trading';",
     ]
     for stmt in ddl:
         try:
             await database.execute(stmt)
         except Exception as e:
             logger.warn("trading_hardening_bootstrap_failed", err=str(e), sql=stmt[:120])
+
+    # 2) add the named constraint with a guard (don’t fail if it already exists)
+    try:
+        await database.execute(
+            "ALTER TABLE futures_listings "
+            "ADD CONSTRAINT chk_trading_status "
+            "CHECK (trading_status IN ('Trading','Halted','Expired'))"
+        )
+    except Exception:
+        # Already exists (or other benign condition) — ignore
+        pass
+
 
 # ===== INVENTORY schema bootstrap (idempotent) =====
 @app.on_event("startup")
@@ -1624,42 +1634,40 @@ async def _ensure_inventory_schema():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
+# ===== INVENTORY schema bootstrap (idempotent) =====
+
+# ------ RECEIPTS schema bootstrap (idempotent) =====
 @app.on_event("startup")
 async def _ensure_receipts_schema():
     ddl = """
-    CREATE TABLE IF NOT EXISTS public.receipts (
-      receipt_id      UUID PRIMARY KEY,
-      seller          TEXT,
-      sku             TEXT,
-      qty_tons        NUMERIC,
-      status          TEXT NOT NULL DEFAULT 'created',
-      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      consumed_at     TIMESTAMPTZ,
-      consumed_bol_id UUID,
-      provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    -- === Option B: extend data model for stocks/locations ===
-    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;     -- tradable symbol (e.g., CU-SHRED-1M)
-    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;     -- yard/warehouse/location code
-    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_lots  NUMERIC;  -- quantity in lots (optional if you keep tons)
-    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS lot_size  NUMERIC;  -- pounds per lot (e.g., 40000 for 20 tons)
+CREATE TABLE IF NOT EXISTS public.receipts (
+  receipt_id      UUID PRIMARY KEY,
+  seller          TEXT,
+  sku             TEXT,
+  qty_tons        NUMERIC,
+  status          TEXT NOT NULL DEFAULT 'created',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  consumed_at     TIMESTAMPTZ,
+  consumed_bol_id UUID,
+  provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
+);
 
-    CREATE OR REPLACE VIEW public.receipts_live AS
-      SELECT * FROM public.receipts
-      WHERE consumed_at IS NULL AND status IN ('created','pledged');
-    """
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_lots  NUMERIC;
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS lot_size  NUMERIC;
+
+CREATE OR REPLACE VIEW public.receipts_live AS
+  SELECT * FROM public.receipts
+  WHERE consumed_at IS NULL AND status IN ('created','pledged');
+"""
     try:
         await run_ddl_multi(ddl)
-        await run_ddl_multi("""
-            ALTER TABLE public.receipts
-              ADD COLUMN IF NOT EXISTS symbol   TEXT,
-              ADD COLUMN IF NOT EXISTS location TEXT,
-              ADD COLUMN IF NOT EXISTS qty_lots NUMERIC,
-              ADD COLUMN IF NOT EXISTS lot_size NUMERIC;
-        """)
     except Exception as e:
         logger.warn("receipts_bootstrap_failed", err=str(e))
+# ===== RECEIPTS schema bootstrap (idempotent) =====
+
 
 @app.on_event("startup")
 async def _receipts_backfill_once():
