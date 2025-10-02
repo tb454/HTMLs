@@ -1951,7 +1951,7 @@ async def finished_goods(seller: str = Query(..., description="Seller (yard) nam
 @app.on_event("startup")
 async def _ensure_contracts_bols_schema():
     ddl = [
-        # contracts
+        # contracts (base shape)
         """
         CREATE TABLE IF NOT EXISTS contracts (
           id UUID PRIMARY KEY,
@@ -1966,7 +1966,16 @@ async def _ensure_contracts_bols_schema():
           signature TEXT
         );
         """,
-        # bols
+
+        # extend contracts with pricing fields used by create_contract()
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_symbol    TEXT;",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_price     NUMERIC;",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_source    TEXT;",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_timestamp TIMESTAMPTZ;",
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS currency            TEXT DEFAULT 'USD';",
+
+        # bols (base shape)
         """
         CREATE TABLE IF NOT EXISTS bols (
           bol_id UUID PRIMARY KEY,
@@ -1989,22 +1998,25 @@ async def _ensure_contracts_bols_schema():
           status TEXT
         );
         """,
-        "CREATE INDEX IF NOT EXISTS idx_bols_contract ON bols(contract_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON bols(pickup_time DESC);",
 
-        # --- Export/compliance fields (idempotent ALTERs) ---
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS origin_country TEXT",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS destination_country TEXT",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS port_code TEXT",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS hs_code TEXT",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC",
+        "CREATE INDEX IF NOT EXISTS idx_bols_contract     ON bols(contract_id);",
+        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time  ON bols(pickup_time DESC);",
+
+        # export/compliance fields (idempotent)
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS origin_country TEXT;",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS destination_country TEXT;",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS port_code TEXT;",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS hs_code TEXT;",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC;",
+        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC;",
     ]
+
     for s in ddl:
         try:
             await database.execute(s)
         except Exception as e:
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
+# ===== /CONTRACTS / BOLS schema bootstrap =====
 
 @app.on_event("startup")
 async def _ensure_audit_log_schema():
