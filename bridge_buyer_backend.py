@@ -1653,6 +1653,7 @@ CREATE TABLE IF NOT EXISTS public.receipts (
   provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_tons NUMERIC;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;
@@ -1697,18 +1698,18 @@ async def _receipts_backfill_once():
 @app.on_event("startup")
 async def _receipts_backfill_columns():
     """
-    Best-effort backfill so /stocks/snapshot can aggregate immediately.
-    Safe to run repeatedly (idempotent updates).
+    Idempotent backfill for receipts so /stocks/snapshot can aggregate.
+    Convention: lot_size is in TONS per lot (e.g., 20.0).
     """
     try:
-        # 1) default lot_size if missing (choose your business default)
+        # 0) Ensure lot_size default (TONS per lot)
         await database.execute("""
             UPDATE public.receipts
                SET lot_size = 20.0
              WHERE lot_size IS NULL
         """)
 
-        # 2) set symbol from sku when missing
+        # 1) Ensure symbol (default to sku)
         await database.execute("""
             UPDATE public.receipts
                SET symbol = sku
@@ -1716,14 +1717,23 @@ async def _receipts_backfill_columns():
                AND sku IS NOT NULL
         """)
 
-        # 3) normalize location (optional placeholder)
+        # 2) Normalize location
         await database.execute("""
             UPDATE public.receipts
                SET location = COALESCE(NULLIF(location,''), 'UNKNOWN')
              WHERE location IS NULL OR location = ''
         """)
 
-        # 4) compute qty_lots from qty_tons / lot_size when missing
+        # 3) If qty_tons is missing but we have qty_lots and lot_size → derive tons
+        await database.execute("""
+            UPDATE public.receipts
+               SET qty_tons = qty_lots * lot_size
+             WHERE qty_tons IS NULL
+               AND qty_lots IS NOT NULL
+               AND lot_size IS NOT NULL
+        """)
+
+        # 4) If qty_lots is missing but we have qty_tons and lot_size → derive lots
         await database.execute("""
             UPDATE public.receipts
                SET qty_lots = CASE
@@ -1732,9 +1742,12 @@ async def _receipts_backfill_columns():
                                 ELSE NULL
                               END
              WHERE qty_lots IS NULL
+               AND qty_tons IS NOT NULL
+               AND lot_size IS NOT NULL
         """)
     except Exception as e:
         logger.warn("receipts_backfill_failed", err=str(e))
+
 
 @app.on_event("startup")
 async def _ensure_stocks_schema():
