@@ -1993,25 +1993,6 @@ async def _ensure_audit_log_schema():
         await database.execute(ddl)
     except Exception as e:
         logger.warn("audit_log_bootstrap_failed", err=str(e))
-
-@app.on_event("startup")
-async def _ensure_audit_seal_schema():
-    ddl = [
-        "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
-        """
-        CREATE TABLE IF NOT EXISTS audit_seals (
-          chain_date DATE PRIMARY KEY,
-          final_hash TEXT NOT NULL,
-          sealed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        """
-    ]
-    for s in ddl:
-        try:
-            await database.execute(s)
-        except Exception as e:
-            logger.warn("audit_seal_bootstrap_failed", err=str(e), sql=s[:120])
-
 # ----------- /schema bootstrap -----------
 
 # ===== AUDIT CHAIN schema bootstrap (idempotent) =====
@@ -2565,88 +2546,7 @@ class ContractOut(ContractIn):
         }}
 
 # -------- Contracts & BOLs --------
-@app.post(
-    "/contracts",
-    response_model=ContractOut,
-    tags=["Contracts"],
-    summary="Create Contract",
-    description="Creates a Pending contract and reserves inventory (qty_reserved += weight_tons).",
-    status_code=201
-)
-async def create_contract(contract: ContractIn):
-    qty   = float(contract.weight_tons)
-    seller = contract.seller.strip()
-    sku    = contract.material.strip()  # we store material in contracts, sku in inventory
 
-    cid = str(uuid.uuid4())
-
-    async with database.transaction():
-        # ensure inventory row exists
-        await database.execute("""
-            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-            VALUES (:seller, :sku, 0, 0, 0)
-            ON CONFLICT (seller, sku) DO NOTHING
-        """, {"seller": seller, "sku": sku})
-
-        # check availability and reserve
-        inv = await database.fetch_one("""
-            SELECT qty_on_hand, qty_reserved, qty_committed
-            FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
-            FOR UPDATE
-        """, {"seller": seller, "sku": sku})
-        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
-        reserved  = float(inv["qty_reserved"]) if inv else 0.0
-        committed = float(inv["qty_committed"]) if inv else 0.0
-        available = on_hand - reserved - committed
-        if available < qty:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)."
-            )
-
-        await database.execute("""
-            UPDATE inventory_items
-               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-             WHERE seller=:seller AND sku=:sku
-        """, {"q": qty, "seller": seller, "sku": sku})
-
-        # movement link
-        await database.execute("""
-            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
-        """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
-              "meta": json.dumps({"reason": "contract_create"})})
-
-        # create contract row (matches your contracts schema)
-        row = await database.fetch_one("""
-            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, created_at)
-            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending', NOW())
-            RETURNING *
-        """, {
-            "id": cid,
-            "buyer": contract.buyer,
-            "seller": contract.seller,
-            "material": contract.material,
-            "weight_tons": contract.weight_tons,
-            "price_per_ton": contract.price_per_ton
-        })
-
-    # optional webhook
-    try:
-        await emit_event("contract.created", {
-            "contract_id": str(row["id"]),
-            "seller": row["seller"],
-            "buyer": row["buyer"],
-            "sku": row["material"],                         # expose as sku to receivers
-            "price_per_unit": float(row["price_per_ton"]),
-            "currency": "USD",
-            "created_at": (row["created_at"] or datetime.utcnow()).isoformat()
-        })
-    except Exception:
-        pass
-
-    return row
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
     expected_status: Literal["Pending"] = "Pending"
@@ -2738,11 +2638,6 @@ async def admin_run_snapshot_now(storage: str = "supabase"):
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-@app.post("/admin/run_snapshot_bg", tags=["Admin"], summary="Queue a snapshot upload (background) and return immediately")
-async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase"):
-    background.add_task(run_daily_snapshot, storage)
-    return {"ok": True, "queued": True}
 
 # ===== Admin export helpers =====
 
@@ -3286,73 +3181,6 @@ async def public_ticker(listing_id: str):
     }
 
 # -------- Contracts (with Inventory linkage) --------
-@app.post(
-    "/contracts",
-    response_model=ContractOut,
-    tags=["Contracts"],
-    summary="Create Contract",
-    description="Creates a Pending contract and reserves inventory (qty_reserved += weight_tons).",
-    status_code=201
-)
-async def create_contract(contract: ContractIn):
-    qty = float(contract.weight_tons)
-    seller = contract.seller.strip()
-    sku = contract.material.strip()
-    cid = str(uuid.uuid4())  # create id up front so we can reference it in movements
-
-    async with database.transaction():
-        # ensure inventory row exists
-        await database.execute("""
-            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-            VALUES (:seller, :sku, 0, 0, 0)
-            ON CONFLICT (seller, sku) DO NOTHING
-        """, {"seller": seller, "sku": sku})
-
-        # check availability
-        inv = await database.fetch_one("""
-            SELECT qty_on_hand, qty_reserved, qty_committed
-              FROM inventory_items
-             WHERE seller=:seller AND sku=:sku
-             FOR UPDATE
-        """, {"seller": seller, "sku": sku})
-        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
-        reserved  = float(inv["qty_reserved"]) if inv else 0.0
-        committed = float(inv["qty_committed"]) if inv else 0.0
-        available = on_hand - reserved - committed
-        if available < qty:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s)."
-            )
-
-        # reserve
-        await database.execute("""
-            UPDATE inventory_items
-               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-             WHERE seller=:seller AND sku=:sku
-        """, {"q": qty, "seller": seller, "sku": sku})
-
-        # movement (now linked to contract id)
-        await database.execute("""
-            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
-        """, {
-            "seller": seller, "sku": sku, "q": qty, "cid": cid,
-            "meta": json.dumps({"reason": "contract_create"})
-        })
-
-        # create contract row using the same cid
-        row = await database.fetch_one("""
-            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status)
-            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, 'Pending')
-            RETURNING *
-        """, {"id": cid, **contract.dict()})
-
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create contract")
-
-        return row
-
 @app.get(
     "/contracts",
     response_model=List[ContractOut],
@@ -3556,15 +3384,6 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
     if idem:
         _idem_cache[idem] = resp
     return resp 
-
-# === INSERT: Back-compat aliases for older UI buttons ===
-@app.get("/admin/export_all", include_in_schema=False)
-def _alias_export_all():
-    return RedirectResponse(url="/admin/exports/all.zip", status_code=307)
-
-@app.get("/contracts/export_csv", include_in_schema=False)
-def _alias_export_csv():
-    return RedirectResponse(url="/admin/exports/contracts.csv", status_code=307)
 # === /INSERT ===
 
 from typing import Optional
@@ -3784,111 +3603,6 @@ async def tax_lookup(hs_code: str, dest: str):
             "tax_pct": float(row["tax_pct"]) if row else 0.0,
             "duty_usd": float(row["duty_usd"]) if row else 0.0}
 
-# --- MANUAL SNAPSHOT GENERATOR (TEMP/ADMIN) ---
-@app.post("/indices/generate_snapshot", tags=["Admin"], summary="Manually generate an index snapshot", description="Aggregates avg price per SKU + region from contracts table and stores it as a snapshot.")
-async def generate_snapshot():
-    agg_q = """
-        SELECT LOWER(seller) AS region, sku, AVG(price_per_unit) AS avg_price
-        FROM contracts
-        WHERE price_per_unit IS NOT NULL
-        GROUP BY region, sku;
-    """
-    rows = await database.fetch_all(agg_q)
-    if not rows:
-        return {"ok": True, "snapshots_created": 0}
-
-    insert_q = """
-        INSERT INTO index_snapshots (region, sku, avg_price)
-        VALUES (:region, :sku, :avg_price);
-    """
-    count = 0
-    for r in rows:
-        await database.execute(insert_q, {"region": r["region"], "sku": r["sku"], "avg_price": r["avg_price"]})
-        count += 1
-    return {"ok": True, "snapshots_created": count}
-
-# ========== Admin Exports router ==========
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse, RedirectResponse
-from sqlalchemy import text as _sqltext
-import io, csv, zipfile
-
-admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
-
-@admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
-def export_contracts_csv_admin():
-    with engine.begin() as conn:
-        rows = conn.execute(_sqltext("""
-            SELECT 
-              id, buyer, seller, material, sku, weight_tons, price_per_ton,
-              total_value, status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC NULLS LAST, id DESC
-        """)).mappings().all()
-        cols = rows[0].keys() if rows else []
-
-        def _iter():
-            buf = io.StringIO(); w = csv.writer(buf)
-            if cols: w.writerow(cols); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-            for r in rows:
-                w.writerow([r.get(c) for c in cols])
-                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-
-        return StreamingResponse(
-            _iter(),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
-
-@admin_exports.get("/all.zip", summary="All core tables as CSV (ZIP)")
-def export_all_zip_admin():
-    queries = {
-        "contracts.csv": """
-            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
-                   total_value, status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC NULLS LAST, id DESC
-        """,
-        "bols.csv": """
-            SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
-                   pickup_time, delivery_time, total_value
-            FROM bols
-            ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
-        """,
-        "inventory_items.csv": """
-            SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
-                   qty_committed, source, external_id, updated_at
-            FROM inventory_items
-            ORDER BY seller, sku
-        """,
-        "inventory_movements.csv": """
-            SELECT seller, sku, movement_type, qty, ref_contract, created_at
-            FROM inventory_movements
-            ORDER BY created_at DESC
-        """
-    }
-
-    with engine.begin() as conn:
-        mem = io.BytesIO()
-        with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for fname, sql in queries.items():
-                rows = conn.execute(_sqltext(sql)).mappings().all()
-                cols = rows[0].keys() if rows else []
-                s = io.StringIO(); w = csv.writer(s)
-                if cols: w.writerow(cols)
-                for r in rows:
-                    w.writerow([r.get(c) for c in cols])
-                zf.writestr(fname, s.getvalue())
-        mem.seek(0)
-        return StreamingResponse(
-            mem,
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
-        )
-
-# mount router (place once, near where you include other routers)
-app.include_router(admin_exports)
-
 # ========== /Admin Exports router ==========
 import asyncio
 import inspect
@@ -4075,32 +3789,6 @@ async def sign_contract(contract_id: str, request: Request):
 
     return {"status": "ok", "contract_id": contract_id}
 
-async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        res = await emit_event(event_type, payload)
-        if not res.get("ok"):
-            try:
-                await database.execute("""
-                  INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
-                  VALUES (:e, :p::jsonb, :sc, :rt)
-                """, {
-                    "e": event_type,
-                    "p": json.dumps(payload),
-                    "sc": res.get("status_code"),
-                    "rt": res.get("response")
-                })
-            except Exception:
-                pass
-        return res
-    except Exception:
-        try:
-            await database.execute("""
-              INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
-              VALUES (:e, :p::jsonb, NULL, 'exception')
-            """, {"e": event_type, "p": json.dumps(payload)})
-        except Exception:
-            pass
-        return {"ok": False, "status_code": None, "response": "exception"}
 class ApplicationIn(BaseModel):
     # use Field(pattern=...) for Pydantic v2; if on v1, switch to constr(regex=...)
     entity_type: str = Field(pattern=r"^(yard|mill|industrial|manufacturer|broker)$")
@@ -4365,6 +4053,8 @@ from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
 import io, csv, zipfile
 
+admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
+
 @admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
 def export_contracts_csv_admin():
     with engine.begin() as conn:
@@ -4436,6 +4126,7 @@ def export_all_zip_admin():
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
+app.include_router(admin_exports)
 
 # === /INSERT ===
 
