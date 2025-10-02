@@ -287,6 +287,45 @@ async def _metrics_and_sentry():
 dsn = os.getenv("SENTRY_DSN")
 if dsn:
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
+# =====  Prometheus metrics + optional Sentry =====
+
+# ---- Settlement Publishing ---- 
+@app.on_event("startup")
+async def _ensure_settlements_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS settlements (
+      as_of DATE NOT NULL,
+      symbol TEXT NOT NULL,
+      settle NUMERIC NOT NULL,
+      method TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (as_of, symbol)
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("settlements_schema_bootstrap_failed", err=str(e))
+# ---- Settlement Publishing ----
+
+# #------ Surveillance / Alerts ------
+@app.on_event("startup")
+async def _ensure_surveillance_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS surveil_alerts (
+      alert_id UUID PRIMARY KEY,
+      rule TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      data JSONB NOT NULL,
+      severity TEXT NOT NULL CHECK (severity IN ('info','warn','high')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("surveil_schema_bootstrap_failed", err=str(e))
+#------ Surveillance / Alerts ------
 
 # -------- Legal pages --------
 @app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
@@ -300,9 +339,9 @@ async def eula_page():
 @app.get("/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy", description="View the BRidge platform Privacy Policy.", status_code=200)
 async def privacy_page():
     return FileResponse("static/legal/privacy.html")
+# -------- Legal pages --------
 
 # -------- Static HTML --------
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
@@ -324,6 +363,7 @@ async def seller_page():
 @app.get("/indices-dashboard", include_in_schema=False)
 async def indices_page():
     return FileResponse("static/indices.html")
+# -------- Static HTML --------
 
 # alias: support any old links that hit /yard
 @app.get("/yard", include_in_schema=False)
@@ -337,6 +377,26 @@ async def yard_alias_slash():
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
+
+# -------- Risk controls (kill switch, price bands, entitlements) --------
+@app.on_event("startup")
+async def _ensure_risk_schema():
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS clob_position_limits (
+          member TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          limit_lots NUMERIC NOT NULL,
+          PRIMARY KEY (member, symbol)
+        );
+        """
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("risk_schema_bootstrap_failed", err=str(e), sql=s[:120])
+#----- Risk controls (kill switch, price bands, entitlements) -----
 
 # -------- Ensure public.users has id/email/username/is_active --------
 @app.on_event("startup")
@@ -858,12 +918,19 @@ async def create_user(
 
     return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
+@app.post("/admin/entitlements/grant", tags=["Admin"], summary="Grant feature to user/member")
+async def grant_entitlement(user: str, feature: str, request: Request):
+    _require_admin(request)  # gate in production
+    _ENTITLEMENTS[user].add(feature)
+    return {"user": user, "features": sorted(list(_ENTITLEMENTS[user]))}
+
 @app.on_event("shutdown")
 async def shutdown_disconnect():
     try:
         await database.disconnect()
     except Exception:
         pass
+# ==== /Quick user creation (admin-only bootstrap) ========================
 
 # ======= AUTH ========
 from fastapi import Request
@@ -4284,6 +4351,248 @@ async def _symbol_for_listing(listing_id: str) -> str:
         return None
     return row["symbol_root"]
 
+class OrderIn(BaseModel):
+    symbol: str
+    side: Literal["buy","sell"]
+    price: Decimal
+    qty_lots: Decimal
+    tif: Literal["day","ioc","fok"] = "day"
+
+@app.post("/orders", tags=["CLOB"], summary="Place order")
+async def place_order(o: OrderIn, request: Request):
+    user = request.session.get("username","anon")
+    require_entitlement(user, "clob.trade")
+    if _KILL_SWITCH.get(user): raise HTTPException(423, "Kill switch active")
+    await price_band_check(o.symbol, float(o.price))
+    await _check_position_limit(user, o.symbol, float(o.qty_lots), o.side)
+
+    order_id = str(uuid.uuid4())
+    qty = float(o.qty_lots)
+    await database.execute("""
+      INSERT INTO orders(order_id,symbol,side,price,qty_lots,qty_open,owner,tif)
+      VALUES (:id,:s,:side,:p,:q,:q,:owner,:tif)
+    """, {"id":order_id,"s":o.symbol,"side":o.side,"p":str(o.price),"q":qty,"owner":user,"tif":o.tif})
+
+    # match loop
+    filled = await _match(order_id)
+    if o.tif in ("ioc","fok"):
+        row = await database.fetch_one("SELECT qty_open FROM orders WHERE order_id=:id", {"id":order_id})
+        open_qty = float(row["qty_open"]) if row else 0.0
+        if (o.tif=="fok" and open_qty>0) or (o.tif=="ioc" and open_qty>0):
+            # cancel remainder
+            await database.execute("UPDATE orders SET status='cancelled', qty_open=0 WHERE order_id=:id", {"id":order_id})
+    return {"order_id": order_id, "filled": filled}
+
+@app.delete("/orders/{order_id}", tags=["CLOB"], summary="Cancel order")
+async def cancel_order(order_id: str, request: Request):
+    user = request.session.get("username","anon")
+    row = await database.fetch_one("SELECT owner,status FROM orders WHERE order_id=:id", {"id":order_id})
+    if not row: raise HTTPException(404, "Order not found")
+    if row["owner"] != user: raise HTTPException(403, "Not owner")
+    if row["status"] != "open": raise HTTPException(409, "Not open")
+    await database.execute("UPDATE orders SET status='cancelled', qty_open=0 WHERE order_id=:id", {"id":order_id})
+    return {"status":"cancelled"}
+
+@app.get("/orderbook", tags=["CLOB"], summary="Best bid/ask + depth (simple)")
+async def orderbook(symbol: str, depth: int = 10):
+    bids = await database.fetch_all("""
+      SELECT price, SUM(qty_open) qty FROM orders
+      WHERE symbol=:s AND side='buy' AND status='open'
+      GROUP BY price ORDER BY price DESC LIMIT :d
+    """, {"s":symbol, "d":depth})
+    asks = await database.fetch_all("""
+      SELECT price, SUM(qty_open) qty FROM orders
+      WHERE symbol=:s AND side='sell' AND status='open'
+      GROUP BY price ORDER BY price ASC LIMIT :d
+    """, {"s":symbol, "d":depth})
+    return {"symbol":symbol, "bids":[dict(b) for b in bids], "asks":[dict(a) for a in asks]}
+
+async def _match(order_id: str) -> float:
+    o = await database.fetch_one("SELECT * FROM orders WHERE order_id=:id", {"id":order_id})
+    if not o or o["status"] != "open": return 0.0
+    symbol, side, owner = o["symbol"], o["side"], o["owner"]
+    price, open_qty = float(o["price"]), float(o["qty_open"])
+    contra_side = "sell" if side=="buy" else "buy"
+    price_sort = "ASC" if side=="buy" else "DESC"
+    price_cmp = "<=" if side=="buy" else ">="
+    # fetch contra orders at marketable prices
+    rows = await database.fetch_all(f"""
+      SELECT * FROM orders
+      WHERE symbol=:s AND side=:cs AND status='open' AND price {price_cmp} :p
+      ORDER BY price {price_sort}, created_at ASC
+    """, {"s":symbol,"cs":contra_side,"p":price})
+    filled_total = 0.0
+    for row in rows:
+        if open_qty <= 0: break
+        if row["owner"] == owner:
+            # self-match prevention → skip
+            continue
+        trade_qty = min(open_qty, float(row["qty_open"]))
+        trade_price = float(row["price"])
+        trade_id = str(uuid.uuid4())
+        buy_owner  = owner if side=="buy" else row["owner"]
+        sell_owner = row["owner"] if side=="buy" else owner
+
+        # position limit check for taker side already done; ensure maker side too
+        await _check_position_limit(buy_owner, symbol, trade_qty, "buy")
+        await _check_position_limit(sell_owner, symbol, trade_qty, "sell", is_sell=True)
+
+        await database.execute("""
+          INSERT INTO trades(trade_id,symbol,price,qty_lots,buy_owner,sell_owner,maker_order,taker_order)
+          VALUES (:id,:s,:p,:q,:b,:se,:maker,:taker)
+        """, {"id":trade_id,"s":symbol,"p":trade_price,"q":trade_qty,"b":buy_owner,"se":sell_owner,
+              "maker":row["order_id"],"taker":order_id})
+
+        # update orders
+        await database.execute("UPDATE orders SET qty_open=qty_open-:q WHERE order_id=:id", {"q":trade_qty,"id":row["order_id"]})
+        await database.execute("UPDATE orders SET qty_open=GREATEST(qty_open-:q,0) WHERE order_id=:id", {"q":trade_qty,"id":order_id})
+        await database.execute("UPDATE orders SET status='filled' WHERE order_id=:id AND qty_open<=0.0000001", {"id":row["order_id"]})
+        await database.execute("UPDATE orders SET status='filled' WHERE order_id=:id AND qty_open<=0.0000001", {"id":order_id})
+
+        # positions
+        await _add_position(buy_owner, symbol, +trade_qty)
+        await _add_position(sell_owner, symbol, -trade_qty)
+
+        # md tick + broadcast
+        await database.execute("""
+          INSERT INTO md_ticks(seq, symbol, price, qty_lots, kind)
+          VALUES (:seq,:s,:p,:q,'trade')
+        """, {"seq":_md_seq+1,"s":symbol,"p":trade_price,"q":trade_qty})
+        await _md_broadcast({"type":"trade","symbol":symbol,"price":trade_price,"qty_lots":trade_qty})
+
+        open_qty -= trade_qty
+        filled_total += trade_qty
+
+    return filled_total
+
+# ===== Risk controls (admin/runtime) =====
+@app.post("/risk/kill_switch/{member_id}", tags=["Risk"], summary="Toggle kill switch")
+async def kill_switch(member_id: str, enabled: bool = True):
+    _KILL_SWITCH[member_id] = enabled
+    return {"member_id": member_id, "enabled": enabled}
+
+@app.post("/risk/price_band/{symbol}", tags=["Risk"], summary="Set absolute price band")
+async def set_price_band(symbol: str, lower: float, upper: float):
+    _PRICE_BANDS[symbol] = (lower, upper)
+    return {"symbol": symbol, "band": _PRICE_BANDS[symbol]}
+
+@app.post("/risk/luld/{symbol}", tags=["Risk"], summary="Set LULD pct (0.05=5%)")
+async def set_luld(symbol: str, down_pct: float, up_pct: float):
+    _LULD[symbol] = (down_pct, up_pct)
+    return {"symbol": symbol, "luld": _LULD[symbol]}
+
+@app.post("/risk/limits", tags=["Risk"], summary="Upsert position limit (member+symbol)")
+async def upsert_limit(member: str, symbol: str, limit_lots: float):
+    await database.execute("""
+      INSERT INTO clob_position_limits(member, symbol, limit_lots)
+      VALUES (:m, :s, :l)
+      ON CONFLICT (member, symbol) DO UPDATE SET limit_lots = EXCLUDED.limit_lots
+    """, {"m": member, "s": symbol, "l": limit_lots})
+    return {"member": member, "symbol": symbol, "limit_lots": limit_lots}
+
+# ---- helpers for risk ----
+async def _latest_settle_for_symbol(symbol_root: str) -> float | None:
+    # Try most recent official mark for any listing of this product
+    r = await database.fetch_one("""
+        SELECT fm.mark_price
+        FROM futures_marks fm
+        JOIN futures_listings fl ON fl.id = fm.listing_id
+        JOIN futures_products fp ON fp.id = fl.product_id
+        WHERE fp.symbol_root = :s
+        ORDER BY fm.mark_date DESC
+        LIMIT 1
+    """, {"s": symbol_root})
+    return float(r["mark_price"]) if r and r["mark_price"] is not None else None
+
+async def _risk_check_position_limit(member: str, symbol: str, delta_lots: float, side: str):
+    row = await database.fetch_one(
+        "SELECT qty_lots FROM clob_positions WHERE owner=:o AND symbol=:s",
+        {"o": member, "s": symbol}
+    )
+    cur = float(row["qty_lots"]) if row else 0.0
+    proposed = cur + (delta_lots if side == "buy" else -delta_lots)
+
+    lim = await database.fetch_one(
+        "SELECT limit_lots FROM clob_position_limits WHERE member=:m AND symbol=:s",
+        {"m": member, "s": symbol}
+    )
+    if lim and abs(proposed) > float(lim["limit_lots"]):
+        raise HTTPException(422, detail=f"Position limit exceeded: {proposed} vs {float(lim['limit_lots'])}")
+
+class MarginIn(BaseModel):
+    member: str
+    symbol: str          # symbol_root, e.g. 'CU-SHRED-1M'
+    net_lots: Optional[Decimal] = None  # if None, read from clob_positions
+    price: float
+    vol_pct: float = 0.15
+    lot_value_per_tick: float = 1.0     # (kept for future use)
+
+@app.post("/risk/margin/calc", tags=["Risk"], summary="SPAN-lite initial & daily PnL")
+async def margin_calc(m: MarginIn):
+    # net exposure
+    if m.net_lots is None:
+        row = await database.fetch_one(
+            "SELECT qty_lots FROM clob_positions WHERE owner=:o AND symbol=:s",
+            {"o": m.member, "s": m.symbol}
+        )
+        net = float(row["qty_lots"]) if row else 0.0
+    else:
+        net = float(m.net_lots)
+
+    # Initial Margin (very simple model)
+    im = abs(net) * m.price * m.vol_pct
+
+    # Reference settle (latest official mark if available)
+    settle = await _latest_settle_for_symbol(m.symbol)
+    ref = settle if settle is not None else m.price
+    daily_pnl = (m.price - ref) * net
+
+    return {
+        "member": m.member,
+        "symbol": m.symbol,
+        "initial_margin": round(im, 2),
+        "daily_pnl": round(daily_pnl, 2),
+        "ref_settle": ref
+    }
+# ===== Risk controls (admin/runtime) =====
+
+# ===== Surveillance / Alerts =====
+class AlertIn(BaseModel):
+    rule: str
+    subject: str
+    data: Dict[str, Any]
+    severity: Literal["info","warn","high"] = "info"
+
+@app.get("/surveil/alerts", tags=["Surveillance"], summary="List alerts")
+async def surveil_list(limit:int=100):
+    rows = await database.fetch_all(
+        "SELECT * FROM surveil_alerts ORDER BY created_at DESC LIMIT :l",
+        {"l": limit}
+    )
+    return [dict(r) for r in rows]
+
+@app.post("/surveil/alert", tags=["Surveillance"], summary="Create alert")
+async def surveil_create(a: AlertIn):
+    aid = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO surveil_alerts(alert_id, rule, subject, data, severity)
+      VALUES (:id,:r,:s,:d::jsonb,:sev)
+    """, {"id": aid, "r": a.rule, "s": a.subject, "d": json.dumps(a.data), "sev": a.severity})
+    return {"alert_id": aid}
+
+# Example: lightweight spoofing detector you can call on trade/order events
+async def surveil_spoof_check(symbol: str, owner: str, side: str, placed: float, canceled: float, window_s:int=5):
+    try:
+        if placed >= 5 and canceled/placed > 0.8:
+            await surveil_create(AlertIn(
+                rule="spoof_like",
+                subject=owner,
+                data={"symbol":symbol,"side":side,"placed":placed,"canceled":canceled,"window_s":window_s},
+            ))
+    except Exception:
+        pass
+# ===== Surveillance / Alerts =====
+
 # ---- Market data websocket ----
 @app.websocket("/md/ws")
 async def md_ws(ws: WebSocket):
@@ -4480,6 +4789,83 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
                 {"id": order_id}
             )
     return {"order_id": order_id, "filled": filled}
+
+# ===== Settlement (VWAP from recent CLOB trades) =====
+@app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
+async def settle_publish(symbol: str, as_of: date, method: str = "vwap_last60m"):
+    # naive vwap: last 60m clob trades
+    rows = await database.fetch_all("""
+      SELECT price, qty_lots FROM clob_trades
+      WHERE symbol = :s AND created_at >= now() - interval '60 minutes'
+    """, {"s": symbol})
+    if rows:
+        qty_sum = sum(float(r["qty_lots"]) for r in rows)
+        vwap = (
+            sum(float(r["price"]) * float(r["qty_lots"]) for r in rows)
+            / max(qty_sum, 1e-9)
+        )
+    else:
+        # fallback to last trade
+        r = await database.fetch_one(
+            "SELECT price FROM clob_trades WHERE symbol = :s ORDER BY created_at DESC LIMIT 1",
+            {"s": symbol}
+        )
+        vwap = float(r["price"]) if r else 0.0
+
+    await database.execute("""
+      INSERT INTO settlements(as_of, symbol, settle, method)
+      VALUES (:d, :s, :p, :m)
+      ON CONFLICT (as_of, symbol) DO UPDATE
+        SET settle = EXCLUDED.settle, method = EXCLUDED.method
+    """, {"d": as_of, "s": symbol, "p": vwap, "m": method})
+    return {"symbol": symbol, "as_of": str(as_of), "settle": round(vwap, 5), "method": method}
+#-------------------- Settlement (VWAP from recent CLOB trades) =====
+# ===== FIX shim → CLOB =====
+class FixOrder(BaseModel):
+    ClOrdID: str
+    Symbol: str
+    Side: Literal["1","2"]  # 1=buy,2=sell
+    Price: float
+    OrderQty: float
+    TimeInForce: Optional[Literal["0","3","4"]] = "0"  # 0=Day,3=IOC,4=FOK
+    SenderCompID: Optional[str] = None
+
+@app.post("/fix/order", tags=["FIX"], summary="FIX Order shim → CLOB")
+async def fix_order(o: FixOrder):
+    side = "buy" if o.Side == "1" else "sell"
+    tif = {"0":"day","3":"ioc","4":"fok"}[o.TimeInForce or "0"]
+
+    member = o.SenderCompID or "fix_member"
+    if _KILL_SWITCH.get(member):
+        raise HTTPException(423, "Kill switch active")
+
+    await price_band_check(o.Symbol, float(o.Price))
+    await _check_position_limit(member, o.Symbol, float(o.OrderQty), side)
+
+    # grant runtime entitlement for the member (sessionless)
+    _ENTITLEMENTS[member].add("clob.trade")
+
+    # Impersonate a minimal Request with session for clob_place_order()
+    class _Req:
+        session = {"username": member}
+
+    # Reuse your CLOB endpoint directly
+    return await clob_place_order(
+        CLOBOrderIn(
+            symbol=o.Symbol,
+            side=side,
+            price=Decimal(str(o.Price)),
+            qty_lots=Decimal(str(o.OrderQty)),
+            tif=tif,
+        ),
+        _Req,
+    )
+
+@app.post("/fix/dropcopy", tags=["FIX"], summary="Receive Drop Copy (stub)")
+async def fix_dropcopy(payload: dict):
+    # Ack & optionally persist elsewhere for audit
+    return {"status": "received", "bytes": len(json.dumps(payload))}
+# ===== FIX shim → CLOB =====
 
 @clob_router.delete("/orders/{order_id}", summary="Cancel order")
 async def clob_cancel_order(order_id: str, request: Request):

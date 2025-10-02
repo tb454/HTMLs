@@ -581,6 +581,23 @@
       else { await refreshSeries(); await refreshMarks(); }
     });
   </script>
+<div id="tape" style="font:14px system-ui;background:#0b1220;color:#cde3ff;padding:8px 12px;border-radius:10px;margin:10px 0;white-space:nowrap;overflow:auto"></div>
+
+<script>
+(function(){
+  const tape = document.getElementById('tape');
+  const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/md/ws');
+  ws.onmessage = (e)=>{
+    const m = JSON.parse(e.data);
+    if(m.type==='trade'){
+      const span = document.createElement('span');
+      span.textContent = ` ${m.symbol} ${m.price.toFixed?m.price.toFixed(4):m.price} × ${m.qty_lots}  |`;
+      tape.appendChild(span);
+      tape.scrollLeft = tape.scrollWidth;
+    }
+  };
+})();
+</script>
 
   <footer style="margin-top:40px;text-align:center;font-size:.9em;">
     <a href="/terms" target="_blank">Terms of Use</a> |
