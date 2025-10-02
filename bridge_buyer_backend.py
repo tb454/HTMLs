@@ -301,7 +301,17 @@ async def hsts_middleware(request: Request, call_next):
 
 # =====  request-id + structured logs =====
 logger = structlog.get_logger()
+async def run_ddl_multi(sql: str):
+    """Split and run multiple DDL statements (for asyncpg/databases)."""
+    stmts = [s.strip() for s in sql.split(";") if s.strip()]
+    for stmt in stmts:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("ddl_failed", sql=stmt[:120], err=str(e))
+# =====  request-id + structured logs =====
 
+# ------ ID Logging ------
 @app.middleware("http")
 async def request_id_logging(request: Request, call_next):
     rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
@@ -311,7 +321,7 @@ async def request_id_logging(request: Request, call_next):
     response.headers["X-Request-ID"] = rid
     logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
     return response
-# =====  request-id + structured logs =====
+# ------ ID Logging ------
 
 # =====  Database (async + sync) =====
 @app.on_event("startup")
@@ -362,7 +372,11 @@ async def _ensure_products_schema():
     );
     """
     try:
-        await database.execute(ddl)
+        # run_ddl_multi is not defined; execute each statement separately
+        for stmt in ddl.split(";"):
+            s = stmt.strip()
+            if s:
+                await database.execute(s)
     except Exception as e:
         logger.warn("products_bootstrap_failed", err=str(e))
 # ----- Products -----
@@ -645,6 +659,17 @@ if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
 # Instantiate clients
 engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, future=True)
 database = databases.Database(ASYNC_DATABASE_URL)
+
+# ---- helper: run multiple DDL statements in one go (asyncpg safe) ----
+async def run_ddl_multi(sql: str):
+    """Split and run multiple DDL statements (for asyncpg/databases)."""
+    stmts = [s.strip() for s in sql.split(";") if s.strip()]
+    for stmt in stmts:
+        try:
+            await database.execute(stmt)
+        except Exception as e:
+            logger.warn("ddl_failed", sql=stmt[:120], err=str(e))
+# ----------------------------------------------------------------------
 
 # Optional one-time sanity log 
 try:
@@ -1625,7 +1650,14 @@ async def _ensure_receipts_schema():
       WHERE consumed_at IS NULL AND status IN ('created','pledged');
     """
     try:
-        await database.execute(ddl)
+        await run_ddl_multi(ddl)
+        await run_ddl_multi("""
+            ALTER TABLE public.receipts
+              ADD COLUMN IF NOT EXISTS symbol   TEXT,
+              ADD COLUMN IF NOT EXISTS location TEXT,
+              ADD COLUMN IF NOT EXISTS qty_lots NUMERIC,
+              ADD COLUMN IF NOT EXISTS lot_size NUMERIC;
+        """)
     except Exception as e:
         logger.warn("receipts_bootstrap_failed", err=str(e))
 
@@ -1654,6 +1686,48 @@ async def _receipts_backfill_once():
         logger.warn("receipts_backfill_failed", err=str(e))
 
 @app.on_event("startup")
+async def _receipts_backfill_columns():
+    """
+    Best-effort backfill so /stocks/snapshot can aggregate immediately.
+    Safe to run repeatedly (idempotent updates).
+    """
+    try:
+        # 1) default lot_size if missing (choose your business default)
+        await database.execute("""
+            UPDATE public.receipts
+               SET lot_size = 20.0
+             WHERE lot_size IS NULL
+        """)
+
+        # 2) set symbol from sku when missing
+        await database.execute("""
+            UPDATE public.receipts
+               SET symbol = sku
+             WHERE (symbol IS NULL OR symbol = '')
+               AND sku IS NOT NULL
+        """)
+
+        # 3) normalize location (optional placeholder)
+        await database.execute("""
+            UPDATE public.receipts
+               SET location = COALESCE(NULLIF(location,''), 'UNKNOWN')
+             WHERE location IS NULL OR location = ''
+        """)
+
+        # 4) compute qty_lots from qty_tons / lot_size when missing
+        await database.execute("""
+            UPDATE public.receipts
+               SET qty_lots = CASE
+                                WHEN lot_size IS NOT NULL AND lot_size > 0
+                                  THEN qty_tons / lot_size
+                                ELSE NULL
+                              END
+             WHERE qty_lots IS NULL
+        """)
+    except Exception as e:
+        logger.warn("receipts_backfill_failed", err=str(e))
+
+@app.on_event("startup")
 async def _ensure_stocks_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.locations(
@@ -1674,7 +1748,7 @@ async def _ensure_stocks_schema():
     );
     """
     try:
-        await database.execute(ddl)
+        await run_ddl_multi(ddl)
     except Exception as e:
         logger.warn("stocks_schema", err=str(e))
 
@@ -1693,7 +1767,7 @@ async def _ensure_receivables_schema():
     CREATE INDEX IF NOT EXISTS idx_receivables_receipt ON public.receivables (receipt_id);
     """
     try:
-        await database.execute(ddl)
+        await run_ddl_multi(ddl)
     except Exception as e:
         logger.warn("receivables_bootstrap_failed", err=str(e))
 # ===== INVENTORY schema bootstrap (idempotent) =====
@@ -2066,7 +2140,7 @@ async def _ensure_audit_chain_schema():
     CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id, chain_date, seq);
     """
     try:
-        await database.execute(ddl)
+        await run_ddl_multi(ddl)
     except Exception as e:
         logger.warn("audit_chain_bootstrap_failed", err=str(e))
 
@@ -2321,22 +2395,32 @@ async def _ensure_perf_indexes():
 # DB safety checks (non-negative inventory quantities)
 @app.on_event("startup")
 async def _ensure_inventory_constraints():
-    ddl = [
-      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_on_hand_nonneg CHECK (qty_on_hand >= 0)",
-      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_reserved_nonneg CHECK (qty_reserved >= 0)",
-      "ALTER TABLE inventory_items ADD CONSTRAINT IF NOT EXISTS chk_qty_committed_nonneg CHECK (qty_committed >= 0)"
-    ]
-    for s in ddl:
-        try:
-            await database.execute(s)
-        except Exception as e:
-            logger.warn("inventory_constraints_bootstrap_failed", sql=s[:100], err=str(e))
+    try:
+        await database.execute(
+            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_on_hand_nonneg CHECK (qty_on_hand >= 0)"
+        )
+    except Exception:
+        pass  # already exists
+
+    try:
+        await database.execute(
+            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_reserved_nonneg CHECK (qty_reserved >= 0)"
+        )
+    except Exception:
+        pass  # already exists
+
+    try:
+        await database.execute(
+            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_committed_nonneg CHECK (qty_committed >= 0)"
+        )
+    except Exception:
+        pass  # already exists
 
 #-------- Dead Letter Startup --------
 @app.on_event("startup")
 async def _ensure_dead_letters():
     try:
-        await database.execute("""
+        await run_ddl_multi("""
         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
         CREATE TABLE IF NOT EXISTS webhook_dead_letters (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3005,6 +3089,75 @@ async def generate_bol_pdf(bol_id: str):
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
 
 # -------- Receipts lifecycle --------
+class ReceiptCreateIn(BaseModel):
+    # business fields you already store
+    seller: str
+    sku: str              # your current schema stores `sku`
+    qty_tons: float
+    # NEW: fields we want to populate for stocks snapshot
+    symbol: Optional[str] = None        # if omitted we’ll default to `sku`
+    location: Optional[str] = None      # yard / warehouse code
+
+class ReceiptCreateOut(BaseModel):
+    receipt_id: str
+    seller: str
+    sku: str
+    qty_tons: float
+    symbol: str
+    location: Optional[str] = None
+    lot_size: float
+    qty_lots: float
+    status: str
+
+@app.post("/receipts", tags=["Receipts"], summary="Create/mint a live receipt")
+async def receipt_create(body: ReceiptCreateIn) -> ReceiptCreateOut:
+    """
+    Populates symbol, lot_size, qty_lots, location at write time.
+    """
+    # pick a symbol (default to SKU if caller didn’t supply a separate tradable symbol)
+    symbol = (body.symbol or body.sku).strip()
+
+    # look up lot_size from your in-memory registry (falls back to 1.0 if missing)
+    lot_size = _lot_size(symbol)  # <-- you already have this helper defined above
+
+    # compute qty_lots
+    qty_lots = float(body.qty_tons) / float(lot_size) if lot_size > 0 else None
+
+    receipt_id = str(uuid.uuid4())
+    status = "created"
+
+    await database.execute("""
+        INSERT INTO public.receipts(
+            receipt_id, seller, sku, qty_tons, status,
+            symbol, location, qty_lots, lot_size, created_at, updated_at
+        ) VALUES (
+            :id, :seller, :sku, :qty_tons, :status,
+            :symbol, :location, :qty_lots, :lot_size, NOW(), NOW()
+        )
+    """, {
+        "id": receipt_id,
+        "seller": body.seller.strip(),
+        "sku": body.sku.strip(),
+        "qty_tons": float(body.qty_tons),
+        "status": status,
+        "symbol": symbol,
+        "location": (body.location or "UNKNOWN").strip(),
+        "qty_lots": qty_lots,
+        "lot_size": lot_size,
+    })
+
+    return ReceiptCreateOut(
+        receipt_id=receipt_id,
+        seller=body.seller.strip(),
+        sku=body.sku.strip(),
+        qty_tons=float(body.qty_tons),
+        symbol=symbol,
+        location=(body.location or "UNKNOWN").strip(),
+        lot_size=float(lot_size),
+        qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
+        status=status,
+    )
+
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
     r = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
@@ -4020,6 +4173,33 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "tax_pct": bol.tax_pct,
     })
 
+    # -------- auto-mint a receipt tied to the BOL’s material + seller --------
+    try:
+        # choose a tradable symbol (for now, align to material/sku)
+        _symbol = row["material"]  # or map if you use different tradable roots
+        _lot = _lot_size(_symbol)
+        _qty_lots = (float(row["weight_tons"]) / _lot) if _lot > 0 else None
+
+        await database.execute("""
+            INSERT INTO public.receipts(
+                receipt_id, seller, sku, qty_tons, status,
+                symbol, location, qty_lots, lot_size, created_at, updated_at, consumed_bol_id
+            ) VALUES (
+                :id, :seller, :sku, :qty_tons, 'created',
+                :symbol, :location, :qty_lots, :lot_size, NOW(), NOW(), NULL
+            )
+        """, {
+            "id": str(uuid.uuid4()),
+            "seller": row["seller"],
+            "sku": row["material"],               # receipts keep `sku`; we’ll also set `symbol`
+            "qty_tons": float(row["weight_tons"]),
+            "symbol": _symbol,
+            "location": "UNKNOWN",                # or derive from carrier/yard if you have it
+            "qty_lots": _qty_lots,
+            "lot_size": _lot,
+        })
+    except Exception:        
+        pass
 
     resp = {
         **bol.dict(),
