@@ -15,10 +15,11 @@ import databases
 import uuid
 import csv
 import io
+from io import BytesIO
 import zipfile
 import tempfile
 import pathlib
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json, hashlib, base64, hmac
 from passlib.hash import bcrypt
 from dotenv import load_dotenv
@@ -100,6 +101,27 @@ _INSTRUMENTS = {
     "CU-SHRED-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Copper Shred 1-Month"},
     "AL-6061-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Al 6061 1-Month"},
 }
+
+# ---- common utils (hashing, dates, json, rounding, lot size) ----
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def _utc_date_now():
+    # Uses system UTC; if you run with TZ aware middlewares, adjust accordingly
+    return datetime.utcnow().date()
+
+def _canon_json(d: dict) -> str:
+    return json.dumps(d, sort_keys=True, separators=(",", ":"))
+
+def _lot_size(symbol: str) -> float:
+    try:
+        return float(_INSTRUMENTS.get(symbol, {}).get("lot", 1.0))
+    except Exception:
+        return 1.0
+
+def _round2(x: float) -> float:
+    return float(Decimal(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+# ---- /common utils ----
 
 load_dotenv()
 
@@ -288,6 +310,24 @@ dsn = os.getenv("SENTRY_DSN")
 if dsn:
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 # =====  Prometheus metrics + optional Sentry =====
+
+#----- Fee schedule ----
+@app.on_event("startup")
+async def _ensure_fee_schedule_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS fee_schedule (
+      symbol TEXT PRIMARY KEY,
+      maker_bps NUMERIC NOT NULL DEFAULT 0,
+      taker_bps NUMERIC NOT NULL DEFAULT 0,
+      min_fee_cents NUMERIC NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("fee_schedule_bootstrap_failed", err=str(e))
+# ---- Fee schedule ----
 
 # ---- Settlement Publishing ---- 
 @app.on_event("startup")
@@ -924,6 +964,49 @@ async def grant_entitlement(user: str, feature: str, request: Request):
     _ENTITLEMENTS[user].add(feature)
     return {"user": user, "features": sorted(list(_ENTITLEMENTS[user]))}
 
+@app.post("/admin/fees/upsert", tags=["Admin"], summary="Upsert fee schedule for a symbol")
+async def upsert_fee(symbol: str, maker_bps: float = 0.0, taker_bps: float = 0.0, min_fee_cents: float = 0.0, request: Request = None):
+    _require_admin(request)  # gate in production
+    await database.execute("""
+      INSERT INTO fee_schedule(symbol, maker_bps, taker_bps, min_fee_cents)
+      VALUES (:s,:m,:t,:c)
+      ON CONFLICT (symbol) DO UPDATE
+        SET maker_bps = EXCLUDED.maker_bps,
+            taker_bps = EXCLUDED.taker_bps,
+            min_fee_cents = EXCLUDED.min_fee_cents
+    """, {"s": symbol, "m": maker_bps, "t": taker_bps, "c": min_fee_cents})
+    return {"symbol": symbol, "maker_bps": maker_bps, "taker_bps": taker_bps, "min_fee_cents": min_fee_cents}
+
+@app.post("/admin/statements/run", tags=["Admin"], summary="Generate nightly statements ZIP for all members")
+async def statements_run(as_of: date, request: Request):
+    _require_admin(request)  # gate in production
+
+    members = await _distinct_members(as_of)
+    run_id = str(uuid.uuid4())
+    await database.execute(
+        "INSERT INTO statement_runs(run_id, as_of, member_count) VALUES (:id,:d,:n)",
+        {"id": run_id, "d": as_of, "n": len(members)}
+    )
+
+    memfile = BytesIO()
+    with zipfile.ZipFile(memfile, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for m in members:
+            csv_text, pdf_bytes = await _build_member_statement(m, as_of)
+            safe_m = "".join(ch if ch.isalnum() or ch in ("-","_",".") else "_" for ch in m)
+            zf.writestr(f"{as_of}/statements/{safe_m}.csv", csv_text)
+            zf.writestr(f"{as_of}/statements/{safe_m}.pdf", pdf_bytes)
+    memfile.seek(0)
+
+    headers = {"Content-Disposition": f'attachment; filename="bridge_statements_{as_of}.zip"'}
+    return StreamingResponse(memfile, media_type="application/zip", headers=headers)
+
+@app.get("/statements/{member}/{as_of}.pdf", tags=["Admin"], summary="Generate a single member statement PDF")
+async def statement_single_pdf(member: str, as_of: date, request: Request):
+    _require_admin(request)  # remove this line if you want it public
+    _, pdf_bytes = await _build_member_statement(member, as_of)
+    headers = {"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'}
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
+
 @app.on_event("shutdown")
 async def shutdown_disconnect():
     try:
@@ -1417,6 +1500,37 @@ async def _ensure_inventory_schema():
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 
+@app.on_event("startup")
+async def _ensure_receipts_schema():
+    ddl = [
+        # base table (create if missing)
+        """
+        CREATE TABLE IF NOT EXISTS public.receipts (
+          receipt_id UUID PRIMARY KEY,
+          seller     TEXT,
+          sku        TEXT,
+          qty_tons   NUMERIC,
+          status     TEXT NOT NULL DEFAULT 'created',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          consumed_at    TIMESTAMPTZ,
+          consumed_bol_id UUID,
+          provenance  JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+        """,
+        # optional view for live/unconsumed
+        """
+        CREATE OR REPLACE VIEW public.receipts_live AS
+          SELECT * FROM public.receipts
+          WHERE consumed_at IS NULL AND status IN ('created','pledged');
+        """
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("receipts_bootstrap_failed", err=str(e), sql=s[:120])
+
 # ---------- Inventory helpers (role check, unit conversion, upsert core) ----------
 def _is_admin_or_seller(request: Request) -> bool:
     try:
@@ -1751,7 +1865,70 @@ async def _ensure_audit_log_schema():
         await database.execute(ddl)
     except Exception as e:
         logger.warn("audit_log_bootstrap_failed", err=str(e))
-# ======================================================================
+
+@app.on_event("startup")
+async def _ensure_audit_seal_schema():
+    ddl = [
+        "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
+        """
+        CREATE TABLE IF NOT EXISTS audit_seals (
+          chain_date DATE PRIMARY KEY,
+          final_hash TEXT NOT NULL,
+          sealed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("audit_seal_bootstrap_failed", err=str(e), sql=s[:120])
+
+# ----------- /schema bootstrap -----------
+
+# ===== AUDIT CHAIN schema bootstrap (idempotent) =====
+@app.on_event("startup")
+async def _ensure_audit_chain_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS audit_events (
+      chain_date DATE NOT NULL,
+      seq        BIGINT NOT NULL,
+      actor      TEXT,
+      action     TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id   TEXT NOT NULL,
+      payload     JSONB NOT NULL,
+      prev_hash   TEXT NOT NULL DEFAULT '',
+      event_hash  TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (chain_date, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id, chain_date, seq);
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("audit_chain_bootstrap_failed", err=str(e))
+
+@app.on_event("startup")
+async def _ensure_audit_seal_schema():
+    ddl = [
+        "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
+        """
+        CREATE TABLE IF NOT EXISTS audit_seals (
+          chain_date DATE PRIMARY KEY,
+          final_hash TEXT NOT NULL,
+          sealed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("audit_seal_bootstrap_failed", err=str(e), sql=s[:120])
+
+# -------- AUDIT CHAIN /schema bootstrap --------
 
 # -------- Inventory: Bulk Upsert (unit-aware, HMAC in prod, replay guard, logs) --------
 @app.post(
@@ -1996,7 +2173,6 @@ async def _ensure_inventory_constraints():
             logger.warn("inventory_constraints_bootstrap_failed", sql=s[:100], err=str(e))
 
 #-------- Dead Letter Startup --------
-
 @app.on_event("startup")
 async def _ensure_dead_letters():
     try:
@@ -2035,6 +2211,7 @@ async def _nightly_dossier_sync():
                 pass
     asyncio.create_task(_runner())
 # ------- Dossier HR Sync -------
+
 #------- RFQs -------
 @app.on_event("startup")
 async def _ensure_rfq_schema():
@@ -2082,6 +2259,23 @@ async def _ensure_rfq_schema():
         except Exception as e:
             logger.warn("rfq_schema_bootstrap_failed", err=str(e), sql=s[:90])
 #------- RFQs -------
+
+# ------ Statements router ------
+@app.on_event("startup")
+async def _ensure_statements_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS statement_runs (
+      run_id UUID PRIMARY KEY,
+      as_of DATE NOT NULL,
+      member_count INT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("statements_schema_bootstrap_failed", err=str(e))
+# ------ Statements router ------
 
 # ------ CLOB router ------
 @app.on_event("startup")
@@ -2228,7 +2422,15 @@ class ContractOut(ContractIn):
             "status":"Signed","created_at":"2025-09-01T10:00:00Z",
             "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
-        
+
+class ReceiptProvenance(BaseModel):
+    truck_id: Optional[str] = None
+    scale_in_lbs: Optional[float] = None
+    scale_out_lbs: Optional[float] = None
+    gps_polyline: Optional[list[list[float]]] = None  # [[lat,lon], ...]
+    photos: Optional[list[str]] = None                 # URLs/ids
+
+
 @app.post(
     "/contracts",
     response_model=ContractOut,
@@ -2504,6 +2706,96 @@ async def log_action(actor: str, action: str, entity_id: str, details: dict):
             "details": json.dumps(details),
         },
     )
+# ------------------ Hash-chained audit events (per-day chain) ---------
+async def audit_append(actor: str, action: str, entity_type: str, entity_id: str, payload: dict, chain_date: Optional[date]=None):
+    cd = chain_date or _utc_date_now()
+    # last link
+    last = await database.fetch_one("""
+        SELECT seq, event_hash FROM audit_events
+        WHERE chain_date=:d ORDER BY seq DESC LIMIT 1
+    """, {"d": cd})
+    prev_seq = int(last["seq"]) if last else 0
+    prev_hash = last["event_hash"] if last else ""
+    seq = prev_seq + 1
+
+    body = {
+        "chain_date": str(cd),
+        "seq": seq,
+        "actor": actor,
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "payload": payload,
+    }
+    event_hash = _sha256_hex((prev_hash or "") + _canon_json(body))
+    await database.execute("""
+        INSERT INTO audit_events(chain_date,seq,actor,action,entity_type,entity_id,payload,prev_hash,event_hash)
+        VALUES (:d,:seq,:actor,:action,:etype,:eid,:payload::jsonb,:prev,:eh)
+    """, {"d": cd, "seq": seq, "actor": actor, "action": action, "etype": entity_type, "eid": entity_id,
+          "payload": json.dumps(payload), "prev": prev_hash, "eh": event_hash})
+    return {"chain_date": str(cd), "seq": seq, "event_hash": event_hash}
+# ------------------- Hash-chained audit events (per-day chain) ----
+
+@app.post("/admin/audit/log", tags=["Admin"], summary="Append audit event")
+async def admin_audit_log(
+    actor: str = "system",
+    action: str = "note",
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    payload: dict = {},
+    request: Request = None,
+):
+    _require_admin(request)  # gate in production
+    rec = await audit_append(actor, action, entity_type or "", entity_id or "", payload or {})
+    return rec
+
+@app.post("/admin/audit/seal", tags=["Admin"], summary="Seal a day's audit chain")
+async def admin_audit_seal(chain_date: Optional[date] = None, request: Request = None):
+    _require_admin(request)  # gate in production
+    cd = chain_date or _utc_date_now()
+    tail = await database.fetch_one("""
+        SELECT seq, event_hash FROM audit_events
+        WHERE chain_date=:d ORDER BY seq DESC LIMIT 1
+    """, {"d": cd})
+    final_hash = tail["event_hash"] if tail else _sha256_hex(f"empty:{cd}")
+    # mark sealed
+    await database.execute("UPDATE audit_events SET sealed=TRUE WHERE chain_date=:d", {"d": cd})
+    await database.execute("""
+        INSERT INTO audit_seals(chain_date, final_hash)
+        VALUES (:d, :h)
+        ON CONFLICT (chain_date) DO UPDATE
+          SET final_hash=EXCLUDED.final_hash, sealed_at=now()
+    """, {"d": cd, "h": final_hash})
+    return {"chain_date": str(cd), "final_hash": final_hash}
+
+@app.get("/admin/audit/verify", tags=["Admin"], summary="Recompute and verify audit chain")
+async def admin_audit_verify(chain_date: date, request: Request = None):
+    _require_admin(request)  # gate in production
+    rows = await database.fetch_all("""
+        SELECT seq, actor, action, entity_type, entity_id, payload, prev_hash, event_hash
+        FROM audit_events
+        WHERE chain_date=:d
+        ORDER BY seq ASC
+    """, {"d": chain_date})
+    prev = ""
+    for r in rows:
+        body = {
+            "chain_date": str(chain_date),
+            "seq": int(r["seq"]),
+            "actor": r["actor"],
+            "action": r["action"],
+            "entity_type": r["entity_type"],
+            "entity_id": r["entity_id"],
+            "payload": r["payload"],
+        }
+        expect = _sha256_hex((prev or "") + _canon_json(body))
+        if expect != r["event_hash"]:
+            return {"ok": False, "seq": int(r["seq"]), "expected": expect, "got": r["event_hash"]}
+        prev = r["event_hash"]
+    seal = await database.fetch_one("SELECT final_hash FROM audit_seals WHERE chain_date=:d", {"d": chain_date})
+    final_hash = prev or _sha256_hex(f"empty:{chain_date}")
+    return {"ok": bool(seal and seal["final_hash"] == final_hash), "final_hash": final_hash}
+# ----- Audit logging -----
 
 # ===== ICE webhook signature verifier =====
 LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
@@ -2662,6 +2954,37 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if idem_key:
         _idem_cache[idem_key] = resp
     return resp
+
+# -------- Receipts lifecycle --------
+@app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
+async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
+    r = await database.execute("""
+      WITH upd AS (
+        UPDATE public.receipts
+           SET consumed_at = NOW(),
+               consumed_bol_id = :bol,
+               provenance = :prov::jsonb,
+               status = 'delivered',
+               updated_at = NOW()
+         WHERE receipt_id = :id
+           AND consumed_at IS NULL
+         RETURNING receipt_id
+      )
+      SELECT COUNT(*) FROM upd
+    """, {"id": receipt_id, "bol": bol_id, "prov": json.dumps(prov.dict())})
+
+    # Some async drivers return None for DML; do an explicit check:
+    row = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
+    if not row:
+        raise HTTPException(404, "receipt not found")
+
+    try:
+        await audit_append("system", "receipt.consume", "receipt", receipt_id, {"bol_id": bol_id})
+    except Exception:
+        pass
+
+    return {"receipt_id": receipt_id, "status": "consumed"}
+#-------- Receipts lifecycle --------
 
     # ---- audit log (best-effort; won't break request on failure)
     actor = request.session.get("username") if hasattr(request, "session") else None
@@ -3799,6 +4122,43 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if idem_key:
         _idem_cache[idem_key] = resp
     return resp
+
+@app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
+async def bols_mark_delivered(
+    bol_id: str,
+    receipt_ids: Optional[List[str]] = Query(None),
+    request: Request = None
+):
+    # mark delivered
+    row = await database.fetch_one("""
+      UPDATE bols
+         SET status='Delivered',
+             delivery_time = COALESCE(delivery_time, NOW())
+       WHERE bol_id=:id
+       RETURNING bol_id
+    """, {"id": bol_id})
+    if not row:
+        raise HTTPException(404, "BOL not found")
+
+    # consume linked receipts (best-effort)
+    if receipt_ids:
+        for rid in receipt_ids:
+            try:
+                await receipt_consume(rid, bol_id=bol_id)  # reuse the endpoint logic
+            except Exception:
+                pass
+
+    # audit
+    try:
+        await audit_append(
+            (request.session.get("username") if hasattr(request, "session") else "system"),
+            "bol.deliver", "bol", bol_id, {"receipts": receipt_ids or []}
+        )
+    except Exception:
+        pass
+
+    return {"bol_id": bol_id, "status": "Delivered", "receipts_consumed": receipt_ids or []}
+
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============
@@ -4469,6 +4829,11 @@ async def _match(order_id: str) -> float:
 @app.post("/risk/kill_switch/{member_id}", tags=["Risk"], summary="Toggle kill switch")
 async def kill_switch(member_id: str, enabled: bool = True):
     _KILL_SWITCH[member_id] = enabled
+    # --- audit (best-effort) ---
+    try:
+        await audit_append("admin", "risk.kill_switch", "member", member_id, {"enabled": enabled})
+    except Exception:
+        pass
     return {"member_id": member_id, "enabled": enabled}
 
 @app.post("/risk/price_band/{symbol}", tags=["Risk"], summary="Set absolute price band")
@@ -4763,6 +5128,163 @@ class CLOBOrderIn(BaseModel):
     qty_lots: Decimal
     tif: Literal["day","ioc","fok"] = "day"
 
+async def _get_fees(symbol: str):
+    row = await database.fetch_one(
+        "SELECT maker_bps, taker_bps, min_fee_cents FROM fee_schedule WHERE symbol=:s",
+        {"s": symbol}
+    )
+    if not row:
+        return (0.0, 0.0, 0.0)
+    return (float(row["maker_bps"]), float(row["taker_bps"]), float(row["min_fee_cents"]))
+
+# -- Reporting/statement helpers (CLOB) --
+async def _latest_settle_on_or_before(symbol: str, d: date) -> Optional[float]:
+    row = await database.fetch_one("""
+      SELECT settle
+      FROM settlements
+      WHERE symbol = :s AND as_of <= :d
+      ORDER BY as_of DESC
+      LIMIT 1
+    """, {"s": symbol, "d": d})
+    return float(row["settle"]) if row else None
+
+async def _distinct_members(as_of: date) -> List[str]:
+    rows = await database.fetch_all("""
+      WITH m1 AS (
+        SELECT buy_owner AS m FROM clob_trades WHERE created_at::date <= :d
+        UNION
+        SELECT sell_owner AS m FROM clob_trades WHERE created_at::date <= :d
+      ),
+      m2 AS (
+        SELECT owner AS m FROM clob_positions
+      )
+      SELECT DISTINCT m FROM (SELECT * FROM m1 UNION SELECT * FROM m2) x
+      WHERE m IS NOT NULL
+    """, {"d": as_of})
+    return [r["m"] for r in rows]
+
+async def _member_day_trades(member: str, as_of: date):
+    rows = await database.fetch_all("""
+      SELECT t.trade_id, t.symbol, t.price, t.qty_lots, t.buy_owner, t.sell_owner,
+             t.maker_order, t.taker_order,
+             t.created_at,
+             ob.owner AS maker_owner, ot.owner AS taker_owner
+      FROM clob_trades t
+      LEFT JOIN clob_orders ob ON ob.order_id = t.maker_order
+      LEFT JOIN clob_orders ot ON ot.order_id = t.taker_order
+      WHERE t.created_at::date = :d
+        AND (t.buy_owner = :m OR t.sell_owner = :m)
+      ORDER BY t.created_at ASC
+    """, {"d": as_of, "m": member})
+    return [dict(r) for r in rows]
+
+async def _position_net(member: str, symbol: str) -> float:
+    row = await database.fetch_one(
+        "SELECT qty_lots FROM clob_positions WHERE owner = :o AND symbol = :s",
+        {"o": member, "s": symbol}
+    )
+    return float(row["qty_lots"]) if row else 0.0
+
+def _fee_amount(notional: float, bps: float, min_cents: float) -> float:
+    fee = notional * (bps / 10000.0)
+    fee = max(fee, (min_cents / 100.0))
+    return _round2(fee)
+
+async def _build_member_statement(member: str, as_of: date):
+    trades = await _member_day_trades(member, as_of)
+    # aggregate by symbol
+    per_symbol = {}
+    total_fees = 0.0
+    for tr in trades:
+        sym = tr["symbol"]
+        lot = _lot_size(sym)
+        qty = float(tr["qty_lots"])
+        px  = float(tr["price"])
+        notional = qty * lot * px
+        maker_bps, taker_bps, min_cents = await _get_fees(sym)
+        # maker/taker role
+        is_maker = (tr.get("maker_owner") == member)
+        bps = maker_bps if is_maker else taker_bps
+        fee = _fee_amount(notional, bps, min_cents)
+        total_fees += fee
+        side = "BUY" if tr["buy_owner"] == member else "SELL"
+        per_symbol.setdefault(sym, {"qty_lots":0.0, "notional":0.0, "trades":[]})
+        per_symbol[sym]["qty_lots"] += qty if side=="BUY" else -qty
+        per_symbol[sym]["notional"] += notional if side=="BUY" else -notional
+        per_symbol[sym]["trades"].append({
+            "time": str(tr["created_at"]),
+            "side": side, "price": px, "qty_lots": qty, "lot": lot,
+            "notional": _round2(notional), "role": "MAKER" if is_maker else "TAKER", "fee": fee
+        })
+
+    # MTM versus prior settle for end-of-day net
+    mtm_total = 0.0
+    mtm_lines = []
+    for sym, agg in per_symbol.items():
+        settle_today = await _latest_settle_on_or_before(sym, as_of)
+        settle_prev  = await _latest_settle_on_or_before(sym, (as_of - timedelta(days=1)))
+        net_pos = await _position_net(member, sym)   # end-of-day net (lots)
+        if settle_today is not None and settle_prev is not None:
+            mtm = (settle_today - settle_prev) * net_pos * _lot_size(sym)
+            mtm_total += mtm
+            mtm_lines.append((sym, net_pos, settle_prev, settle_today, _round2(mtm)))
+
+    # CSV (as string)
+    csv_lines = []
+    csv_lines.append("Member,As Of")
+    csv_lines.append(f"{member},{as_of}")
+    csv_lines.append("")
+    csv_lines.append("Trades (time, symbol, side, qty_lots, lot, price, notional, role, fee)")
+    csv_lines.append("time,symbol,side,qty_lots,lot,price,notional,role,fee")
+    for sym, agg in per_symbol.items():
+        for t in agg["trades"]:
+            csv_lines.append(f"{t['time']},{sym},{t['side']},{t['qty_lots']},{t['lot']},{t['price']},{t['notional']},{t['role']},{t['fee']}")
+    csv_lines.append("")
+    csv_lines.append("MTM (symbol, net_lots_eod, settle_prev, settle_today, mtm)")
+    csv_lines.append("symbol,net_lots_eod,settle_prev,settle_today,mtm")
+    for (sym, net, sp, st, mtm) in mtm_lines:
+        csv_lines.append(f"{sym},{net},{sp},{st},{mtm}")
+    csv_lines.append("")
+    csv_lines.append(f"Total Fees USD,{_round2(total_fees)}")
+    csv_lines.append(f"Total MTM USD,{_round2(mtm_total)}")
+    csv_text = "\n".join(csv_lines)
+
+    # PDF
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=LETTER)
+    w, h = LETTER
+    y = h - 1*inch
+    c.setFont("Helvetica-Bold", 14); c.drawString(1*inch, y, f"BRidge Statement — {member}"); y -= 16
+    c.setFont("Helvetica", 10); c.drawString(1*inch, y, f"As Of: {as_of}"); y -= 18
+    c.drawString(1*inch, y, f"Total Fees: ${_round2(total_fees)}   Total MTM: ${_round2(mtm_total)}"); y -= 22
+    c.setFont("Helvetica-Bold", 10); c.drawString(1*inch, y, "Trades"); y -= 14
+    c.setFont("Helvetica", 9)
+    for sym, agg in per_symbol.items():
+        c.drawString(1*inch, y, f"{sym}"); y -= 12
+        for t in agg["trades"]:
+            line = f"{t['time']}  {t['side']}  {t['qty_lots']}@{t['price']}  lot={t['lot']}  ${t['notional']}  {t['role']} fee=${t['fee']}"
+            c.drawString(1.2*inch, y, line); y -= 11
+            if y < 1*inch: c.showPage(); y = h - 1*inch; c.setFont("Helvetica", 9)
+    c.setFont("Helvetica-Bold", 10); c.drawString(1*inch, y, "MTM"); y -= 14
+    c.setFont("Helvetica", 9)
+    for (sym, net, sp, st, mtm) in mtm_lines:
+        c.drawString(1.2*inch, y, f"{sym}: net={net}  prev={sp}  today={st}  MTM=${mtm}"); y -= 11
+        if y < 1*inch: c.showPage(); y = h - 1*inch; c.setFont("Helvetica", 9)
+    c.showPage(); c.save()
+    pdf_bytes = buf.getvalue(); buf.close()
+
+    return csv_text, pdf_bytes
+
+@clob_router.get("/statement", summary="Generate statement (CSV or PDF)")
+async def clob_statement(member: str, as_of: date, fmt: Literal["csv","pdf"]="pdf"):
+    csv_text, pdf_bytes = await _build_member_statement(member, as_of)
+    if fmt == "csv":
+        return StreamingResponse(iter([csv_text]), media_type="text/csv",
+                                 headers={"Content-Disposition": f'attachment; filename="{member}_{as_of}.csv"'})
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'})
+
+
 @clob_router.post("/orders", summary="Place order")
 async def clob_place_order(o: CLOBOrderIn, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
@@ -4818,7 +5340,16 @@ async def settle_publish(symbol: str, as_of: date, method: str = "vwap_last60m")
       ON CONFLICT (as_of, symbol) DO UPDATE
         SET settle = EXCLUDED.settle, method = EXCLUDED.method
     """, {"d": as_of, "s": symbol, "p": vwap, "m": method})
+
+    # --- audit (best-effort) ---
+    try:
+        await audit_append("admin", "settlement.publish", "settlement",
+                           f"{symbol}:{as_of}", {"method": method, "settle": vwap})
+    except Exception:
+        pass
+
     return {"symbol": symbol, "as_of": str(as_of), "settle": round(vwap, 5), "method": method}
+
 #-------------------- Settlement (VWAP from recent CLOB trades) =====
 # ===== FIX shim → CLOB =====
 class FixOrder(BaseModel):
@@ -4934,6 +5465,18 @@ async def _clob_match(order_id: str) -> float:
           VALUES (:id,:s,:p,:q,:b,:se,:maker,:taker)
         """, {"id": trade_id, "s": symbol, "p": trade_price, "q": trade_qty, "b": buy_owner, "se": sell_owner,
               "maker": row["order_id"], "taker": order_id})
+        # --- audit (best-effort; never break matching) ---
+    try:
+        await audit_append(buy_owner,  "trade.fill", "trade", trade_id, {
+        "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
+        "maker_order": row["order_id"], "taker_order": order_id
+    })
+        await audit_append(sell_owner, "trade.fill", "trade", trade_id, {
+        "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
+        "maker_order": row["order_id"], "taker_order": order_id
+    })
+    except Exception:
+        pass
 
         await database.execute("UPDATE clob_orders SET qty_open = qty_open - :q WHERE order_id=:id",
                                {"q": trade_qty, "id": row["order_id"]})
