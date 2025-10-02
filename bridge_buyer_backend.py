@@ -884,14 +884,18 @@ async def login(body: LoginIn, request: Request):
 
     row = await database.fetch_one(
         """
-        SELECT id, email, COALESCE(username, '') AS username, role
+        SELECT
+          COALESCE(username, '') AS username,
+          COALESCE(email,    '') AS email,
+          role
         FROM public.users
-        WHERE (LOWER(email) = :ident OR LOWER(COALESCE(username, '')) = :ident)
+        WHERE (LOWER(COALESCE(email, '')) = :ident OR LOWER(COALESCE(username, '')) = :ident)
           AND password_hash = crypt(:pwd, password_hash)
         LIMIT 1
         """,
         {"ident": ident, "pwd": pwd},
     )
+
     if not row:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -4118,7 +4122,7 @@ async def _require_listing_trading(listing_id: str):
     if r["trading_status"] != "Trading":
         raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
 
-# ---- MARKET price-protection helpers (NEW) ----
+# ---- MARKET price-protection helpers ----
 PRICE_BAND_PCT = float(os.getenv("PRICE_BAND_PCT", "0.10"))  # 10% default band
 
 async def _ref_price_for(listing_id: str) -> Optional[float]:
@@ -4142,10 +4146,54 @@ async def _ref_price_for(listing_id: str) -> Optional[float]:
         return (float(bid["price"]) + float(ask["price"])) / 2.0
     return float(bid["price"]) if bid else (float(ask["price"]) if ask else None)
 
+# ---- ENTITLEMENTS & PRICE BANDS/LULD ----
+def require_entitlement(user: str, feature: str):
+    feats = _ENTITLEMENTS.get(user, set())
+    if feature not in feats:
+        raise HTTPException(status_code=403, detail=f"Missing entitlement: {feature}")
+
+async def price_band_check(symbol: str, price: float):
+    if band := _PRICE_BANDS.get(symbol):
+        lo, hi = band
+        if price < lo or price > hi:
+            raise HTTPException(status_code=422, detail=f"Price {price} outside band [{lo}, {hi}]")
+    # LULD on last settle 
+    if symbol in _LULD:
+        down, up = _LULD[symbol]
+        row = await database.fetch_one(
+            "SELECT settle FROM settlements WHERE symbol=:s ORDER BY as_of DESC LIMIT 1",
+            {"s": symbol}
+        )
+        if row:
+            base = float(row["settle"])
+            if price < base*(1.0 - down) or price > base*(1.0 + up):
+                raise HTTPException(status_code=422, detail="LULD violation")
+
+async def _symbol_for_listing(listing_id: str) -> str:
+    row = await database.fetch_one("""
+        SELECT fp.symbol_root
+        FROM futures_listings fl
+        JOIN futures_products fp ON fp.id = fl.product_id
+        WHERE fl.id = :id
+    """, {"id": listing_id})
+    if not row:
+        return None
+    return row["symbol_root"]
+
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
-async def place_order(ord_in: OrderIn):
+async def place_order(ord_in: OrderIn, request: Request):  # <-- added request
+    # entitlement gate
+    user = (request.session.get("username") if hasattr(request, "session") else None) or ""
+    require_entitlement(user, "trade.place")
+
     await _ensure_margin_account(ord_in.account_id)
     contract_size = await _get_contract_size(ord_in.listing_id)
+
+    # Band/LULD pre-check for LIMIT orders (MARKET is guarded later during matching)
+    if ord_in.order_type == "LIMIT" and ord_in.price is not None:
+        sym = await _symbol_for_listing(ord_in.listing_id)
+        if sym:
+            await price_band_check(sym, float(ord_in.price))
 
     order_id = str(uuid.uuid4())
     side = ord_in.side.upper()
