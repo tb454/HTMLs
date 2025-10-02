@@ -69,66 +69,104 @@
   <div id="error" class="mt-3 text-danger text-center" style="display:none;"></div>
   <div id="success" class="mt-3 text-success text-center" style="display:none;"></div>
 </div>
-
 <script>
-  const endpoint = "https://bridge-buyer.onrender.com";
+  // Same-origin calls; leave blank in prod so /login hits this service
+  const endpoint = ""; // e.g. "" in prod, or "http://localhost:10000" for local dev
+
+  // Collapse accidental double slashes
+  function joinURL(base, path) {
+    const b = (base || "").replace(/\/+$/,"");
+    const p = (path || "").replace(/^\/+/,"/");
+    return b + p;
+  }
+
+  async function api(path, opts = {}) {
+    const url = joinURL(endpoint, path);
+    const res = await fetch(url, {
+      ...opts,
+      headers: { "Accept":"application/json", "Content-Type":"application/json", ...(opts.headers||{}) }
+    });
+    return res;
+  }
 
   document.getElementById("loginForm").addEventListener("submit", async function (e) {
     e.preventDefault();
-    document.getElementById("error").style.display = "none";
+    const errBox = document.getElementById("error");
+    errBox.style.display = "none";
 
     const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value.trim();
+    const password = document.getElementById("password").value;
 
     try {
-      const res = await fetch(`${endpoint}/login`, {
+      const res = await api("/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json"   // ensure JSON branch on the server
-        },
         body: JSON.stringify({ username, password })
       });
 
       if (!res.ok) {
-        // show backend message if present
         let msg = "Invalid credentials. Try again.";
-        try {
-          const err = await res.json();
-          if (err?.detail) msg = err.detail;
-        } catch {}
-        document.getElementById("error").textContent = msg;
-        document.getElementById("error").style.display = "block";
+        try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch {}
+        errBox.textContent = msg;
+        errBox.style.display = "block";
         return;
       }
 
       const data = await res.json();
 
+      // normalize role + persist minimal state
       let role = (data.role || "").toLowerCase();
-       if (role === "yard") role = "seller";  // back-compat
-       localStorage.setItem("bridgeUser", JSON.stringify({ role }));
-       window.location.href = `/${role}`;
+      if (role === "yard") role = "seller";
+      localStorage.setItem("bridgeUser", JSON.stringify({ role }));
 
-      // Persist minimal session info if you want
-      localStorage.setItem("bridgeUser", JSON.stringify({ role: data.role }));
+      // Prefer server-provided redirect
+      if (data.redirect) { window.location.href = data.redirect; return; }
 
-      // Prefer server-provided redirect if present
-      if (data.redirect) {
-        window.location.href = data.redirect;
-        return;
-      }
-
-      // Fallback by role (note: 'seller', not 'yard')
-      if (data.role === "admin")      window.location.href = "/admin";
-      else if (data.role === "buyer") window.location.href = "/buyer";
-      else if (data.role === "seller")window.location.href = "/seller";
-      else                            window.location.href = "/buyer";
+      // Fallback by role
+      window.location.href = role === "admin" ? "/admin"
+                           : role ? `/${role}` : "/buyer";
     } catch (err) {
-      document.getElementById("error").textContent = "Network error. Please try again.";
-      document.getElementById("error").style.display = "block";
+      errBox.textContent = "Network error. Please try again.";
+      errBox.style.display = "block";
       console.error(err);
     }
   });
+
+  // ----- Optional: wire up the signup UI you already have -----
+  const showSignup = document.getElementById("showSignup");
+  const signupForm = document.getElementById("signupForm");
+  const backToLogin = document.getElementById("backToLogin");
+
+  if (showSignup && signupForm && backToLogin) {
+    showSignup.onclick = () => { signupForm.style.display = "block"; document.getElementById("loginForm").style.display = "none"; };
+    backToLogin.onclick = () => { signupForm.style.display = "none"; document.getElementById("loginForm").style.display = "block"; };
+
+    signupForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const success = document.getElementById("success");
+      const error = document.getElementById("error");
+      success.style.display = "none"; error.style.display = "none";
+
+      const email = document.getElementById("signupEmail").value.trim();
+      const password = document.getElementById("signupPassword").value;
+      const role = document.getElementById("signupRole").value;
+
+      try {
+        const r = await api("/signup", { method:"POST", body: JSON.stringify({ email, password, role }) });
+        const j = await r.json();
+        if (!r.ok || j?.ok === false) {
+          error.textContent = (j?.detail || "Signup failed.");
+          error.style.display = "block";
+          return;
+        }
+        success.textContent = "Account created. You can log in now.";
+        success.style.display = "block";
+        setTimeout(() => { backToLogin.click(); }, 1200);
+      } catch (e2) {
+        error.textContent = "Network error during signup.";
+        error.style.display = "block";
+      }
+    });
+  }
 </script>
 
   <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
