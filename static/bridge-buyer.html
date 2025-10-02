@@ -76,6 +76,34 @@
       <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">Refresh</button>
     </div>
 
+    <!-- RFQ (two-click) -->
+    <div class="cardy" id="rfqCard">
+      <div class="d-flex gap-2 align-items-end" style="max-width:520px">
+        <div style="flex:1">
+          <label class="form-label mb-1">Symbol</label>
+          <select id="rfqSym" class="form-select">
+            <option>CU-SHRED-1M</option>
+            <option>AL-6061-1M</option>
+          </select>
+        </div>
+        <div style="width:120px">
+          <label class="form-label mb-1">Side</label>
+          <select id="rfqSide" class="form-select">
+            <option>buy</option>
+            <option>sell</option>
+          </select>
+        </div>
+        <div style="width:140px">
+          <label class="form-label mb-1">Qty (lots)</label>
+          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="1">
+        </div>
+        <div>
+          <label class="form-label mb-1" style="opacity:0">.</label>
+          <button id="rfqGo" class="btn btn-primary">RFQ</button>
+        </div>
+      </div>
+    </div>
+
     <!-- live region for loading text (a11y) -->
     <div id="loadingStatus" class="visually-hidden" role="status" aria-live="polite"></div>
 
@@ -233,6 +261,35 @@
     // Initial load + periodic refresh
     loadOpenContracts();
     setInterval(loadOpenContracts, 10000);
+  </script>
+
+  <!-- RFQ wiring (after api() & DOM exist) -->
+  <script>
+    (function(){
+      const btn = document.getElementById('rfqGo');
+      if(!btn) return;
+      // default side to 'buy' for buyers
+      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
+      if (role === 'buyer') {
+        const sideSel = document.getElementById('rfqSide');
+        if (sideSel) sideSel.value = 'buy';
+      }
+
+      btn.onclick = async ()=>{
+        const s   = document.getElementById('rfqSym').value;
+        const side= document.getElementById('rfqSide').value;
+        const q   = +document.getElementById('rfqQty').value;
+        if (!q) return toast('Enter qty');
+        const exp = new Date(Date.now() + 20*60*1000).toISOString();
+        const r = await api('/rfq', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
+        });
+        toast('RFQ posted');
+        try { console.log(await r.json()); } catch {}
+      };
+    })();
   </script>
 </body>
 </html>

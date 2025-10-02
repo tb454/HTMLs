@@ -1574,34 +1574,27 @@ async def _ensure_inventory_schema():
 
 @app.on_event("startup")
 async def _ensure_receipts_schema():
-    ddl = [
-        # base table (create if missing)
-        """
-        CREATE TABLE IF NOT EXISTS public.receipts (
-          receipt_id UUID PRIMARY KEY,
-          seller     TEXT,
-          sku        TEXT,
-          qty_tons   NUMERIC,
-          status     TEXT NOT NULL DEFAULT 'created',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          consumed_at    TIMESTAMPTZ,
-          consumed_bol_id UUID,
-          provenance  JSONB NOT NULL DEFAULT '{}'::jsonb
-        );
-        """,
-        # optional view for live/unconsumed
-        """
-        CREATE OR REPLACE VIEW public.receipts_live AS
-          SELECT * FROM public.receipts
-          WHERE consumed_at IS NULL AND status IN ('created','pledged');
-        """
-    ]
-    for s in ddl:
-        try:
-            await database.execute(s)
-        except Exception as e:
-            logger.warn("receipts_bootstrap_failed", err=str(e), sql=s[:120])
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.receipts (
+      receipt_id UUID PRIMARY KEY,
+      seller     TEXT,
+      sku        TEXT,
+      qty_tons   NUMERIC,
+      status     TEXT NOT NULL DEFAULT 'created',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      consumed_at    TIMESTAMPTZ,
+      consumed_bol_id UUID,
+      provenance  JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+    CREATE OR REPLACE VIEW public.receipts_live AS
+      SELECT * FROM public.receipts
+      WHERE consumed_at IS NULL AND status IN ('created','pledged');
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("receipts_bootstrap_failed", err=str(e))
 
 @app.on_event("startup")
 async def _ensure_stocks_schema():
@@ -2507,6 +2500,13 @@ class BOLRecord(BaseModel):
     delivery_time: Optional[datetime] = None
     status: str
 
+class ReceiptProvenance(BaseModel):
+    truck_id: Optional[str] = None
+    scale_in_lbs: Optional[float] = None
+    scale_out_lbs: Optional[float] = None
+    gps_polyline: Optional[list[list[float]]] = None  # [[lat,lon], ...]
+    photos: Optional[list[str]] = None                 # URLs/ids
+
 class ProductIn(BaseModel):
     symbol: str
     description: str
@@ -3069,6 +3069,29 @@ async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: R
     row = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
     if not row:
         raise HTTPException(404, "receipt not found")
+
+    try:
+        await audit_append("system", "receipt.consume", "receipt", receipt_id, {"bol_id": bol_id})
+    except Exception:
+        pass
+
+    return {"receipt_id": receipt_id, "status": "consumed"}
+
+@app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
+async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
+    r = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
+    if not r:
+        raise HTTPException(404, "receipt not found")
+
+    await database.execute("""
+      UPDATE public.receipts
+         SET consumed_at=NOW(),
+             consumed_bol_id=:bol,
+             provenance=:prov::jsonb,
+             status='delivered',
+             updated_at=NOW()
+       WHERE receipt_id=:id AND consumed_at IS NULL
+    """, {"id":receipt_id, "bol":bol_id, "prov": json.dumps(prov.dict())})
 
     try:
         await audit_append("system", "receipt.consume", "receipt", receipt_id, {"bol_id": bol_id})
@@ -5365,6 +5388,56 @@ async def _get_fees(symbol: str):
         return (0.0, 0.0, 0.0)
     return (float(row["maker_bps"]), float(row["taker_bps"]), float(row["min_fee_cents"]))
 
+async def _get_fees(symbol: str):
+    row = await database.fetch_one(
+        "SELECT maker_bps, taker_bps, min_fee_cents FROM public.fee_schedule WHERE symbol=:s", {"s": symbol}
+    )
+    if not row: return (0.0, 0.0, 0.0)
+    return (float(row["maker_bps"]), float(row["taker_bps"]), float(row["min_fee_cents"]))
+
+async def _latest_settle_on_or_before(symbol: str, d: date) -> Optional[float]:
+    row = await database.fetch_one("""
+      SELECT settle FROM public.settlements WHERE symbol=:s AND as_of<=:d
+      ORDER BY as_of DESC LIMIT 1
+    """, {"s":symbol, "d":d})
+    return float(row["settle"]) if row else None
+
+async def _distinct_members(as_of: date) -> List[str]:
+    rows = await database.fetch_all("""
+      WITH m1 AS (
+        SELECT buy_owner AS m FROM public.clob_trades WHERE created_at::date<=:d
+        UNION
+        SELECT sell_owner AS m FROM public.clob_trades WHERE created_at::date<=:d
+      ), m2 AS (
+        SELECT owner AS m FROM public.clob_positions
+      )
+      SELECT DISTINCT m FROM (SELECT * FROM m1 UNION SELECT * FROM m2) x WHERE m IS NOT NULL
+    """, {"d":as_of})
+    return [r["m"] for r in rows]
+
+async def _member_day_trades(member: str, as_of: date):
+    rows = await database.fetch_all("""
+      SELECT t.trade_id, t.symbol, t.price, t.qty_lots, t.buy_owner, t.sell_owner,
+             t.maker_order, t.taker_order, t.created_at,
+             ob.owner AS maker_owner, ot.owner AS taker_owner
+      FROM public.clob_trades t
+      LEFT JOIN public.clob_orders ob ON ob.order_id = t.maker_order
+      LEFT JOIN public.clob_orders ot ON ot.order_id = t.taker_order
+      WHERE t.created_at::date = :d AND (t.buy_owner=:m OR t.sell_owner=:m)
+      ORDER BY t.created_at ASC
+    """, {"d":as_of, "m":member})
+    return [dict(r) for r in rows]
+
+async def _position_net(member: str, symbol: str) -> float:
+    row = await database.fetch_one(
+        "SELECT qty_lots FROM public.clob_positions WHERE owner=:o AND symbol=:s", {"o":member,"s":symbol}
+    )
+    return float(row["qty_lots"]) if row else 0.0
+
+def _fee_amount(notional: float, bps: float, min_cents: float) -> float:
+    fee = max(notional * (bps/10000.0), (min_cents/100.0))
+    return _round2(fee)
+
 # -- Reporting/statement helpers (CLOB) --
 async def _latest_settle_on_or_before(symbol: str, d: date) -> Optional[float]:
     row = await database.fetch_one("""
@@ -5784,28 +5857,39 @@ async def _clob_match(order_id: str) -> float:
           VALUES (:id,:s,:p,:q,:b,:se,:maker,:taker)
         """, {"id": trade_id, "s": symbol, "p": trade_price, "q": trade_qty, "b": buy_owner, "se": sell_owner,
               "maker": row["order_id"], "taker": order_id})
+
         # --- audit (best-effort; never break matching) ---
-    try:
-        await audit_append(buy_owner,  "trade.fill", "trade", trade_id, {
-        "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
-        "maker_order": row["order_id"], "taker_order": order_id
-    })
-        await audit_append(sell_owner, "trade.fill", "trade", trade_id, {
-        "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
-        "maker_order": row["order_id"], "taker_order": order_id
-    })
-    except Exception:
-        pass
+        try:
+            await audit_append(buy_owner, "trade.fill", "trade", trade_id, {
+                "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
+                "maker_order": row["order_id"], "taker_order": order_id
+            })
+            await audit_append(sell_owner, "trade.fill", "trade", trade_id, {
+                "symbol": symbol, "price": trade_price, "qty_lots": trade_qty,
+                "maker_order": row["order_id"], "taker_order": order_id
+            })
+        except Exception:
+            pass
 
-        await database.execute("UPDATE clob_orders SET qty_open = qty_open - :q WHERE order_id=:id",
-                               {"q": trade_qty, "id": row["order_id"]})
-        await database.execute("UPDATE clob_orders SET qty_open = GREATEST(qty_open - :q, 0) WHERE order_id=:id",
-                               {"q": trade_qty, "id": order_id})
-        await database.execute("UPDATE clob_orders SET status='filled' WHERE order_id=:id AND qty_open <= 0.0000001",
-                               {"id": row["order_id"]})
-        await database.execute("UPDATE clob_orders SET status='filled' WHERE order_id=:id AND qty_open <= 0.0000001",
-                               {"id": order_id})
+        # order updates
+        await database.execute(
+            "UPDATE clob_orders SET qty_open = qty_open - :q WHERE order_id=:id",
+            {"q": trade_qty, "id": row["order_id"]}
+        )
+        await database.execute(
+            "UPDATE clob_orders SET qty_open = GREATEST(qty_open - :q, 0) WHERE order_id=:id",
+            {"q": trade_qty, "id": order_id}
+        )
+        await database.execute(
+            "UPDATE clob_orders SET status='filled' WHERE order_id=:id AND qty_open <= 0.0000001",
+            {"id": row["order_id"]}
+        )
+        await database.execute(
+            "UPDATE clob_orders SET status='filled' WHERE order_id=:id AND qty_open <= 0.0000001",
+            {"id": order_id}
+        )
 
+        # positions + ticks
         await _add_position(buy_owner, symbol, +trade_qty)
         await _add_position(sell_owner, symbol, -trade_qty)
 
@@ -5818,7 +5902,7 @@ async def _clob_match(order_id: str) -> float:
         open_qty -= trade_qty
         filled_total += trade_qty
 
-    return filled_total
+
 
 
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
