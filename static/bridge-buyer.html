@@ -20,8 +20,6 @@
     button:disabled{opacity:.6;cursor:not-allowed}
   </style>
 
-  <!-- Global endpoint + toast + api helper -->
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
   <script>
     // Single source of truth for API base (same-origin in prod; localhost in dev)
     window.endpoint = window.endpoint || (
@@ -30,7 +28,7 @@
 
     function toast(msg, ms=2800){
       const t = document.getElementById('toast');
-      if(!t){ alert(msg); return; }
+      if(!t){ alert(typeof msg === 'string' ? msg : (msg?.message || 'Error')); return; }
       t.textContent = typeof msg === 'string' ? msg : (msg?.message || 'Error');
       t.style.display = 'block';
       setTimeout(()=>{ t.style.display = 'none'; }, ms);
@@ -64,6 +62,9 @@
   </script>
 </head>
 <body>
+  <!-- Toast (must live in <body>, not <head>) -->
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+
   <div class="container">
     <div class="d-flex align-items-center justify-content-between">
       <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
@@ -117,12 +118,12 @@
   </div>
 
   <script>
-    const endpoint = window.endpoint;           // unified base
-    let offset = 0, limit = 100;                // pagination
-    let loadCtl = null;                         // AbortController for overlapping loads
-    let refreshTimer = null;                    // interval handle
+    const endpoint = window.endpoint;            // unified base
+    let offset = 0, limit = 100;                 // pagination
+    let loadCtl = null;                          // AbortController for overlapping loads
+    let refreshTimer = null;                     // interval handle
 
-    // Role guard: hide Buy if not buyer
+    // Role guard helper (kept for compatibility)
     function currentRole(){
       try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
       catch{ return ''; }
@@ -176,13 +177,15 @@
 
       const root = document.getElementById('list');
       const ls = document.getElementById('loadingStatus');
-      ls.textContent = 'Loading contracts…';
+      if (ls) ls.textContent = 'Loading contracts…';
       setLoadingUI(true);
       showSkeletonCards(5);
 
       const q = new URLSearchParams({ status: 'Pending', limit, offset });
-      const buyerVal = document.getElementById('buyerFilter').value.trim();
-      const matVal   = document.getElementById('materialFilter').value.trim();
+      const buyerEl = document.getElementById('buyerFilter');
+      const matEl   = document.getElementById('materialFilter');
+      const buyerVal = (buyerEl?.value || '').trim();
+      const matVal   = (matEl?.value || '').trim();
       if (buyerVal) q.set('buyer', buyerVal);
       if (matVal)   q.set('material', matVal);
 
@@ -195,10 +198,10 @@
         const rows = await res.json();
 
         root.innerHTML = '';
-        if (rows.length === 0) {
+        if (!Array.isArray(rows) || rows.length === 0) {
           root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
-          document.getElementById('pageInfo').textContent = `Showing 0 • offset ${offset}`;
-          ls.textContent = 'Loaded.';
+          const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing 0 • offset ${offset}`;
+          if (ls) ls.textContent = 'Loaded.';
           return;
         }
 
@@ -206,18 +209,20 @@
         rows.forEach(r=>{
           const div = document.createElement('div');
           div.className = 'cardy';
-          const total = (Number(r.weight_tons) * Number(r.price_per_ton));
+          const wt = Number(r?.weight_tons ?? 0);
+          const pt = Number(r?.price_per_ton ?? 0);
+          const total = wt * pt;
           const buyBtn = (role === 'buyer')
             ? `<button class="btn btn-primary btn-sm" data-id="${r.id}" onclick="buy(event,'${r.id}')">Buy</button>`
             : `<button class="btn btn-secondary btn-sm" disabled title="Login as Buyer to purchase">Buy</button>`;
           div.innerHTML = `
             <div class="d-flex justify-content-between align-items-start">
               <div>
-                <h5 class="mb-1">${r.material}</h5>
-                <div class="text-muted small">Seller: ${r.seller}</div>
-                <div class="text-muted small">Buyer: ${r.buyer}</div>
-                <div class="small">Tons: <b>${r.weight_tons}</b> @ $<b>${r.price_per_ton}</b>/ton · Total $<b>${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
-                <div class="small text-muted">Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</div>
+                <h5 class="mb-1">${r?.material ?? ''}</h5>
+                <div class="text-muted small">Seller: ${r?.seller ?? ''}</div>
+                <div class="text-muted small">Buyer: ${r?.buyer ?? ''}</div>
+                <div class="small">Tons: <b>${wt}</b> @ $<b>${pt}</b>/ton · Total $<b>${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
+                <div class="small text-muted">Created: ${r?.created_at ? new Date(r.created_at).toLocaleString() : ''}</div>
               </div>
               <div class="text-end">
                 ${buyBtn}
@@ -226,13 +231,13 @@
           root.appendChild(div);
         });
 
-        document.getElementById('pageInfo').textContent = `Showing ${rows.length} • offset ${offset}`;
+        const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing ${rows.length} • offset ${offset}`;
       }catch(e){
         if (e.name !== 'AbortError') {
-          // api() already toasted the error
+          // api() already toasted
         }
       }finally{
-        ls.textContent = 'Loaded.';
+        if (ls) ls.textContent = 'Loaded.';
         loadCtl = null;
         setLoadingUI(false);
       }
@@ -251,7 +256,7 @@
           body: JSON.stringify({ op:'purchase', expected_status:'Pending' })
         });
         const data = await res.json();
-        toast(`Purchased. BOL ${data.bol_id} created.`);
+        toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
         loadOpenContracts();
       }catch(e){
         // api() already showed toast
@@ -262,11 +267,11 @@
     window.buy = buy; // expose for inline onclick
 
     // Wire UI
-    document.getElementById('refreshBtn').addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
-    document.getElementById('buyerFilter').addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
-    document.getElementById('materialFilter').addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
-    document.getElementById('prevBtn').addEventListener('click', ()=>{ offset = Math.max(0, offset - limit); loadOpenContracts(); });
-    document.getElementById('nextBtn').addEventListener('click', ()=>{ offset += limit; loadOpenContracts(); });
+    document.getElementById('refreshBtn')?.addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
+    document.getElementById('buyerFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
+    document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
+    document.getElementById('prevBtn')?.addEventListener('click', ()=>{ offset = Math.max(0, offset - limit); loadOpenContracts(); });
+    document.getElementById('nextBtn')?.addEventListener('click', ()=>{ offset += limit; loadOpenContracts(); });
 
     // Hydrate filters/page from URL on first load
     (function hydrateFromURL(){
@@ -274,8 +279,8 @@
       const buyer = q.get('buyer') || '';
       const material = q.get('material') || '';
       const page = Math.max(1, parseInt(q.get('page')||'1', 10));
-      document.getElementById('buyerFilter').value = buyer;
-      document.getElementById('materialFilter').value = material;
+      const bf = document.getElementById('buyerFilter'); if (bf) bf.value = buyer;
+      const mf = document.getElementById('materialFilter'); if (mf) mf.value = material;
       offset = (page - 1) * limit;
     })();
 
@@ -292,12 +297,14 @@
   <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
   <script>
     (function(){
-      // Hide RFQ for non-buyers (client-side courtesy; server still enforces)
+      // Hide RFQ for non-buyers (client-side courtesy; server should still enforce)
       const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
-      if (role !== 'buyer') document.getElementById('rfqCard')?.classList.add('d-none');
+      const rfqCard = document.getElementById('rfqCard');
+      if (rfqCard && role !== 'buyer') rfqCard.classList.add('d-none');
 
       const btn = document.getElementById('rfqGo');
       if(!btn) return;
+
       // default side to 'buy' for buyers
       if (role === 'buyer') {
         const sideSel = document.getElementById('rfqSide');
@@ -305,9 +312,9 @@
       }
 
       btn.onclick = async ()=>{
-        const s   = document.getElementById('rfqSym').value;
-        const side= document.getElementById('rfqSide').value;
-        const q   = +document.getElementById('rfqQty').value;
+        const s   = document.getElementById('rfqSym')?.value || '';
+        const side= document.getElementById('rfqSide')?.value || 'buy';
+        const q   = +(document.getElementById('rfqQty')?.value || 0);
         if (!q) return toast('Enter qty');
         const exp = new Date(Date.now() + 20*60*1000).toISOString();
         const r = await api('/rfq', {

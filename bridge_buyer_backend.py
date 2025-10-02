@@ -323,6 +323,21 @@ if dsn:
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 # =====  Prometheus metrics + optional Sentry =====
 
+# ----- Extra indexes -----
+@app.on_event("startup")
+async def _ensure_more_indexes():
+    ddl = [
+        "CREATE INDEX IF NOT EXISTS idx_settlements_symbol_asof ON public.settlements(symbol, as_of DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_clob_trades_symbol_time ON public.clob_trades(symbol, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_clob_orders_book ON public.clob_orders(symbol, side, price, created_at) WHERE status='open'",
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("extra_index_bootstrap_failed", sql=s[:100], err=str(e))
+# ----- Extra indexes -----
+
 # ----- Products -----
 @app.on_event("startup")
 async def _ensure_products_schema():
@@ -556,7 +571,7 @@ async def _ensure_users_columns():
         await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON public.users ((lower(email))) WHERE email IS NOT NULL;")
     except Exception:
         pass
-# ------------------------------------------------------------------------------
+# -------- Ensure public.users has id/email/username/is_active --------
 
 # -------- Health --------
 @app.get("/healthz", tags=["Health"], summary="Health Check")
@@ -566,6 +581,9 @@ async def healthz():
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
+    
+@app.get("/health", include_in_schema=False)
+async def health_alias(): return await healthz()
     
 @app.get("/__diag/users_count", tags=["Health"])
 async def diag_users_count():
@@ -6117,14 +6135,6 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename=\"trades_{day}.csv\"'}
     )
-
-app.include_router(router_idx)
-app.include_router(router_fc)
-app.include_router(router_prices)
-app.include_router(router_pricing)
-
-app.include_router(futures_router)
-app.include_router(admin_exports)
 
 app.include_router(trade_router)
 app.include_router(clob_router)
