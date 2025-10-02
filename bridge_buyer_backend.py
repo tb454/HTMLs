@@ -85,6 +85,22 @@ import sentry_sdk
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
 
+_KILL_SWITCH: Dict[str, bool] = defaultdict(bool)          # member_id -> True/False
+_PRICE_BANDS: Dict[str, Tuple[float, float]] = {}          # symbol -> (lower, upper)
+_LULD: Dict[str, Tuple[float, float]] = {}                 # symbol -> (down_pct, up_pct)
+_ENTITLEMENTS: Dict[str, Set[str]] = defaultdict(set)      # username/member -> features set
+
+# simple market-data feed state (used by WebSocket endpoint)
+_md_subs: Set[WebSocket] = set()
+_md_seq: int = 1
+
+# instrument registry (example; persist later)
+_INSTRUMENTS = {
+    # symbol: lot_size (tons), tick_size ($/lb), description
+    "CU-SHRED-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Copper Shred 1-Month"},
+    "AL-6061-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Al 6061 1-Month"},
+}
+
 load_dotenv()
 
 # ---- SaaS soft quotas (optional) ----
