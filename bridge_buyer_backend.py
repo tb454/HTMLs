@@ -313,6 +313,16 @@ async def request_id_logging(request: Request, call_next):
     return response
 # =====  request-id + structured logs =====
 
+# =====  Database (async + sync) =====
+@app.on_event("startup")
+async def _connect_db_first():
+    if not database.is_connected:
+        await database.connect()
+    if not hasattr(app.state, "db_pool"):
+        import asyncpg
+        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
+# ----- database (async + sync) -----
+
 # =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
 async def _metrics_and_sentry():
