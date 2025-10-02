@@ -1604,6 +1604,31 @@ async def _ensure_receipts_schema():
             logger.warn("receipts_bootstrap_failed", err=str(e), sql=s[:120])
 
 @app.on_event("startup")
+async def _ensure_stocks_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.locations(
+      location TEXT PRIMARY KEY,
+      name TEXT,
+      city TEXT,
+      region TEXT,
+      storage_fee_usd_per_ton_day NUMERIC DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS public.stocks_daily(
+      as_of DATE NOT NULL,
+      symbol TEXT NOT NULL,
+      location TEXT NOT NULL,
+      qty_lots NUMERIC NOT NULL,
+      lot_size NUMERIC NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (as_of, symbol, location)
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("stocks_schema", err=str(e))
+
+@app.on_event("startup")
 async def _ensure_receivables_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.receivables (
@@ -3099,6 +3124,54 @@ async def insurance_quote(i: InsuranceQuoteIn):
         pass
     return {"premium_usd": prem, "rate_bps": rate_bps}
 # ---- Insurance: transport coverage quote (stub) ----
+# ========== Stocks (daily snapshots from receipts) ==========
+@app.post("/stocks/snapshot", tags=["Stocks"], summary="Snapshot live receipts into stocks_daily")
+async def stocks_snapshot(as_of: date):
+    rows = await database.fetch_all("""
+      SELECT symbol, location, SUM(qty_lots) qty_lots, MAX(lot_size) lot_size
+      FROM public.receipts
+      WHERE status IN ('created','pledged') AND consumed_at IS NULL
+      GROUP BY symbol, location
+    """)
+    await database.execute("DELETE FROM public.stocks_daily WHERE as_of=:d", {"d": as_of})
+    for r in rows:
+        await database.execute("""
+          INSERT INTO public.stocks_daily(as_of, symbol, location, qty_lots, lot_size)
+          VALUES (:d,:s,:loc,:q,:lot)
+        """, {"d": as_of, "s": r["symbol"], "loc": r["location"],
+              "q": float(r["qty_lots"]), "lot": float(r["lot_size"])})
+    return {"as_of": str(as_of), "rows": len(rows)}
+
+@app.get("/stocks", tags=["Stocks"], summary="Read stocks snapshot (JSON)")
+async def stocks(as_of: date | None = None):
+    d = as_of or datetime.utcnow().date()
+    rows = await database.fetch_all("""
+      SELECT as_of, symbol, location, qty_lots, lot_size
+      FROM public.stocks_daily
+      WHERE as_of=:d
+      ORDER BY symbol, location
+    """, {"d": d})
+    return [dict(r) for r in rows]
+
+@app.get("/stocks.csv", tags=["Stocks"], summary="Read stocks snapshot (CSV)")
+async def stocks_csv(as_of: date | None = None):
+    d = as_of or datetime.utcnow().date()
+    rows = await database.fetch_all("""
+      SELECT as_of, symbol, location, qty_lots, lot_size
+      FROM public.stocks_daily
+      WHERE as_of=:d
+      ORDER BY symbol, location
+    """, {"d": d})
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["date","symbol","location","qty_lots","lot_size","qty_lb"])
+    for r in rows:
+        qty_lb = float(r["qty_lots"]) * float(r["lot_size"])
+        w.writerow([r["as_of"], r["symbol"], r["location"],
+                    float(r["qty_lots"]), float(r["lot_size"]), qty_lb])
+    out.seek(0)
+    return StreamingResponse(iter([out.read()]), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="stocks_{d}.csv"'} )
+# ========== Stocks (daily snapshots from receipts) ==========
 
     # ---- audit log (best-effort; won't break request on failure)
     actor = request.session.get("username") if hasattr(request, "session") else None
@@ -5542,7 +5615,61 @@ async def expire_month(tradable_symbol: str, as_of: date, request: Request):
 
     return {"tradable_symbol": tradable_symbol, "final_settle": settle_px, "as_of": str(as_of)}
 
+# ===== Index (read APIs over settlements) =====
+@app.get("/index/latest", tags=["Index"], summary="Latest settle per symbol")
+async def index_latest():
+    rows = await database.fetch_all("""
+      SELECT DISTINCT ON (symbol) symbol, as_of, settle, method, created_at
+      FROM public.settlements
+      ORDER BY symbol, as_of DESC, created_at DESC
+    """)
+    return [dict(r) for r in rows]
+
+@app.get("/index/history", tags=["Index"], summary="Historical settles for a symbol (JSON)")
+async def index_history(symbol: str, start: date | None = None, end: date | None = None):
+    sql = "SELECT as_of, settle, method, created_at FROM public.settlements WHERE symbol=:s"
+    args = {"s": symbol}
+    if start: sql += " AND as_of >= :a"; args["a"] = start
+    if end:   sql += " AND as_of <= :b"; args["b"] = end
+    sql += " ORDER BY as_of ASC"
+    rows = await database.fetch_all(sql, args)
+    return {"symbol": symbol, "rows": [dict(r) for r in rows]}
+
+@app.get("/index/history.csv", tags=["Index"], summary="Historical settles for a symbol (CSV)")
+async def index_history_csv(symbol: str, start: date | None = None, end: date | None = None):
+    sql = "SELECT as_of, settle, method FROM public.settlements WHERE symbol=:s"
+    args = {"s": symbol}
+    if start: sql += " AND as_of >= :a"; args["a"] = start
+    if end:   sql += " AND as_of <= :b"; args["b"] = end
+    sql += " ORDER BY as_of ASC"
+    rows = await database.fetch_all(sql, args)
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["date","settle","method"])
+    for r in rows:
+        w.writerow([r["as_of"], float(r["settle"]), r["method"]])
+    out.seek(0)
+    return StreamingResponse(iter([out.read()])),  # or use out.getvalue()
+
+@app.get("/index/tweet", tags=["Index"], summary="One-line tweet text for today’s BR-Settle")
+async def index_tweet(as_of: date | None = None):
+    d = as_of or datetime.utcnow().date()
+    rows = await database.fetch_all(
+        "SELECT symbol, settle FROM public.settlements WHERE as_of=:d ORDER BY symbol",
+        {"d": d}
+    )
+    if not rows:
+        return {"as_of": str(d), "text": "No BR-Settle today."}
+
+    parts = [f"{r['symbol']} ${float(r['settle']):.4f}/lb" for r in rows]
+    text = (
+        f"Official BR-Settle ({d}): "
+        + "  •  ".join(parts)
+        + " — Method: VWAP last 60m (fallback last trade)."
+    )
+    return {"as_of": str(d), "text": text}
+
 #-------------------- Settlement (VWAP from recent CLOB trades) =====
+
 # ===== FIX shim → CLOB =====
 class FixOrder(BaseModel):
     ClOrdID: str
