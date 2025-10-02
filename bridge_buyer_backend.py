@@ -69,6 +69,11 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+# --- EXCHANGE ADJACENT ADD-ONS: imports (place near other FastAPI imports) ---
+from fastapi import WebSocket, WebSocketDisconnect
+from collections import defaultdict, deque
+from typing import Tuple, Set
+
 # metrics & errors
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter
@@ -325,6 +330,15 @@ async def healthz():
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
+    
+@app.get("/__diag/users_count", tags=["Health"])
+async def diag_users_count():
+    try:
+        row = await database.fetch_one("SELECT COUNT(*) AS c FROM public.users")
+        return {"users": int(row["c"])}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 # --- Pricing & Indices wiring (drop-in) --------------------------------------
 import os, asyncio
