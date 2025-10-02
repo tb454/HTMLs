@@ -1653,6 +1653,7 @@ CREATE TABLE IF NOT EXISTS public.receipts (
   provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_lots  NUMERIC;
