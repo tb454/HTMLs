@@ -119,6 +119,8 @@
   <script>
     const endpoint = window.endpoint;           // unified base
     let offset = 0, limit = 100;                // pagination
+    let loadCtl = null;                         // AbortController for overlapping loads
+    let refreshTimer = null;                    // interval handle
 
     // Role guard: hide Buy if not buyer
     function currentRole(){
@@ -157,15 +159,30 @@
       history.replaceState({}, '', u);
     }
 
+    // Optional nicety: disable nav buttons while loading
+    function setLoadingUI(isLoading){
+      const ids = ['prevBtn','nextBtn','refreshBtn'];
+      ids.forEach(id=>{
+        const el = document.getElementById(id);
+        if (el) el.disabled = isLoading;
+      });
+    }
+
+    // Abortable loader with button-state + URL sync
     async function loadOpenContracts(){
+      // cancel any in-flight load
+      if (loadCtl) loadCtl.abort();
+      loadCtl = new AbortController();
+
       const root = document.getElementById('list');
       const ls = document.getElementById('loadingStatus');
       ls.textContent = 'Loading contracts…';
+      setLoadingUI(true);
       showSkeletonCards(5);
 
       const q = new URLSearchParams({ status: 'Pending', limit, offset });
       const buyerVal = document.getElementById('buyerFilter').value.trim();
-      const matVal = document.getElementById('materialFilter').value.trim();
+      const matVal   = document.getElementById('materialFilter').value.trim();
       if (buyerVal) q.set('buyer', buyerVal);
       if (matVal)   q.set('material', matVal);
 
@@ -174,14 +191,14 @@
       _syncQuery({ buyer: buyerVal || '', material: matVal || '', page });
 
       try{
-        const res  = await api(`/contracts?` + q.toString());
+        const res  = await api(`/contracts?` + q.toString(), { signal: loadCtl.signal });
         const rows = await res.json();
 
         root.innerHTML = '';
         if (rows.length === 0) {
           root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
           document.getElementById('pageInfo').textContent = `Showing 0 • offset ${offset}`;
-          ls.textContent = 'Loaded.'; 
+          ls.textContent = 'Loaded.';
           return;
         }
 
@@ -210,10 +227,14 @@
         });
 
         document.getElementById('pageInfo').textContent = `Showing ${rows.length} • offset ${offset}`;
-      } catch(e){
-        // api() already toasted; keep skeleton until next refresh
-      } finally {
+      }catch(e){
+        if (e.name !== 'AbortError') {
+          // api() already toasted the error
+        }
+      }finally{
         ls.textContent = 'Loaded.';
+        loadCtl = null;
+        setLoadingUI(false);
       }
     }
 
@@ -258,18 +279,26 @@
       offset = (page - 1) * limit;
     })();
 
-    // Initial load + periodic refresh
+    // Auto-refresh controls (pause when hidden)
+    function startAuto(){ if (!refreshTimer) refreshTimer = setInterval(loadOpenContracts, 10000); }
+    function stopAuto(){ if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
+    document.addEventListener('visibilitychange', ()=> document.hidden ? stopAuto() : (loadOpenContracts(), startAuto()));
+
+    // Initial load + start timer
     loadOpenContracts();
-    setInterval(loadOpenContracts, 10000);
+    startAuto();
   </script>
 
-  <!-- RFQ wiring (after api() & DOM exist) -->
+  <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
   <script>
     (function(){
+      // Hide RFQ for non-buyers (client-side courtesy; server still enforces)
+      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
+      if (role !== 'buyer') document.getElementById('rfqCard')?.classList.add('d-none');
+
       const btn = document.getElementById('rfqGo');
       if(!btn) return;
       // default side to 'buy' for buyers
-      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
       if (role === 'buyer') {
         const sideSel = document.getElementById('rfqSide');
         if (sideSel) sideSel.value = 'buy';

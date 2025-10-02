@@ -2546,14 +2546,7 @@ class ContractOut(ContractIn):
             "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
         }}
 
-class ReceiptProvenance(BaseModel):
-    truck_id: Optional[str] = None
-    scale_in_lbs: Optional[float] = None
-    scale_out_lbs: Optional[float] = None
-    gps_polyline: Optional[list[list[float]]] = None  # [[lat,lon], ...]
-    photos: Optional[list[str]] = None                 # URLs/ids
-
-
+# -------- Contracts & BOLs --------
 @app.post(
     "/contracts",
     response_model=ContractOut,
@@ -3050,35 +3043,6 @@ async def generate_bol_pdf(bol_id: str):
 # -------- Receipts lifecycle --------
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
-    r = await database.execute("""
-      WITH upd AS (
-        UPDATE public.receipts
-           SET consumed_at = NOW(),
-               consumed_bol_id = :bol,
-               provenance = :prov::jsonb,
-               status = 'delivered',
-               updated_at = NOW()
-         WHERE receipt_id = :id
-           AND consumed_at IS NULL
-         RETURNING receipt_id
-      )
-      SELECT COUNT(*) FROM upd
-    """, {"id": receipt_id, "bol": bol_id, "prov": json.dumps(prov.dict())})
-
-    # Some async drivers return None for DML; do an explicit check:
-    row = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
-    if not row:
-        raise HTTPException(404, "receipt not found")
-
-    try:
-        await audit_append("system", "receipt.consume", "receipt", receipt_id, {"bol_id": bol_id})
-    except Exception:
-        pass
-
-    return {"receipt_id": receipt_id, "status": "consumed"}
-
-@app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
-async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
     r = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
     if not r:
         raise HTTPException(404, "receipt not found")
@@ -3147,6 +3111,7 @@ async def insurance_quote(i: InsuranceQuoteIn):
         pass
     return {"premium_usd": prem, "rate_bps": rate_bps}
 # ---- Insurance: transport coverage quote (stub) ----
+
 # ========== Stocks (daily snapshots from receipts) ==========
 @app.post("/stocks/snapshot", tags=["Stocks"], summary="Snapshot live receipts into stocks_daily")
 async def stocks_snapshot(as_of: date):
@@ -3196,21 +3161,7 @@ async def stocks_csv(as_of: date | None = None):
         headers={"Content-Disposition": f'attachment; filename="stocks_{d}.csv"'} )
 # ========== Stocks (daily snapshots from receipts) ==========
 
-    # ---- audit log (best-effort; won't break request on failure)
-    actor = request.session.get("username") if hasattr(request, "session") else None
-    try:
-        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
-            "contract_id": str(bol.contract_id),
-            "material": bol.material,
-            "weight_tons": bol.weight_tons
-        })
-    except Exception:
-        pass
-
-    if idem_key:
-        _idem_cache[idem_key] = resp
-    return resp
-
+# -------- BOLs (with filtering) --------
 @app.get(
     "/bols",
     response_model=List[BOLOut],
@@ -3284,6 +3235,7 @@ async def get_all_bols_pg(
             "status": d.get("status") or "",
         })
     return out
+# -------- BOLs (with filtering) --------
 
 # -------- Public ticker (ungated) ------
 @app.get("/ticker", tags=["Market"], summary="Public ticker snapshot")
@@ -4520,7 +4472,7 @@ futures_router = APIRouter(
     dependencies=[Depends(_require_admin)]
 )
 
-class ProductIn(BaseModel):
+class FuturesProductIn(BaseModel):
     symbol_root: str
     material: str
     delivery_location: str
@@ -4529,7 +4481,7 @@ class ProductIn(BaseModel):
     currency: str = "USD"
     price_method: Literal["VWAP_BASIS", "MANUAL", "EXTERNAL"] = "VWAP_BASIS"
 
-class ProductOut(ProductIn):
+class FuturesProductOut(FuturesProductIn):
     id: str
 
 class PricingParamsIn(BaseModel):
@@ -4603,8 +4555,8 @@ async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] 
     mark = float(recent_vwap) + float(listing["basis_adjustment"]) + m_to_exp * float(listing["carry_per_month"])
     return float(mark), "VWAP_BASIS"
 
-@futures_router.post("/products", response_model=ProductOut, summary="Create/Upsert a futures product")
-async def create_product(p: ProductIn):
+@futures_router.post("/products", response_model=FuturesProductOut, summary="Create/Upsert a futures product")
+async def create_product(p: FuturesProductIn):
     row = await database.fetch_one("""
       INSERT INTO futures_products (id, symbol_root, material, delivery_location, contract_size_tons, tick_size, currency, price_method)
       VALUES (:id,:symbol_root,:material,:delivery_location,:contract_size_tons,:tick_size,:currency,:price_method)
@@ -4739,7 +4691,7 @@ async def publish_mark(body: PublishMarkIn):
     """, {"id": str(uuid.uuid4()), "lid": body.listing_id, "dt": (body.mark_date or _date.today()), "px": mark_price, "m": method})
     return {"listing_id": body.listing_id, "mark_date": str(body.mark_date or _date.today()), "mark_price": mark_price, "method": method}
 
-@futures_router.get("/products", response_model=List[ProductOut], summary="List products")
+@futures_router.get("/products", response_model=List[FuturesProductOut], summary="List products")
 async def list_products():
     rows = await database.fetch_all("""
         SELECT 
@@ -4937,120 +4889,6 @@ async def _symbol_for_listing(listing_id: str) -> str:
     if not row:
         return None
     return row["symbol_root"]
-
-class OrderIn(BaseModel):
-    symbol: str
-    side: Literal["buy","sell"]
-    price: Decimal
-    qty_lots: Decimal
-    tif: Literal["day","ioc","fok"] = "day"
-
-@app.post("/orders", tags=["CLOB"], summary="Place order")
-async def place_order(o: OrderIn, request: Request):
-    user = request.session.get("username","anon")
-    require_entitlement(user, "clob.trade")
-    if _KILL_SWITCH.get(user): raise HTTPException(423, "Kill switch active")
-    await price_band_check(o.symbol, float(o.price))
-    await _check_position_limit(user, o.symbol, float(o.qty_lots), o.side)
-
-    order_id = str(uuid.uuid4())
-    qty = float(o.qty_lots)
-    await database.execute("""
-      INSERT INTO orders(order_id,symbol,side,price,qty_lots,qty_open,owner,tif)
-      VALUES (:id,:s,:side,:p,:q,:q,:owner,:tif)
-    """, {"id":order_id,"s":o.symbol,"side":o.side,"p":str(o.price),"q":qty,"owner":user,"tif":o.tif})
-
-    # match loop
-    filled = await _match(order_id)
-    if o.tif in ("ioc","fok"):
-        row = await database.fetch_one("SELECT qty_open FROM orders WHERE order_id=:id", {"id":order_id})
-        open_qty = float(row["qty_open"]) if row else 0.0
-        if (o.tif=="fok" and open_qty>0) or (o.tif=="ioc" and open_qty>0):
-            # cancel remainder
-            await database.execute("UPDATE orders SET status='cancelled', qty_open=0 WHERE order_id=:id", {"id":order_id})
-    return {"order_id": order_id, "filled": filled}
-
-@app.delete("/orders/{order_id}", tags=["CLOB"], summary="Cancel order")
-async def cancel_order(order_id: str, request: Request):
-    user = request.session.get("username","anon")
-    row = await database.fetch_one("SELECT owner,status FROM orders WHERE order_id=:id", {"id":order_id})
-    if not row: raise HTTPException(404, "Order not found")
-    if row["owner"] != user: raise HTTPException(403, "Not owner")
-    if row["status"] != "open": raise HTTPException(409, "Not open")
-    await database.execute("UPDATE orders SET status='cancelled', qty_open=0 WHERE order_id=:id", {"id":order_id})
-    return {"status":"cancelled"}
-
-@app.get("/orderbook", tags=["CLOB"], summary="Best bid/ask + depth (simple)")
-async def orderbook(symbol: str, depth: int = 10):
-    bids = await database.fetch_all("""
-      SELECT price, SUM(qty_open) qty FROM orders
-      WHERE symbol=:s AND side='buy' AND status='open'
-      GROUP BY price ORDER BY price DESC LIMIT :d
-    """, {"s":symbol, "d":depth})
-    asks = await database.fetch_all("""
-      SELECT price, SUM(qty_open) qty FROM orders
-      WHERE symbol=:s AND side='sell' AND status='open'
-      GROUP BY price ORDER BY price ASC LIMIT :d
-    """, {"s":symbol, "d":depth})
-    return {"symbol":symbol, "bids":[dict(b) for b in bids], "asks":[dict(a) for a in asks]}
-
-async def _match(order_id: str) -> float:
-    o = await database.fetch_one("SELECT * FROM orders WHERE order_id=:id", {"id":order_id})
-    if not o or o["status"] != "open": return 0.0
-    symbol, side, owner = o["symbol"], o["side"], o["owner"]
-    price, open_qty = float(o["price"]), float(o["qty_open"])
-    contra_side = "sell" if side=="buy" else "buy"
-    price_sort = "ASC" if side=="buy" else "DESC"
-    price_cmp = "<=" if side=="buy" else ">="
-    # fetch contra orders at marketable prices
-    rows = await database.fetch_all(f"""
-      SELECT * FROM orders
-      WHERE symbol=:s AND side=:cs AND status='open' AND price {price_cmp} :p
-      ORDER BY price {price_sort}, created_at ASC
-    """, {"s":symbol,"cs":contra_side,"p":price})
-    filled_total = 0.0
-    for row in rows:
-        if open_qty <= 0: break
-        if row["owner"] == owner:
-            # self-match prevention → skip
-            continue
-        trade_qty = min(open_qty, float(row["qty_open"]))
-        trade_price = float(row["price"])
-        trade_id = str(uuid.uuid4())
-        buy_owner  = owner if side=="buy" else row["owner"]
-        sell_owner = row["owner"] if side=="buy" else owner
-
-        # position limit check for taker side already done; ensure maker side too
-        await _check_position_limit(buy_owner, symbol, trade_qty, "buy")
-        await _check_position_limit(sell_owner, symbol, trade_qty, "sell", is_sell=True)
-
-        await database.execute("""
-          INSERT INTO trades(trade_id,symbol,price,qty_lots,buy_owner,sell_owner,maker_order,taker_order)
-          VALUES (:id,:s,:p,:q,:b,:se,:maker,:taker)
-        """, {"id":trade_id,"s":symbol,"p":trade_price,"q":trade_qty,"b":buy_owner,"se":sell_owner,
-              "maker":row["order_id"],"taker":order_id})
-
-        # update orders
-        await database.execute("UPDATE orders SET qty_open=qty_open-:q WHERE order_id=:id", {"q":trade_qty,"id":row["order_id"]})
-        await database.execute("UPDATE orders SET qty_open=GREATEST(qty_open-:q,0) WHERE order_id=:id", {"q":trade_qty,"id":order_id})
-        await database.execute("UPDATE orders SET status='filled' WHERE order_id=:id AND qty_open<=0.0000001", {"id":row["order_id"]})
-        await database.execute("UPDATE orders SET status='filled' WHERE order_id=:id AND qty_open<=0.0000001", {"id":order_id})
-
-        # positions
-        await _add_position(buy_owner, symbol, +trade_qty)
-        await _add_position(sell_owner, symbol, -trade_qty)
-
-        # md tick + broadcast
-        await database.execute("""
-          INSERT INTO md_ticks(seq, symbol, price, qty_lots, kind)
-          VALUES (:seq,:s,:p,:q,'trade')
-        """, {"seq":_md_seq+1,"s":symbol,"p":trade_price,"q":trade_qty})
-        await _md_broadcast({"type":"trade","symbol":symbol,"price":trade_price,"qty_lots":trade_qty})
-
-        open_qty -= trade_qty
-        filled_total += trade_qty
-
-    return filled_total
 
 # ===== Risk controls (admin/runtime) =====
 @app.post("/risk/kill_switch/{member_id}", tags=["Risk"], summary="Toggle kill switch")
@@ -5378,15 +5216,6 @@ class CLOBOrderIn(BaseModel):
     price: Decimal
     qty_lots: Decimal
     tif: Literal["day","ioc","fok"] = "day"
-
-async def _get_fees(symbol: str):
-    row = await database.fetch_one(
-        "SELECT maker_bps, taker_bps, min_fee_cents FROM fee_schedule WHERE symbol=:s",
-        {"s": symbol}
-    )
-    if not row:
-        return (0.0, 0.0, 0.0)
-    return (float(row["maker_bps"]), float(row["taker_bps"]), float(row["min_fee_cents"]))
 
 async def _get_fees(symbol: str):
     row = await database.fetch_one(
@@ -5721,7 +5550,11 @@ async def index_history_csv(symbol: str, start: date | None = None, end: date | 
     for r in rows:
         w.writerow([r["as_of"], float(r["settle"]), r["method"]])
     out.seek(0)
-    return StreamingResponse(iter([out.read()])),  # or use out.getvalue()
+    return StreamingResponse(
+    iter([out.getvalue()]),
+    media_type="text/csv",
+    headers={"Content-Disposition": f'attachment; filename="{symbol}_history.csv"'}
+)
 
 @app.get("/index/tweet", tags=["Index"], summary="One-line tweet text for today’s BR-Settle")
 async def index_tweet(as_of: date | None = None):
