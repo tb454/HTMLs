@@ -322,6 +322,54 @@ async def yard_alias_slash():
 async def favicon():
     return Response(status_code=204)
 
+# -------- Ensure public.users has id/email/username/is_active --------
+@app.on_event("startup")
+async def _ensure_users_columns():
+    # Make sure gen_random_uuid() is available
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+
+    # Add columns if they don't exist
+    try:
+        await database.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();")
+    except Exception:
+        pass
+
+    try:
+        await database.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email TEXT;")
+    except Exception:
+        pass
+
+    try:
+        await database.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS username TEXT;")
+    except Exception:
+        pass
+
+    try:
+        await database.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;")
+    except Exception:
+        pass
+
+    # Uniqueness / PK-ish constraints 
+    try:
+        await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_id ON public.users(id);")
+    except Exception:
+        pass
+
+    # Lowercased uniqueness on username/email when present
+    try:
+        await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_lower ON public.users ((lower(username))) WHERE username IS NOT NULL;")
+    except Exception:
+        pass
+
+    try:
+        await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON public.users ((lower(email))) WHERE email IS NOT NULL;")
+    except Exception:
+        pass
+# ------------------------------------------------------------------------------
+
 # -------- Health --------
 @app.get("/healthz", tags=["Health"], summary="Health Check")
 async def healthz():
@@ -360,34 +408,43 @@ from price_sources import (
 from indices_builder import run_indices_builder as indices_generate_snapshot
 # -----------------------------------------------------------------------------
 
-# -------- Database setup (non-fatal, with bootstrap in CI/staging) -----------
+# -------- Database setup (sync psycopg3 + async asyncpg) -----------
 BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-# Normalize base
+# Normalize legacy scheme
 if BASE_DATABASE_URL.startswith("postgres://"):
     BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Build sync URL for SQLAlchemy (psycopg v3)
+# Driver-specific DSNs
 SYNC_DATABASE_URL = BASE_DATABASE_URL
 if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL and "+asyncpg" not in SYNC_DATABASE_URL:
     SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-# Build async URL for asyncpg/databases (NO "+psycopg" here)
 ASYNC_DATABASE_URL = BASE_DATABASE_URL
 if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
 if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
 
-# Engines/clients
+# Instantiate clients
 engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, future=True)
 database = databases.Database(ASYNC_DATABASE_URL)
 
+# Optional one-time sanity log 
+try:
+    _sync_tail  = SYNC_DATABASE_URL.split("@")[-1]
+    _async_tail = ASYNC_DATABASE_URL.split("@")[-1]
+    print(f"[DB] sync={_sync_tail}  async={_async_tail}")
+except Exception:
+    pass
+
 @app.on_event("startup")
 async def _startup_prices():
+    # asyncpg pool uses the async DSN (no +psycopg)
     if not hasattr(app.state, "db_pool"):
         app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
-
+# -------------------------------------------------------------------
+# -------- Pricing & Indices Routers (drop-in) -------------------------
 async def _fetch_base(symbol: str):
     return await latest_price(app.state.db_pool, symbol)
 
