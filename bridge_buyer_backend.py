@@ -1589,22 +1589,27 @@ async def _ensure_inventory_schema():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
-
 @app.on_event("startup")
 async def _ensure_receipts_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.receipts (
-      receipt_id UUID PRIMARY KEY,
-      seller     TEXT,
-      sku        TEXT,
-      qty_tons   NUMERIC,
-      status     TEXT NOT NULL DEFAULT 'created',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      consumed_at    TIMESTAMPTZ,
+      receipt_id      UUID PRIMARY KEY,
+      seller          TEXT,
+      sku             TEXT,
+      qty_tons        NUMERIC,
+      status          TEXT NOT NULL DEFAULT 'created',
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      consumed_at     TIMESTAMPTZ,
       consumed_bol_id UUID,
-      provenance  JSONB NOT NULL DEFAULT '{}'::jsonb
+      provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
     );
+    -- === Option B: extend data model for stocks/locations ===
+    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;     -- tradable symbol (e.g., CU-SHRED-1M)
+    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;     -- yard/warehouse/location code
+    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_lots  NUMERIC;  -- quantity in lots (optional if you keep tons)
+    ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS lot_size  NUMERIC;  -- pounds per lot (e.g., 40000 for 20 tons)
+
     CREATE OR REPLACE VIEW public.receipts_live AS
       SELECT * FROM public.receipts
       WHERE consumed_at IS NULL AND status IN ('created','pledged');
@@ -1613,6 +1618,30 @@ async def _ensure_receipts_schema():
         await database.execute(ddl)
     except Exception as e:
         logger.warn("receipts_bootstrap_failed", err=str(e))
+
+@app.on_event("startup")
+async def _receipts_backfill_once():
+    try:
+        # set symbol from sku where missing
+        await database.execute("""
+            UPDATE public.receipts
+               SET symbol = COALESCE(symbol, sku)
+             WHERE (symbol IS NULL OR symbol = '')
+        """)
+        # default lot_size to 40000 lb (20 tons) where missing
+        await database.execute("""
+            UPDATE public.receipts
+               SET lot_size = 40000
+             WHERE lot_size IS NULL
+        """)
+        # compute qty_lots from qty_tons when missing (tons -> pounds -> lots)
+        await database.execute("""
+            UPDATE public.receipts
+               SET qty_lots = (COALESCE(qty_tons,0) * 2000.0) / NULLIF(lot_size,0)
+             WHERE (qty_lots IS NULL) AND qty_tons IS NOT NULL AND lot_size IS NOT NULL
+        """)
+    except Exception as e:
+        logger.warn("receipts_backfill_failed", err=str(e))
 
 @app.on_event("startup")
 async def _ensure_stocks_schema():
