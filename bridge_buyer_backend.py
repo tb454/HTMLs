@@ -85,6 +85,7 @@ import sentry_sdk
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
+_FX = {"USD": 1.0, "EUR": 0.92, "RMB": 7.10}
 
 _KILL_SWITCH: Dict[str, bool] = defaultdict(bool)          # member_id -> True/False
 _PRICE_BANDS: Dict[str, Tuple[float, float]] = {}          # symbol -> (lower, upper)
@@ -229,6 +230,26 @@ async def prices_copper_last():
         last = 4.19
         return {"last": last, "base_minus_025": round(last - 0.25, 4), "note": f"fallback: {e.__class__.__name__}"}
 
+@app.get(
+    "/prices/copper_last",
+    tags=["Prices"],
+    summary="COMEX copper last trade (USD/lb)",
+    description="Scrapes https://comexlive.org/copper/ for the 'last trade' price and returns base = last - 0.25",
+    status_code=200
+)
+async def prices_copper_last():
+    ...
+
+@app.get("/fx/convert", tags=["Global"], summary="Convert amount between currencies (static FX)")
+async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
+    try:
+        f = (from_ccy or "").upper()
+        t = (to_ccy or "").upper()
+        return {"amount": round(amount / _FX[f] * _FX[t], 2), "to": t}
+    except KeyError:
+        raise HTTPException(422, "Unsupported currency")
+# === Prices endpoint ===
+
 # ===== DB bootstrap for CI/staging =====
 import sqlalchemy
 from sqlalchemy import text as _sqltext
@@ -300,6 +321,7 @@ async def request_id_logging(request: Request, call_next):
     response.headers["X-Request-ID"] = rid
     logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
     return response
+# =====  request-id + structured logs =====
 
 # =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
@@ -310,6 +332,66 @@ dsn = os.getenv("SENTRY_DSN")
 if dsn:
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 # =====  Prometheus metrics + optional Sentry =====
+
+# ----- Products -----
+@app.on_event("startup")
+async def _ensure_products_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.products (
+      symbol TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      quality JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("products_bootstrap_failed", err=str(e))
+# ----- Products -----
+
+# ----- Anomaly scores -----
+@app.on_event("startup")
+async def _ensure_anomaly_scores_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.anomaly_scores (
+      member  TEXT NOT NULL,
+      symbol  TEXT NOT NULL,
+      as_of   DATE NOT NULL,
+      score   NUMERIC NOT NULL,
+      features JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (member, symbol, as_of)
+    );
+    CREATE INDEX IF NOT EXISTS idx_anom_asof ON public.anomaly_scores (as_of);
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("anomaly_scores_bootstrap_failed", err=str(e))
+# ----- Anomaly scores -----
+
+# ----- Index contracts -----
+@app.on_event("startup")
+async def _ensure_index_contracts_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.index_contracts (
+      tradable_symbol TEXT PRIMARY KEY,   -- e.g., 'BR-CU-2025M'
+      symbol          TEXT NOT NULL,      -- index root, e.g., 'BR-CU'
+      month_code      TEXT NOT NULL,      -- e.g., 'M'
+      year            INT  NOT NULL,
+      expiry_date     DATE NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'Listed',
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("index_contracts_bootstrap_failed", err=str(e))
+# ----- Index contracts -----
 
 #----- Fee schedule ----
 @app.on_event("startup")
@@ -1531,6 +1613,26 @@ async def _ensure_receipts_schema():
         except Exception as e:
             logger.warn("receipts_bootstrap_failed", err=str(e), sql=s[:120])
 
+@app.on_event("startup")
+async def _ensure_receivables_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS public.receivables (
+      id UUID PRIMARY KEY,
+      receipt_id UUID NOT NULL,
+      face_value_usd NUMERIC NOT NULL,
+      due_date DATE NOT NULL,
+      debtor TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_receivables_receipt ON public.receivables (receipt_id);
+    """
+    try:
+        await database.execute(ddl)
+    except Exception as e:
+        logger.warn("receivables_bootstrap_failed", err=str(e))
+# ===== INVENTORY schema bootstrap (idempotent) =====
+
 # ---------- Inventory helpers (role check, unit conversion, upsert core) ----------
 def _is_admin_or_seller(request: Request) -> bool:
     try:
@@ -2390,6 +2492,12 @@ class BOLRecord(BaseModel):
     delivery_time: Optional[datetime] = None
     status: str
 
+class ProductIn(BaseModel):
+    symbol: str
+    description: str
+    unit: str
+    quality: Optional[dict] = {}
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -2816,6 +2924,25 @@ async def ice_trade_webhook(request: Request):
     # TODO: parse/process payload here (idempotency, persistence, audit)
     return {"ok": True}
 
+@app.post("/ice/webhook", tags=["Integrations"], summary="ICE DT webhook (HMAC)")
+async def ice_webhook(request: Request, x_signature: str = Header(None, alias="X-Signature")):
+    body = await request.body()
+    secret = os.getenv("ICE_WEBHOOK_SECRET", "")
+    mac = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(mac, x_signature or ""):
+        raise HTTPException(401, "Bad signature")
+    try:
+        payload = json.loads(body.decode())
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    # best-effort audit
+    try:
+        await audit_append("ice", "webhook.recv", "ice_dt", "", payload)
+    except Exception:
+        pass
+    return {"ok": True}
+# ---------- Ice webhook signature verifier -----
+
 # ===== Link signing (itsdangerous) =====
 LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", os.getenv("SESSION_SECRET", "dev-only-secret"))
 _link_signer = URLSafeTimedSerializer(LINK_SIGNING_SECRET, salt="bridge-link-v1")
@@ -2985,6 +3112,53 @@ async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: R
 
     return {"receipt_id": receipt_id, "status": "consumed"}
 #-------- Receipts lifecycle --------
+
+# ---- Finance: receivables mint ----
+class ReceivableIn(BaseModel):
+    receipt_id: str
+    face_value_usd: float
+    due_date: date
+    debtor: str  # buyer name/id
+
+@app.post("/finance/receivable", tags=["Finance"], summary="Mint receivable from a live receipt")
+async def receivable_create(r: ReceivableIn):
+    rec = await database.fetch_one("SELECT * FROM public.receipts WHERE receipt_id=:id", {"id": r.receipt_id})
+    if not rec:
+        raise HTTPException(404, "Receipt not found")
+    if rec.get("consumed_at"):
+        raise HTTPException(409, "Receipt already consumed")
+
+    rid = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO public.receivables (id, receipt_id, face_value_usd, due_date, debtor, status, created_at)
+      VALUES (:id, :rid, :fv, :dd, :deb, 'open', NOW())
+    """, {"id": rid, "rid": r.receipt_id, "fv": r.face_value_usd, "dd": r.due_date, "deb": r.debtor})
+
+    try:
+        await audit_append("system", "receivable.create", "receivable", rid, r.dict())
+    except Exception:
+        pass
+
+    return {"receivable_id": rid, "status": "open"}
+# ---- Finance: receivables mint ----
+
+# ---- Insurance: transport coverage quote (stub) ----
+class InsuranceQuoteIn(BaseModel):
+    receipt_id: str
+    coverage_usd: float
+    route_miles: Optional[float] = None
+
+@app.post("/insurance/quote", tags=["Insurance"], summary="Get a stubbed transport insurance quote")
+async def insurance_quote(i: InsuranceQuoteIn):
+    # TODO: call carrier API; stub a rate
+    rate_bps = 15.0  # 0.15%
+    prem = round(i.coverage_usd * rate_bps / 10000.0, 2)
+    try:
+        await audit_append("system", "insurance.quote", "receipt", i.receipt_id, {"premium": prem, "bps": rate_bps})
+    except Exception:
+        pass
+    return {"premium_usd": prem, "rate_bps": rate_bps}
+# ---- Insurance: transport coverage quote (stub) ----
 
     # ---- audit log (best-effort; won't break request on failure)
     actor = request.session.get("username") if hasattr(request, "session") else None
@@ -3830,6 +4004,23 @@ async def create_contract(contract: ContractInExtended, request: Request):
         pass
 
     return row
+
+# -------- Products --------
+@app.post("/products", tags=["Products"], summary="Upsert a tradable product")
+async def products_add(p: ProductIn):
+    await database.execute("""
+      INSERT INTO public.products(symbol, description, unit, quality)
+      VALUES (:s, :d, :u, :q::jsonb)
+      ON CONFLICT (symbol) DO UPDATE
+        SET description = EXCLUDED.description,
+            unit        = EXCLUDED.unit,
+            quality     = EXCLUDED.quality
+    """, {"s": p.symbol, "d": p.description, "u": p.unit, "q": json.dumps(p.quality)})
+
+    # also expose as tradable instrument (in-memory)
+    _INSTRUMENTS[p.symbol] = {"lot": 1.0, "tick": 0.01, "desc": p.description}
+    return {"symbol": p.symbol, "tradable": True}
+#-------- Products --------
 
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
@@ -4956,6 +5147,30 @@ async def surveil_spoof_check(symbol: str, owner: str, side: str, placed: float,
             ))
     except Exception:
         pass
+
+class AnomIn(BaseModel):
+    member: str
+    symbol: str
+    as_of: date
+    features: dict
+
+@app.post("/ml/anomaly", tags=["Surveillance"])
+async def ml_anomaly(a: AnomIn):
+    # Placeholder: simple z-score style
+    score = min(1.0, max(0.0, (a.features.get("cancel_rate", 0)*0.6 + a.features.get("gps_var", 0)*0.4)))
+    await database.execute("""
+      INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
+      VALUES (:m, :s, :d, :sc, :f::jsonb)
+    """, {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)})
+
+    if score > 0.85:
+        await surveil_create(AlertIn(
+            rule="ml_anomaly_high",
+            subject=a.member,
+            data={"symbol": a.symbol, "score": score, "features": a.features},
+            severity="high"
+        ))
+    return {"score": score}
 # ===== Surveillance / Alerts =====
 
 # ---- Market data websocket ----
@@ -5349,6 +5564,43 @@ async def settle_publish(symbol: str, as_of: date, method: str = "vwap_last60m")
         pass
 
     return {"symbol": symbol, "as_of": str(as_of), "settle": round(vwap, 5), "method": method}
+
+@app.post("/index/contracts/expire", tags=["Settlement"], summary="Expire monthly index futures to BR-Settle")
+async def expire_month(tradable_symbol: str, as_of: date, request: Request | None = None):
+    # _require_admin(request)  # uncomment to gate in production
+
+    ic = await database.fetch_one(
+        "SELECT * FROM index_contracts WHERE tradable_symbol = :t",
+        {"t": tradable_symbol}
+    )
+    if not ic:
+        raise HTTPException(404, "No such contract")
+
+    root = ic["symbol"]  # e.g., "BR-CU"
+    # map index root to underlying settle symbol
+    under = {"BR-CU": "CU-SHRED-1M", "BR-AL": "AL-6061-1M"}.get(root)
+    if not under:
+        raise HTTPException(422, "No underlying mapping")
+
+    row = await database.fetch_one(
+        "SELECT settle FROM settlements WHERE symbol = :s AND as_of = :d",
+        {"s": under, "d": as_of}
+    )
+    if not row:
+        raise HTTPException(409, "No BR-Settle for expiry date")
+
+    settle_px = float(row["settle"])
+
+    # best-effort audit
+    try:
+        await audit_append(
+            "system", "futures.expire", "index_contract", tradable_symbol,
+            {"settle": settle_px, "as_of": str(as_of)}
+        )
+    except Exception:
+        pass
+
+    return {"tradable_symbol": tradable_symbol, "final_settle": settle_px, "as_of": str(as_of)}
 
 #-------------------- Settlement (VWAP from recent CLOB trades) =====
 # ===== FIX shim → CLOB =====
