@@ -318,8 +318,8 @@ async def request_id_logging(request: Request, call_next):
 async def _metrics_and_sentry():
     instrumentator.expose(app, include_in_schema=False)
 
-dsn = os.getenv("SENTRY_DSN")
-if dsn:
+dsn = (os.getenv("SENTRY_DSN") or "").strip()
+if dsn.startswith("http"):  # only init if it looks like a real DSN
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 # =====  Prometheus metrics + optional Sentry =====
 
@@ -4974,59 +4974,6 @@ async def _position_net(member: str, symbol: str) -> float:
 
 def _fee_amount(notional: float, bps: float, min_cents: float) -> float:
     fee = max(notional * (bps/10000.0), (min_cents/100.0))
-    return _round2(fee)
-
-# -- Reporting/statement helpers (CLOB) --
-async def _latest_settle_on_or_before(symbol: str, d: date) -> Optional[float]:
-    row = await database.fetch_one("""
-      SELECT settle
-      FROM settlements
-      WHERE symbol = :s AND as_of <= :d
-      ORDER BY as_of DESC
-      LIMIT 1
-    """, {"s": symbol, "d": d})
-    return float(row["settle"]) if row else None
-
-async def _distinct_members(as_of: date) -> List[str]:
-    rows = await database.fetch_all("""
-      WITH m1 AS (
-        SELECT buy_owner AS m FROM clob_trades WHERE created_at::date <= :d
-        UNION
-        SELECT sell_owner AS m FROM clob_trades WHERE created_at::date <= :d
-      ),
-      m2 AS (
-        SELECT owner AS m FROM clob_positions
-      )
-      SELECT DISTINCT m FROM (SELECT * FROM m1 UNION SELECT * FROM m2) x
-      WHERE m IS NOT NULL
-    """, {"d": as_of})
-    return [r["m"] for r in rows]
-
-async def _member_day_trades(member: str, as_of: date):
-    rows = await database.fetch_all("""
-      SELECT t.trade_id, t.symbol, t.price, t.qty_lots, t.buy_owner, t.sell_owner,
-             t.maker_order, t.taker_order,
-             t.created_at,
-             ob.owner AS maker_owner, ot.owner AS taker_owner
-      FROM clob_trades t
-      LEFT JOIN clob_orders ob ON ob.order_id = t.maker_order
-      LEFT JOIN clob_orders ot ON ot.order_id = t.taker_order
-      WHERE t.created_at::date = :d
-        AND (t.buy_owner = :m OR t.sell_owner = :m)
-      ORDER BY t.created_at ASC
-    """, {"d": as_of, "m": member})
-    return [dict(r) for r in rows]
-
-async def _position_net(member: str, symbol: str) -> float:
-    row = await database.fetch_one(
-        "SELECT qty_lots FROM clob_positions WHERE owner = :o AND symbol = :s",
-        {"o": member, "s": symbol}
-    )
-    return float(row["qty_lots"]) if row else 0.0
-
-def _fee_amount(notional: float, bps: float, min_cents: float) -> float:
-    fee = notional * (bps / 10000.0)
-    fee = max(fee, (min_cents / 100.0))
     return _round2(fee)
 
 async def _build_member_statement(member: str, as_of: date):
