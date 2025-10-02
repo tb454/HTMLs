@@ -885,8 +885,7 @@ async def login(body: LoginIn, request: Request):
     row = await database.fetch_one(
         """
         SELECT
-          COALESCE(username, '') AS username,
-          COALESCE(email,    '') AS email,
+          COALESCE(username, '') AS username,          
           role
         FROM public.users
         WHERE (LOWER(COALESCE(email, '')) = :ident OR LOWER(COALESCE(username, '')) = :ident)
@@ -1969,6 +1968,53 @@ async def _nightly_dossier_sync():
                 pass
     asyncio.create_task(_runner())
 # ------- Dossier HR Sync -------
+#------- RFQs -------
+@app.on_event("startup")
+async def _ensure_rfq_schema():
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS rfqs (
+          rfq_id UUID PRIMARY KEY,
+          symbol TEXT NOT NULL,             -- use symbol_root like 'CU-SHRED-1M'
+          side TEXT NOT NULL CHECK (side IN ('buy','sell')),
+          quantity_lots NUMERIC NOT NULL,
+          price_limit NUMERIC,
+          expires_at TIMESTAMPTZ NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          creator TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS rfq_quotes (
+          quote_id UUID PRIMARY KEY,
+          rfq_id UUID NOT NULL REFERENCES rfqs(rfq_id) ON DELETE CASCADE,
+          responder TEXT NOT NULL,
+          price NUMERIC NOT NULL,
+          qty_lots NUMERIC NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS rfq_deals (
+          deal_id UUID PRIMARY KEY,
+          rfq_id UUID NOT NULL REFERENCES rfqs(rfq_id) ON DELETE CASCADE,
+          quote_id UUID NOT NULL REFERENCES rfq_quotes(quote_id) ON DELETE CASCADE,
+          symbol TEXT NOT NULL,
+          price NUMERIC NOT NULL,
+          qty_lots NUMERIC NOT NULL,
+          buy_owner TEXT NOT NULL,
+          sell_owner TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
+    ]
+    for s in ddl:
+        try:
+            await database.execute(s)
+        except Exception as e:
+            logger.warn("rfq_schema_bootstrap_failed", err=str(e), sql=s[:90])
+#------- RFQs -------
 
 # -------- CORS --------
 ALLOWED_ORIGINS = [
@@ -4180,6 +4226,145 @@ async def _symbol_for_listing(listing_id: str) -> str:
         return None
     return row["symbol_root"]
 
+# ---- Market data websocket ----
+@app.websocket("/md/ws")
+async def md_ws(ws: WebSocket):
+    await ws.accept()
+    _md_subs.add(ws)
+    try:
+        await ws.send_json({"type": "hello", "seq": _md_seq})
+        while True:
+            # Optional: receive pings or client filter updates
+            _ = await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _md_subs.discard(ws)
+
+async def _md_broadcast(msg: Dict[str, Any]):
+    global _md_seq
+    _md_seq += 1
+    msg["seq"] = _md_seq
+    dead = []
+    for s in list(_md_subs):
+        try:
+            await s.send_json(msg)
+        except Exception:
+            dead.append(s)
+    for s in dead:
+        _md_subs.discard(s)
+
+# ---- RFQ (Request for Quote) ----
+class RFQIn(BaseModel):
+    symbol: str
+    side: Literal["buy","sell"]
+    quantity_lots: Decimal
+    price_limit: Optional[Decimal] = None
+    expires_at: datetime
+
+class RFQQuoteIn(BaseModel):
+    price: Decimal
+    qty_lots: Decimal
+
+async def _rfq_symbol(rfq_id: str) -> str:
+    row = await database.fetch_one("SELECT symbol FROM rfqs WHERE rfq_id=:id", {"id": rfq_id})
+    if not row:
+        raise HTTPException(404, "RFQ not found")
+    return row["symbol"]
+
+@app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
+async def create_rfq(r: RFQIn, request: Request):
+    user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
+    require_entitlement(user, "rfq.post")
+    rfq_id = str(uuid.uuid4())
+    await database.execute(
+        """
+        INSERT INTO rfqs(rfq_id, symbol, side, quantity_lots, price_limit, expires_at, creator)
+        VALUES (:id, :symbol, :side, :qty, :pl, :exp, :creator)
+        """,
+        {
+            "id": rfq_id,
+            "symbol": r.symbol,
+            "side": r.side,
+            "qty": str(r.quantity_lots),
+            "pl": str(r.price_limit) if r.price_limit is not None else None,
+            "exp": r.expires_at,
+            "creator": user,
+        },
+    )
+    # optional: broadcast a “new RFQ” tick
+    try:
+        await _md_broadcast({"type": "rfq.new", "rfq_id": rfq_id, "symbol": r.symbol, "side": r.side, "qty_lots": float(r.quantity_lots)})
+    except Exception:
+        pass
+    return {"rfq_id": rfq_id, "status": "open"}
+
+@app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
+async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
+    user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
+    require_entitlement(user, "rfq.quote")
+    symbol = await _rfq_symbol(rfq_id)
+    await price_band_check(symbol, float(q.price))
+    quote_id = str(uuid.uuid4())
+    await database.execute(
+        """
+        INSERT INTO rfq_quotes(quote_id, rfq_id, responder, price, qty_lots)
+        VALUES (:qid, :rid, :resp, :p, :q)
+        """,
+        {"qid": quote_id, "rid": rfq_id, "resp": user, "p": str(q.price), "q": str(q.qty_lots)},
+    )
+    try:
+        await _md_broadcast({"type": "rfq.quote", "rfq_id": rfq_id, "quote_id": quote_id, "symbol": symbol, "price": float(q.price), "qty_lots": float(q.qty_lots)})
+    except Exception:
+        pass
+    return {"quote_id": quote_id}
+
+@app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
+async def award_rfq(rfq_id: str, quote_id: str, request: Request):
+    user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
+    require_entitlement(user, "rfq.award")
+
+    rfq = await database.fetch_one("SELECT * FROM rfqs WHERE rfq_id=:id", {"id": rfq_id})
+    if not rfq:
+        raise HTTPException(404, "RFQ not found")
+    if rfq["status"] != "open":
+        raise HTTPException(409, "RFQ not open")
+
+    q = await database.fetch_one("SELECT * FROM rfq_quotes WHERE quote_id=:q AND rfq_id=:r", {"q": quote_id, "r": rfq_id})
+    if not q:
+        raise HTTPException(404, "Quote not found")
+
+    price = float(q["price"])
+    qty   = float(q["qty_lots"])
+    symbol = rfq["symbol"]
+    await price_band_check(symbol, price)
+
+    # Determine sides for record
+    creator = rfq["creator"]
+    responder = q["responder"]
+    buy_owner  = creator if rfq["side"] == "buy" else responder
+    sell_owner = creator if rfq["side"] == "sell" else responder
+
+    deal_id = str(uuid.uuid4())
+    async with database.transaction():
+        await database.execute(
+            """
+            INSERT INTO rfq_deals(deal_id, rfq_id, quote_id, symbol, price, qty_lots, buy_owner, sell_owner)
+            VALUES (:id, :rid, :qid, :s, :p, :q, :b, :s2)
+            """,
+            {"id": deal_id, "rid": rfq_id, "qid": quote_id, "s": symbol, "p": price, "q": qty, "b": buy_owner, "s2": sell_owner},
+        )
+        await database.execute("UPDATE rfqs SET status='filled' WHERE rfq_id=:id", {"id": rfq_id})
+
+    # Broadcast trade tick (RFQ-style)
+    try:
+        await _md_broadcast({"type": "trade", "venue": "RFQ", "symbol": symbol, "price": price, "qty_lots": qty})
+    except Exception:
+        pass
+
+    return {"deal_id": deal_id, "status": "done"}
+
+
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn, request: Request):  # <-- added request
     # entitlement gate
@@ -4341,9 +4526,27 @@ async def place_order(ord_in: OrderIn, request: Request):  # <-- added request
     return dict(final)
 
 @trade_router.patch("/orders/{order_id}", summary="Modify order (price/qty) and rematch")
-async def modify_order(order_id: str, body: ModifyOrderIn):
+async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
+    user = (request.session.get("username") if hasattr(request, "session") else None) or ""
+    require_entitlement(user, "trade.modify")
+
     if body.price is None and body.qty is None:
         raise HTTPException(400, "provide price and/or qty to modify")
+
+    # If a new price is proposed, validate against bands/LULD before heavy work
+    if body.price is not None:
+        row_listing = await database.fetch_one(
+            "SELECT listing_id, listing_id AS id, listing_id FROM orders WHERE id=:id",
+            {"id": order_id}
+        )
+
+        if not row_listing:
+            raise HTTPException(404, "order not found")
+        sym = await _symbol_for_listing(row_listing["listing_id"])
+        if sym:
+            await price_band_check(sym, float(body.price))
+
+    # ------ Main transaction to lock and modify order, check margin, rematch -------
 
     async with database.transaction():
         row = await database.fetch_one("SELECT * FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
