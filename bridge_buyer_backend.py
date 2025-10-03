@@ -157,9 +157,9 @@ instrumentator = Instrumentator()
 instrumentator.instrument(app)
 
 # Move docs under /api/v1 but keep existing endpoints 
-app.docs_url = "/api/v1/docs"
+app.docs_url = "/docs"
 app.redoc_url = None
-app.openapi_url = "/api/v1/openapi.json"
+app.openapi_url = "/openapi.json"
 
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
