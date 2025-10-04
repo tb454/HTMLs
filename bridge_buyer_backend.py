@@ -491,6 +491,28 @@ async def _ensure_settlements_schema():
         logger.warn("settlements_schema_bootstrap_failed", err=str(e))
 # ---- Settlement Publishing ----
 
+# ---- Indices (daily + snapshots) bootstrap ----
+@app.on_event("startup")
+async def _ensure_indices_tables():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS indices_daily (
+      as_of_date DATE NOT NULL,
+      region TEXT NOT NULL,
+      material TEXT NOT NULL,
+      avg_price NUMERIC,
+      volume_tons NUMERIC,
+      PRIMARY KEY (as_of_date, region, material)
+    );
+    CREATE TABLE IF NOT EXISTS index_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      region TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      avg_price NUMERIC,
+      snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE
+    );
+    """)
+# ---- /Indices (daily + snapshots) bootstrap ----
+
 # #------ Surveillance / Alerts ------
 @app.on_event("startup")
 async def _ensure_surveillance_schema():
@@ -623,6 +645,35 @@ async def _ensure_risk_schema():
             await database.execute(s)
         except Exception as e:
             logger.warn("risk_schema_bootstrap_failed", err=str(e), sql=s[:120])
+
+@app.on_event("startup")
+async def _ensure_entitlements_table():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS runtime_entitlements(
+      username TEXT NOT NULL,
+      feature  TEXT NOT NULL,
+      PRIMARY KEY (username, feature)
+    );
+    """)
+    # hydrate into memory
+    rows = await database.fetch_all("SELECT username, feature FROM runtime_entitlements")
+    for r in rows:
+        _ENTITLEMENTS[r["username"]].add(r["feature"])
+
+# Persist whenever we grant
+@app.post("/admin/entitlements/grant", tags=["Admin"], summary="Grant feature to user/member")
+async def grant_entitlement(user: str, feature: str, request: Request):
+    _require_admin(request)  # gate in production
+    _ENTITLEMENTS[user].add(feature)
+    try:
+        await database.execute("""
+          INSERT INTO runtime_entitlements(username, feature)
+          VALUES (:u,:f)
+          ON CONFLICT (username, feature) DO NOTHING
+        """, {"u": user, "f": feature})
+    except Exception:
+        pass
+    return {"user": user, "features": sorted(list(_ENTITLEMENTS[user]))}
 #----- Risk controls (kill switch, price bands, entitlements) -----
 
 # -------- Ensure public.users has id/email/username/is_active --------
@@ -919,7 +970,7 @@ async def _start_daily_indices():
     asyncio.create_task(_daily_indices_job())
 
 # Optional bootstrap for CI/staging/local: create minimal schema if missing
-def _bootstrap_schema_if_needed(sqlalchemy_engine):
+def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
     with sqlalchemy_engine.begin() as conn:
         conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS reference_prices (
@@ -988,7 +1039,7 @@ async def startup_bootstrap_and_connect():
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
     if env in {"ci", "test", "staging"} or init_flag:
         try:
-            _bootstrap_schema_if_needed(engine)
+            _bootstrap_prices_indices_schema_if_needed(engine)
         except Exception as e:
             print(f"[bootstrap] non-fatal init error: {e}")
     try:
@@ -1409,6 +1460,30 @@ async def logout(request: Request):
     return {"ok": True}
 # ======= /AUTH ========
 
+# --- Canonical contracts export (maps raw cols -> your header set) ---
+CONTRACTS_EXPORT_SQL = """
+SELECT
+  c.id,
+  c.buyer,
+  c.seller,
+  c.material,
+  /* sku -> use material as the SKU for now */
+  c.material AS sku,
+  c.weight_tons,
+  c.price_per_ton,
+  /* total_value -> compute */
+  (c.price_per_ton * c.weight_tons) AS total_value,
+  c.status,
+  /* contract_date -> created_at */
+  c.created_at AS contract_date,
+  /* pickup_time/delivery_time -> from linked BOLs */
+  (SELECT MIN(b.pickup_time)   FROM bols b WHERE b.contract_id = c.id) AS pickup_time,
+  (SELECT MAX(b.delivery_time) FROM bols b WHERE b.contract_id = c.id) AS delivery_time,
+  COALESCE(c.currency, 'USD') AS currency
+FROM contracts c
+ORDER BY c.created_at DESC NULLS LAST, c.id DESC
+"""
+
 # --- ZIP export (all core data) ---
 from fastapi.responses import StreamingResponse
 import zipfile, io, csv
@@ -1416,13 +1491,10 @@ from sqlalchemy import text as _sqltext
 
 @app.get("/admin/export_all", tags=["Admin"], summary="Download ZIP of all CSVs")
 def admin_export_all():
+    
     exports = {
-        "contracts.csv": """
-            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
-                   total_value, status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC NULLS LAST, id DESC
-        """,
+        "contracts.csv": CONTRACTS_EXPORT_SQL,
+
         "bols.csv": """
             SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
                    pickup_time, delivery_time, total_value
@@ -2268,6 +2340,10 @@ async def _ensure_contracts_bols_schema():
           signature TEXT
         );
         """,
+        
+        # idempotent key for imports/backfills
+        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON contracts(dedupe_key);",
 
         # extend contracts with pricing fields used by create_contract()
         "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;",
@@ -2822,6 +2898,7 @@ ALLOWED_ORIGINS = [
     "https://bridge.scrapfutures.com",
     "https://bridge-buyer.onrender.com",
     "https://indices.scrapfutures.com",
+    "https://indices.scrapfutures.com",
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -2837,6 +2914,7 @@ ALLOWED_HOSTS = [
     "bridge.scrapfutures.com",
     "bridge-buyer.onrender.com",  
     "localhost",
+    "indices.scrapfutures.com",
     "127.0.0.1",
 ]
 
@@ -3321,8 +3399,11 @@ async def generate_bol_pdf(bol_id: str):
     draw("Seller", row["seller"])
     draw("Material", row["material"])
     draw("Weight (tons)", row["weight_tons"])
-    draw("Price per ton", f"${row['price_per_unit']:.2f}")
-    draw("Total Value", f"${row['total_value']:.2f}")
+    ppu = float(row['price_per_unit']) if row.get('price_per_unit') is not None else 0.0
+    tv = float(row['total_value']) if row.get('total_value') is not None else 0.0
+    draw("Price per ton", f"${ppu:.2f}")
+    draw("Total Value", f"${tv:.2f}")
+
     draw("Pickup Time", row["pickup_time"].isoformat() if row["pickup_time"] else "—")
     draw("Delivery Time", row["delivery_time"].isoformat() if row["delivery_time"] else "—")
     draw("Carrier Name", row["carrier_name"])
@@ -3649,10 +3730,10 @@ async def public_ticker(listing_id: str):
         "listing_id": listing_id,
         "last": (float(last["last"]) if last and last["last"] is not None else None),
         "last_date": (str(last["mark_date"]) if last else None),
-        "best_bid": (float(bid["price"]) if bid else None),
-        "best_bid_size": (float(bid["qty"]) if bid else None),
-        "best_ask": (float(ask["price"]) if ask else None),
-        "best_ask_size": (float(ask["qty"]) if ask else None),
+        "best_bid": (float(bid["price"]) if (bid and bid["price"] is not None) else None),
+        "best_bid_size": (float(bid["qty"]) if (bid and bid["qty"] is not None) else None),
+        "best_ask": (float(ask["price"]) if (ask and ask["price"] is not None) else None),
+        "best_ask_size": (float(ask["qty"]) if (ask and ask["qty"] is not None) else None),
     }
 
 # -------- Contracts (with Inventory linkage) --------
@@ -4338,6 +4419,41 @@ class ApplicationOut(BaseModel):
     status: str
     message: str
 
+# ========== Tenant Applications ==========
+@app.on_event("startup")
+async def _ensure_tenant_applications_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS tenant_applications (
+      application_id UUID PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL DEFAULT 'pending',
+      entity_type TEXT NOT NULL,
+      role TEXT NOT NULL,
+      org_name TEXT NOT NULL,
+      ein TEXT,
+      address TEXT,
+      city TEXT,
+      region TEXT,
+      website TEXT,
+      monthly_volume_tons INT,
+      contact_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT,
+      ref_code TEXT,
+      materials_buy TEXT,
+      materials_sell TEXT,
+      lanes TEXT,
+      compliance_notes TEXT,
+      plan TEXT NOT NULL,
+      notes TEXT,
+      utm_source TEXT,
+      utm_campaign TEXT,
+      utm_medium TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tenant_apps_created ON tenant_applications(created_at DESC);
+    """)
+# ========== Tenant Applications ==========
+
 # --- Public endpoint (replaces /public/yard_signup) ---
 @app.post(
     "/public/apply",
@@ -4586,13 +4702,8 @@ admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
 @admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
 def export_contracts_csv_admin():
     with engine.begin() as conn:
-        rows = conn.execute(_sqltext("""
-            SELECT 
-              id, buyer, seller, material, sku, weight_tons, price_per_ton,
-              total_value, status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC NULLS LAST, id DESC
-        """)).mappings().all()
+        rows = conn.execute(_sqltext(CONTRACTS_EXPORT_SQL)).mappings().all()
+
         cols = rows[0].keys() if rows else []
 
         def _iter():
@@ -4612,12 +4723,8 @@ def export_contracts_csv_admin():
 @admin_exports.get("/all.zip", summary="All core tables as CSV (ZIP)")
 def export_all_zip_admin():
     queries = {
-        "contracts.csv": """
-            SELECT id, buyer, seller, material, sku, weight_tons, price_per_ton,
-                   total_value, status, contract_date, pickup_time, delivery_time, currency
-            FROM contracts
-            ORDER BY contract_date DESC NULLS LAST, id DESC
-        """,
+        "contracts.csv": CONTRACTS_EXPORT_SQL,
+
         "bols.csv": """
             SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
                    pickup_time, delivery_time, total_value
@@ -6420,12 +6527,8 @@ async def build_export_zip() -> bytes:
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
        exports = {
     # contracts table: id, buyer, seller, material, weight_tons, price_per_ton, ...
-    "contracts.csv": """
-        SELECT id, buyer, seller, material, weight_tons, price_per_ton,
-               status, created_at, signed_at, signature
-        FROM contracts
-        ORDER BY created_at DESC
-    """,
+    "contracts.csv": CONTRACTS_EXPORT_SQL,
+
     # bols table: bol_id (not id) and detailed columns you actually store
     "bols.csv": """
         SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
