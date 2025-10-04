@@ -1,5 +1,5 @@
 # full_test_suite.py
-# End-to-end smoke/flow test for your FastAPI backend.
+# End-to-end smoke/flow test for FastAPI backend.
 # Run with:  python full_test_suite.py
 import os, sys, time, json, uuid
 from datetime import date, datetime, timedelta
@@ -7,7 +7,7 @@ import requests
 
 BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
 
-# Optional headers for endpoints that check these in your code (only needed if you set these env vars)
+# Optional headers for endpoints that check these in your code (only needed if set in env vars)
 H_SNAPSHOT = os.environ.get("SNAPSHOT_AUTH", "")
 H_ICE      = os.environ.get("ICE_WEBHOOK_SECRET", "")
 H_SETUP    = os.environ.get("ADMIN_SETUP_TOKEN", "")
@@ -71,7 +71,7 @@ def main():
     r = get("/fx/convert", params={"amount": 100, "from_ccy":"USD","to_ccy":"EUR"}); ok("GET /fx/convert", r)
 
     # --------- ADMIN / EXPORTS (dev: usually open) ---------
-    # background snapshot (requires SNAPSHOT_AUTH header only if you set it)
+    # background snapshot (requires SNAPSHOT_AUTH header only if set)
     r = post("/admin/run_snapshot_bg", headers=hdr(h_snapshot()), json=None); ok("POST /admin/run_snapshot_bg", r)
     r = get("/admin/export_all"); ok("GET /admin/export_all (ZIP)", r, cond=(r.status_code==200 and "application/zip" in r.headers.get("content-type","")))
     r = get("/admin/exports/all.zip"); ok("GET /admin/exports/all.zip", r, cond=(r.status_code==200 and "application/zip" in r.headers.get("content-type","")))
@@ -90,7 +90,7 @@ def main():
 
     # indices universe / latest (may be empty -> still 200 or 404)
     get("/indices/universe")
-    # If your DB has rows these will 200; else you may get 404 — acceptable
+    # If DB has rows these will 200; you may get 404 — acceptable
     r = get("/indices/latest", params={"symbol":"BR-CU"})
     if r.status_code == 404:
         skip("GET /indices/latest", "no index history yet")
@@ -99,12 +99,12 @@ def main():
 
     # --------- INVENTORY SEED for contract create ---------
     seller = "Acme Yard"
-    sku    = "CU-SHRED-1M"     # aligns with your _INSTRUMENTS
+    sku    = "CU-SHRED-1M"     # aligns with _INSTRUMENTS
     inv = {"seller": seller, "sku": sku, "qty_on_hand": 100.0, "uom":"ton", "location":"YARD-A", "description":"Seed"}
     r = post("/inventory/manual_add", json=inv); ok("POST /inventory/manual_add", r)
 
     # --------- CONTRACTS (create → list → get → export) ---------
-    # Ensure enough stock exists (we just seeded)
+    # Ensure enough stock exists (just seeded)
     contract = {
         "buyer":"Buyer Inc",
         "seller": seller,
@@ -126,7 +126,7 @@ def main():
         ok("PUT /contracts/{id} → Signed", put(f"/contracts/{cid}", json={"status":"Signed","signature":"SmokeTester"}))
         ok("GET /contracts/export_csv", get("/contracts/export_csv", stream=True))
 
-    # purchase (atomic) — will only pass if contract is still Pending; otherwise expect 409 → we still mark as pass-ish
+    # purchase (atomic) — will only pass if contract is still Pending; otherwise expect 409 → still mark as pass-ish
     if cid:
         r = patch(f"/contracts/{cid}/purchase", json={"op":"purchase","expected_status":"Pending"})
         if r.status_code == 409:
@@ -220,7 +220,7 @@ def main():
     # --------- COMPLIANCE ---------
     ok("GET /export/tax_lookup", get("/export/tax_lookup", params={"hs_code":"7404","dest":"US"}))
 
-    # --------- PRODUCTS / FUTURES / MARKS (MANUAL pricing so we can publish a mark) ---------
+    # --------- PRODUCTS / FUTURES / MARKS (MANUAL pricing to publish a mark) ---------
     symbol_root = "CU-SHRED-1M"
     prod = {"symbol":symbol_root, "description":"Copper Shred 1M", "unit":"ton", "quality":{"grade":"shred"}}
     ok("POST /products", post("/products", json=prod))
@@ -314,7 +314,6 @@ def main():
     get("/index/tweet")
 
     # Clearing (read-only unless you deposit)
-    # (Margin account created via trade/order path in futures book, but we can directly hit clearing)
     get("/clearing/positions", params={"account_id": str(uuid.uuid4())})
     get("/clearing/margin",    params={"account_id": str(uuid.uuid4())})
     # Variation run without data is fine
