@@ -343,6 +343,26 @@ if dsn.startswith("http"):  # only init if it looks like a real DSN
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 # =====  Prometheus metrics + optional Sentry =====
 
+from prometheus_client import Histogram
+H_REQ = Histogram("bridge_http_latency_ms", "HTTP latency (ms)", ["path","method"])
+
+@app.middleware("http")
+async def _sla_timer(request: Request, call_next):
+    import time as _tm
+    t0 = _tm.perf_counter()
+    resp = await call_next(request)
+    dt = (_tm.perf_counter() - t0) * 1000.0
+    try:
+        H_REQ.labels(path=request.url.path, method=request.method).observe(dt)
+    except Exception:
+        pass
+    resp.headers["X-Perf-ms"] = f"{dt:.2f}"
+    return resp
+
+@app.get("/time/sync", tags=["Health"], summary="Server time sync (UTC + monotonic)")
+async def time_sync():
+    return {"utc": datetime.utcnow().isoformat() + "Z", "mono_ns": time.time_ns()}
+
 # ----- Extra indexes -----
 @app.on_event("startup")
 async def _ensure_more_indexes():
@@ -491,6 +511,50 @@ async def eula_page():
 async def privacy_page():
     return FileResponse("static/legal/privacy.html")
 # -------- Legal pages --------
+
+# -------- Regulatory: Rulebook & Policies (versioned) --------
+@app.on_event("startup")
+async def _ensure_rulebook_schema():
+    ddl = """
+    CREATE TABLE IF NOT EXISTS rulebook_versions(
+      version TEXT PRIMARY KEY,
+      effective_date DATE NOT NULL,
+      url TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS compliance_policies(
+      key TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    await run_ddl_multi(ddl)
+
+@app.get("/legal/rulebook", tags=["Legal"], summary="Current Rulebook (HTML)")
+async def rulebook_latest():
+    row = await database.fetch_one(
+        "SELECT url FROM rulebook_versions ORDER BY effective_date DESC LIMIT 1"
+    )
+    if not row: return FileResponse("static/legal/rulebook.html")
+    return FileResponse(row["url"])
+
+@app.get("/legal/rulebook/versions", tags=["Legal"])
+async def rulebook_versions():
+    rows = await database.fetch_all(
+        "SELECT version,effective_date,url FROM rulebook_versions ORDER BY effective_date DESC"
+    )
+    return [dict(r) for r in rows]
+
+@app.post("/admin/legal/rulebook/upsert", tags=["Legal"])
+async def rulebook_upsert(version: str, effective_date: date, file_path: str, request: Request):
+    _require_admin(request)
+    await database.execute("""
+      INSERT INTO rulebook_versions(version,effective_date,url)
+      VALUES (:v,:d,:u)
+      ON CONFLICT (version) DO UPDATE SET effective_date=EXCLUDED.effective_date, url=EXCLUDED.url
+    """, {"v":version, "d":effective_date, "u":file_path})
+    return {"ok": True, "version": version}
+# -------- /Regulatory --------
 
 # -------- Static HTML --------
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1181,6 +1245,46 @@ async def login(body: LoginIn, request: Request):
     request.session["role"] = role
 
     return LoginOut(ok=True, role=role, redirect=f"/{role}")
+# ======= AUTH ========
+
+# -------- Compliance: KYC/AML flags + recordkeeping toggle --------
+@app.on_event("startup")
+async def _ensure_compliance_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS compliance_members(
+      username TEXT PRIMARY KEY,
+      kyc_passed BOOLEAN NOT NULL DEFAULT FALSE,
+      aml_passed BOOLEAN NOT NULL DEFAULT FALSE,
+      bsa_risk TEXT NOT NULL DEFAULT 'low',
+      sanctions_screened BOOLEAN NOT NULL DEFAULT FALSE,
+      boi_collected BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS retention_policies(
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+
+@app.post("/admin/compliance/member/set", tags=["Admin"])
+async def compliance_member_set(username: str, kyc: bool=False, aml: bool=False,
+                                sanctions: bool=False, boi: bool=False, bsa_risk: str="low",
+                                request: Request=None):
+    _require_admin(request)
+    await database.execute("""
+      INSERT INTO compliance_members(username,kyc_passed,aml_passed,sanctions_screened,boi_collected,bsa_risk)
+      VALUES (:u,:k,:a,:s,:b,:r)
+      ON CONFLICT (username) DO UPDATE SET
+        kyc_passed=EXCLUDED.kyc_passed,
+        aml_passed=EXCLUDED.aml_passed,
+        sanctions_screened=EXCLUDED.sanctions_screened,
+        boi_collected=EXCLUDED.boi_collected,
+        bsa_risk=EXCLUDED.bsa_risk,
+        updated_at=NOW()
+    """, {"u":username,"k":kyc,"a":aml,"s":sanctions,"b":boi,"r":bsa_risk})
+    return {"ok": True, "user": username}
+# -------- Compliance: KYC/AML flags + recordkeeping toggle --------
 
 ALLOW_PUBLIC_SELLER_SIGNUP = os.getenv("ALLOW_PUBLIC_SELLER_SIGNUP", "0").lower() in ("1","true","yes")
 
@@ -1344,6 +1448,23 @@ def admin_export_all():
         mem.seek(0)
         headers = {"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         return StreamingResponse(mem, media_type="application/zip", headers=headers)
+
+# -------- DR: snapshot self-verify & RTO/RPO exposure --------
+@app.get("/admin/dr/objectives", tags=["Admin"])
+def dr_objectives():
+    return {"RTO_seconds": 900, "RPO_seconds": 60, "note": "Targets; enforce via ops runbook."}
+
+@app.get("/admin/backup/selfcheck", tags=["Admin"])
+def backup_selfcheck():
+    with engine.begin() as conn:
+        counts = {}
+        for tbl in ["contracts","bols","inventory_items","orders","trades","audit_events","settlements"]:
+            try:
+                counts[tbl] = conn.execute(_sqltext(f"SELECT COUNT(*) c FROM {tbl}")).scalar()
+            except Exception:
+                counts[tbl] = None
+        return {"ok": True, "table_counts": counts}
+# -------- DR: snapshot self-verify & RTO/RPO exposure --------
 
 # ===== HMAC gating for inventory endpoints =====
 INVENTORY_SECRET_ENV = "INVENTORY_WEBHOOK_SECRET"
@@ -1527,6 +1648,19 @@ async def _ensure_trading_schema():
         except Exception as e:
             logger.warn("trading_schema_bootstrap_failed", err=str(e), sql=stmt[:90])
 
+@app.on_event("startup")
+async def _ensure_eventlog_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS matching_events(
+      id BIGSERIAL PRIMARY KEY,
+      topic TEXT NOT NULL,        -- 'ORDER','CANCEL','MODIFY'
+      payload JSONB NOT NULL,
+      enqueued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_matching_events_unproc ON matching_events(processed_at) WHERE processed_at IS NULL;
+    """)
+
 # ===== TRADING HARDENING: risk limits, audit, trading status =====
 @app.on_event("startup")
 async def _ensure_trading_hardening():
@@ -1680,10 +1814,10 @@ async def _receipts_backfill_once():
                SET symbol = COALESCE(symbol, sku)
              WHERE (symbol IS NULL OR symbol = '')
         """)
-        # default lot_size to 40000 lb (20 tons) where missing
+        # default lot_size to 20 tons where missing
         await database.execute("""
             UPDATE public.receipts
-               SET lot_size = 40000
+               SET lot_size = 20.0
              WHERE lot_size IS NULL
         """)
         # compute qty_lots from qty_tons when missing (tons -> pounds -> lots)
@@ -1774,6 +1908,56 @@ async def _ensure_stocks_schema():
     except Exception as e:
         logger.warn("stocks_schema", err=str(e))
 
+# -------- Warranting & Chain of Title --------
+@app.on_event("startup")
+async def _ensure_warrant_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS warrants(
+      warrant_id UUID PRIMARY KEY,
+      receipt_id UUID NOT NULL REFERENCES receipts(receipt_id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'on_warrant', -- on_warrant | off_warrant | pledged
+      holder TEXT NOT NULL,                      -- member/beneficial owner
+      pledged_to TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+
+class WarrantIn(BaseModel):
+    receipt_id: str
+    holder: str
+
+@app.post("/warrants/mint", tags=["Warehousing"])
+async def warrant_mint(w: WarrantIn):
+    wid = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO warrants(warrant_id,receipt_id,holder) VALUES (:w,:r,:h)
+    """, {"w":wid,"r":w.receipt_id,"h":w.holder})
+    return {"warrant_id": wid, "status":"on_warrant"}
+
+@app.post("/warrants/transfer", tags=["Warehousing"])
+async def warrant_transfer(warrant_id: str, new_holder: str):
+    await database.execute("""
+      UPDATE warrants SET holder=:h, updated_at=NOW() WHERE warrant_id=:w AND status <> 'pledged'
+    """, {"w":warrant_id,"h":new_holder})
+    return {"ok": True}
+
+@app.post("/warrants/pledge", tags=["Warehousing"])
+async def warrant_pledge(warrant_id: str, lender: str):
+    await database.execute("""
+      UPDATE warrants SET status='pledged', pledged_to=:p, updated_at=NOW() WHERE warrant_id=:w
+    """, {"w":warrant_id,"p":lender})
+    return {"ok": True}
+
+@app.post("/warrants/release", tags=["Warehousing"])
+async def warrant_release(warrant_id: str):
+    await database.execute("""
+      UPDATE warrants SET status='on_warrant', pledged_to=NULL, updated_at=NOW() WHERE warrant_id=:w
+    """, {"w":warrant_id})
+    return {"ok": True}
+# -------- Warranting & Chain of Title --------
+
+# ------ RECEIVABLES schema bootstrap (idempotent) =====
 @app.on_event("startup")
 async def _ensure_receivables_schema():
     ddl = """
@@ -1792,7 +1976,7 @@ async def _ensure_receivables_schema():
         await run_ddl_multi(ddl)
     except Exception as e:
         logger.warn("receivables_bootstrap_failed", err=str(e))
-# ===== INVENTORY schema bootstrap (idempotent) =====
+# ===== Receivables schema bootstrap (idempotent) =====
 
 # ---------- Inventory helpers (role check, unit conversion, upsert core) ----------
 def _is_admin_or_seller(request: Request) -> bool:
@@ -2195,7 +2379,10 @@ async def _ensure_audit_seal_schema():
     status_code=200
 )
 @limiter.limit("60/minute")
-async def inventory_bulk_upsert(body: dict, request: Request):    
+async def inventory_bulk_upsert(body: dict, request: Request):
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]    
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
@@ -2251,7 +2438,8 @@ async def inventory_bulk_upsert(body: dict, request: Request):
         except Exception:
             pass
 
-    return {"ok": True, "upserted": upserted}
+    resp = {"ok": True, "upserted": upserted}              # bulk_upsert
+    return await _idem_guard(request, key, resp)
 
 # -------- Inventory: Manual Add/Set (gated + unit-aware) --------
 @app.post(
@@ -2262,7 +2450,10 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     status_code=200
 )
 @limiter.limit("60/minute")
-async def inventory_manual_add(payload: dict, request: Request):    
+async def inventory_manual_add(payload: dict, request: Request): 
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]   
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
 
@@ -2285,7 +2476,8 @@ async def inventory_manual_add(payload: dict, request: Request):
             uom=uom, location=loc, description=desc, source=source,
             movement_reason="manual_add", idem_key=idem
         )
-    return {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
+    resp = {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
+    return await _idem_guard(request, key, resp)           # manual_add
 
 # -------- Inventory: CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
@@ -2393,6 +2585,7 @@ async def inventory_import_excel(
 
     return {"ok": True, "upserted": upserted, "errors": errors}
 
+# ----------- Startup tasks -----------
 @app.on_event("startup")
 async def _ensure_pgcrypto():
     try:
@@ -2795,9 +2988,17 @@ async def admin_run_snapshot_now(storage: str = "supabase"):
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+# ----- Idempotency helper -----
+def _idem_key(request: Request) -> Optional[str]:
+    return request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key")
+
+async def _idem_guard(request: Request, key: Optional[str], resp: dict):
+    if key:
+        _idem_cache[key] = resp
+    return resp
+# ===== Idempotency cache for POST/Inventory/Purchase =====
 
 # ===== Admin export helpers =====
-
 # --- helpers (for CSV/ZIP safety) ---
 def _safe(v):
     if isinstance(v, Decimal):
@@ -3021,6 +3222,29 @@ async def ice_webhook(request: Request, x_signature: str = Header(None, alias="X
     return {"ok": True}
 # ---------- Ice webhook signature verifier -----
 
+# -------- Security: key registry & rotation (scaffold) --------
+@app.on_event("startup")
+async def _ensure_key_registry():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS key_registry(
+      key_name TEXT PRIMARY KEY,
+      version INT NOT NULL DEFAULT 1,
+      material TEXT NOT NULL,        -- store KMS alias or encrypted blob, NOT plaintext keys
+      rotated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+
+@app.post("/admin/keys/rotate", tags=["Admin"])
+async def rotate_key(key_name: str, new_material_ref: str, request: Request):
+    _require_admin(request)
+    await database.execute("""
+      INSERT INTO key_registry(key_name,version,material)
+      VALUES (:n,1,:m)
+      ON CONFLICT (key_name) DO UPDATE SET version = key_registry.version + 1, material=:m, rotated_at=NOW()
+    """, {"n": key_name, "m": new_material_ref})
+    return {"ok": True, "key_name": key_name}
+# -------- Security: key registry & rotation (scaffold) --------
+
 # ===== Link signing (itsdangerous) =====
 LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", os.getenv("SESSION_SECRET", "dev-only-secret"))
 _link_signer = URLSafeTimedSerializer(LINK_SIGNING_SECRET, salt="bridge-link-v1")
@@ -3132,7 +3356,10 @@ class ReceiptCreateOut(BaseModel):
     status: str
 
 @app.post("/receipts", tags=["Receipts"], summary="Create/mint a live receipt")
-async def receipt_create(body: ReceiptCreateIn) -> ReceiptCreateOut:
+async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCreateOut:
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+         return _idem_cache[key]
     """
     Populates symbol, lot_size, qty_lots, location at write time.
     """
@@ -3168,17 +3395,18 @@ async def receipt_create(body: ReceiptCreateIn) -> ReceiptCreateOut:
         "lot_size": lot_size,
     })
 
-    return ReceiptCreateOut(
-        receipt_id=receipt_id,
-        seller=body.seller.strip(),
-        sku=body.sku.strip(),
-        qty_tons=float(body.qty_tons),
-        symbol=symbol,
-        location=(body.location or "UNKNOWN").strip(),
-        lot_size=float(lot_size),
-        qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
-        status=status,
-    )
+    resp = ReceiptCreateOut(
+         receipt_id=receipt_id,
+         seller=body.seller.strip(),
+         sku=body.sku.strip(),
+         qty_tons=float(body.qty_tons),
+         symbol=symbol,
+         location=(body.location or "UNKNOWN").strip(),
+         lot_size=float(lot_size),
+         qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
+         status=status,
+     )
+    return await _idem_guard(request, key, resp)
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -3526,17 +3754,17 @@ async def export_contracts_csv():
         headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
     )
 
-@app.patch(
-    "/contracts/{contract_id}/purchase",
-    tags=["Contracts"],
-    summary="Purchase (atomic)",
-    description="Atomically change a Pending contract to Signed, move reserved→committed, and auto-create a Scheduled BOL.",
-    status_code=200
-)
+# --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
+@app.patch("/contracts/{contract_id}/purchase",
+           tags=["Contracts"],
+           summary="Purchase (atomic)",
+           description="Atomically change a Pending contract to Signed, move reserved→committed, and auto-create a Scheduled BOL.",
+           status_code=200)
 async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):
-    idem = body.idempotency_key or request.headers.get("Idempotency-Key")
-    if idem and idem in _idem_cache:
-        return _idem_cache[idem]
+    # Idempotency guard (accept body key OR header key)
+    key = _idem_key(request) or (body.idempotency_key if hasattr(body, "idempotency_key") else None)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
 
     async with database.transaction():
         row = await database.fetch_one("""
@@ -3607,9 +3835,8 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         })
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
-    if idem:
-        _idem_cache[idem] = resp
-    return resp 
+    return await _idem_guard(request, key, resp)
+
 # === /INSERT ===
 
 from typing import Optional
@@ -3844,6 +4071,11 @@ class ContractInExtended(ContractIn):
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request):
+    # Idempotency guard (header: Idempotency-Key or X-Idempotency-Key)
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
+
     await _check_contract_quota()
     qty    = float(contract.weight_tons)
     seller = contract.seller.strip()
@@ -3948,8 +4180,9 @@ async def create_contract(contract: ContractInExtended, request: Request):
         })
     except Exception:
         pass
-
-    return row
+    resp = row
+    return await _idem_guard(request, key, resp)
+# ========== /Admin Exports router =========
 
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
@@ -4148,18 +4381,12 @@ async def export_applications_csv():
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
 # -------- BOLs (with PDF generation) --------
-@app.post(
-    "/bols",
-    response_model=BOLOut,
-    tags=["BOLs"],
-    summary="Create BOL",
-    status_code=201
-    )
+@app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
-   # Optional idempotency
-    idem_key = request.headers.get("Idempotency-Key")
-    if idem_key and idem_key in _idem_cache:
-        return _idem_cache[idem_key]
+    # Idempotency guard
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
 
     row = await database.fetch_one("""
         INSERT INTO bols (
@@ -4187,21 +4414,16 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
         "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
         "pickup_time": bol.pickup_time,
-        "origin_country": bol.origin_country,
-        "destination_country": bol.destination_country,
-        "port_code": bol.port_code,
-        "hs_code": bol.hs_code,
-        "duty_usd": bol.duty_usd,
-        "tax_pct": bol.tax_pct,
+        "origin_country": bol.origin_country, "destination_country": bol.destination_country,
+        "port_code": bol.port_code, "hs_code": bol.hs_code,
+        "duty_usd": bol.duty_usd, "tax_pct": bol.tax_pct,
     })
 
-    # -------- auto-mint a receipt tied to the BOL’s material + seller --------
+    # Optional: auto-mint a receipt
     try:
-        # choose a tradable symbol (for now, align to material/sku)
-        _symbol = row["material"]  # or map if you use different tradable roots
+        _symbol = row["material"]
         _lot = _lot_size(_symbol)
         _qty_lots = (float(row["weight_tons"]) / _lot) if _lot > 0 else None
-
         await database.execute("""
             INSERT INTO public.receipts(
                 receipt_id, seller, sku, qty_tons, status,
@@ -4213,14 +4435,36 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         """, {
             "id": str(uuid.uuid4()),
             "seller": row["seller"],
-            "sku": row["material"],               # receipts keep `sku`; we’ll also set `symbol`
+            "sku": row["material"],
             "qty_tons": float(row["weight_tons"]),
             "symbol": _symbol,
-            "location": "UNKNOWN",                # or derive from carrier/yard if you have it
+            "location": "UNKNOWN",
             "qty_lots": _qty_lots,
             "lot_size": _lot,
         })
-    except Exception:        
+    except Exception:
+        pass
+
+    # Best-effort audit / webhook / metric (optional)
+    try:
+        actor = request.session.get("username") if hasattr(request, "session") else None
+        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
+            "contract_id": str(bol.contract_id), "material": bol.material, "weight_tons": bol.weight_tons
+        })
+    except Exception:
+        pass
+    try:
+        await emit_event_safe("bol.created", {
+            "bol_id": row["bol_id"], "contract_id": row["contract_id"],
+            "seller": row["seller"], "buyer": row["buyer"],
+            "material": row["material"], "weight_tons": float(row["weight_tons"]),
+            "status": row["status"]
+        })
+    except Exception:
+        pass
+    try:
+        METRICS_BOLS_CREATED.inc()
+    except Exception:
         pass
 
     resp = {
@@ -4230,36 +4474,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
-
-    # ---- audit
-    try:
-        actor = request.session.get("username") if hasattr(request, "session") else None
-        await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
-            "contract_id": str(bol.contract_id),
-            "material": bol.material,
-            "weight_tons": bol.weight_tons
-        })
-    except Exception:
-        pass
-
-    # ---- webhook
-    try:
-        await emit_event_safe("bol.created", {
-            "bol_id": row["bol_id"],
-            "contract_id": row["contract_id"],
-            "seller": row["seller"], "buyer": row["buyer"],
-            "material": row["material"], "weight_tons": float(row["weight_tons"]),
-            "status": row["status"]
-        })
-    except Exception:
-        pass
-
-    # ---- metric
-    METRICS_BOLS_CREATED.inc()
-
-    if idem_key:
-        _idem_cache[idem_key] = resp
-    return resp
+    return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
 async def bols_mark_delivered(
@@ -4946,6 +5161,20 @@ async def margin_calc(m: MarginIn):
         "daily_pnl": round(daily_pnl, 2),
         "ref_settle": ref
     }
+
+@app.post("/risk/portfolio_margin", tags=["Risk"], summary="Scenario-based PM")
+async def portfolio_margin(member: str, symbol: str, price: float, net_lots: float,
+                           shocks: List[float] = Query([-0.1,-0.05,0,0.05,0.1])):
+    lot = _lot_size(symbol)
+    exposures = []
+    worst = 0.0
+    for s in shocks:
+        px = price * (1.0 + s)
+        pnl = (px - price) * net_lots * lot
+        exposures.append({"shock": s, "mtm": round(pnl,2)})
+        worst = min(worst, pnl)
+    im = round(abs(worst), 2)  # conservative: worst loss across scenarios
+    return {"member": member, "symbol": symbol, "net_lots": net_lots, "scenarios": exposures, "initial_margin_PM": im}
 # ===== Risk controls (admin/runtime) =====
 
 # ===== Surveillance / Alerts =====
@@ -5009,6 +5238,43 @@ async def ml_anomaly(a: AnomIn):
     return {"score": score}
 # ===== Surveillance / Alerts =====
 
+# -------- Surveillance: case management + rules --------
+@app.on_event("startup")
+async def _ensure_surv_cases():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS surveil_cases(
+      case_id UUID PRIMARY KEY,
+      rule TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL DEFAULT 'open',
+      notes TEXT
+    );
+    """)
+
+@app.post("/surveil/case/open", tags=["Surveillance"])
+async def case_open(rule: str, subject: str, notes: str=""):
+    cid = str(uuid.uuid4())
+    await database.execute("""INSERT INTO surveil_cases(case_id,rule,subject,notes) VALUES (:i,:r,:s,:n)""",
+                           {"i":cid,"r":rule,"s":subject,"n":notes})
+    return {"case_id": cid, "status": "open"}
+
+@app.post("/surveil/rules/run", tags=["Surveillance"])
+async def run_rules(symbol: str, window_minutes: int = 5):
+    # Example: wash trade heuristic (same owner both sides within window)
+    rows = await database.fetch_all("""
+      SELECT t1.trade_id a, t2.trade_id b, t1.buy_owner, t1.sell_owner, t2.buy_owner, t2.sell_owner
+      FROM clob_trades t1 JOIN clob_trades t2 ON t1.symbol=t2.symbol
+      WHERE t1.symbol=:s AND abs(EXTRACT(EPOCH FROM (t1.created_at - t2.created_at))) <= :w*60
+        AND (t1.buy_owner=t2.sell_owner OR t1.sell_owner=t2.buy_owner)
+      LIMIT 100
+    """, {"s":symbol, "w":window_minutes})
+    flagged = len(rows)
+    if flagged:
+        await surveil_create(AlertIn(rule="wash_like", subject=symbol, data={"pairs": flagged}, severity="high"))
+    return {"ok": True, "wash_like_pairs": flagged}
+# -------- Surveillance: case management + rules --------
+
 # ---- Market data websocket ----
 @app.websocket("/md/ws")
 async def md_ws(ws: WebSocket):
@@ -5057,6 +5323,9 @@ async def _rfq_symbol(rfq_id: str) -> str:
 
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
 async def create_rfq(r: RFQIn, request: Request):
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     require_entitlement(user, "rfq.post")
     rfq_id = str(uuid.uuid4())
@@ -5080,10 +5349,14 @@ async def create_rfq(r: RFQIn, request: Request):
         await _md_broadcast({"type": "rfq.new", "rfq_id": rfq_id, "symbol": r.symbol, "side": r.side, "qty_lots": float(r.quantity_lots)})
     except Exception:
         pass
-    return {"rfq_id": rfq_id, "status": "open"}
+    resp = {"rfq_id": rfq_id, "status": "open"}
+    return await _idem_guard(request, key, resp)
 
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
 async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     require_entitlement(user, "rfq.quote")
     symbol = await _rfq_symbol(rfq_id)
@@ -5100,10 +5373,14 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
         await _md_broadcast({"type": "rfq.quote", "rfq_id": rfq_id, "quote_id": quote_id, "symbol": symbol, "price": float(q.price), "qty_lots": float(q.qty_lots)})
     except Exception:
         pass
-    return {"quote_id": quote_id}
+    resp = {"quote_id": quote_id}
+    return await _idem_guard(request, key, resp)
 
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
 async def award_rfq(rfq_id: str, quote_id: str, request: Request):
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     require_entitlement(user, "rfq.award")
 
@@ -5145,7 +5422,8 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     except Exception:
         pass
 
-    return {"deal_id": deal_id, "status": "done"}
+    resp = {"deal_id": deal_id, "status": "done"}
+    return await _idem_guard(request, key, resp)
 
 # ===================== CLOB (Symbol-level order book) =====================
 from fastapi import APIRouter
@@ -5323,9 +5601,38 @@ async def clob_statement(member: str, as_of: date, fmt: Literal["csv","pdf"]="pd
     return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'})
 
+# ===== Deterministic sequencer (single worker) =====
+_event_queue: asyncio.Queue = asyncio.Queue()
+_SEQUENCER_STARTED = False
+
+async def _sequencer_worker():
+    while True:
+        ev_id, topic, payload = await _event_queue.get()
+        try:
+            await database.execute("UPDATE matching_events SET processed_at=NOW() WHERE id=:i", {"i": ev_id})
+            if topic == "ORDER":
+                await _clob_match(payload["order_id"])
+            elif topic == "CANCEL":
+                req = type("Req", (), {"session": {"username": payload.get("user", "system")}})
+                await clob_cancel_order(payload["order_id"], request=req)
+        except Exception as e:
+            logger.warn("sequencer_fail", topic=topic, err=str(e))
+        finally:
+            _event_queue.task_done()
+
+@app.on_event("startup")
+async def _start_sequencer():
+    global _SEQUENCER_STARTED
+    if not _SEQUENCER_STARTED:
+        asyncio.create_task(_sequencer_worker())
+        _SEQUENCER_STARTED = True
+# ===== /Deterministic sequencer =====
 
 @clob_router.post("/orders", summary="Place order")
 async def clob_place_order(o: CLOBOrderIn, request: Request):
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     require_entitlement(user, "clob.trade")
     if _KILL_SWITCH.get(user):
@@ -5335,21 +5642,21 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
 
     order_id = str(uuid.uuid4())
     qty = float(o.qty_lots)
+
     await database.execute("""
       INSERT INTO clob_orders(order_id,symbol,side,price,qty_lots,qty_open,owner,tif,status)
       VALUES (:id,:s,:side,:p,:q,:q,:owner,:tif,'open')
     """, {"id": order_id, "s": o.symbol, "side": o.side, "p": str(o.price), "q": qty, "owner": user, "tif": o.tif})
 
-    filled = await _clob_match(order_id)
-    if o.tif in ("ioc","fok"):
-        row = await database.fetch_one("SELECT qty_open FROM clob_orders WHERE order_id=:id", {"id": order_id})
-        open_qty = float(row["qty_open"]) if row else 0.0
-        if (o.tif == "fok" and open_qty > 0) or (o.tif == "ioc" and open_qty > 0):
-            await database.execute(
-                "UPDATE clob_orders SET status='cancelled', qty_open=0 WHERE order_id=:id",
-                {"id": order_id}
-            )
-    return {"order_id": order_id, "filled": filled}
+    # Enqueue for deterministic matching (must be inside this async function)
+    ev = await database.fetch_one(
+        "INSERT INTO matching_events(topic,payload) VALUES ('ORDER', :p) RETURNING id",
+        {"p": json.dumps({"order_id": order_id})}
+    )
+    await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
+
+    resp = {"order_id": order_id, "queued": True}
+    return await _idem_guard(request, key, resp)
 
 # ===== Settlement (VWAP from recent CLOB trades) =====
 @app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
@@ -5536,16 +5843,20 @@ async def fix_dropcopy(payload: dict):
 async def clob_cancel_order(order_id: str, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     row = await database.fetch_one("SELECT owner,status FROM clob_orders WHERE order_id=:id", {"id": order_id})
-    if not row:
-        raise HTTPException(404, "Order not found")
-    if row["owner"] != user:
-        raise HTTPException(403, "Not owner")
-    if row["status"] != "open":
-        raise HTTPException(409, "Not open")
+    if not row: raise HTTPException(404, "Order not found")
+    if row["owner"] != user: raise HTTPException(403, "Not owner")
+    if row["status"] != "open": return {"status": row["status"]}
+
     await database.execute(
         "UPDATE clob_orders SET status='cancelled', qty_open=0 WHERE order_id=:id",
         {"id": order_id}
     )
+    # enqueue cancel (safe if already cancelled)
+    ev = await database.fetch_one(
+        "INSERT INTO matching_events(topic,payload) VALUES ('CANCEL', :p) RETURNING id",
+        {"p": json.dumps({"order_id": order_id, "user": user})}
+    )
+    await _event_queue.put((int(ev["id"]), "CANCEL", {"order_id": order_id, "user": user}))
     return {"status": "cancelled"}
 
 @clob_router.get("/orderbook", summary="Best bid/ask + depth (simple)")
@@ -5648,7 +5959,10 @@ async def _clob_match(order_id: str) -> float:
 
 
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
-async def place_order(ord_in: OrderIn, request: Request):  # <-- added request
+async def place_order(ord_in: OrderIn, request: Request):  
+    key = _idem_key(request)
+    if key and key in _idem_cache:
+        return _idem_cache[key]
     # entitlement gate
     user = (request.session.get("username") if hasattr(request, "session") else None) or ""
     require_entitlement(user, "trade.place")
@@ -5805,7 +6119,8 @@ async def place_order(ord_in: OrderIn, request: Request):  # <-- added request
             await _audit_order(order_id, "CANCELLED", 0, "market IOC remainder")
 
     final = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
-    return dict(final)
+    resp = dict(final)
+    return await _idem_guard(request, key, resp)
 
 @trade_router.patch("/orders/{order_id}", summary="Modify order (price/qty) and rematch")
 async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
@@ -6029,7 +6344,8 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
 
 app.include_router(trade_router)
 app.include_router(clob_router)
- 
+#=================== Exports (CSV) ===================== 
+
 # =================== /TRADING (Order Book) =====================
 async def _fetch_csv_rows(query: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     rows = await database.fetch_all(query, params or {})
@@ -6243,3 +6559,52 @@ async def run_variation(body: VariationRunIn):
 
 app.include_router(clearing_router)
 # =================== /CLEARING (Margin & Variation) =====================
+
+# -------- Clearinghouse Economics (guaranty fund + waterfall) --------
+@app.on_event("startup")
+async def _ensure_ccp_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS guaranty_fund(
+      member TEXT PRIMARY KEY,
+      contribution_usd NUMERIC NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS default_events(
+      id UUID PRIMARY KEY,
+      member TEXT NOT NULL,
+      occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      amount_usd NUMERIC NOT NULL,
+      notes TEXT
+    );
+    """)
+
+@clearing_router.post("/guaranty/deposit")
+async def gf_deposit(member: str, amount: float):
+    await database.execute("""
+      INSERT INTO guaranty_fund(member,contribution_usd)
+      VALUES (:m,:a)
+      ON CONFLICT (member) DO UPDATE SET contribution_usd = guaranty_fund.contribution_usd + EXCLUDED.contribution_usd,
+                                         updated_at=NOW()
+    """, {"m":member,"a":amount})
+    return {"ok": True}
+
+@clearing_router.post("/waterfall/apply")
+async def waterfall_apply(member: str, shortfall_usd: float):
+    # 1) Use IM/VM balances (margin_accounts) → 2) Guaranty fund → 3) Skin-in-the-game (not modeled here)
+    row = await database.fetch_one("SELECT balance FROM margin_accounts WHERE account_id=:a", {"a": member})
+    bal = float(row["balance"]) if row else 0.0
+    use_imvm = min(bal, shortfall_usd)
+    rem = shortfall_usd - use_imvm
+    if use_imvm:
+        await _adjust_margin(member, -use_imvm, "default_waterfall", None)
+    if rem > 0:
+        gf = await database.fetch_one("SELECT contribution_usd FROM guaranty_fund WHERE member=:m", {"m": member})
+        g = float(gf["contribution_usd"]) if gf else 0.0
+        use_gf = min(g, rem)
+        if use_gf:
+            await database.execute("UPDATE guaranty_fund SET contribution_usd = contribution_usd - :x WHERE member=:m",
+                                   {"x":use_gf,"m":member})
+        rem -= use_gf
+    await database.execute("INSERT INTO default_events(id,member,amount_usd,notes) VALUES (:i,:m,:a,:n)",
+                           {"i":str(uuid.uuid4()),"m":member,"a":shortfall_usd,"n":f"IM/VM used={use_imvm}"})
+    return {"ok": rem <= 0, "remaining_shortfall": rem}
