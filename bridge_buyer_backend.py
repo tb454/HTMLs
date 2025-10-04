@@ -341,7 +341,6 @@ async def _metrics_and_sentry():
 dsn = (os.getenv("SENTRY_DSN") or "").strip()
 if dsn.startswith("http"):  # only init if it looks like a real DSN
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
-# =====  Prometheus metrics + optional Sentry =====
 
 from prometheus_client import Histogram
 H_REQ = Histogram("bridge_http_latency_ms", "HTTP latency (ms)", ["path","method"])
@@ -362,6 +361,19 @@ async def _sla_timer(request: Request, call_next):
 @app.get("/time/sync", tags=["Health"], summary="Server time sync (UTC + monotonic)")
 async def time_sync():
     return {"utc": datetime.utcnow().isoformat() + "Z", "mono_ns": time.time_ns()}
+# =====  Prometheus metrics + optional Sentry =====
+
+# ----- Uniq ref guard -----
+@app.on_event("startup")
+async def _uniq_ref_guard():
+    try:
+        await database.execute("""
+          ALTER TABLE contracts
+          ADD CONSTRAINT uq_contracts_ref UNIQUE (reference_source, reference_symbol)
+        """)
+    except Exception:
+        pass  # already exists or incompatible
+# ----- Uniq ref guard -----
 
 # ----- Extra indexes -----
 @app.on_event("startup")
@@ -2719,6 +2731,15 @@ async def _ensure_rfq_schema():
             logger.warn("rfq_schema_bootstrap_failed", err=str(e), sql=s[:90])
 #------- RFQs -------
 
+# ------ Contracts refs index ------
+@app.on_event("startup")
+async def _idx_refs():
+    try:
+        await database.execute("CREATE INDEX IF NOT EXISTS idx_contracts_ref ON contracts(reference_source, reference_symbol)")
+    except Exception:
+        pass
+# ------ Contracts refs index ------
+
 # ------ Statements router ------
 @app.on_event("startup")
 async def _ensure_statements_schema():
@@ -3650,6 +3671,8 @@ async def get_all_contracts(
     status: Optional[str] = Query(None),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime]   = Query(None),
+    reference_source: Optional[str] = Query(None),    
+    reference_symbol: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -3657,6 +3680,8 @@ async def get_all_contracts(
     seller   = seller.strip()   if isinstance(seller, str) else seller
     material = material.strip() if isinstance(material, str) else material
     status   = status.strip()   if isinstance(status, str) else status
+    reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
+    reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
 
     query = "SELECT * FROM contracts"
     conditions, values = [], {}
@@ -3673,6 +3698,11 @@ async def get_all_contracts(
         conditions.append("created_at >= :start"); values["start"] = start
     if end:
         conditions.append("created_at <= :end"); values["end"] = end
+    if reference_source:
+        conditions.append("reference_source = :ref_src");         values["ref_src"] = reference_source
+    if reference_symbol:
+        # allow exact or prefix (search "4409" or "4409#")
+        conditions.append("reference_symbol ILIKE :ref_sym");     values["ref_sym"] = f"%{reference_symbol}%"
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -4056,7 +4086,7 @@ async def tax_lookup(hs_code: str, dest: str):
             "tax_pct": float(row["tax_pct"]) if row else 0.0,
             "duty_usd": float(row["duty_usd"]) if row else 0.0}
 
-# ========== /Admin Exports router ==========
+# ========== Admin Exports router ==========
 import asyncio
 import inspect
 from fastapi import Request
@@ -4071,92 +4101,122 @@ class ContractInExtended(ContractIn):
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request):
-    # Idempotency guard (header: Idempotency-Key or X-Idempotency-Key)
+    # Idempotency guard
     key = _idem_key(request)
     if key and key in _idem_cache:
         return _idem_cache[key]
 
     await _check_contract_quota()
+
     qty    = float(contract.weight_tons)
     seller = contract.seller.strip()
     sku    = contract.material.strip()
     cid    = str(uuid.uuid4())
 
+    # Historical-import toggle (e.g., QBO backfills)
+    import_mode = request.headers.get("X-Import-Mode", "").lower() == "historical"
+    if os.getenv("ENV","").lower() == "production" and import_mode:
+        _require_admin(request)
+
     async with database.transaction():
-        # ensure inventory row exists
-        await database.execute("""
-            INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-            VALUES (:seller, :sku, 0, 0, 0)
-            ON CONFLICT (seller, sku) DO NOTHING
-        """, {"seller": seller, "sku": sku})
+        if import_mode:
+            # --- direct insert (no inventory ops), mark Signed ---
+            payload = {
+                "id": cid,
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "weight_tons": contract.weight_tons,
+                "price_per_ton": contract.price_per_ton,
+                "status": "Signed",  # historicals are written as Signed
+                "pricing_formula": contract.pricing_formula,
+                "reference_symbol": contract.reference_symbol,
+                "reference_price": contract.reference_price,
+                "reference_source": contract.reference_source,
+                "reference_timestamp": contract.reference_timestamp,
+                "currency": contract.currency or "USD",
+            }
+            row = await database.fetch_one("""
+                INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,
+                                       pricing_formula,reference_symbol,reference_price,reference_source,reference_timestamp,currency)
+                VALUES (:id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
+                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,:reference_timestamp,:currency)
+                RETURNING *
+            """, payload)
 
-        # check availability & reserve
-        inv = await database.fetch_one("""
-            SELECT qty_on_hand, qty_reserved, qty_committed
-            FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
-            FOR UPDATE
-        """, {"seller": seller, "sku": sku})
-        on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
-        reserved  = float(inv["qty_reserved"]) if inv else 0.0
-        committed = float(inv["qty_committed"]) if inv else 0.0
-        available = on_hand - reserved - committed
-        if available < qty:
-            raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+        else:
+            # --- live path: reserve inventory, then insert Pending ---
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
+                VALUES (:seller, :sku, 0, 0, 0)
+                ON CONFLICT (seller, sku) DO NOTHING
+            """, {"seller": seller, "sku": sku})
 
-        await database.execute("""
-            UPDATE inventory_items
-               SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-             WHERE seller=:seller AND sku=:sku
-        """, {"q": qty, "seller": seller, "sku": sku})
+            inv = await database.fetch_one("""
+                SELECT qty_on_hand, qty_reserved, qty_committed
+                FROM inventory_items
+                WHERE seller=:seller AND sku=:sku
+                FOR UPDATE
+            """, {"seller": seller, "sku": sku})
 
-        await database.execute("""
-            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-            VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
-        """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
-              "meta": json.dumps({"reason": "contract_create"})})
+            on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
+            reserved  = float(inv["qty_reserved"]) if inv else 0.0
+            committed = float(inv["qty_committed"]) if inv else 0.0
+            available = on_hand - reserved - committed
+            if available < qty:
+                raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
 
-        # --- Internal ref snapshot if caller didn't pass one (BEFORE INSERT) ---
-        if not (contract.reference_price and contract.reference_source):
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=6) as c:
-                    r = await c.get(f"{request.base_url}prices/copper_last")
-                    if 200 <= r.status_code < 300:
-                        j = r.json()
-                        contract.reference_price = float(j.get("last"))
-                        contract.reference_source = "COMEX (derived/internal, delayed)"
-                        contract.reference_symbol = "HG=F"
-                        contract.reference_timestamp = datetime.utcnow()
-                        contract.pricing_formula = contract.pricing_formula or "COMEX_Cu - 0.25"
-            except Exception:
-                pass
+            await database.execute("""
+                UPDATE inventory_items
+                   SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+                 WHERE seller=:seller AND sku=:sku
+            """, {"q": qty, "seller": seller, "sku": sku})
 
-        # INSERT with pricing fields (single payload)
-        payload = {
-            "id": cid,
-            "buyer": contract.buyer,
-            "seller": contract.seller,
-            "material": contract.material,
-            "weight_tons": contract.weight_tons,
-            "price_per_ton": contract.price_per_ton,
-            "status": "Pending",
-            "pricing_formula": contract.pricing_formula,
-            "reference_symbol": contract.reference_symbol,
-            "reference_price": contract.reference_price,
-            "reference_source": contract.reference_source,
-            "reference_timestamp": contract.reference_timestamp,
-            "currency": contract.currency or "USD",
-        }
-        row = await database.fetch_one("""
-            INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status,
-                                   pricing_formula, reference_symbol, reference_price, reference_source, reference_timestamp, currency)
-            VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, :status,
-                    :pricing_formula, :reference_symbol, :reference_price, :reference_source, :reference_timestamp, :currency)
-            RETURNING *
-        """, payload)
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:seller, :sku, 'reserve', :q, :cid, :meta)
+            """, {"seller": seller, "sku": sku, "q": qty, "cid": cid,
+                  "meta": json.dumps({"reason": "contract_create"})})
 
-    # audit (disclaimer)
+            # Internal ref snapshot if caller didn't pass one
+            if not (contract.reference_price and contract.reference_source):
+                try:
+                    async with httpx.AsyncClient(timeout=6) as c:
+                        r = await c.get(f"{request.base_url}prices/copper_last")
+                        if 200 <= r.status_code < 300:
+                            j = r.json()
+                            contract.reference_price = float(j.get("last"))
+                            contract.reference_source = "COMEX (derived/internal, delayed)"
+                            contract.reference_symbol = "HG=F"
+                            contract.reference_timestamp = datetime.utcnow()
+                            contract.pricing_formula = contract.pricing_formula or "COMEX_Cu - 0.25"
+                except Exception:
+                    pass
+
+            payload = {
+                "id": cid,
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "weight_tons": contract.weight_tons,
+                "price_per_ton": contract.price_per_ton,
+                "status": "Pending",
+                "pricing_formula": contract.pricing_formula,
+                "reference_symbol": contract.reference_symbol,
+                "reference_price": contract.reference_price,
+                "reference_source": contract.reference_source,
+                "reference_timestamp": contract.reference_timestamp,
+                "currency": contract.currency or "USD",
+            }
+            row = await database.fetch_one("""
+                INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status,
+                                       pricing_formula, reference_symbol, reference_price, reference_source, reference_timestamp, currency)
+                VALUES (:id, :buyer, :seller, :material, :weight_tons, :price_per_ton, :status,
+                        :pricing_formula, :reference_symbol, :reference_price, :reference_source, :reference_timestamp, :currency)
+                RETURNING *
+            """, payload)
+
+    # audit + emit
     try:
         actor = request.session.get("username") if hasattr(request, "session") else None
         await log_action(actor or "system", "contract.create", str(row["id"]), {
@@ -4165,7 +4225,6 @@ async def create_contract(contract: ContractInExtended, request: Request):
     except Exception:
         pass
 
-    # metric + webhook
     METRICS_CONTRACTS_CREATED.inc()
     try:
         await emit_event_safe("contract.updated", {
@@ -4180,9 +4239,10 @@ async def create_contract(contract: ContractInExtended, request: Request):
         })
     except Exception:
         pass
+
     resp = row
     return await _idem_guard(request, key, resp)
-# ========== /Admin Exports router =========
+# ========= Admin Exports router ==========
 
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
