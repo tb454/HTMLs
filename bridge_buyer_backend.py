@@ -96,6 +96,12 @@ _ENTITLEMENTS: Dict[str, Set[str]] = defaultdict(set)      # username/member -> 
 _md_subs: Set[WebSocket] = set()
 _md_seq: int = 1
 
+# --- market data push tuning (production) ---
+MD_BOOK_PUSH       = os.getenv("MD_BOOK_PUSH", "1").lower() in ("1","true","yes")
+MD_BOOK_DEPTH      = int(os.getenv("MD_BOOK_DEPTH", "10"))            # top N levels
+MD_BOOK_MIN_MS     = int(os.getenv("MD_BOOK_MIN_MS", "250"))          # debounce per symbol
+_md_last_push_ms: Dict[str, int] = defaultdict(lambda: 0)
+
 # instrument registry (example; persist later)
 _INSTRUMENTS = {
     # symbol: lot_size (tons), tick_size ($/lb), description
@@ -4699,6 +4705,8 @@ async def export_applications_csv():
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
 # -------- BOLs (with PDF generation) --------
+from uuid import uuid4, uuid5, NAMESPACE_URL
+
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
     key = _idem_key(request)
@@ -4706,6 +4714,11 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if hit:
         return hit
 
+    # Deterministic UUID when an Idempotency-Key is present
+    bol_uuid = uuid5(NAMESPACE_URL, f"bol:{key}") if key else uuid4()
+    bol_id_str = str(bol_uuid)
+
+    # Try to insert; if it already exists (same key), fetch the existing row
     row = await database.fetch_one("""
         INSERT INTO bols (
             bol_id, contract_id, buyer, seller, material, weight_tons,
@@ -4723,9 +4736,10 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             :pickup_time, 'Scheduled',
             :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct
         )
+        ON CONFLICT (bol_id) DO NOTHING
         RETURNING *
     """, {
-        "bol_id": str(uuid.uuid4()),
+        "bol_id": bol_id_str,
         "contract_id": str(bol.contract_id),
         "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
         "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
@@ -4736,34 +4750,38 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "port_code": bol.port_code, "hs_code": bol.hs_code,
         "duty_usd": bol.duty_usd, "tax_pct": bol.tax_pct,
     })
+    we_created = row is not None
+    if row is None:
+        row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :id", {"id": bol_id_str})
 
-    # Optional: auto-mint a receipt
-    try:
-        _symbol = row["material"]
-        _lot = _lot_size(_symbol)
-        _qty_lots = (float(row["weight_tons"]) / _lot) if _lot > 0 else None
-        await database.execute("""
-            INSERT INTO public.receipts(
-                receipt_id, seller, sku, qty_tons, status,
-                symbol, location, qty_lots, lot_size, created_at, updated_at, consumed_bol_id
-            ) VALUES (
-                :id, :seller, :sku, :qty_tons, 'created',
-                :symbol, :location, :qty_lots, :lot_size, NOW(), NOW(), NULL
-            )
-        """, {
-            "id": str(uuid.uuid4()),
-            "seller": row["seller"],
-            "sku": row["material"],
-            "qty_tons": float(row["weight_tons"]),
-            "symbol": _symbol,
-            "location": "UNKNOWN",
-            "qty_lots": _qty_lots,
-            "lot_size": _lot,
-        })
-    except Exception:
-        pass
+    # Auto-mint a receipt ONLY on first creation
+    if we_created:
+        try:
+            _symbol = row["material"]
+            _lot = _lot_size(_symbol)
+            _qty_lots = (float(row["weight_tons"]) / _lot) if _lot > 0 else None
+            await database.execute("""
+                INSERT INTO public.receipts(
+                    receipt_id, seller, sku, qty_tons, status,
+                    symbol, location, qty_lots, lot_size, created_at, updated_at, consumed_bol_id
+                ) VALUES (
+                    :id, :seller, :sku, :qty_tons, 'created',
+                    :symbol, :location, :qty_lots, :lot_size, NOW(), NOW(), NULL
+                )
+            """, {
+                "id": str(uuid4()),
+                "seller": row["seller"],
+                "sku": row["material"],
+                "qty_tons": float(row["weight_tons"]),
+                "symbol": _symbol,
+                "location": "UNKNOWN",
+                "qty_lots": _qty_lots,
+                "lot_size": _lot,
+            })
+        except Exception:
+            pass
 
-    # Best-effort audit / webhook / metric (optional)
+    # Best-effort audit / webhook / metric
     try:
         actor = request.session.get("username") if hasattr(request, "session") else None
         await log_action(actor or "system", "bol.create", str(row["bol_id"]), {
@@ -4786,13 +4804,12 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         pass
 
     resp = {
-        **bol.dict(),
+        **bol.model_dump(),  # Pydantic v2
         "bol_id": row["bol_id"],
         "status": row["status"],
         "delivery_signature": None,
-        "delivery_time": None
+        "delivery_time": None,
     }
-    await idem_put(key, resp)
     return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
