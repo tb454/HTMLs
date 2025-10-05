@@ -5674,6 +5674,38 @@ async def _md_broadcast(msg: Dict[str, Any]):
     for s in dead:
         _md_subs.discard(s)
 
+async def _publish_book(symbol: str) -> None:
+    if not MD_BOOK_PUSH:
+        return
+    try:
+        now_ms = time.time_ns() // 1_000_000
+        last = _md_last_push_ms.get(symbol, 0)
+        if now_ms - last < MD_BOOK_MIN_MS:
+            return
+        _md_last_push_ms[symbol] = now_ms
+
+        bids = await database.fetch_all("""
+          SELECT price, SUM(qty_open) AS qty
+            FROM clob_orders
+           WHERE symbol=:s AND side='buy' AND status='open'
+           GROUP BY price ORDER BY price DESC LIMIT :d
+        """, {"s": symbol, "d": MD_BOOK_DEPTH})
+        asks = await database.fetch_all("""
+          SELECT price, SUM(qty_open) AS qty
+            FROM clob_orders
+           WHERE symbol=:s AND side='sell' AND status='open'
+           GROUP BY price ORDER BY price ASC LIMIT :d
+        """, {"s": symbol, "d": MD_BOOK_DEPTH})
+
+        await _md_broadcast({
+            "type": "book",
+            "symbol": symbol,
+            "bids": [{"price": float(r["price"]), "qty": float(r["qty"])} for r in bids],
+            "asks": [{"price": float(r["price"]), "qty": float(r["qty"])} for r in asks],
+        })
+    except Exception:
+        pass
+
 # ---- RFQ (Request for Quote) ----
 class RFQIn(BaseModel):
     symbol: str
@@ -6327,7 +6359,7 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
         {"p": json.dumps({"order_id": order_id})}
     )
     await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
-
+    await _publish_book(o.symbol)
     resp = {"order_id": order_id, "queued": True}
     return await _idem_guard(request, key, resp)
 
@@ -6530,6 +6562,7 @@ async def clob_cancel_order(order_id: str, request: Request):
         {"p": json.dumps({"order_id": order_id, "user": user})}
     )
     await _event_queue.put((int(ev["id"]), "CANCEL", {"order_id": order_id, "user": user}))
+    await _publish_book(row["symbol"])   
     return {"status": "cancelled"}
 
 @clob_router.get("/orderbook", summary="Best bid/ask + depth (simple)")
@@ -6627,6 +6660,10 @@ async def _clob_match(order_id: str) -> float:
 
         open_qty -= trade_qty
         filled_total += trade_qty
+    try:
+        await _publish_book(symbol)
+    except Exception:
+        pass
 
 @limiter.limit("180/minute")
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
