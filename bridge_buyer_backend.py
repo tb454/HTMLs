@@ -7198,6 +7198,7 @@ async def run_variation(body: VariationRunIn):
                     "balance_after": cur_bal,
                 }
         )
+            return {"mark_date": str(dt), "accounts_processed": len(results), "details": results}
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
 
 @app.on_event("startup")
