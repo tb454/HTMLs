@@ -926,17 +926,6 @@ if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
 engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, future=True)
 database = databases.Database(ASYNC_DATABASE_URL)
 
-# ---- helper: run multiple DDL statements in one go (asyncpg safe) ----
-async def run_ddl_multi(sql: str):
-    """Split and run multiple DDL statements (for asyncpg/databases)."""
-    stmts = [s.strip() for s in sql.split(";") if s.strip()]
-    for stmt in stmts:
-        try:
-            await database.execute(stmt)
-        except Exception as e:
-            logger.warn("ddl_failed", sql=stmt[:120], err=str(e))
-# ----------------------------------------------------------------------
-
 # Optional one-time sanity log 
 try:
     _sync_tail  = SYNC_DATABASE_URL.split("@")[-1]
@@ -6929,9 +6918,8 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
 
 app.include_router(trade_router)
 app.include_router(clob_router)
-#=================== Exports (CSV) ===================== 
 
-# =================== /TRADING (Order Book) =====================
+#=================== /TRADING (Order Book) =====================
 async def _fetch_csv_rows(query: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     rows = await database.fetch_all(query, params or {})
     return [dict(r) for r in rows]
@@ -7069,7 +7057,6 @@ async def deposit(dep: DepositIn):
 class VariationRunIn(BaseModel):
     mark_date: Optional[date] = None
 
-clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])
 @clearing_router.post("/variation_run", summary="Run daily variation margin across all accounts")
 async def run_variation(body: VariationRunIn):
     dt = body.mark_date or _date.today()
@@ -7134,7 +7121,7 @@ async def run_variation(body: VariationRunIn):
             cur = await database.fetch_one(
                 "SELECT balance, is_blocked FROM margin_accounts WHERE account_id = :a",
                 {"a": r["account_id"]},
-            )
+)
 
             cur_bal = float(cur["balance"]) if cur else 0.0
             was_blocked = bool(cur and cur.get("is_blocked"))
@@ -7142,27 +7129,19 @@ async def run_variation(body: VariationRunIn):
 
             if needs_block and not was_blocked:
                 # transition → UNBLOCKED -> BLOCKED
-                await _adjust_margin(
-                    str(r["account_id"]),
-                    0.0,
-                    f"margin_call_required: need >= {req:.2f}",
-                    None,
-                )
+                await _adjust_margin(str(r["account_id"]), 0.0, f"margin_call_required: need >= {req:.2f}", None)
                 await database.execute(
                     "UPDATE margin_accounts SET is_blocked = TRUE WHERE account_id = :a",
                     {"a": r["account_id"]},
                 )
                 try:
-                    await emit_event_safe(
-                        "risk.margin_call",
-                        {
-                            "account_id": str(r["account_id"]),
-                            "required": round(req, 2),
-                            "balance": round(cur_bal, 2),
-                            "listing_id": lst,
-                            "mark_date": str(dt),
-                        },
-                    )
+                    await emit_event_safe("risk.margin_call", {
+                        "account_id": str(r["account_id"]),
+                        "required": round(req, 2),
+                        "balance": round(cur_bal, 2),
+                        "listing_id": lst,
+                        "mark_date": str(dt),
+                    })
                 except Exception:
                     pass
 
@@ -7173,33 +7152,30 @@ async def run_variation(body: VariationRunIn):
                     {"a": r["account_id"]},
                 )
                 try:
-                    await emit_event_safe(
-                        "risk.unblocked",
-                        {
-                            "account_id": str(r["account_id"]),
-                            "balance": round(cur_bal, 2),
-                            "listing_id": lst,
-                            "mark_date": str(dt),
-                        },
-                    )
+                    await emit_event_safe("risk.unblocked", {
+                        "account_id": str(r["account_id"]),
+                        "balance": round(cur_bal, 2),
+                        "listing_id": lst,
+                        "mark_date": str(dt),
+                    })
                 except Exception:
                     pass
-            # else: no state change → no DB write & no webhook
 
-            results.append(
-                {
-                    "account_id": str(r["account_id"]),
-                    "listing_id": lst,
-                    "qty": qty,
-                    "prev_settle": px_y,
-                    "settle": px_t,
-                    "variation_pnl": pnl,
-                    "maintenance_required": req,
-                    "balance_after": cur_bal,
-                })
-            return {"mark_date": str(dt), "accounts_processed": len(results), "details": results}
+            # append a row for this position regardless of state change
+            results.append({
+                "account_id": str(r["account_id"]),
+                "listing_id": lst,
+                "qty": qty,
+                "prev_settle": px_y,
+                "settle": px_t,
+                "variation_pnl": pnl,
+                "maintenance_required": req,
+                "balance_after": cur_bal,
+            })
+            return {"as_of": str(dt), "results": results}
+# --- maintenance margin check / block-unblock logic (state-change emits) ---
+
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
-
 @app.on_event("startup")
 async def _ensure_ccp_schema():
     await run_ddl_multi("""
@@ -7247,3 +7223,5 @@ async def waterfall_apply(member: str, shortfall_usd: float):
     await database.execute("INSERT INTO default_events(id,member,amount_usd,notes) VALUES (:i,:m,:a,:n)",
                            {"i":str(uuid.uuid4()),"m":member,"a":shortfall_usd,"n":f"IM/VM used={use_imvm}"})
     return {"ok": rem <= 0, "remaining_shortfall": rem}
+app.include_router(clearing_router)
+# ===================== /CLEARING (Margin & Variation) =====================
