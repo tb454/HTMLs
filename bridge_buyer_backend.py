@@ -214,9 +214,10 @@ async def prices_copper_last():
         last = _PRICE_CACHE["copper_last"]
         return {"last": last, "base_minus_025": round(last - 0.25, 4)}
     try:
-        resp = requests.get("https://comexlive.org/copper/", timeout=6)
-        resp.raise_for_status()
-        html = resp.text
+        async with httpx.AsyncClient(timeout=6) as c:
+            r = await c.get("https://comexlive.org/copper/")
+            r.raise_for_status()
+            html = r.text
         m = (re.search(r"Last\s*Trade[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
              or re.search(r"Last[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
              or re.search(r'>(\d\.\d{2,4})<', html))
@@ -332,6 +333,19 @@ async def _connect_db_first():
         import asyncpg
         app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 # ----- database (async + sync) -----
+
+# ----- idem key cache -----
+@app.on_event("startup")
+async def _ensure_http_idem_table():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS http_idempotency (
+      key TEXT PRIMARY KEY,
+      response JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_http_idem_ttl ON http_idempotency (created_at);
+    """)
+# ----- idem key cache -----
 
 # =====  Prometheus metrics + optional Sentry =====
 @app.on_event("startup")
@@ -531,6 +545,66 @@ async def _ensure_surveillance_schema():
     except Exception as e:
         logger.warn("surveil_schema_bootstrap_failed", err=str(e))
 #------ Surveillance / Alerts ------
+
+# ----- Total cleanup job -----
+@app.on_event("startup")
+async def _http_idem_ttl_job():
+    async def _run():
+        while True:
+            try:
+                await database.execute("DELETE FROM http_idempotency WHERE created_at < NOW() - INTERVAL '2 days'")
+            except Exception:
+                pass
+            await asyncio.sleep(24*3600)
+    asyncio.create_task(_run())
+# ===== Total cleanup job =====
+
+# ===== Retention cron =====
+@app.on_event("startup")
+async def _retention_cron():
+    async def _run():
+        while True:
+            try:
+                # Simple defaults; wire to retention_policies if you want dynamic TTLs
+                await database.execute("DELETE FROM md_ticks WHERE ts < NOW() - INTERVAL '30 days'")
+                await database.execute("DELETE FROM orders_audit WHERE at < NOW() - INTERVAL '180 days'")
+                await database.execute("DELETE FROM webhook_dead_letters WHERE created_at < NOW() - INTERVAL '14 days'")
+                await database.execute("DELETE FROM http_idempotency WHERE created_at < NOW() - INTERVAL '2 days'")
+            except Exception:
+                pass
+            await asyncio.sleep(24*3600)
+    asyncio.create_task(_run())
+# ===== Retention cron =====
+
+# -------- DDL and hydrate ----------
+@app.on_event("startup")
+async def _ensure_runtime_risk_tables():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS runtime_price_bands(
+      symbol TEXT PRIMARY KEY,
+      lower NUMERIC,
+      upper NUMERIC,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS runtime_luld(
+      symbol TEXT PRIMARY KEY,
+      down_pct NUMERIC,
+      up_pct NUMERIC,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """)
+
+    # hydrate into memory
+    try:
+        bands = await database.fetch_all("SELECT symbol, lower, upper FROM runtime_price_bands")
+        for b in bands:
+            _PRICE_BANDS[b["symbol"]] = (float(b["lower"]), float(b["upper"]))
+        lulds = await database.fetch_all("SELECT symbol, down_pct, up_pct FROM runtime_luld")
+        for l in lulds:
+            _LULD[l["symbol"]] = (float(l["down_pct"]), float(l["up_pct"]))
+    except Exception:
+        pass
+# -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
 @app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
@@ -744,6 +818,18 @@ async def diag_users_count():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/ops/readiness", tags=["Health"])
+async def readiness():
+    try:
+        await database.execute("SELECT 1")  # db check
+        qdepth_row = await database.fetch_one(
+            "SELECT COUNT(*) AS c FROM matching_events WHERE processed_at IS NULL"
+        )
+        qdepth = int(qdepth_row["c"]) if qdepth_row else 0
+        return {"db":"ok", "queue_depth": qdepth, "sequencer_running": bool(_SEQUENCER_STARTED)}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"db":"error","error":str(e)})
+# -------- Health --------
 
 # --- Pricing & Indices wiring (drop-in) --------------------------------------
 import os, asyncio
@@ -2529,6 +2615,22 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     resp = {"ok": True, "upserted": upserted}              # bulk_upsert
     return await _idem_guard(request, key, resp)
 
+async def idem_get(key: str):
+    if not key: return None
+    row = await database.fetch_one("SELECT response FROM http_idempotency WHERE key=:k", {"k": key})
+    return (row and row["response"])
+
+async def idem_put(key: str, resp: dict):
+    if not key: return resp
+    try:
+        await database.execute(
+            "INSERT INTO http_idempotency(key,response) VALUES (:k,:r::jsonb) ON CONFLICT DO NOTHING",
+            {"k": key, "r": json.dumps(resp, default=str)}
+        )
+    except Exception:
+        pass
+    return resp
+
 # -------- Inventory: Manual Add/Set (gated + unit-aware) --------
 @app.post(
     "/inventory/manual_add",
@@ -2737,6 +2839,27 @@ async def _ensure_dead_letters():
     except Exception:
         pass
 #-------- Dead Letter Startup --------
+
+#------- Webhook Dlq replayer -------
+@limiter.limit("30/minute")
+@app.post("/admin/webhooks/replay", tags=["Admin"])
+async def webhook_replay(limit:int=100, request:Request=None):
+    _require_admin(request)  # gate in production
+    rows = await database.fetch_all("""
+      SELECT id, event, payload FROM webhook_dead_letters
+      ORDER BY created_at ASC
+      LIMIT :l
+    """, {"l": limit})
+    ok = fail = 0
+    for r in rows:
+        res = await emit_event(r["event"], dict(r["payload"]))
+        if res.get("ok"):
+            ok += 1
+            await database.execute("DELETE FROM webhook_dead_letters WHERE id=:i", {"i": r["id"]})
+        else:
+            fail += 1
+    return {"replayed_ok": ok, "failed": fail}
+# ------- Webhook Dlq replayer -------
 
 #------- Dossier HR Sync -------
 @app.on_event("startup")
@@ -3622,7 +3745,7 @@ async def stocks_csv(as_of: date | None = None):
     out = io.StringIO(); w = csv.writer(out)
     w.writerow(["date","symbol","location","qty_lots","lot_size","qty_lb"])
     for r in rows:
-        qty_lb = float(r["qty_lots"]) * float(r["lot_size"])
+        qty_lb = float(r["qty_lots"]) * float(r["lot_size"]) * 2000.0
         w.writerow([r["as_of"], r["symbol"], r["location"],
                     float(r["qty_lots"]), float(r["lot_size"]), qty_lb])
     out.seek(0)
@@ -4181,8 +4304,7 @@ class ContractInExtended(ContractIn):
     currency: Optional[str] = "USD"
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
-async def create_contract(contract: ContractInExtended, request: Request):
-    # Idempotency guard
+async def create_contract(contract: ContractInExtended, request: Request):   
     key = _idem_key(request)
     if key and key in _idem_cache:
         return _idem_cache[key]
@@ -5248,11 +5370,21 @@ async def kill_switch(member_id: str, enabled: bool = True):
 @app.post("/risk/price_band/{symbol}", tags=["Risk"], summary="Set absolute price band")
 async def set_price_band(symbol: str, lower: float, upper: float):
     _PRICE_BANDS[symbol] = (lower, upper)
+    await database.execute("""
+      INSERT INTO runtime_price_bands(symbol, lower, upper, updated_at)
+      VALUES (:s,:l,:u, NOW())
+      ON CONFLICT (symbol) DO UPDATE SET lower=EXCLUDED.lower, upper=EXCLUDED.upper, updated_at=NOW()
+    """, {"s": symbol, "l": lower, "u": upper})
     return {"symbol": symbol, "band": _PRICE_BANDS[symbol]}
 
 @app.post("/risk/luld/{symbol}", tags=["Risk"], summary="Set LULD pct (0.05=5%)")
 async def set_luld(symbol: str, down_pct: float, up_pct: float):
     _LULD[symbol] = (down_pct, up_pct)
+    await database.execute("""
+      INSERT INTO runtime_luld(symbol, down_pct, up_pct, updated_at)
+      VALUES (:s,:d,:u, NOW())
+      ON CONFLICT (symbol) DO UPDATE SET down_pct=EXCLUDED.down_pct, up_pct=EXCLUDED.up_pct, updated_at=NOW()
+    """, {"s": symbol, "d": down_pct, "u": up_pct})
     return {"symbol": symbol, "luld": _LULD[symbol]}
 
 @app.post("/risk/limits", tags=["Risk"], summary="Upsert position limit (member+symbol)")
@@ -5488,6 +5620,7 @@ async def _rfq_symbol(rfq_id: str) -> str:
         raise HTTPException(404, "RFQ not found")
     return row["symbol"]
 
+@limiter.limit("30/minute")
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
 async def create_rfq(r: RFQIn, request: Request):
     key = _idem_key(request)
@@ -5519,6 +5652,7 @@ async def create_rfq(r: RFQIn, request: Request):
     resp = {"rfq_id": rfq_id, "status": "open"}
     return await _idem_guard(request, key, resp)
 
+@limiter.limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
 async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     key = _idem_key(request)
@@ -5543,6 +5677,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     resp = {"quote_id": quote_id}
     return await _idem_guard(request, key, resp)
 
+@limiter.limit("30/minute")
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
 async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     key = _idem_key(request)
@@ -5776,16 +5911,235 @@ async def _sequencer_worker():
     while True:
         ev_id, topic, payload = await _event_queue.get()
         try:
-            await database.execute("UPDATE matching_events SET processed_at=NOW() WHERE id=:i", {"i": ev_id})
+            # mark as processing (best-effort)
+            try:
+                await database.execute(
+                    "UPDATE matching_events SET processed_at=NOW() WHERE id=:i",
+                    {"i": ev_id}
+                )
+            except Exception:
+                pass
+
             if topic == "ORDER":
                 await _clob_match(payload["order_id"])
+
             elif topic == "CANCEL":
                 req = type("Req", (), {"session": {"username": payload.get("user", "system")}})
                 await clob_cancel_order(payload["order_id"], request=req)
+
+            elif topic == "ORDER_FUTURES":
+                await _fut_order_match(payload["order_id"])
+
+            elif topic == "MODIFY_FUTURES":
+                await _fut_modify(payload["order_id"], payload.get("new_price"), payload.get("new_qty"))
+
+            elif topic == "CANCEL_FUTURES":
+                await _fut_cancel(payload["order_id"], payload.get("user"))
+
         except Exception as e:
-            logger.warn("sequencer_fail", topic=topic, err=str(e))
+            try:
+                logger.warn("sequencer_fail", topic=topic, err=str(e))
+            except Exception:
+                pass
         finally:
             _event_queue.task_done()
+
+
+@app.on_event("startup")
+async def _start_sequencer():
+    global _SEQUENCER_STARTED
+    if not _SEQUENCER_STARTED:
+        asyncio.create_task(_sequencer_worker())
+        _SEQUENCER_STARTED = True
+
+# ===== Futures matching handlers (sequenced) =====
+async def _fut_match(order_id: str):
+    """Sequenced matching for a single futures order id (already inserted)."""
+    row = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
+    if not row:
+        return
+
+    listing_id = row["listing_id"]
+    side = row["side"]               # 'BUY' or 'SELL'
+    price = float(row["price"])
+    remaining = float(row["qty_open"])
+
+    await _require_listing_trading(listing_id)
+    contract_size = await _get_contract_size(listing_id)
+
+    # Market detection (same spirit as before): SELL with price==0 is market; BUY market handled by cap logic.
+    is_market = (side == "SELL" and price == 0.0)
+
+    # market price protection band (cap)
+    cap_min = cap_max = None
+    if is_market:
+        ref = await _ref_price_for(listing_id)
+        if ref is not None:
+            lo = ref * (1.0 - PRICE_BAND_PCT)
+            hi = ref * (1.0 + PRICE_BAND_PCT)
+            if side == "BUY":
+                cap_max = hi
+            else:
+                cap_min = lo
+
+    # pull opposite orders
+    if side == "BUY":
+        if is_market:
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL')
+                 AND (:cap_max IS NULL OR price <= :cap_max)
+               ORDER BY price ASC, created_at ASC
+               FOR UPDATE
+            """, {"l": listing_id, "cap_max": cap_max})
+        else:
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p
+               ORDER BY price ASC, created_at ASC
+               FOR UPDATE
+            """, {"l": listing_id, "p": price})
+    else:  # SELL
+        if is_market:
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL')
+                 AND (:cap_min IS NULL OR price >= :cap_min)
+               ORDER BY price DESC, created_at ASC
+               FOR UPDATE
+            """, {"l": listing_id, "cap_min": cap_min})
+        else:
+            opp = await database.fetch_all("""
+              SELECT * FROM orders
+               WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p
+               ORDER BY price DESC, created_at ASC
+               FOR UPDATE
+            """, {"l": listing_id, "p": price})
+
+    for r in opp:
+        if remaining <= 0:
+            break
+
+        open_qty = float(r["qty_open"])
+        if open_qty <= 0:
+            continue
+
+        trade_qty = min(remaining, open_qty)
+        trade_px  = float(r["price"])
+
+        # market caps
+        if is_market:
+            if side == "BUY" and cap_max is not None and trade_px > cap_max:
+                break
+            if side == "SELL" and cap_min is not None and trade_px < cap_min:
+                break
+
+        buy_id  = order_id if side == "BUY" else r["id"]
+        sell_id = r["id"]   if side == "BUY" else order_id
+
+        # margin checks (same as your inline logic)
+        notional = trade_px * contract_size * trade_qty
+
+        part_a = await database.fetch_one("""
+          SELECT o.account_id AS aid, m.balance, m.initial_pct
+          FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+          WHERE o.id=:oid
+        """, {"oid": order_id})
+        part_b = await database.fetch_one("""
+          SELECT o.account_id AS aid, m.balance, m.initial_pct
+          FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
+          WHERE o.id=:oid
+        """, {"oid": r["id"]})
+        if not part_a or not part_b:
+            raise HTTPException(400, "margin account not found")
+
+        need_a = float(part_a["initial_pct"]) * notional
+        need_b = float(part_b["initial_pct"]) * notional
+        if float(part_a["balance"]) < need_a:
+            raise HTTPException(402, f"insufficient initial margin for account {part_a['aid']}")
+        if float(part_b["balance"]) < need_b:
+            raise HTTPException(402, f"insufficient initial margin for account {part_b['aid']}")
+
+        await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
+        await _adjust_margin(part_b["aid"], -need_b, "initial_margin", r["id"])
+
+        trade_id = str(uuid.uuid4())
+        await database.execute("""
+          INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
+          VALUES (:id,:b,:s,:l,:px,:q)
+        """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": listing_id, "px": trade_px, "q": trade_qty})
+
+        # update contra
+        r_new_open = open_qty - trade_qty
+        r_status = "FILLED" if r_new_open <= 0 else "PARTIAL"
+        await database.execute(
+            "UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+            {"qo": r_new_open, "st": r_status, "id": r["id"]}
+        )
+        await _audit_order(r["id"], r_status, r_new_open, "matched")
+
+        # update this order
+        remaining -= trade_qty
+        my_status = "FILLED" if remaining <= 0 else "PARTIAL"
+        await database.execute(
+            "UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
+            {"qo": remaining, "st": my_status, "id": order_id}
+        )
+        await _audit_order(order_id, my_status, remaining, "matched")
+
+    # market IOC remainder
+    if is_market and remaining > 0:
+        await database.execute("UPDATE orders SET qty_open=0, status='CANCELLED' WHERE id=:id", {"id": order_id})
+        await _audit_order(order_id, "CANCELLED", 0, "market IOC remainder")
+
+
+async def _fut_modify_match(order_id: str, new_price: float | None, new_qty: float | None):
+    """Apply modify (price/qty), then rematch the order sequenced."""
+    async with database.transaction():
+        row = await database.fetch_one("SELECT * FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
+        if not row:
+            return
+        if row["status"] in ("FILLED", "CANCELLED"):
+            return
+
+        old_price = float(row["price"])
+        old_qty   = float(row["qty"])
+        old_open  = float(row["qty_open"])
+        filled    = old_qty - old_open
+
+        total = float(new_qty) if new_qty is not None else old_qty
+        if total < filled:
+            # don't throw in sequencer; just ignore bad amend
+            return
+
+        price = float(new_price) if new_price is not None else old_price
+        new_open = total - filled
+        new_status = "FILLED" if new_open <= 0 else ("PARTIAL" if filled > 0 else "NEW")
+
+        await database.execute("""
+          UPDATE orders SET price=:p, qty=:qt, qty_open=:qo, status=:st WHERE id=:id
+        """, {"p": price, "qt": total, "qo": new_open, "st": new_status, "id": order_id})
+        await _audit_order(order_id, "MODIFY", new_open, "sequenced amend")
+
+    # Attempt rematch after modify
+    await _fut_match(order_id)
+
+
+async def _fut_order_match(order_id: str):
+    """Order entry handler -> run sequenced matching."""
+    await _fut_match(order_id)
+
+
+async def _fut_modify(order_id: str, new_price: float | None, new_qty: float | None):
+    await _fut_modify_match(order_id, new_price, new_qty)
+
+
+async def _fut_cancel(order_id: str, user: str | None = None):
+    # reuse existing cancel path
+    req = type("Req", (), {"session": {"username": user or "system"}})
+    await clob_cancel_order(order_id, request=req)
+# ===== /Futures matching handlers =====
+
 
 @app.on_event("startup")
 async def _start_sequencer():
@@ -5795,6 +6149,7 @@ async def _start_sequencer():
         _SEQUENCER_STARTED = True
 # ===== /Deterministic sequencer =====
 
+@limiter.limit("120/minute")
 @clob_router.post("/orders", summary="Place order")
 async def clob_place_order(o: CLOBOrderIn, request: Request):
     key = _idem_key(request)
@@ -6122,15 +6477,13 @@ async def _clob_match(order_id: str) -> float:
         open_qty -= trade_qty
         filled_total += trade_qty
 
-
-
-
+@limiter.limit("180/minute")
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn, request: Request):  
     key = _idem_key(request)
-    if key and key in _idem_cache:
-        return _idem_cache[key]
-    # entitlement gate
+    if key:
+        hit = await idem_get(key)
+        if hit: return hit   
     user = (request.session.get("username") if hasattr(request, "session") else None) or ""
     require_entitlement(user, "trade.place")
 
@@ -6293,22 +6646,15 @@ async def place_order(ord_in: OrderIn, request: Request):
 async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or ""
     require_entitlement(user, "trade.modify")
-
     if body.price is None and body.qty is None:
         raise HTTPException(400, "provide price and/or qty to modify")
-
-    # If a new price is proposed, validate against bands/LULD before heavy work
-    if body.price is not None:
-        row_listing = await database.fetch_one(
-            "SELECT listing_id, listing_id AS id, listing_id FROM orders WHERE id=:id",
-            {"id": order_id}
-        )
-
-        if not row_listing:
-            raise HTTPException(404, "order not found")
-        sym = await _symbol_for_listing(row_listing["listing_id"])
-        if sym:
-            await price_band_check(sym, float(body.price))
+    # enqueue for sequencer; actual modify+rematch happens there
+    ev = await database.fetch_one(
+        "INSERT INTO matching_events(topic,payload) VALUES ('MODIFY_FUTURES', :p) RETURNING id",
+        {"p": json.dumps({"order_id": order_id, "new_price": body.price, "new_qty": body.qty})}
+    )
+    await _event_queue.put((int(ev["id"]), "MODIFY_FUTURES", {"order_id": order_id, "new_price": body.price, "new_qty": body.qty}))
+    return {"order_id": order_id, "queued": True}
 
     # ------ Main transaction to lock and modify order, check margin, rematch -------
 
@@ -6434,16 +6780,15 @@ async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
     return dict(final)
 
 @trade_router.delete("/orders/{order_id}", response_model=CancelOut, summary="Cancel remaining qty")
-async def cancel_order(order_id: str):
-    async with database.transaction():
-        row = await database.fetch_one("SELECT status, qty_open FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
-        if not row:
-            raise HTTPException(404, "order not found")
-        if row["status"] in ("FILLED","CANCELLED") or float(row["qty_open"]) <= 0:
-            return {"id": order_id, "status": row["status"]}
-        await database.execute("UPDATE orders SET status='CANCELLED' WHERE id=:id", {"id": order_id})
-        await _audit_order(order_id, "CANCELLED", float(row["qty_open"]), "manual cancel")
-    return {"id": order_id, "status": "CANCELLED"}
+async def cancel_order(order_id: str, request: Request):
+    user = (request.session.get("username") if hasattr(request, "session") else None) or ""
+    # just enqueue; sequencer will perform ownership checks via clob_cancel_order
+    ev = await database.fetch_one(
+        "INSERT INTO matching_events(topic,payload) VALUES ('CANCEL_FUTURES', :p) RETURNING id",
+        {"p": json.dumps({"order_id": order_id, "user": user})}
+    )
+    await _event_queue.put((int(ev["id"]), "CANCEL_FUTURES", {"order_id": order_id, "user": user}))
+    return {"id": order_id, "status": "QUEUED"}
 
 @trade_router.get("/book", response_model=BookSnapshot, summary="Order book snapshot (top levels)")
 async def get_book(listing_id: str, depth: int = Query(5, ge=1, le=50)):
