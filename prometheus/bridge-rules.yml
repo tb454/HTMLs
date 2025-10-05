@@ -1,0 +1,14 @@
+groups:
+- name: bridge-slo
+  rules:
+  - alert: BridgeP99LatencyHigh
+    expr: |
+      histogram_quantile(0.99,
+        sum(rate(bridge_http_latency_ms_bucket[5m])) by (le, path, method)
+      ) > 300
+    for: 10m
+    labels:
+      severity: page
+    annotations:
+      summary: "p99 latency on {{ $labels.path }} ({{ $labels.method }}) > 300ms"
+      description: "Investigate hot path or DB contention."
