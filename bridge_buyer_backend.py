@@ -383,6 +383,17 @@ async def time_sync():
     return {"utc": datetime.utcnow().isoformat() + "Z", "mono_ns": time.time_ns()}
 # =====  Prometheus metrics + optional Sentry =====
 
+# =====  account - user ownership =====
+@app.on_event("startup")
+async def _ensure_account_user_map():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS account_users(
+      account_id UUID PRIMARY KEY,
+      username   TEXT NOT NULL
+    );
+    """)
+# =====  account - user ownership =====
+
 # ----- Uniq ref guard -----
 @app.on_event("startup")
 async def _uniq_ref_guard():
@@ -6547,7 +6558,10 @@ async def fix_dropcopy(payload: dict):
 @clob_router.delete("/orders/{order_id}", summary="Cancel order")
 async def clob_cancel_order(order_id: str, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
-    row = await database.fetch_one("SELECT owner,status FROM clob_orders WHERE order_id=:id", {"id": order_id})
+    row = await database.fetch_one(
+    "SELECT owner,status,symbol FROM clob_orders WHERE order_id=:id",
+    {"id": order_id}
+)
     if not row: raise HTTPException(404, "Order not found")
     if row["owner"] != user: raise HTTPException(403, "Not owner")
     if row["status"] != "open": return {"status": row["status"]}
@@ -7056,22 +7070,46 @@ async def run_variation(body: VariationRunIn):
 
             if cur_bal < req:
                 await _adjust_margin(str(r["account_id"]), 0.0, f"margin_call_required: need >= {req:.2f}", None)
-                await database.execute("UPDATE margin_accounts SET is_blocked=TRUE WHERE account_id=:a", {"a": r["account_id"]})
-            else:
-                await database.execute("UPDATE margin_accounts SET is_blocked=FALSE WHERE account_id=:a", {"a": r["account_id"]})
+                await database.execute(
+                "UPDATE margin_accounts SET is_blocked=TRUE WHERE account_id=:a",
+                {"a": r["account_id"]}
+            )
+            # --- emit margin-call webhook (optional) ---
+    try:
+            await emit_event_safe("risk.margin_call", {
+            "account_id": str(r["account_id"]),
+            "required": round(req, 2),
+            "balance": round(cur_bal, 2),
+            "listing_id": lst,
+            "mark_date": str(dt),
+        })
+    except Exception:
+        pass
+    else:
+        await database.execute(
+        "UPDATE margin_accounts SET is_blocked=FALSE WHERE account_id=:a",
+        {"a": r["account_id"]}
+    )
+    try:
+        await emit_event_safe("risk.unblocked", {
+            "account_id": str(r["account_id"]),
+            "balance": round(cur_bal, 2),
+            "listing_id": lst,
+            "mark_date": str(dt),
+        })
+    except Exception:
+        pass
 
-            results.append({
-                "account_id": str(r["account_id"]),
-                "listing_id": lst,
-                "qty": qty,
-                "prev_settle": px_y,
-                "settle": px_t,
-                "variation_pnl": pnl,
-                "maintenance_required": req,
-                "balance_after": cur_bal
-            })
-
-    return {"mark_date": str(dt), "accounts_processed": len(results), "details": results}
+    results.append({
+    "account_id": str(r["account_id"]),
+    "listing_id": lst,
+    "qty": qty,
+    "prev_settle": px_y,
+    "settle": px_t,
+    "variation_pnl": pnl,
+    "maintenance_required": req,
+    "balance_after": cur_bal
+})
 
 app.include_router(clearing_router)
 # =================== /CLEARING (Margin & Variation) =====================
