@@ -210,23 +210,22 @@ async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "sup
 @app.get("/indices/latest", tags=["Indices"], summary="Get latest index record")
 async def indices_latest(symbol: str):
     try:
-        # If the table isn't created yet, this may throw; we catch below.
         row = await database.fetch_one(
             """
-            SELECT symbol, as_of, value, created_at
+            SELECT dt AS as_of, close_price, unit, currency, source_note
             FROM bridge_index_history
             WHERE symbol = :s
-            ORDER BY as_of DESC
+            ORDER BY dt DESC
             LIMIT 1
             """,
             {"s": symbol},
         )
-        if not row:            
+        if not row:
             raise HTTPException(status_code=404, detail="No index history yet")
         return dict(row)
-    except HTTPException:        
+    except HTTPException:
         raise
-    except Exception as e:        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"indices_latest error: {type(e).__name__}")
 # --- Safe latest index handler ---
 
@@ -1013,18 +1012,6 @@ async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
 async def run_indices_now():
     await run_indices_builder()
     return {"ok": True}
-
-@router_idx.get("/latest", summary="Latest close for an index symbol")
-async def latest_index(symbol: str):
-    q = """SELECT dt, close_price, unit, currency, source_note
-           FROM bridge_index_history
-           WHERE symbol=$1
-           ORDER BY dt DESC
-           LIMIT 1"""
-    row = await app.state.db_pool.fetchrow(q, symbol)
-    if not row:
-        raise HTTPException(404, "No index history for that symbol")
-    return dict(row)
 
 @router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
 async def indices_backfill(start: date = Query(...), end: date = Query(...)):  
