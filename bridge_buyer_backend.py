@@ -3225,6 +3225,10 @@ def _idem_key(request: Request) -> Optional[str]:
 async def _idem_guard(request: Request, key: Optional[str], resp: dict):
     if key:
         _idem_cache[key] = resp
+        try:
+            await idem_put(key, resp)  # persist to http_idempotency so idem_get() works
+        except Exception:
+            pass
     return resp
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 
