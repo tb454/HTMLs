@@ -7018,42 +7018,55 @@ async def deposit(dep: DepositIn):
 class VariationRunIn(BaseModel):
     mark_date: Optional[date] = None
 
+clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])
 @clearing_router.post("/variation_run", summary="Run daily variation margin across all accounts")
 async def run_variation(body: VariationRunIn):
     dt = body.mark_date or _date.today()
 
+    # --- pull current marks/settles + positions/margin accounts ---
     pos = await database.fetch_all("""
       SELECT p.account_id, p.listing_id, p.net_qty,
              COALESCE(
-               (SELECT fm.mark_price FROM futures_marks fm
-                 WHERE fm.listing_id = p.listing_id AND fm.mark_date <= :d
-                 ORDER BY fm.mark_date DESC LIMIT 1),
-               (SELECT settle_price FROM v_latest_settle v WHERE v.listing_id = p.listing_id)
+               (SELECT fm.mark_price
+                  FROM futures_marks fm
+                 WHERE fm.listing_id = p.listing_id
+                   AND fm.mark_date   <= :d
+                 ORDER BY fm.mark_date DESC
+                 LIMIT 1),
+               (SELECT settle_price
+                  FROM v_latest_settle v
+                 WHERE v.listing_id = p.listing_id)
              ) AS settle_price,
              fp.contract_size_tons,
-             m.balance, m.maintenance_pct
+             m.balance,
+             m.maintenance_pct
         FROM positions p
         JOIN futures_listings fl ON fl.id = p.listing_id
         JOIN futures_products fp ON fp.id = fl.product_id
         JOIN margin_accounts m   ON m.account_id = p.account_id
     """, {"d": dt})
 
-    prev_map = {}
+    # --- previous day marks per listing (for variation PnL) ---
+    prev_map: dict[str, float] = {}
     prev = await database.fetch_all("""
-      SELECT DISTINCT ON (fm.listing_id) fm.listing_id, fm.mark_price
-        FROM futures_marks fm
-       WHERE fm.mark_date < :d
-    ORDER BY fm.listing_id, fm.mark_date DESC
+        SELECT DISTINCT ON (fm.listing_id) fm.listing_id, fm.mark_price
+          FROM futures_marks fm
+         WHERE fm.mark_date < :d
+      ORDER BY fm.listing_id, fm.mark_date DESC
     """, {"d": dt})
     for r in prev:
         prev_map[str(r["listing_id"])] = float(r["mark_price"])
 
     results = []
+
+    # --- atomic run ---
     async with database.transaction():
         for r in pos:
-            lst = str(r["listing_id"])
+            lst  = str(r["listing_id"])
             px_t = float(r["settle_price"]) if r["settle_price"] is not None else None
             px_y = prev_map.get(lst)
+
+            # need both prices to compute variation
             if px_t is None or px_y is None:
                 continue
 
@@ -7064,57 +7077,78 @@ async def run_variation(body: VariationRunIn):
             if pnl != 0.0:
                 await _adjust_margin(str(r["account_id"]), pnl, "variation_margin", None)
 
+           # --- maintenance margin check / block-unblock logic (state-change emits) ---
             req = abs(qty) * px_t * size * float(r["maintenance_pct"])
-            cur = await database.fetch_one("SELECT balance FROM margin_accounts WHERE account_id=:a", {"a": r["account_id"]})
-            cur_bal = float(cur["balance"]) if cur else 0.0
 
-            if cur_bal < req:
-                await _adjust_margin(str(r["account_id"]), 0.0, f"margin_call_required: need >= {req:.2f}", None)
-                await database.execute(
-                "UPDATE margin_accounts SET is_blocked=TRUE WHERE account_id=:a",
-                {"a": r["account_id"]}
+            cur = await database.fetch_one(
+                "SELECT balance, is_blocked FROM margin_accounts WHERE account_id = :a",
+                {"a": r["account_id"]},
             )
-            # --- emit margin-call webhook (optional) ---
-    try:
-            await emit_event_safe("risk.margin_call", {
-            "account_id": str(r["account_id"]),
-            "required": round(req, 2),
-            "balance": round(cur_bal, 2),
-            "listing_id": lst,
-            "mark_date": str(dt),
-        })
-    except Exception:
-        pass
-    else:
-        await database.execute(
-        "UPDATE margin_accounts SET is_blocked=FALSE WHERE account_id=:a",
-        {"a": r["account_id"]}
-    )
-    try:
-        await emit_event_safe("risk.unblocked", {
-            "account_id": str(r["account_id"]),
-            "balance": round(cur_bal, 2),
-            "listing_id": lst,
-            "mark_date": str(dt),
-        })
-    except Exception:
-        pass
 
-    results.append({
-    "account_id": str(r["account_id"]),
-    "listing_id": lst,
-    "qty": qty,
-    "prev_settle": px_y,
-    "settle": px_t,
-    "variation_pnl": pnl,
-    "maintenance_required": req,
-    "balance_after": cur_bal
-})
+            cur_bal = float(cur["balance"]) if cur else 0.0
+            was_blocked = bool(cur and cur.get("is_blocked"))
+            needs_block = cur_bal < req
 
-app.include_router(clearing_router)
-# =================== /CLEARING (Margin & Variation) =====================
+            if needs_block and not was_blocked:
+                # transition → UNBLOCKED -> BLOCKED
+                await _adjust_margin(
+                    str(r["account_id"]),
+                    0.0,
+                    f"margin_call_required: need >= {req:.2f}",
+                    None,
+                )
+                await database.execute(
+                    "UPDATE margin_accounts SET is_blocked = TRUE WHERE account_id = :a",
+                    {"a": r["account_id"]},
+                )
+                try:
+                    await emit_event_safe(
+                        "risk.margin_call",
+                        {
+                            "account_id": str(r["account_id"]),
+                            "required": round(req, 2),
+                            "balance": round(cur_bal, 2),
+                            "listing_id": lst,
+                            "mark_date": str(dt),
+                        },
+                    )
+                except Exception:
+                    pass
 
+            elif not needs_block and was_blocked:
+                # transition → BLOCKED -> UNBLOCKED
+                await database.execute(
+                    "UPDATE margin_accounts SET is_blocked = FALSE WHERE account_id = :a",
+                    {"a": r["account_id"]},
+                )
+                try:
+                    await emit_event_safe(
+                        "risk.unblocked",
+                        {
+                            "account_id": str(r["account_id"]),
+                            "balance": round(cur_bal, 2),
+                            "listing_id": lst,
+                            "mark_date": str(dt),
+                        },
+                    )
+                except Exception:
+                    pass
+            # else: no state change → no DB write & no webhook
+
+            results.append(
+                {
+                    "account_id": str(r["account_id"]),
+                    "listing_id": lst,
+                    "qty": qty,
+                    "prev_settle": px_y,
+                    "settle": px_t,
+                    "variation_pnl": pnl,
+                    "maintenance_required": req,
+                    "balance_after": cur_bal,
+                }
+        )
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
+
 @app.on_event("startup")
 async def _ensure_ccp_schema():
     await run_ddl_multi("""
