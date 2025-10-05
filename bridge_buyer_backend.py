@@ -3406,66 +3406,85 @@ async def audit_append(actor: str, action: str, entity_type: str, entity_id: str
     return {"chain_date": str(cd), "seq": seq, "event_hash": event_hash}
 # ------------------- Hash-chained audit events (per-day chain) ----
 
+# --------- AUDIT Logging (safe models + guarded) ---------------------
+from pydantic import BaseModel
+from fastapi import Body
+
+class AuditAppendIn(BaseModel):
+    actor: str = "system"
+    action: str = "note"
+    entity_type: str = ""
+    entity_id: str = ""
+    payload: dict = {}
+
 @app.post("/admin/audit/log", tags=["Admin"], summary="Append audit event")
-async def admin_audit_log(
-    actor: str = "system",
-    action: str = "note",
-    entity_type: str | None = None,
-    entity_id: str | None = None,
-    payload: dict = {},
-    request: Request = None,
-):
-    _require_admin(request)  # gate in production
-    rec = await audit_append(actor, action, entity_type or "", entity_id or "", payload or {})
-    return rec
+async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request | None = None):
+    _require_admin(request)
+    try:
+        rec = await audit_append(
+            body.actor, body.action, body.entity_type, body.entity_id, body.payload
+        )
+        return rec
+    except Exception as e:
+        # never crash the socket
+        return JSONResponse(status_code=500, content={"error":"audit_append_failed","detail":str(e)})
+
+class AuditSealIn(BaseModel):
+    chain_date: Optional[date] = None
 
 @app.post("/admin/audit/seal", tags=["Admin"], summary="Seal a day's audit chain")
-async def admin_audit_seal(chain_date: Optional[date] = None, request: Request = None):
-    _require_admin(request)  # gate in production
-    cd = chain_date or _utc_date_now()
-    tail = await database.fetch_one("""
-        SELECT seq, event_hash FROM audit_events
-        WHERE chain_date=:d ORDER BY seq DESC LIMIT 1
-    """, {"d": cd})
-    final_hash = tail["event_hash"] if tail else _sha256_hex(f"empty:{cd}")
-    # mark sealed
-    await database.execute("UPDATE audit_events SET sealed=TRUE WHERE chain_date=:d", {"d": cd})
-    await database.execute("""
-        INSERT INTO audit_seals(chain_date, final_hash)
-        VALUES (:d, :h)
-        ON CONFLICT (chain_date) DO UPDATE
-          SET final_hash=EXCLUDED.final_hash, sealed_at=now()
-    """, {"d": cd, "h": final_hash})
-    return {"chain_date": str(cd), "final_hash": final_hash}
+async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Request | None = None):
+    _require_admin(request)
+    try:
+        cd = body.chain_date or _utc_date_now()
+        tail = await database.fetch_one("""
+            SELECT seq, event_hash FROM audit_events
+            WHERE chain_date=:d ORDER BY seq DESC LIMIT 1
+        """, {"d": cd})
+        final_hash = tail["event_hash"] if tail else _sha256_hex(f"empty:{cd}")
+        await database.execute("UPDATE audit_events SET sealed=TRUE WHERE chain_date=:d", {"d": cd})
+        await database.execute("""
+            INSERT INTO audit_seals(chain_date, final_hash)
+            VALUES (:d, :h)
+            ON CONFLICT (chain_date) DO UPDATE
+              SET final_hash=EXCLUDED.final_hash, sealed_at=now()
+        """, {"d": cd, "h": final_hash})
+        return {"chain_date": str(cd), "final_hash": final_hash}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error":"audit_seal_failed","detail":str(e)})
 
 @app.get("/admin/audit/verify", tags=["Admin"], summary="Recompute and verify audit chain")
-async def admin_audit_verify(chain_date: date, request: Request = None):
-    _require_admin(request)  # gate in production
-    rows = await database.fetch_all("""
-        SELECT seq, actor, action, entity_type, entity_id, payload, prev_hash, event_hash
-        FROM audit_events
-        WHERE chain_date=:d
-        ORDER BY seq ASC
-    """, {"d": chain_date})
-    prev = ""
-    for r in rows:
-        body = {
-            "chain_date": str(chain_date),
-            "seq": int(r["seq"]),
-            "actor": r["actor"],
-            "action": r["action"],
-            "entity_type": r["entity_type"],
-            "entity_id": r["entity_id"],
-            "payload": r["payload"],
-        }
-        expect = _sha256_hex((prev or "") + _canon_json(body))
-        if expect != r["event_hash"]:
-            return {"ok": False, "seq": int(r["seq"]), "expected": expect, "got": r["event_hash"]}
-        prev = r["event_hash"]
-    seal = await database.fetch_one("SELECT final_hash FROM audit_seals WHERE chain_date=:d", {"d": chain_date})
-    final_hash = prev or _sha256_hex(f"empty:{chain_date}")
-    return {"ok": bool(seal and seal["final_hash"] == final_hash), "final_hash": final_hash}
-# ----- Audit logging -----
+async def admin_audit_verify(chain_date: date, request: Request | None = None):
+    _require_admin(request)
+    try:
+        rows = await database.fetch_all("""
+            SELECT seq, actor, action, entity_type, entity_id, payload, prev_hash, event_hash
+            FROM audit_events
+            WHERE chain_date=:d
+            ORDER BY seq ASC
+        """, {"d": chain_date})
+        prev = ""
+        for r in rows:
+            body = {
+                "chain_date": str(chain_date),
+                "seq": int(r["seq"]),
+                "actor": r["actor"],
+                "action": r["action"],
+                "entity_type": r["entity_type"],
+                "entity_id": r["entity_id"],
+                "payload": r["payload"],
+            }
+            expect = _sha256_hex((prev or "") + _canon_json(body))
+            if expect != r["event_hash"]:
+                return {"ok": False, "seq": int(r["seq"]), "expected": expect, "got": r["event_hash"]}
+            prev = r["event_hash"]
+        seal = await database.fetch_one("SELECT final_hash FROM audit_seals WHERE chain_date=:d", {"d": chain_date})
+        final_hash = prev or _sha256_hex(f"empty:{chain_date}")
+        return {"ok": bool(seal and seal["final_hash"] == final_hash), "final_hash": final_hash}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error":"audit_verify_failed","detail":str(e)})
+# ---------- AUDIT logging --------------------------------
+
 
 # ===== ICE webhook signature verifier =====
 ICE_LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
