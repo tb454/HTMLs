@@ -4696,11 +4696,11 @@ async def export_applications_csv():
     })
 # -------- BOLs (with PDF generation) --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
-async def create_bol_pg(bol: BOLIn, request: Request):    
+async def create_bol_pg(bol: BOLIn, request: Request):
     key = _idem_key(request)
-    if key and key in _idem_cache:
-        return _idem_cache[key]
-
+    hit = await idem_get(key) if key else None
+    if hit:
+        return hit
 
     row = await database.fetch_one("""
         INSERT INTO bols (
