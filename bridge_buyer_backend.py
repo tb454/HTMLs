@@ -2555,9 +2555,8 @@ async def _ensure_audit_seal_schema():
 @limiter.limit("60/minute")
 async def inventory_bulk_upsert(body: dict, request: Request):
     key = _idem_key(request)
-    if key:
-        hit = await idem_get(key)
-    if hit: return hit    
+    hit = await idem_get(key) if key else None
+    if hit: return hit   
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
