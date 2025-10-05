@@ -2613,7 +2613,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             pass
 
     resp = {"ok": True, "upserted": upserted}              # bulk_upsert
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 async def idem_get(key: str):
     if not key: return None
@@ -3633,7 +3633,7 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
          qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
          status=status,
      )
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -4072,7 +4072,8 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         })
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
+
 # ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
 
 # --- MATERIAL PRICE HISTORY (by day, avg) ---
@@ -4448,7 +4449,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
         pass
 
     resp = row
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 # ========= Admin Exports router ==========
 
 # -------- Products --------
@@ -4776,7 +4777,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
 async def bols_mark_delivered(
@@ -5656,7 +5657,7 @@ async def create_rfq(r: RFQIn, request: Request):
     except Exception:
         pass
     resp = {"rfq_id": rfq_id, "status": "open"}
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 @limiter.limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
@@ -5683,7 +5684,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     except Exception:
         pass
     resp = {"quote_id": quote_id}
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 @limiter.limit("30/minute")
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
@@ -5734,7 +5735,7 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
         pass
 
     resp = {"deal_id": deal_id, "status": "done"}
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 # ===================== CLOB (Symbol-level order book) =====================
 from fastapi import APIRouter
@@ -6180,7 +6181,7 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
     await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
 
     resp = {"order_id": order_id, "queued": True}
-    return await _idem_guard(key, resp)
+    return await _idem_guard(request, key, resp)
 
 # ===== Settlement (VWAP from recent CLOB trades) =====
 @app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
