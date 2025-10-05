@@ -206,6 +206,30 @@ async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "sup
     background.add_task(run_daily_snapshot, storage)
     return {"ok": True, "queued": True}
 
+# --- Safe latest index handler (idempotent empty state) ---
+@app.get("/indices/latest", tags=["Indices"], summary="Get latest index record")
+async def indices_latest(symbol: str):
+    try:
+        # If the table isn't created yet, this may throw; we catch below.
+        row = await database.fetch_one(
+            """
+            SELECT symbol, as_of, value, created_at
+            FROM bridge_index_history
+            WHERE symbol = :s
+            ORDER BY as_of DESC
+            LIMIT 1
+            """,
+            {"s": symbol},
+        )
+        if not row:            
+            raise HTTPException(status_code=404, detail="No index history yet")
+        return dict(row)
+    except HTTPException:        
+        raise
+    except Exception as e:        
+        raise HTTPException(status_code=500, detail=f"indices_latest error: {type(e).__name__}")
+# --- Safe latest index handler ---
+
 # === Prices endpoint ===
 @app.get(
     "/prices/copper_last",
