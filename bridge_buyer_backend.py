@@ -4792,6 +4792,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None
     }
+    await idem_put(key, resp)
     return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
