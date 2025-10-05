@@ -7172,7 +7172,7 @@ async def run_variation(body: VariationRunIn):
                 "maintenance_required": req,
                 "balance_after": cur_bal,
             })
-            return {"as_of": str(dt), "results": results}
+        return {"as_of": str(dt), "results": results}
 # --- maintenance margin check / block-unblock logic (state-change emits) ---
 
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
