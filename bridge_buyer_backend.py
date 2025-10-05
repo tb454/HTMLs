@@ -2116,17 +2116,30 @@ async def _ensure_stocks_schema():
 # -------- Warranting & Chain of Title --------
 @app.on_event("startup")
 async def _ensure_warrant_schema():
+    # 1) Create table without FK (order-safe)
     await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS warrants(
+    CREATE TABLE IF NOT EXISTS public.warrants(
       warrant_id UUID PRIMARY KEY,
-      receipt_id UUID NOT NULL REFERENCES receipts(receipt_id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'on_warrant', -- on_warrant | off_warrant | pledged
-      holder TEXT NOT NULL,                      -- member/beneficial owner
+      receipt_id UUID NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'on_warrant', -- on_warrant | off_warrant | pledged
+      holder     TEXT NOT NULL,                      -- member/beneficial owner
       pledged_to TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     """)
+    # 2) Add FK separately, guarded (idempotent-ish)
+    try:
+        await database.execute("""
+          ALTER TABLE public.warrants
+          ADD CONSTRAINT fk_warrants_receipt
+          FOREIGN KEY (receipt_id)
+          REFERENCES public.receipts(receipt_id)
+          ON DELETE CASCADE
+        """)
+    except Exception:
+        # already exists or receipts not ready yet in this boot — safe to ignore
+        pass
 
 class WarrantIn(BaseModel):
     receipt_id: str
@@ -2136,31 +2149,39 @@ class WarrantIn(BaseModel):
 async def warrant_mint(w: WarrantIn):
     wid = str(uuid.uuid4())
     await database.execute("""
-      INSERT INTO warrants(warrant_id,receipt_id,holder) VALUES (:w,:r,:h)
-    """, {"w":wid,"r":w.receipt_id,"h":w.holder})
-    return {"warrant_id": wid, "status":"on_warrant"}
+      INSERT INTO public.warrants(warrant_id,receipt_id,holder)
+      VALUES (:w,:r,:h)
+    """, {"w": wid, "r": w.receipt_id, "h": w.holder})
+    return {"warrant_id": wid, "status": "on_warrant"}
 
 @app.post("/warrants/transfer", tags=["Warehousing"])
 async def warrant_transfer(warrant_id: str, new_holder: str):
     await database.execute("""
-      UPDATE warrants SET holder=:h, updated_at=NOW() WHERE warrant_id=:w AND status <> 'pledged'
-    """, {"w":warrant_id,"h":new_holder})
+      UPDATE public.warrants
+         SET holder=:h, updated_at=NOW()
+       WHERE warrant_id=:w AND status <> 'pledged'
+    """, {"w": warrant_id, "h": new_holder})
     return {"ok": True}
 
 @app.post("/warrants/pledge", tags=["Warehousing"])
 async def warrant_pledge(warrant_id: str, lender: str):
     await database.execute("""
-      UPDATE warrants SET status='pledged', pledged_to=:p, updated_at=NOW() WHERE warrant_id=:w
-    """, {"w":warrant_id,"p":lender})
+      UPDATE public.warrants
+         SET status='pledged', pledged_to=:p, updated_at=NOW()
+       WHERE warrant_id=:w
+    """, {"w": warrant_id, "p": lender})
     return {"ok": True}
 
 @app.post("/warrants/release", tags=["Warehousing"])
 async def warrant_release(warrant_id: str):
     await database.execute("""
-      UPDATE warrants SET status='on_warrant', pledged_to=NULL, updated_at=NOW() WHERE warrant_id=:w
-    """, {"w":warrant_id})
+      UPDATE public.warrants
+         SET status='on_warrant', pledged_to=NULL, updated_at=NOW()
+       WHERE warrant_id=:w
+    """, {"w": warrant_id})
     return {"ok": True}
-# -------- Warranting & Chain of Title --------
+# -------- /Warranting & Chain of Title --------
+
 
 # ------ RECEIVABLES schema bootstrap (idempotent) =====
 @app.on_event("startup")
