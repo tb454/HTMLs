@@ -12,3 +12,21 @@ groups:
     annotations:
       summary: "p99 latency on {{ $labels.path }} ({{ $labels.method }}) > 300ms"
       description: "Investigate hot path or DB contention."
+
+- alert: BridgeHTTP5xxHigh
+  expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (job) > 0.5
+  for: 10m
+  labels:
+    severity: page
+  annotations:
+    summary: "High 5xx rate on {{ $labels.job }}"
+    description: "Investigate application errors."
+
+- alert: MatchingBacklogGrowing
+  expr: increase(bridge_matching_events_unprocessed[10m]) > 100
+  for: 10m
+  labels:
+    severity: warn
+  annotations:
+    summary: "matching_events backlog growing"
+    description: "Queue depth increasing; check sequencer or DB."
