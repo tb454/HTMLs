@@ -7196,8 +7196,7 @@ async def run_variation(body: VariationRunIn):
                     "variation_pnl": pnl,
                     "maintenance_required": req,
                     "balance_after": cur_bal,
-                }
-        )
+                })
             return {"mark_date": str(dt), "accounts_processed": len(results), "details": results}
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
 
