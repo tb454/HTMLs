@@ -1309,12 +1309,6 @@ async def create_user(
 
     return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
-@app.post("/admin/entitlements/grant", tags=["Admin"], summary="Grant feature to user/member")
-async def grant_entitlement(user: str, feature: str, request: Request):
-    _require_admin(request)  # gate in production
-    _ENTITLEMENTS[user].add(feature)
-    return {"user": user, "features": sorted(list(_ENTITLEMENTS[user]))}
-
 @app.post("/admin/fees/upsert", tags=["Admin"], summary="Upsert fee schedule for a symbol")
 async def upsert_fee(symbol: str, maker_bps: float = 0.0, taker_bps: float = 0.0, min_fee_cents: float = 0.0, request: Request = None):
     _require_admin(request)  # gate in production
@@ -2633,6 +2627,7 @@ async def idem_get(key: str):
     row = await database.fetch_one("SELECT response FROM http_idempotency WHERE key=:k", {"k": key})
     return (row and row["response"])
 
+# Legacy helper kept for backward compatibility; prefer `_idem_guard(...)` in handlers.
 async def idem_put(key: str, resp: dict):
     if not key: return resp
     try:
@@ -3420,13 +3415,13 @@ async def admin_audit_verify(chain_date: date, request: Request = None):
 # ----- Audit logging -----
 
 # ===== ICE webhook signature verifier =====
-LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
+ICE_LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
 
 def verify_sig_ice(raw_body: bytes, given_sig: str) -> bool:
     """Verify ICE webhook signatures. Pass-through if no secret is set (dev/CI)."""
-    if not LINK_SIGNING_SECRET:  # dev/staging/CI mode
+    if not ICE_LINK_SIGNING_SECRET:  # dev/staging/CI mode
         return True
-    mac = hmac.new(LINK_SIGNING_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    mac = hmac.new(ICE_LINK_SIGNING_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(mac, given_sig)
 
 @app.post("/ice-digital-trade", tags=["ICE"], summary="ICE Digital Trade webhook (stub)")
@@ -3596,6 +3591,7 @@ class ReceiptCreateOut(BaseModel):
 @app.post("/receipts", tags=["Receipts"], summary="Create/mint a live receipt")
 async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCreateOut:
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -4011,6 +4007,7 @@ async def export_contracts_csv():
            status_code=200)
 async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):    
     key = _idem_key(request) or getattr(body, "idempotency_key", None)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -4322,6 +4319,7 @@ class ContractInExtended(ContractIn):
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request):   
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -5676,6 +5674,7 @@ async def _rfq_symbol(rfq_id: str) -> str:
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
 async def create_rfq(r: RFQIn, request: Request):
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -5710,6 +5709,7 @@ async def create_rfq(r: RFQIn, request: Request):
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
 async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -5737,6 +5737,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
 async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -6278,6 +6279,7 @@ async def _fut_cancel(order_id: str, user: str | None = None):
 @clob_router.post("/orders", summary="Place order")
 async def clob_place_order(o: CLOBOrderIn, request: Request):
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
     if hit: return hit
@@ -6608,6 +6610,7 @@ async def _clob_match(order_id: str) -> float:
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn, request: Request):    
     key = _idem_key(request)
+    hit = None
     if key:
         hit = await idem_get(key)
         if hit: return hit
@@ -6630,18 +6633,24 @@ async def place_order(ord_in: OrderIn, request: Request):
     is_market = (ord_in.order_type == "MARKET")
     price = float(ord_in.price) if (ord_in.price is not None) else (0.0 if is_market and side == "SELL" else float("inf"))
     qty   = float(ord_in.qty)
+    # validations
     if qty <= 0:
         raise HTTPException(400, "qty must be positive")
     if not is_market and (ord_in.price is None or float(ord_in.price) <= 0):
         raise HTTPException(400, "price must be positive for LIMIT orders")
-        params = await _get_margin_params(ord_in.account_id)
+
+    # --- cheap risk before enqueue (single copy only) ---
+    params = await _get_margin_params(ord_in.account_id)
     if params.get("is_blocked"):
         raise HTTPException(402, "account blocked pending margin call")
+
     open_lots = await _sum_open_lots(ord_in.account_id)
     limit_lots = float(params.get("risk_limit_open_lots", 50))
     if open_lots + qty > limit_lots:
         raise HTTPException(429, f"risk limit exceeded: {open_lots}+{qty}>{limit_lots}")
+
     await _fut_check_position_limit(ord_in.account_id, ord_in.listing_id, qty, side)
+
 
     async with database.transaction():
         await database.execute("""
@@ -6698,141 +6707,7 @@ async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
         "order_id": order_id, "new_price": body.price, "new_qty": body.qty
     }))
     return {"order_id": order_id, "queued": True}
-
-
-    # enqueue for sequencer; actual modify+rematch happens there
-    ev = await database.fetch_one(
-        "INSERT INTO matching_events(topic,payload) VALUES ('MODIFY_FUTURES', :p) RETURNING id",
-        {"p": json.dumps({"order_id": order_id, "new_price": body.price, "new_qty": body.qty})}
-    )
-    await _event_queue.put((int(ev["id"]), "MODIFY_FUTURES", {"order_id": order_id, "new_price": body.price, "new_qty": body.qty}))
-
-  # ------ Main transaction to lock and modify order, check margin, rematch -------
-
-    async with database.transaction():
-        row = await database.fetch_one("SELECT * FROM orders WHERE id=:id FOR UPDATE", {"id": order_id})
-        if not row:
-            raise HTTPException(404, "order not found")
-        if row["status"] in ("FILLED","CANCELLED"):
-            raise HTTPException(409, f"order is {row['status']} and cannot be modified")
-
-        account_id = row["account_id"]
-        listing_id = row["listing_id"]
-        side = row["side"]
-        old_price = float(row["price"])
-        old_qty   = float(row["qty"])
-        old_open  = float(row["qty_open"])
-        filled    = old_qty - old_open
-
-        new_total = float(body.qty) if body.qty is not None else old_qty
-        if new_total < filled:
-            raise HTTPException(400, f"qty too low; already filled {filled}")
-
-        new_price = float(body.price) if body.price is not None else old_price
-        new_open  = new_total - filled
-
-        delta_open = new_open - old_open
-        # Early initial-margin check on increased exposure 
-        if delta_open > 0:
-            params = await _get_margin_params(account_id)
-            if params.get("is_blocked"):
-                raise HTTPException(402, "account blocked pending margin call")
-            contract_size = await _get_contract_size(listing_id)
-            est_notional = new_price * contract_size * delta_open
-            need = float(params["initial_pct"]) * est_notional
-            if float(params["balance"]) < need:
-                raise HTTPException(402, f"insufficient initial margin for modification; need ≥ {need:.2f}")
-
-            open_lots = await _sum_open_lots(account_id)
-            limit_lots = float(params.get("risk_limit_open_lots", 50))
-            if open_lots + delta_open > limit_lots:
-                raise HTTPException(429, f"risk limit exceeded: {open_lots}+{delta_open}>{limit_lots}")
-
-        new_status = "FILLED" if new_open <= 0 else ("PARTIAL" if filled > 0 else "NEW")
-        await database.execute("""
-          UPDATE orders SET price=:p, qty=:qt, qty_open=:qo, status=:st WHERE id=:id
-        """, {"p": new_price, "qt": new_total, "qo": new_open, "st": new_status, "id": order_id})
-        await _audit_order(order_id, "MODIFY", new_open, "amend price/qty")
-
-        remaining = new_open
-        if remaining > 0:
-            if side == "BUY":
-                opp = await database.fetch_all("""
-                  SELECT * FROM orders
-                   WHERE listing_id=:l AND side='SELL' AND status IN ('NEW','PARTIAL') AND price <= :p AND id <> :me
-                   ORDER BY price ASC, created_at ASC
-                   FOR UPDATE
-                """, {"l": listing_id, "p": new_price, "me": order_id})
-            else:
-                opp = await database.fetch_all("""
-                  SELECT * FROM orders
-                   WHERE listing_id=:l AND side='BUY' AND status IN ('NEW','PARTIAL') AND price >= :p AND id <> :me
-                   ORDER BY price DESC, created_at ASC
-                   FOR UPDATE
-                """, {"l": listing_id, "p": new_price, "me": order_id})
-
-            for r in opp:
-                if remaining <= 0:
-                    break
-                open_qty = float(r["qty_open"])
-                if open_qty <= 0:
-                    continue
-
-                trade_qty = min(remaining, open_qty)
-                trade_px  = float(r["price"])
-
-                buy_id  = order_id if side == "BUY" else r["id"]
-                sell_id = r["id"]   if side == "BUY" else order_id
-
-                notional = trade_px * (await _get_contract_size(listing_id)) * trade_qty
-
-                part_a = await database.fetch_one("""
-                  SELECT o.account_id AS aid, m.balance, m.initial_pct
-                  FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
-                  WHERE o.id=:oid
-                """, {"oid": order_id})
-                part_b = await database.fetch_one("""
-                  SELECT o.account_id AS aid, m.balance, m.initial_pct
-                  FROM orders o JOIN margin_accounts m ON m.account_id = o.account_id
-                  WHERE o.id=:oid
-                """, {"oid": r["id"]})
-                if not part_a or not part_b:
-                    raise HTTPException(400, "margin account not found")
-
-                need_a = float(part_a["initial_pct"]) * notional
-                need_b = float(part_b["initial_pct"]) * notional
-                if float(part_a["balance"]) < need_a:
-                    raise HTTPException(402, f"insufficient initial margin for account {part_a['aid']}")
-                if float(part_b["balance"]) < need_b:
-                    raise HTTPException(402, f"insufficient initial margin for account {part_b['aid']}")
-
-                await _adjust_margin(part_a["aid"], -need_a, "initial_margin", order_id)
-                await _adjust_margin(part_b["aid"], -need_b, "initial_margin", r["id"])
-
-                trade_id = str(uuid.uuid4())
-                await database.execute("""
-                  INSERT INTO trades (id, buy_order_id, sell_order_id, listing_id, price, qty)
-                  VALUES (:id,:b,:s,:l,:px,:q)
-                """, {"id": trade_id, "b": buy_id, "s": sell_id, "l": listing_id, "px": trade_px, "q": trade_qty})
-                
-                await _update_position(part_a["aid"], listing_id, +trade_qty if side == "BUY" else -trade_qty)
-                await _update_position(part_b["aid"], listing_id, -trade_qty if side == "BUY" else +trade_qty)
-
-                r_new_open = open_qty - trade_qty
-                r_status = "FILLED" if r_new_open <= 0 else "PARTIAL"
-                await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
-                                       {"qo": r_new_open, "st": r_status, "id": r["id"]})
-                await _audit_order(r["id"], r_status, r_new_open, "matched")
-
-                remaining -= trade_qty
-                my_status = "FILLED" if remaining <= 0 else ("PARTIAL" if filled > 0 or new_total != remaining else "NEW")
-                await database.execute("UPDATE orders SET qty_open=:qo, status=:st WHERE id=:id",
-                                       {"qo": remaining, "st": my_status, "id": order_id})
-                await _audit_order(order_id, my_status, remaining, "matched")
-
-    final = await database.fetch_one("SELECT * FROM orders WHERE id=:id", {"id": order_id})
-    return dict(final)
-
+    
 @trade_router.delete("/orders/{order_id}", response_model=CancelOut, summary="Cancel remaining qty")
 async def cancel_order(order_id: str, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or ""
