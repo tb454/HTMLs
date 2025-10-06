@@ -212,7 +212,7 @@ async def _snapshot_task(storage: str):
             logger.warn("snapshot_bg_failed", err=str(e))
         except Exception:
             pass
-        
+
 # --- background snapshot wrapper: never crash the worker ---
 async def _snapshot_task(storage: str):
     try:
@@ -7074,8 +7074,6 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
         except Exception:
             pass
         return {"ok": False, "error": str(e), "path": path}
-
-
 
 # ===================== CLEARING (Margin & Variation) =====================
 clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])
