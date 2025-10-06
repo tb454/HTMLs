@@ -2889,7 +2889,7 @@ async def _ensure_dead_letters():
 #------- Webhook Dlq replayer -------
 @limiter.limit("30/minute")
 @app.post("/admin/webhooks/replay", tags=["Admin"])
-async def webhook_replay(limit:int=100, request:Request=None):
+async def webhook_replay(limit:int=100, request: Request):
     _require_admin(request)  # gate in production
     rows = await database.fetch_all("""
       SELECT id, event, payload FROM webhook_dead_letters
@@ -3407,7 +3407,7 @@ class AuditAppendIn(BaseModel):
     payload: dict = {}
 
 @app.post("/admin/audit/log", tags=["Admin"], summary="Append audit event")
-async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request | None = None):
+async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request):
     _require_admin(request)
     try:
         rec = await audit_append(
@@ -3416,13 +3416,17 @@ async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request | No
         return rec
     except Exception as e:
         # never crash the socket
-        return JSONResponse(status_code=500, content={"error":"audit_append_failed","detail":str(e)})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "audit_append_failed", "detail": str(e)},
+        )
+
 
 class AuditSealIn(BaseModel):
     chain_date: Optional[date] = None
 
 @app.post("/admin/audit/seal", tags=["Admin"], summary="Seal a day's audit chain")
-async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Request | None = None):
+async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Request):
     _require_admin(request)
     try:
         cd = body.chain_date or _utc_date_now()
@@ -3443,7 +3447,7 @@ async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Reques
         return JSONResponse(status_code=500, content={"error":"audit_seal_failed","detail":str(e)})
 
 @app.get("/admin/audit/verify", tags=["Admin"], summary="Recompute and verify audit chain")
-async def admin_audit_verify(chain_date: date, request: Request | None = None):
+async def admin_audit_verify(chain_date: date, request: Request):
     _require_admin(request)
     try:
         rows = await database.fetch_all("""
