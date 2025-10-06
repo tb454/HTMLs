@@ -199,6 +199,20 @@ async def ratelimit_handler(request, exc):
 
 SNAPSHOT_AUTH = os.getenv("SNAPSHOT_AUTH", "")
 
+# --- background snapshot wrapper: never crash the worker ---
+async def _snapshot_task(storage: str):
+    try:
+        res = await run_daily_snapshot(storage=storage)
+        try:
+            logger.warn("snapshot_bg_result", **({"res": res} if isinstance(res, dict) else {"note": str(res)}))
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            logger.warn("snapshot_bg_failed", err=str(e))
+        except Exception:
+            pass
+
 @app.post("/admin/run_snapshot_bg", tags=["Admin"], summary="Queue a snapshot upload (background)")
 async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase", x_auth: str = Header(default="")):
     if SNAPSHOT_AUTH and x_auth != SNAPSHOT_AUTH:
@@ -7027,10 +7041,26 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
     filename = f"{stamp}_export_all.zip"
     path = f"{day}/{filename}"
 
-    if storage == "s3":
-        return await _upload_to_s3(path, data)
-    else:
+    try:
+        if storage == "s3":
+            # dev-safe: if S3 not configured, report skipped instead of raising
+            if not os.getenv("S3_BUCKET"):
+                return {"ok": True, "skipped": "s3 env missing", "path": path}
+            return await _upload_to_s3(path, data)
+
+        # default: supabase
+        if not (os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE")):
+            return {"ok": True, "skipped": "supabase env missing", "path": path}
         return await _upload_to_supabase(path, data)
+
+    except Exception as e:
+        # never take the server down because of a snapshot error
+        try:
+            logger.warn("snapshot_upload_failed", err=str(e), path=path)
+        except Exception:
+            pass
+        return {"ok": False, "error": str(e), "path": path}
+
 
 
 # ===================== CLEARING (Margin & Variation) =====================
