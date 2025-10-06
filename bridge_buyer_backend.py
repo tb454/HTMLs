@@ -231,8 +231,15 @@ async def _snapshot_task(storage: str):
 async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase", x_auth: str = Header(default="")):
     if SNAPSHOT_AUTH and x_auth != SNAPSHOT_AUTH:
         raise HTTPException(401, "bad auth")
-    background.add_task(run_daily_snapshot, storage)
+
+    # In dev/test, DO NOT queue background tasks (they can kill the worker if creds missing)
+    if os.getenv("ENV", "").lower() != "production":
+        return {"ok": True, "queued": False, "note": "dev-noop"}
+
+    # prod path: safe wrapper
+    background.add_task(_snapshot_task, storage)
     return {"ok": True, "queued": True}
+
 
 # --- Safe latest index handler (idempotent empty state) ---
 @app.get("/indices/latest", tags=["Indices"], summary="Get latest index record")
@@ -7057,18 +7064,15 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
 
     try:
         if storage == "s3":
-            # dev-safe: if S3 not configured, report skipped instead of raising
             if not os.getenv("S3_BUCKET"):
                 return {"ok": True, "skipped": "s3 env missing", "path": path}
             return await _upload_to_s3(path, data)
 
-        # default: supabase
         if not (os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE")):
             return {"ok": True, "skipped": "supabase env missing", "path": path}
         return await _upload_to_supabase(path, data)
 
     except Exception as e:
-        # never take the server down because of a snapshot error
         try:
             logger.warn("snapshot_upload_failed", err=str(e), path=path)
         except Exception:
