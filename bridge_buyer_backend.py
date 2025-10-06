@@ -2886,26 +2886,33 @@ async def _ensure_dead_letters():
         pass
 #-------- Dead Letter Startup --------
 
-#------- Webhook Dlq replayer -------
+# ------- Webhook DLQ replayer -------
 @limiter.limit("30/minute")
 @app.post("/admin/webhooks/replay", tags=["Admin"])
-async def webhook_replay(limit:int=100, request: Request):
+async def webhook_replay(request: Request, limit: int = 100):
     _require_admin(request)  # gate in production
-    rows = await database.fetch_all("""
-      SELECT id, event, payload FROM webhook_dead_letters
-      ORDER BY created_at ASC
-      LIMIT :l
-    """, {"l": limit})
+    rows = await database.fetch_all(
+        """
+        SELECT id, event, payload
+        FROM webhook_dead_letters
+        ORDER BY created_at ASC
+        LIMIT :l
+        """,
+        {"l": limit},
+    )
     ok = fail = 0
     for r in rows:
         res = await emit_event(r["event"], dict(r["payload"]))
         if res.get("ok"):
             ok += 1
-            await database.execute("DELETE FROM webhook_dead_letters WHERE id=:i", {"i": r["id"]})
+            await database.execute(
+                "DELETE FROM webhook_dead_letters WHERE id=:i", {"i": r["id"]}
+            )
         else:
             fail += 1
     return {"replayed_ok": ok, "failed": fail}
-# ------- Webhook Dlq replayer -------
+# ------- Webhook DLQ replayer -------
+
 
 #------- Dossier HR Sync -------
 @app.on_event("startup")
@@ -3406,30 +3413,35 @@ class AuditAppendIn(BaseModel):
     entity_id: str = ""
     payload: dict = {}
 
+# --- AUDIT (safe models + guarded) ---------------------------------
+
+from pydantic import BaseModel
+
+class AuditAppendIn(BaseModel):
+    actor: str = "system"
+    action: str = "note"
+    entity_type: str = ""
+    entity_id: str = ""
+    payload: dict = {}
+
 @app.post("/admin/audit/log", tags=["Admin"], summary="Append audit event")
-async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request):
+async def admin_audit_log(request: Request, body: AuditAppendIn):
     _require_admin(request)
     try:
-        rec = await audit_append(
+        return await audit_append(
             body.actor, body.action, body.entity_type, body.entity_id, body.payload
         )
-        return rec
     except Exception as e:
-        # never crash the socket
-        return JSONResponse(
-            status_code=500,
-            content={"error": "audit_append_failed", "detail": str(e)},
-        )
-
+        return JSONResponse(status_code=500, content={"error": "audit_append_failed", "detail": str(e)})
 
 class AuditSealIn(BaseModel):
     chain_date: Optional[date] = None
 
 @app.post("/admin/audit/seal", tags=["Admin"], summary="Seal a day's audit chain")
-async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Request):
+async def admin_audit_seal(request: Request, body: Optional[AuditSealIn] = None):
     _require_admin(request)
     try:
-        cd = body.chain_date or _utc_date_now()
+        cd = (body.chain_date if (body and body.chain_date) else _utc_date_now())
         tail = await database.fetch_one("""
             SELECT seq, event_hash FROM audit_events
             WHERE chain_date=:d ORDER BY seq DESC LIMIT 1
@@ -3444,10 +3456,10 @@ async def admin_audit_seal(body: AuditSealIn = Body(default={}), request: Reques
         """, {"d": cd, "h": final_hash})
         return {"chain_date": str(cd), "final_hash": final_hash}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error":"audit_seal_failed","detail":str(e)})
+        return JSONResponse(status_code=500, content={"error": "audit_seal_failed", "detail": str(e)})
 
 @app.get("/admin/audit/verify", tags=["Admin"], summary="Recompute and verify audit chain")
-async def admin_audit_verify(chain_date: date, request: Request):
+async def admin_audit_verify(request: Request, chain_date: date):
     _require_admin(request)
     try:
         rows = await database.fetch_all("""
@@ -3475,9 +3487,8 @@ async def admin_audit_verify(chain_date: date, request: Request):
         final_hash = prev or _sha256_hex(f"empty:{chain_date}")
         return {"ok": bool(seal and seal["final_hash"] == final_hash), "final_hash": final_hash}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error":"audit_verify_failed","detail":str(e)})
+        return JSONResponse(status_code=500, content={"error": "audit_verify_failed", "detail": str(e)})
 # ---------- AUDIT logging --------------------------------
-
 
 # ===== ICE webhook signature verifier =====
 ICE_LINK_SIGNING_SECRET = os.getenv("LINK_SIGNING_SECRET", "")
