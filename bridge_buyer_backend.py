@@ -212,6 +212,20 @@ async def _snapshot_task(storage: str):
             logger.warn("snapshot_bg_failed", err=str(e))
         except Exception:
             pass
+        
+# --- background snapshot wrapper: never crash the worker ---
+async def _snapshot_task(storage: str):
+    try:
+        res = await run_daily_snapshot(storage=storage)
+        try:
+            logger.warn("snapshot_bg_result", **({"res": res} if isinstance(res, dict) else {"note": str(res)}))
+        except Exception:
+            pass
+    except Exception as e:
+        try:
+            logger.warn("snapshot_bg_failed", err=str(e))
+        except Exception:
+            pass
 
 @app.post("/admin/run_snapshot_bg", tags=["Admin"], summary="Queue a snapshot upload (background)")
 async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "supabase", x_auth: str = Header(default="")):
