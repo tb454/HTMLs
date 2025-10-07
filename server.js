@@ -3,7 +3,6 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { body, validationResult } = require('express-validator');
 const app = express();
 const logger = require('./logger'); // Ensure you have logger.js that sets up Winston
 const compression = require('compression');
