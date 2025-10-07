@@ -1,9 +1,9 @@
 services:
   - type: web
     name: bridge-api
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn bridge_buyer_backend:app --host 0.0.0.0 --port 10000"
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn bridge_buyer_backend:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
-        value: postgresql://postgres:Vh9jGqvfnjHtNZlr@db.naoaitepvzrwlaqihzvc.supabase.co:5432/postgres
+        fromSecret: DATABASE_URL
