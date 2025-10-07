@@ -167,6 +167,17 @@ app.docs_url = "/docs"
 app.redoc_url = None
 app.openapi_url = "/openapi.json"
 
+# === QBO OAuth Relay • Config ===
+QBO_RELAY_AUTH = os.getenv("QBO_RELAY_AUTH", "").strip()  # shared secret for /admin/qbo/peek
+# Minimal helper: header check for the relayer fetch
+def _require_qbo_relay_auth(request: Request):
+    if not QBO_RELAY_AUTH:  # if unset, allow in dev but warn
+        return
+    hdr = request.headers.get("X-Relay-Auth", "")
+    if hdr != QBO_RELAY_AUTH:
+        raise HTTPException(status_code=401, detail="bad relay auth")
+# === QBO OAuth Relay • Config ===
+
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
@@ -687,17 +698,53 @@ async def _ensure_runtime_risk_tables():
 # -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
-@app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use", description="View the BRidge platform Terms of Use.", status_code=200)
-async def terms_page():
-    return FileResponse("static/legal/terms.html")
+# Cookie Notice (alias: /legal/cookies and /cookies)
+@app.get("/legal/cookies", include_in_schema=True, tags=["Legal"],
+         summary="Cookie Notice",
+         description="View the BRidge Cookie Notice.", status_code=200)
+@app.get("/cookies", include_in_schema=False)
+async def cookies_page():
+    return FileResponse("static/legal/cookies.html")
 
-@app.get("/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement (EULA)", description="View the BRidge platform EULA.", status_code=200)
-async def eula_page():
-    return FileResponse("static/legal/eula.html")
+# Subprocessors (alias: /legal/subprocessors and /subprocessors)
+@app.get("/legal/subprocessors", include_in_schema=True, tags=["Legal"],
+         summary="Subprocessors",
+         description="View the current list of BRidge subprocessors.", status_code=200)
+@app.get("/subprocessors", include_in_schema=False)
+async def subprocessors_page():
+    return FileResponse("static/legal/subprocessors.html")
 
-@app.get("/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy", description="View the BRidge platform Privacy Policy.", status_code=200)
-async def privacy_page():
-    return FileResponse("static/legal/privacy.html")
+# Data Processing Addendum (alias: /legal/dpa and /dpa)
+@app.get("/legal/dpa", include_in_schema=True, tags=["Legal"],
+         summary="Data Processing Addendum (DPA)",
+         description="View the BRidge Data Processing Addendum.", status_code=200)
+@app.get("/dpa", include_in_schema=False)
+async def dpa_page():
+    return FileResponse("static/legal/dpa.html")
+
+# Service Level Addendum (alias: /legal/sla and /sla)
+@app.get("/legal/sla", include_in_schema=True, tags=["Legal"],
+         summary="Service Level Addendum (SLA)",
+         description="View the BRidge Service Level Addendum.", status_code=200)
+@app.get("/sla", include_in_schema=False)
+async def sla_page():
+    return FileResponse("static/legal/sla.html")
+
+# Security Controls Overview (alias: /legal/security and /security)
+@app.get("/legal/security", include_in_schema=True, tags=["Legal"],
+         summary="Security Controls Overview",
+         description="View the BRidge Security Controls Overview / Security Whitepaper.", status_code=200)
+@app.get("/security", include_in_schema=False)
+async def security_page():
+    return FileResponse("static/legal/security.html")
+
+# Jurisdictional Privacy Appendix (alias: /legal/privacy-appendix and /privacy/appendix)
+@app.get("/legal/privacy-appendix", include_in_schema=True, tags=["Legal"],
+         summary="Jurisdictional Privacy Appendix (APAC & Canada)",
+         description="View region-specific privacy disclosures for APAC & Canada.", status_code=200)
+@app.get("/privacy/appendix", include_in_schema=False)
+async def privacy_appendix_page():
+    return FileResponse("static/legal/privacy-appendix.html")
 # -------- Legal pages --------
 
 # -------- Regulatory: Rulebook & Policies (versioned) --------
@@ -743,6 +790,21 @@ async def rulebook_upsert(version: str, effective_date: date, file_path: str, re
     """, {"v":version, "d":effective_date, "u":file_path})
     return {"ok": True, "version": version}
 # -------- /Regulatory --------
+
+# === QBO OAuth Relay • Table  ===
+@app.on_event("startup")
+async def _ensure_qbo_oauth_events_table():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS qbo_oauth_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      state    TEXT UNIQUE NOT NULL,
+      code     TEXT NOT NULL,
+      realm_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_qbo_events_created ON qbo_oauth_events(created_at DESC);
+    """)
+# === QBO OAuth Relay • Table ===
 
 # -------- Static HTML --------
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -3564,6 +3626,46 @@ async def ice_webhook(request: Request, x_signature: str = Header(None, alias="X
     return {"ok": True}
 # ---------- Ice webhook signature verifier -----
 
+# === QBO OAuth Relay • Endpoints  ===
+from fastapi import Query
+
+@app.get("/qbo/callback", include_in_schema=False)
+async def qbo_callback(code: str = Query(...), state: str = Query(...), realmId: str = Query(...)):
+    """
+    Public endpoint hit by Intuit after user approves OAuth.
+    Writes (state, code, realmId) into qbo_oauth_events for the local harvester to fetch.
+    """
+    # Basic sanity check on state
+    if not state or len(state) < 8:
+        raise HTTPException(status_code=400, detail="invalid state")
+
+    # idempotent upsert on state
+    await database.execute("""
+        INSERT INTO qbo_oauth_events(state, code, realm_id)
+        VALUES (:s, :c, :r)
+        ON CONFLICT (state) DO UPDATE SET code=EXCLUDED.code, realm_id=EXCLUDED.realm_id, created_at=NOW()
+    """, {"s": state, "c": code, "r": realmId})
+
+    # Plaintext so the browser tab just says "You can close this tab."
+    return PlainTextResponse("You can close this tab.")
+
+@app.get("/admin/qbo/peek", include_in_schema=False)
+async def qbo_peek(state: str = Query(...), request: Request = None):
+    """
+    Private fetch used by your local harvester.
+    Requires X-Relay-Auth header == QBO_RELAY_AUTH (env).
+    Returns {"code": "...","realmId":"..."} once the callback has landed.
+    """
+    _require_qbo_relay_auth(request)
+    row = await database.fetch_one(
+        "SELECT code, realm_id FROM qbo_oauth_events WHERE state = :s",
+        {"s": state}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="pending")
+    return {"code": row["code"], "realmId": row["realm_id"]}
+# === QBO OAuth Relay • Endpoints ===
+
 # -------- Security: key registry & rotation (scaffold) --------
 @app.on_event("startup")
 async def _ensure_key_registry():
@@ -4109,22 +4211,47 @@ async def update_contract(
         raise HTTPException(status_code=500, detail="contract update failed")
 #-------- Contract ID--------       
 
+#-------- Export Contracts as CSV --------
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
-    rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-    rows = [dict(r) for r in rows]
-    if not rows:
+    try:
+        rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
+        dict_rows = [dict(r) for r in rows]
+
+        # Choose a stable header set even if rows are heterogenous
+        if dict_rows:
+            fieldnames = sorted({k for r in dict_rows for k in r.keys()})
+        else:
+            fieldnames = ["id"]  # minimal header when empty
+
+        buf = io.StringIO(newline="")
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+
+        # Normalize values so CSV never trips on types mid-stream
+        for r in dict_rows:
+            writer.writerow({k: _normalize(r.get(k)) for k in fieldnames})
+
+        data = buf.getvalue().encode("utf-8")
+
         return StreamingResponse(
-            iter(["id\n"]),
+            io.BytesIO(data),
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
         )
-    fieldnames = list(rows[0].keys())
-    return StreamingResponse(
-        _iter_csv(rows, fieldnames),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-    )
+    except Exception as e:
+        # dev-safe: never kill the socket; return an empty CSV and log
+        try:
+            logger.warn("contracts_export_csv_failed", err=str(e))
+        except Exception:
+            pass
+        fallback = "id\n".encode("utf-8")
+        return StreamingResponse(
+            io.BytesIO(fallback),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+#-------- Export Contracts as CSV --------
 
 # --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
 @app.patch("/contracts/{contract_id}/purchase",

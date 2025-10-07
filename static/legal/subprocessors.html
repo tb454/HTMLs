@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Subprocessors – BRidge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; }
+    html, body { background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif; line-height:1.55; }
+    .wrap { max-width:960px; margin:0 auto; padding:2.25rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height:1.25; margin:1.6rem 0 .6rem; }
+    h1 { font-size:1.9rem; }
+    h2 { font-size:1.35rem; margin-top:2rem; }
+    h3 { font-size:1.05rem; margin-top:1.2rem; }
+    p { margin:.6rem 0 .6rem; }
+    small, .muted { color:var(--muted); }
+    hr { border:0; border-top:1px solid var(--rule); margin:1.4rem 0; }
+    a { color:#0645ad; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    table { border-collapse:collapse; width:100%; margin:1rem 0; }
+    th, td { border:1px solid #ddd; padding:.55rem .75rem; text-align:left; vertical-align:top; }
+    th { background:#f9f9f9; }
+    .note { padding:.8rem 1rem; background:#fff9f0; border:1px solid #ffe2bf; border-radius:8px; }
+    .footer { margin-top:2.5rem; font-size:.9rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Subprocessors</h1>
+  <p class="muted">
+    This list identifies third-party subprocessors authorized to process personal data for BRidge, consistent with our
+    <a href="/privacy">Privacy Policy</a> and <a href="/legal/dpa">Data Processing Addendum (DPA)</a>.
+    Each is bound by written terms imposing confidentiality, security, and data protection obligations at least equivalent to those in the DPA.
+  </p>
+
+  <h2>Current Subprocessors</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Vendor / Service</th>
+        <th>Purpose</th>
+        <th>Location</th>
+        <th>Safeguard (Transfers)</th>
+        <th>Typical Data Categories</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Amazon Web Services (AWS)</strong></td>
+        <td>Primary hosting, storage, backups</td>
+        <td>United States / Global Regions</td>
+        <td>SCCs/IDTA as applicable; encryption in transit/at rest</td>
+        <td>Account metadata, logs, Customer Content at rest, BOL PDFs</td>
+      </tr>
+      <tr>
+        <td><strong>Supabase</strong></td>
+        <td>Database hosting & authentication services</td>
+        <td>United States / EU</td>
+        <td>SCCs/IDTA; regional hosting options</td>
+        <td>Account profiles, application data (contracts, inventory), audit records</td>
+      </tr>
+      <tr>
+        <td><strong>Render</strong></td>
+        <td>Application deployment & runtime infrastructure</td>
+        <td>United States</td>
+        <td>SCCs/IDTA (where applicable)</td>
+        <td>Transient app data, logs, operational telemetry</td>
+      </tr>
+      <tr>
+        <td><strong>Cloudflare</strong></td>
+        <td>CDN, DDoS protection, DNS, edge security</td>
+        <td>Global</td>
+        <td>SCCs/IDTA; edge security controls</td>
+        <td>IP addresses, request headers, performance metrics</td>
+      </tr>
+      <tr>
+        <td><strong>Stripe, Inc.</strong></td>
+        <td>Billing & payment processing</td>
+        <td>United States / Global</td>
+        <td>SCCs/IDTA; PCI-DSS compliance</td>
+        <td>Billing contact, org info; <em>no card numbers stored by Atlas</em></td>
+      </tr>
+      <tr>
+        <td><strong>Postmark / Mailgun</strong></td>
+        <td>Transactional email delivery</td>
+        <td>United States</td>
+        <td>SCCs/IDTA</td>
+        <td>Recipient email, message metadata; deliverability logs</td>
+      </tr>
+      <tr>
+        <td><strong>Sentry</strong></td>
+        <td>Error tracking & observability</td>
+        <td>United States / EU</td>
+        <td>SCCs/IDTA; PII scrubbing rules</td>
+        <td>Stack traces, sanitized request context, performance metrics</td>
+      </tr>
+      <tr>
+        <td><strong>Prometheus / Grafana Cloud</strong></td>
+        <td>Metrics collection & monitoring</td>
+        <td>United States / EU</td>
+        <td>SCCs/IDTA</td>
+        <td>Aggregated service metrics (no content data)</td>
+      </tr>
+      <tr>
+        <td><strong>Google Workspace</strong></td>
+        <td>Internal communications, support, documentation</td>
+        <td>United States / EU</td>
+        <td>SCCs/IDTA</td>
+        <td>Support emails, ticket attachments, internal docs</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Change Management & Objections</h2>
+  <div class="note">
+    <p><strong>Notice:</strong> Atlas may add or replace subprocessors to support new features or infrastructure. We will post updates on this page and, where required, provide advance notice to customers.</p>
+    <p><strong>Objection Window:</strong> Customers may object to a new subprocessor within <strong>30 days</strong> of notice by emailing <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a> with reasonable, documented grounds related to data protection. Atlas will work in good faith to address concerns (e.g., alternative controls, regional routing) or propose a commercially reasonable alternative.</p>
+  </div>
+
+  <h2>Customer Responsibilities</h2>
+  <p>Customers are responsible for the subprocessors and integrations they enable within their own environments (e.g., data exports, webhooks), and for ensuring those third parties meet their compliance obligations.</p>
+
+  <hr />
+  <p class="footer">
+    <span class="caps">Effective Date:</span> October 6, 2025<br/>
+    <small class="muted">Version 1.1 — Last updated October 6, 2025</small><br/>
+    <span class="caps">Product:</span> BRidge™ – Contracting, Logistics, Indices &amp; Market Functions Platform<br/>
+    © Atlas IP Holdings LLC. All rights reserved.
+  </p>
+</div>
+</body>
+</html>

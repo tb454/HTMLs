@@ -1,18 +1,157 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Privacy Policy – BRidge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; --accent:#0a5; }
+    html, body { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; line-height: 1.55; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2.25rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height: 1.25; margin: 1.6rem 0 0.6rem; }
+    h1 { font-size: 1.9rem; }
+    h2 { font-size: 1.35rem; margin-top: 2rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.2rem; }
+    p { margin: 0.6rem 0 0.6rem; }
+    ul, ol { margin: 0.4rem 0 1rem 1.35rem; }
+    li { margin: 0.25rem 0; }
+    small, .muted { color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--rule); margin: 1.4rem 0; }
+    code { background: #f7f7f7; padding: 0 .25rem; border-radius: .25rem; }
+    .topnote { padding: .85rem 1rem; background: #f8fff9; border: 1px solid #e6f6ea; border-radius: 8px; }
+    .toc { border-left: 3px solid var(--rule); padding-left: .9rem; margin: .5rem 0 1.5rem; }
+    a { color: #0645ad; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .caps { text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .section-id { color: var(--muted); font-weight: 500; margin-right: .35rem; }
+    .footer { margin-top: 2.5rem; font-size: .9rem; color: var(--muted); }
+    .badge { display:inline-block; padding:.1rem .45rem; background:#eef7ff; border:1px solid #d8eefc; border-radius:6px; font-size:.78rem; }
+    .callout { padding:.8rem 1rem; background:#fff9f0; border:1px solid #ffe2bf; border-radius:8px; }
+  </style>
 </head>
-<body style="padding: 2rem; font-family: sans-serif;">
-  <h2>Privacy Policy</h2>
-  <p>BRidge respects your privacy. Here's how we handle your data:</p>
-  <ul>
-    <li>We store contract and BOL activity in a secure database for legal traceability.</li>
-    <li>We do not sell, trade, or share your data with any third party.</li>
-    <li>Your login and activity may be used for security, auditing, and compliance monitoring.</li>
-    <li>By using this platform, you consent to the storage and processing of your data in accordance with this policy.</li>
-  </ul>
-  <p>Contact info@atlasipholdingsllc.com with any concerns. Last updated: August 2025</p>
+<body>
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="muted">This Privacy Policy explains how Atlas IP Holdings LLC (“<strong>Atlas</strong>”, “we”, “us”, “our”) collects, uses, discloses, and protects personal data in connection with the BRidge platform, software, APIs, and websites (collectively, “<strong>BRidge</strong>”). It forms part of our <a href="/terms">Terms</a> and <a href="/eula">EULA</a>.</p>
+
+    <div class="topnote">
+      <strong>Summary:</strong> We process personal data to provide and secure BRidge, fulfill contracts, comply with law, and improve functionality. We use subprocessors under contract; we do <strong>not sell</strong> personal data and do <strong>not share</strong> it for cross-context behavioral advertising. Users have rights described below (GDPR/UK/CCPA and other state laws).
+    </div>
+
+    <h2>Table of Contents</h2>
+    <div class="toc">
+      <ol>
+        <li><a href="#1-scope">Scope & Roles</a></li>
+        <li><a href="#2-collection">Data We Collect</a></li>
+        <li><a href="#3-use">How We Use Data</a></li>
+        <li><a href="#4-automated">Automated Processing & Profiling</a></li>
+        <li><a href="#5-legal-bases">Legal Bases (GDPR/UK GDPR)</a></li>
+        <li><a href="#6-sharing">Sharing & Subprocessors</a></li>
+        <li><a href="#7-transfers">International Transfers</a></li>
+        <li><a href="#8-security">Security & Retention</a></li>
+        <li><a href="#9-rights">Your Privacy Rights</a></li>
+        <li><a href="#10-cookies">Cookies, Consent & Signals</a></li>
+        <li><a href="#11-children">Children’s Privacy</a></li>
+        <li><a href="#12-changes">Changes & Versioning</a></li>
+        <li><a href="#13-contact">Contact</a></li>
+      </ol>
+    </div>
+
+    <h2 id="1-scope"><span class="section-id">1.</span>Scope & Roles</h2>
+    <p>We act as a <strong>controller</strong> for website, account, and billing data, and generally as a <strong>processor</strong> for Customer personal data ingested into BRidge by our customers (e.g., counterparties, drivers on BOLs). Where we are a processor, a Data Processing Addendum (“<strong>DPA</strong>”) governs and prevails.</p>
+
+    <h2 id="2-collection"><span class="section-id">2.</span>Data We Collect</h2>
+    <ul>
+      <li><strong>Account & Profile:</strong> name, email, role/entitlements, company, phone.</li>
+      <li><strong>Transactional:</strong> contract fields, BOL metadata (e.g., driver name/signature timestamps), inventory events, indices usage, audit logs.</li>
+      <li><strong>Technical:</strong> IP, device/browser info, session identifiers, request IDs, telemetry (Prometheus/Sentry), security signals (rate-limit hits, auth outcomes).</li>
+      <li><strong>Billing:</strong> plan, invoices, payment confirmations (via processor).</li>
+      <li><strong>Support/Comms:</strong> tickets, emails, meeting notes.</li>
+      <li><strong>Cookies/Similar:</strong> session, CSRF, analytics, preference cookies (see §10).</li>
+      <li><strong>Sensitive data (CPRA):</strong> We do <em>not</em> use sensitive personal information for inferring characteristics or for cross-context behavioral advertising.</li>
+    </ul>
+
+    <h2 id="3-use"><span class="section-id">3.</span>How We Use Data</h2>
+    <ul>
+      <li>Provide, operate, and support BRidge features (contracts, BOL PDFs, exports, indices, trading functions).</li>
+      <li>Secure and monitor the service (audit chain hashing, anomaly detection, fraud/abuse prevention).</li>
+      <li>Comply with legal obligations and enforce agreements.</li>
+      <li>Improve functionality, quality, and performance (aggregated analytics, benchmarking).</li>
+      <li>Communicate notices, updates, and support messages.</li>
+    </ul>
+
+    <h2 id="4-automated"><span class="section-id">4.</span>Automated Processing & Profiling</h2>
+    <p>BRidge may apply automated scoring/anomaly detection to flag security or fraud risks. These processes do <strong>not</strong> produce legal effects or similarly significant effects about individuals without human review. You may request human review of a decision by contacting us (see §13).</p>
+
+    <h2 id="5-legal-bases"><span class="section-id">5.</span>Legal Bases (GDPR/UK GDPR)</h2>
+    <ul>
+      <li><strong>Contract</strong> – to deliver BRidge to your organization.</li>
+      <li><strong>Legitimate interests</strong> – security, product improvement, fraud prevention, aggregated analytics (balanced against data subject rights).</li>
+      <li><strong>Legal obligation</strong> – tax, accounting, regulatory inquiries.</li>
+      <li><strong>Consent</strong> – where required for certain cookies/marketing (withdraw anytime).</li>
+    </ul>
+
+    <h2 id="6-sharing"><span class="section-id">6.</span>Sharing & Subprocessors</h2>
+    <p>We do not sell personal data. We share with:</p>
+    <ul>
+      <li><strong>Subprocessors:</strong> cloud hosting, storage, observability/monitoring, email, PDF generation, backup, security—bound by confidentiality and data protection terms.</li>
+      <li><strong>Integrations you enable:</strong> e.g., ICE Digital Trade, storage providers, analytics—subject to their terms.</li>
+      <li><strong>Authorities/Legal:</strong> when required by law or to protect rights, safety, and system integrity.</li>
+      <li><strong>Corporate events:</strong> M&A/financing/asset transfer with continued protections.</li>
+    </ul>
+    <p>A current list of core subprocessors is available at <a href="/legal/subprocessors">/legal/subprocessors</a> (or upon request) and may be updated. We will provide reasonable advance notice of material changes where required.</p>
+
+    <h2 id="7-transfers"><span class="section-id">7.</span>International Transfers</h2>
+    <p>We may transfer personal data across borders (including to the United States). For EEA/UK transfers, we rely on Standard Contractual Clauses (SCCs) and the UK IDTA/Addendum and conduct transfer risk assessments (TRA/TIA) with supplementary measures as needed. Details are provided in the DPA.</p>
+
+    <h2 id="8-security"><span class="section-id">8.</span>Security & Retention</h2>
+    <ul>
+      <li><strong>Security:</strong> session & host protections, rate limiting, security headers, structured logging, audit chain, role-based entitlements, encryption in transit, and defense-in-depth vendor controls.</li>
+      <li><strong>Incident response:</strong> We notify customers of security incidents affecting their data without undue delay after becoming aware, via admin email or in-product notice. Security contact: <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>.</li>
+      <li><strong>Retention:</strong> We retain personal data as long as necessary to provide BRidge and meet legal obligations. Operational logs have rolling TTLs; backups follow DR objectives (see <code>/admin/dr/objectives</code> in-product).</li>
+    </ul>
+    <p><strong>Typical windows:</strong> account/billing records: 7 years; security/audit logs: 90–365 days; support tickets: up to 3 years. On verified deletion, we delete or de-identify unless retention is legally required.</p>
+
+    <h2 id="9-rights"><span class="section-id">9.</span>Your Privacy Rights</h2>
+    <ul>
+      <li><strong>GDPR/UK GDPR:</strong> access, rectification, erasure, restriction, portability, objection, complaint to a supervisory authority. Where we process as processor, contact your organization’s admin; we’ll support requests as processor.</li>
+      <li><strong>CCPA/CPRA (California) & other US state laws (VA/CO/CT/UT et al.):</strong> right to know/access, delete, correct, and opt-out of “sale”/“sharing.” We do <em>not</em> sell or share personal information for cross-context ads. We honor recognized opt-out preference signals (e.g., GPC) where required.</li>
+    </ul>
+    <h3 id="9a-exercise">9.1 Exercising Your Rights & Appeals</h3>
+    <p>Email <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a> with your request, jurisdiction, and verification info (account email/org). If we deny a request (e.g., cannot verify identity or legal exception applies), you may submit an <strong>appeal</strong> by replying to our decision notice; we will respond within applicable statutory timelines.</p>
+    <div class="callout">
+      <strong>Do Not Sell or Share My Personal Information:</strong> We do not sell or share for cross-context behavioral advertising. You can manage preferences at <a href="/privacy/choices">/privacy/choices</a> (if available) or by contacting us.
+    </div>
+
+    <h2 id="10-cookies"><span class="section-id">10.</span>Cookies, Consent & Signals</h2>
+    <p>We use essential cookies (authentication/session, CSRF), functional cookies (preferences), and limited analytics/telemetry. Where required, we present consent controls and honor your choices. See our <a href="/cookies">Cookie Notice</a> for details.</p>
+    <p>We honor applicable opt-out preference signals (e.g., Global Privacy Control) for relevant jurisdictions and do not respond to legacy “Do Not Track” headers.</p>
+    <p><strong>Marketing:</strong> Service emails are transactional; marketing emails are optional and include unsubscribe links.</p>
+
+    <h2 id="11-children"><span class="section-id">11.</span>Children’s Privacy</h2>
+    <p>BRidge is for business use only and not directed to children under 16 (or under 13 under COPPA). We do not knowingly collect such data. If you believe we have, contact us for deletion.</p>
+
+    <h2 id="12-changes"><span class="section-id">12.</span>Changes & Versioning</h2>
+    <p>We may update this Policy. Material changes will be posted here and effective upon posting or as otherwise stated. Continued use of BRidge indicates acceptance.</p>
+    <p><small><strong>Version:</strong> 1.1 • <strong>Last Updated:</strong> October 6, 2025 • <a href="#changelog">Change log</a></small></p>
+    <h3 id="changelog">Change log</h3>
+    <ul>
+      <li>v1.1 – Added automated processing clarifications, incident notice language, GPC recognition, and sensitive data statement.</li>
+      <li>v1.0 – Initial publication.</li>
+    </ul>
+
+    <h2 id="13-contact"><span class="section-id">13.</span>Contact</h2>
+    <p>Atlas IP Holdings LLC — Privacy<br/>
+      <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a></p>
+    <p><strong>EU/UK Representative (if applicable):</strong> details provided in DPA or upon request.<br/>
+    <strong>Data Protection Officer (if appointed):</strong> contact via the privacy email above.</p>
+
+    <hr />
+    <p class="footer">
+      <span class="caps">Effective Date:</span> October 6, 2025<br/>
+      <span class="caps">Product:</span> BRidge™ – Contracting, Logistics, Indices &amp; Market Functions Platform<br/>
+      © Atlas IP Holdings LLC. All rights reserved.
+    </p>
+  </div>
 </body>
 </html>

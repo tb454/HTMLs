@@ -1,18 +1,243 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>End User License Agreement (EULA) – BRidge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; --accent:#0a5; }
+    html, body { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; line-height: 1.55; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2.25rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height: 1.25; margin: 1.6rem 0 0.6rem; }
+    h1 { font-size: 1.9rem; }
+    h2 { font-size: 1.35rem; margin-top: 2rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.2rem; }
+    p { margin: 0.6rem 0 0.6rem; }
+    ul { margin: 0.4rem 0 1rem 1.35rem; }
+    li { margin: 0.25rem 0; }
+    small, .muted { color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--rule); margin: 1.4rem 0; }
+    code { background: #f7f7f7; padding: 0 .25rem; border-radius: .25rem; }
+    .topnote { padding: .85rem 1rem; background: #f8fff9; border: 1px solid #e6f6ea; border-radius: 8px; }
+    .toc { border-left: 3px solid var(--rule); padding-left: .9rem; margin: .5rem 0 1.5rem; }
+    a { color: #0645ad; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .caps { text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .section-id { color: var(--muted); font-weight: 500; margin-right: .35rem; }
+    .footer { margin-top: 2.5rem; font-size: .9rem; color: var(--muted); }
+  </style>
 </head>
-<body style="padding: 2rem; font-family: sans-serif;">
-  <h2>End User License Agreement (EULA)</h2>
-  <p>This software is licensed, not sold. By using BRidge, you agree to the following terms:</p>
-  <ul>
-    <li>You may use BRidge solely for legal, commercial scrap trading and contract management.</li>
-    <li>You may not reverse engineer, resell, sublicense, or replicate the platform.</li>
-    <li>Access to BRidge may be suspended or revoked for violation of these terms.</li>
-    <li>The platform is provided "as-is" with no guarantee of uptime, compatibility, or suitability for any particular purpose.</li>
-  </ul>
-  <p>This license is governed by the laws of the State of Indiana. Last updated: August 2025</p>
+<body>
+  <div class="wrap">
+    <h1>End User License Agreement (EULA)</h1>
+    <p class="muted">This End User License Agreement (“<strong>EULA</strong>”) is a legal agreement between Atlas IP Holdings LLC (“<strong>Atlas</strong>”, “<strong>we</strong>”, “<strong>us</strong>”, “<strong>our</strong>”) and the entity or person that accesses or uses the BRidge platform, software, documentation, websites, APIs, and related materials (collectively, “<strong>BRidge</strong>”). By accessing or using BRidge, you agree to be bound by this EULA.</p>
+
+    <div class="topnote">
+      <strong>Important:</strong> BRidge is a commercial platform for real-world commodity contracts, logistics artifacts (e.g., BOLs), indices, market functions, and related analytics. It is licensed, not sold. Use of BRidge is subject to this EULA, any applicable Order, and the Policies referenced below.
+    </div>
+
+    <h2>Table of Contents</h2>
+    <div class="toc">
+      <ol>
+        <li><a href="#1-definitions">Definitions</a></li>
+        <li><a href="#2-license-grant-scope">License Grant &amp; Scope</a></li>
+        <li><a href="#3-accounts-access">Accounts, Access &amp; Roles</a></li>
+        <li><a href="#4-acceptable-use">Acceptable Use; Prohibited Conduct</a></li>
+        <li><a href="#5-data-rights-privacy">Data Rights, Confidentiality &amp; Privacy</a></li>
+        <li><a href="#6-compliance">Compliance (KYC/AML/Sanctions; Recordkeeping)</a></li>
+        <li><a href="#7-third-party">Third-Party Services, Market Data &amp; APIs</a></li>
+        <li><a href="#8-security-audit">Security, Logging &amp; Audit</a></li>
+        <li><a href="#9-service-changes-sla">Service Changes; Availability; Support</a></li>
+        <li><a href="#10-fees-taxes">Fees, Taxes &amp; Payment</a></li>
+        <li><a href="#11-ip">Intellectual Property; Feedback</a></li>
+        <li><a href="#12-warranties">Disclaimers &amp; No Warranties</a></li>
+        <li><a href="#13-liability">Limitation of Liability</a></li>
+        <li><a href="#14-indemnity">Indemnification</a></li>
+        <li><a href="#15-export-ethics">Export Controls; Anti-Bribery; Ethics</a></li>
+        <li><a href="#16-termination">Term, Suspension &amp; Termination</a></li>
+        <li><a href="#17-governing-law">Governing Law, Venue &amp; Dispute Resolution</a></li>
+        <li><a href="#18-updates">Updates to this EULA</a></li>
+        <li><a href="#19-general">General Terms</a></li>
+        <li><a href="#20-contacts">Notices &amp; Contacts</a></li>
+      </ol>
+    </div>
+
+    <h2 id="1-definitions"><span class="section-id">1.</span>Definitions</h2>
+    <ul>
+      <li><strong>“Affiliate”</strong> means an entity controlling, controlled by, or under common control with a party.</li>
+      <li><strong>“Order”</strong> means a mutually executed order form, statement of work, or online checkout detailing plan tier(s), term, and any commercial terms.</li>
+      <li><strong>“Policies”</strong> means documents available within BRidge (e.g., <a href="/terms">Terms</a>, <a href="/privacy">Privacy</a>, Acceptable Use, Security Overview, DR/Retention notes) which may be updated from time to time.</li>
+      <li><strong>“Customer Data”</strong> means data you or your users submit to BRidge (e.g., contracts, inventory, BOLs), excluding Derived Data.</li>
+      <li><strong>“Derived Data”</strong> means anonymized, aggregated, or transformed outputs, indices, analytics, and logs generated by or for BRidge.</li>
+      <li><strong>“Market Data”</strong> means price references or feeds (e.g., COMEX/LME snapshots), whether first-party, scraped, delayed, or third-party.</li>
+      <li><strong>“User”</strong> means your employee, contractor, or agent authorized to use BRidge under your account.</li>
+    </ul>
+
+    <h2 id="2-license-grant-scope"><span class="section-id">2.</span>License Grant &amp; Scope</h2>
+    <p>Subject to this EULA and any applicable Order, Atlas grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable license to access and use BRidge during the Term, solely for your internal, lawful business purposes in connection with commodity contracts, logistics, compliance, analysis, and related workflows.</p>
+
+    <h3>2.1 Restrictions</h3>
+    <ul>
+      <li>No resale, re-licensing, time-sharing, or service bureau use of BRidge.</li>
+      <li>No reverse engineering, decompiling, scraping of non-exposed endpoints, or circumvention of security controls.</li>
+      <li>No benchmarking or publication of performance results without Atlas’s prior written consent.</li>
+      <li>Use of reference prices/feeds is <strong>internal only</strong>; you must not publicly redistribute Market Data or Derived Data unless expressly permitted by Atlas and any third-party data providers.</li>
+    </ul>
+
+    <h3>2.2 Reservation of Rights</h3>
+    <p>BRidge is licensed, not sold. Atlas and its licensors reserve all rights not expressly granted.</p>
+
+    <!-- NEW: Regulatory Status -->
+    <h3>2.3 Regulatory Status; No Brokerage</h3>
+    <p>Unless expressly stated in an Order, Atlas is not acting as a registered broker-dealer, investment adviser, alternative trading system (ATS), designated contract market (DCM), or clearing agency. BRidge is software infrastructure and operational tooling; it does not constitute investment advice, a solicitation to buy or sell commodities or securities, or a commitment to execute or clear any transaction.</p>
+
+    <h2 id="3-accounts-access"><span class="section-id">3.</span>Accounts, Access &amp; Roles</h2>
+    <p>You are responsible for: (a) creating and maintaining accurate account information; (b) restricting access to authorized Users; (c) all activities under your accounts; and (d) complying with role-based permissions (e.g., admin, buyer, seller, manager).</p>
+    <p>Atlas may suspend or restrict access (e.g., via kill-switch or entitlements) to protect the platform, enforce risk controls, address non-payment, or respond to regulatory issues.</p>
+
+    <h2 id="4-acceptable-use"><span class="section-id">4.</span>Acceptable Use; Prohibited Conduct</h2>
+    <ul>
+      <li>Use BRidge only for lawful commercial purposes in compliance with applicable laws and Policies.</li>
+      <li>No uploading of malicious code, attack traffic, or attempts to bypass rate limits or idempotency gates.</li>
+      <li>No infringement, defamation, harassment, or misuse of logistics/identity data.</li>
+      <li>No use that would violate antitrust/competition laws or create false/market-manipulative signals.</li>
+    </ul>
+
+    <!-- NEW: API Fair Use -->
+    <h3>4.1 API Fair Use &amp; Rate Limits</h3>
+    <p>You will comply with published or in-product rate limits and idempotency requirements. Atlas may throttle, queue, or temporarily block requests that exceed fair-use thresholds or threaten system stability.</p>
+
+    <h2 id="5-data-rights-privacy"><span class="section-id">5.</span>Data Rights, Confidentiality &amp; Privacy</h2>
+    <h3>5.1 Customer Data</h3>
+    <p>You retain all rights to Customer Data. You grant Atlas a worldwide, non-exclusive license to host, process, display, analyze, and create Derived Data from Customer Data to provide, secure, and improve BRidge (including indices, risk models, anomaly detection, and operational analytics).</p>
+
+    <h3>5.2 Derived Data</h3>
+    <p>Atlas owns Derived Data and may use it for benchmarking, indices, product improvement, security, and compliance, provided it is not used to identify you or your Users (unless legally required or expressly permitted by you).</p>
+
+    <h3>5.3 Confidentiality</h3>
+    <p>Each party will protect the other’s Confidential Information with reasonable care and use it only as permitted under this EULA. Confidentiality obligations survive termination.</p>
+
+    <h3>5.4 Privacy &amp; Dossier HR</h3>
+    <p>Processing of personal data is governed by our <a href="/privacy">Privacy Policy</a> and, where applicable, a data protection addendum (“<strong>DPA</strong>”). You acknowledge that BRidge may emit signed, auditable events to Dossier HR (behavioral/compliance bus) as configured, for normalization, trust scoring, and recordkeeping.</p>
+
+    <!-- NEW: Subprocessors & Data Residency -->
+    <h3>5.5 Subprocessors &amp; Data Residency</h3>
+    <p>Atlas may use vetted subprocessors (e.g., hosting, storage, observability) to provide BRidge. A current list is available upon request and may be updated. Where a DPA applies, data residency, transfer mechanisms, and subprocessors will follow the DPA’s terms and prevail over this EULA in case of conflict.</p>
+
+    <h2 id="6-compliance"><span class="section-id">6.</span>Compliance (KYC/AML/Sanctions; Recordkeeping)</h2>
+    <ul>
+      <li>You are responsible for your own counterparty diligence. BRidge supports flags and statuses, but does not certify counterparties.</li>
+      <li>You must not use BRidge in violation of KYC/AML, sanctions, or import/export laws. Atlas may suspend access upon reasonable suspicion of noncompliance.</li>
+      <li>Recordkeeping, retention, and export (e.g., <code>/admin/exports</code>) are provided as tools; you remain responsible for regulatory filings and accuracy.</li>
+    </ul>
+
+    <h2 id="7-third-party"><span class="section-id">7.</span>Third-Party Services, Market Data &amp; APIs</h2>
+    <p>BRidge may rely on third-party services (e.g., ICE Digital Trade, Supabase, cloud storage, FX references) and may ingest/delay reference Market Data (e.g., COMEX/LME snapshots) on a best-effort basis. Such services are subject to their own terms. Atlas makes no guarantees regarding availability, accuracy, timeliness, licensing status, or continuing access to third-party services or Market Data.</p>
+    <p>You must not redistribute third-party Market Data obtained through BRidge unless expressly permitted by the originating provider and Atlas.</p>
+
+    <!-- NEW: Pricing/Market Data Disclaimers -->
+    <h3>7.1 Pricing/Market Data Disclaimers</h3>
+    <p>Reference prices, indices, or FX shown in BRidge are for internal calculation and operational use only and may be delayed, estimated, incomplete, or interrupted. You are solely responsible for any trading, hedging, or accounting decisions that rely on such values. Redistribution or public display is prohibited unless expressly licensed by the originating provider and Atlas.</p>
+
+    <h2 id="8-security-audit"><span class="section-id">8.</span>Security, Logging &amp; Audit</h2>
+    <ul>
+      <li>Atlas implements reasonable technical and organizational measures (e.g., session controls, rate limiting, security headers, logging, Prometheus/Sentry, audit chain hashing).</li>
+      <li>BRidge may generate immutable (hash-chained) audit events and daily seals. You consent to logging and monitoring necessary to provide and secure the Service.</li>
+      <li>Disaster recovery targets (e.g., RTO/RPO) are goals and not guarantees.</li>
+      <li><strong>Regulatory Audit Rights.</strong> Atlas may grant limited audit access to regulators, licensed exchanges, or their designated auditors for the sole purpose of verifying compliance, provided such access is subject to confidentiality and security controls.</li>
+    </ul>
+
+    <h2 id="9-service-changes-sla"><span class="section-id">9.</span>Service Changes; Availability; Support</h2>
+    <p>Atlas may update, modify, or discontinue features (including indices, APIs, or integrations) on reasonable notice where practicable. BRidge is provided on an “as-available” basis; no specific uptime or response SLAs are provided unless expressly stated in an Order or SLA addendum.</p>
+    <p><strong>Service Level Addendum.</strong> Service uptime and performance commitments, where applicable, are defined in the <em>SLA Addendum</em> available upon request or as incorporated by reference in an Order.</p>
+
+    <h2 id="10-fees-taxes"><span class="section-id">10.</span>Fees, Taxes &amp; Payment</h2>
+    <p>Fees (subscription, usage, marketplace, or integration fees) are as stated in the applicable Order. Fees are non-refundable except as expressly provided. You are responsible for applicable taxes (excluding Atlas’s taxes on income). Late amounts may incur finance charges or suspension.</p>
+
+    <h2 id="11-ip"><span class="section-id">11.</span>Intellectual Property; Feedback</h2>
+    <p>Atlas and its licensors own BRidge, including software, schemas, documentation, UI, designs, indices methodologies, models, and all improvements. If you provide Feedback or suggestions, Atlas may freely use them without restriction or obligation.</p>
+
+    <!-- NEW: Open-Source & Third-Party Components -->
+    <h3>11.1 Third-Party &amp; Open-Source Components</h3>
+    <p>BRidge may include or interact with open-source software and third-party components subject to their own licenses. To the extent required by those licenses, Atlas will make applicable notices and source code offers available upon request. In the event of conflict between such licenses and this EULA, the open-source licenses control solely for the covered components.</p>
+
+    <h2 id="12-warranties"><span class="section-id">12.</span>Disclaimers &amp; No Warranties</h2>
+    <p><strong>BRIDGE, MARKET DATA, INDICES, ANALYTICS, AND ALL RELATED MATERIALS ARE PROVIDED “AS IS” AND “AS AVAILABLE.”</strong> TO THE MAXIMUM EXTENT PERMITTED BY LAW, ATLAS DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, QUIET ENJOYMENT, AND NON-INFRINGEMENT. WITHOUT LIMITATION, ATLAS DOES NOT WARRANT THAT BRIDGE OR ANY MARKET DATA OR THIRD-PARTY SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, ACCURATE, OR SECURE.</p>
+    <p><em>Professional Advice Disclaimer.</em> BRidge does not provide legal, accounting, investment, or tax advice.</p>
+
+    <h2 id="13-liability"><span class="section-id">13.</span>Limitation of Liability</h2>
+    <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL ATLAS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES; OR FOR LOST PROFITS, LOSS OF BUSINESS, LOSS OF DATA, TRADING LOSSES, HEDGING ERRORS, OR REGULATORY PENALTIES, EVEN IF ADVISED OF THE POSSIBILITY.</p>
+    <p>ATLAS’S AGGREGATE LIABILITY ARISING OUT OF OR RELATED TO THIS EULA WILL NOT EXCEED THE AMOUNTS PAID BY YOU TO ATLAS FOR BRIDGE IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO LIABILITY. THE FOREGOING LIMITATIONS APPLY NOTWITHSTANDING FAILURE OF THE ESSENTIAL PURPOSE OF ANY LIMITED REMEDY.</p>
+
+    <h2 id="14-indemnity"><span class="section-id">14.</span>Indemnification</h2>
+    <p>You will defend, indemnify, and hold harmless Atlas and its Affiliates from and against any claims, damages, liabilities, costs, and expenses (including reasonable attorneys’ fees) arising out of or related to: (a) your use of BRidge in violation of this EULA, Policies, or law; (b) your Customer Data; (c) your interactions and contracts with counterparties; or (d) your use or redistribution of Market Data or Derived Data contrary to applicable licenses.</p>
+
+    <!-- UPDATED: Export/Sanctions/Anti-Bribery -->
+    <h2 id="15-export-ethics"><span class="section-id">15.</span>Export Controls; Sanctions; Anti-Bribery</h2>
+    <ul>
+      <li>You represent that neither you nor your beneficial owners are the subject of sanctions or listed on any restricted-party list (including OFAC, UK HMT, EU, or UN lists).</li>
+      <li>You will not export, re-export, or transfer BRidge to any embargoed jurisdiction or prohibited party and will obtain all required licenses.</li>
+      <li>You will comply with the U.S. FCPA, UK Bribery Act, and analogous anti-corruption laws, maintaining adequate internal controls.</li>
+    </ul>
+
+    <h2 id="16-termination"><span class="section-id">16.</span>Term, Suspension &amp; Termination</h2>
+    <p>This EULA begins upon your first access to BRidge and continues for the Term specified in your Order or until terminated as permitted herein.</p>
+    <h3>16.1 Suspension</h3>
+    <p>Atlas may immediately suspend access for security risks, suspected violations, non-payment, or legal/regulatory requests.</p>
+    <h3>16.2 Termination</h3>
+    <p>Either party may terminate for material breach if not cured within thirty (30) days’ written notice (ten (10) days for non-payment). Atlas may terminate immediately for illegal use, infringement risk, sanctions issues, or data misuse.</p>
+    <h3>16.3 Effect; Survival</h3>
+    <p>Upon termination, your license ends and you must cease use and destroy any non-exported copies of software or confidential materials. Sections on data rights (to the extent necessary), confidentiality, IP, disclaimers, liability limits, indemnity, and dispute resolution survive.</p>
+    <p>Atlas may, at your written request and subject to fees, provide reasonable export of your recent Customer Data (e.g., via <code>/admin/exports</code>) unless prohibited by law, third-party rights, or security concerns.</p>
+
+    <h2 id="17-governing-law"><span class="section-id">17.</span>Governing Law, Venue &amp; Dispute Resolution</h2>
+    <p><strong>Governing Law.</strong> This EULA is governed by the laws of the State of Indiana, USA, without regard to conflict-of-laws principles.</p>
+    <p><strong>International / UK Users.</strong> Where the Order specifies the United Kingdom as the contracting region, or where you are incorporated or primarily located in the UK, this EULA is governed by the laws of England and Wales. The parties submit to the exclusive jurisdiction of the courts of England and Wales for matters not subject to arbitration under this Section.</p>
+
+    <h3>17.1 Dispute Escalation Ladder</h3>
+    <ol>
+      <li><strong>Mediation (Good-Faith Negotiation).</strong> The parties’ authorized representatives will meet (virtually or in person) to negotiate in good faith for at least ten (10) business days to resolve any dispute arising out of or relating to this EULA.</li>
+      <li><strong>Arbitration.</strong> If the dispute is not resolved by mediation, it will be finally resolved by binding arbitration:
+        <ul>
+          <li><em>US seat:</em> American Arbitration Association (AAA) Commercial Arbitration Rules, seated in Indianapolis, Indiana, before one arbitrator.</li>
+          <li><em>UK seat:</em> London Court of International Arbitration (LCIA) Rules, seated in London, England, before one arbitrator.</li>
+        </ul>
+        Judgment on the award may be entered in any court of competent jurisdiction.
+      </li>
+      <li><strong>Litigation (Residual Matters).</strong> Applications for injunctive relief, enforcement of arbitration awards, or claims not subject to arbitration by law may be brought in the courts specified above.</li>
+    </ol>
+    <p>Each party waives the right to a jury trial to the extent permitted by law.</p>
+
+    <h2 id="18-updates"><span class="section-id">18.</span>Updates to this EULA</h2>
+    <p>Atlas may update this EULA to reflect changes to the Service, law, or business needs. Material changes will be posted within BRidge (e.g., at <code>/eula</code>) and become effective upon posting or as otherwise stated. Your continued use after the effective date constitutes acceptance.</p>
+
+    <h2 id="19-general"><span class="section-id">19.</span>General Terms</h2>
+    <ul>
+      <li><strong>Entire Agreement.</strong> This EULA, the Policies, and any applicable Order constitute the entire agreement and supersede prior discussions.</li>
+      <li><strong>Order of Precedence.</strong> If there is a conflict, an executed Order controls, then this EULA, then the Policies.</li>
+      <li><strong>Assignment.</strong> You may not assign this EULA without Atlas’s prior written consent; any attempted assignment in violation is void. Atlas may assign to an Affiliate or in connection with a merger, sale, or reorganization.</li>
+      <li><strong>Force Majeure.</strong> Neither party is liable for delays beyond its reasonable control (e.g., acts of God, network failures, regulatory actions).</li>
+      <li><strong>Severability; Waiver.</strong> If any provision is unenforceable, the remainder remains in effect. Failure to enforce is not a waiver.</li>
+      <li><strong>Independent Contractors.</strong> The parties are independent contractors; no partnership, agency, or fiduciary duty is created.</li>
+      <li><strong>Publicity.</strong> Atlas may use your name and marks to identify you as a customer, subject to your reasonable brand guidelines (unless your Order states otherwise).</li>
+      <li><strong>Government Use.</strong> BRidge is “commercial computer software” and “commercial computer software documentation.” Government use is subject to standard commercial licensing terms.</li>
+      <li><strong>Electronic Acceptance.</strong> You agree that clicking “I agree,” checking a box, API key issuance/first use, or otherwise affirmatively consenting within the BRidge UI constitutes your electronic signature and acceptance of this EULA under the U.S. E-SIGN Act, the Uniform Electronic Transactions Act (UETA), and, where applicable, the UK Electronic Communications Act 2000.</li>
+    </ul>
+
+    <h2 id="20-contacts"><span class="section-id">20.</span>Notices &amp; Contacts</h2>
+    <p>Notices to Atlas must be sent to: <br/>
+      <em>Atlas IP Holdings LLC</em><br/>
+      Attn: Legal – BRidge EULA<br/>
+      <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>
+    </p>
+    <p>We may provide notices to you via the BRidge UI, email to your admin contact, or your account address.</p>
+
+    <hr />
+    <p class="footer">
+      <span class="caps">Effective Date:</span> October 6, 2025<br/>
+      <span class="caps">Product:</span> BRidge™ – Contracting, Logistics, Indices &amp; Market Functions Platform<br/>
+      © Atlas IP Holdings LLC. All rights reserved.
+    </p>
+  </div>
 </body>
 </html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Service Level Addendum (SLA) – BRidge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; }
+    html, body { background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif; line-height:1.55; }
+    .wrap { max-width:960px; margin:0 auto; padding:2.25rem 1.25rem 4rem; }
+    h1,h2,h3 { line-height:1.25; margin:1.6rem 0 .6rem; }
+    h1{font-size:1.9rem;} h2{font-size:1.35rem;} h3{font-size:1.05rem;}
+    p{margin:.6rem 0 .6rem;} ul,ol{margin:.4rem 0 1rem 1.35rem;} li{margin:.25rem 0;}
+    small,.muted{color:var(--muted);} hr{border:0;border-top:1px solid var(--rule);margin:1.4rem 0;}
+    table{border-collapse:collapse;width:100%;margin:1rem 0;} th,td{border:1px solid #ddd;padding:.55rem .75rem;text-align:left;vertical-align:top;}
+    th{background:#f9f9f9;}
+    a{color:#0645ad;text-decoration:none;} a:hover{text-decoration:underline;}
+    .footer{margin-top:2.5rem;font-size:.9rem;color:var(--muted);}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Service Level Addendum (SLA)</h1>
+  <p class="muted">This Service Level Addendum (“<strong>SLA</strong>”) forms part of the <a href="/terms">Terms of Service</a> and <a href="/eula">EULA</a> between Atlas IP Holdings LLC (“<strong>Atlas</strong>”) and Customer. Capitalized terms not defined here have the meanings in the EULA/Terms.</p>
+
+  <h2>1. Availability Commitment</h2>
+  <p><strong>Monthly Uptime Percentage (MUP):</strong> 99.90% per calendar month for the production BRidge application and APIs, measured at the service edge (health endpoints) excluding Planned Maintenance and SLA Exclusions (Section 6).</p>
+
+  <h3>1.1 Downtime Definition</h3>
+  <p><strong>Downtime</strong> means ≥ 5 consecutive minutes in which BRidge’s core API health endpoint returns 5xx or is unreachable from ≥ 3 independent vantage points. Partial impairment of non-core features (e.g., PDF exports) does not count as Downtime if login and contract execution APIs remain available.</p>
+  <p><strong>MUP</strong> = (1 – Downtime minutes ÷ Total minutes in calendar month) × 100%.</p>
+
+  <h2>2. Incident Severity & Response Targets</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Definition</th><th>Initial Response</th><th>Workaround / Update Cadence</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>SEV-1</strong> (Critical Outage)</td>
+        <td>Complete loss of service or critical path (login, contracts, BOLs, trading) unavailable for all tenants.</td>
+        <td>≤ 30 minutes</td>
+        <td>Workaround ASAP; status updates ≤ 60 minutes until resolved</td>
+      </tr>
+      <tr>
+        <td><strong>SEV-2</strong> (Major Degradation)</td>
+        <td>Material impairment (e.g., BOL PDF generation failures, high error rates) with no viable workaround for most users.</td>
+        <td>≤ 2 hours</td>
+        <td>Updates ≤ 4 hours until resolved or mitigated</td>
+      </tr>
+      <tr>
+        <td><strong>SEV-3</strong> (Minor Impact)</td>
+        <td>Degraded functionality with a reasonable workaround or limited scope impact.</td>
+        <td>≤ 1 business day</td>
+        <td>Updates at least every 2 business days</td>
+      </tr>
+      <tr>
+        <td><strong>SEV-4</strong> (Cosmetic / Inquiry)</td>
+        <td>Non-blocking issues, questions, or feature requests.</td>
+        <td>≤ 3 business days</td>
+        <td>As mutually agreed</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.1 Communications</h3>
+  <p>For SEV-1/SEV-2, Atlas will post public incident updates to the Status Page and send notifications to admin emails on file at the cadence in Section 2. Status Page: <code>status.scrapfutures.com</code>.</p>
+
+  <h3>2.2 DR Objectives</h3>
+  <p>For reference, Atlas targets RTO ≤ 15 minutes and RPO ≤ 60 seconds for core databases (see <code>/admin/dr/objectives</code>). These are objectives, not guarantees, and do not modify the SLA credits.</p>
+
+  <h2>3. Maintenance Windows</h2>
+  <ul>
+    <li><strong>Planned Maintenance:</strong> typically Saturdays 00:00–04:00 US Eastern with ≥ 72 hours’ notice via in-product banner or email to admin contacts.</li>
+    <li><strong>Emergency Maintenance:</strong> performed as needed to address urgent security or stability risks; Atlas will provide notice where practicable.</li>
+  </ul>
+
+  <h3>3.1 Maintenance Limits</h3>
+  <p>Emergency maintenance will be limited to actions necessary to mitigate active security or stability risk and will be scheduled to minimize impact where practicable.</p>
+
+  <h2>4. Measurement & Reporting</h2>
+  <ul>
+    <li>MUP is measured using Atlas telemetry and health checks at publicly documented endpoints (e.g., <code>/healthz</code>).</li>
+    <li>Service credits are based on confirmed monthly measurements and Customer support tickets referencing incident windows.</li>
+  </ul>
+
+  <h3>4.1 Measurement Sources</h3>
+  <p>Authoritative measurements are Atlas synthetic probes and server-side logs. Summaries may be published at <code>status.scrapfutures.com</code>. Customer evidence (timestamps, traceroutes) will be considered in good faith during claim validation.</p>
+
+  <h2>5. Service Credits</h2>
+  <table>
+    <thead><tr><th>MUP in a Month</th><th>Credit (% of monthly subscription fees for affected service)</th></tr></thead>
+    <tbody>
+      <tr><td>&lt; 99.90% and ≥ 99.0%</td><td>10%</td></tr>
+      <tr><td>&lt; 99.0% and ≥ 98.0%</td><td>25%</td></tr>
+      <tr><td>&lt; 98.0%</td><td>40%</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Claim Process:</strong> Email <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a> within 30 days after the month-end with incident IDs/timestamps. Credits are applied to future invoices and are Customer’s sole and exclusive remedy for availability issues.</p>
+
+  <h3>5.1 Credit Cap &amp; Stacking</h3>
+  <p>Total credits in a month are capped at the lesser of (a) the fees for that month for the affected service or (b) one month of the then-current subscription for that service. Credits cannot be exchanged for cash, transferred, or combined across separate accounts or months.</p>
+
+  <h3>5.2 Chronic SLA Breach</h3>
+  <p>If MUP falls below 99.0% in any three (3) months in a rolling twelve-month period, Customer may terminate the affected service for material breach with thirty (30) days’ written notice, and receive a prorated refund of prepaid, unused fees.</p>
+
+  <h2>6. SLA Exclusions</h2>
+  <ul>
+    <li>Customer or third-party networks, ISPs, DNS, or integrations not operated by Atlas (including ICE Digital Trade or Customer-enabled webhooks).</li>
+    <li>Customer misuse, AUP violations, exceeding documented rate limits, or unsafe automation.</li>
+    <li>Planned/Emergency Maintenance within the windows above.</li>
+    <li>Force majeure events and events outside Atlas’s reasonable control.</li>
+    <li>Beta/pre-release features labeled as such.</li>
+  </ul>
+
+  <h3>6.1 DDoS &amp; Force Majeure</h3>
+  <p>Periods attributable to active DDoS or upstream carrier failures are excluded provided Atlas is actively mitigating using commercially reasonable measures (e.g., scrubbing, rate-limiting, rerouting).</p>
+
+  <h2>7. Support &amp; Contact</h2>
+  <ul>
+    <li><strong>Support Hours:</strong> Standard: Mon–Fri 9:00–18:00 US Eastern (excluding US holidays). SEV-1 handled 24×7.</li>
+    <li><strong>Channels:</strong> Email <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>; in-product ticketing where available.</li>
+  </ul>
+
+  <h2>8. Changes to this SLA</h2>
+  <p>Atlas may update this SLA from time to time. Material changes will be posted here and, where applicable, notified to Customer admin contacts at least 10 days before effectiveness unless earlier changes are required by law or security concerns.</p>
+
+  <hr />
+  <p class="footer">
+    <span class="caps">Effective Date:</span> October 6, 2025<br/>
+    <small class="muted">Version 1.1 — Last updated October 6, 2025</small><br/>
+    <span class="caps">Product:</span> BRidge™ – Contracting, Logistics, Indices &amp; Market Functions Platform<br/>
+    © Atlas IP Holdings LLC. All rights reserved.
+  </p>
+</div>
+</body>
+</html>

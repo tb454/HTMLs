@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Acceptable Use Policy – BRidge</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; --accent:#0a5; }
+    html, body { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; line-height: 1.55; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2.25rem 1.25rem 4rem; }
+    h1, h2, h3 { line-height: 1.25; margin: 1.6rem 0 0.6rem; }
+    h1 { font-size: 1.9rem; }
+    h2 { font-size: 1.35rem; margin-top: 2rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.2rem; }
+    p { margin: 0.6rem 0 0.6rem; }
+    ul, ol { margin: 0.4rem 0 1rem 1.35rem; }
+    li { margin: 0.25rem 0; }
+    small, .muted { color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--rule); margin: 1.4rem 0; }
+    code { background: #f7f7f7; padding: 0 .25rem; border-radius: .25rem; }
+    .topnote { padding: .85rem 1rem; background: #f8fff9; border: 1px solid #e6f6ea; border-radius: 8px; }
+    .toc { border-left: 3px solid var(--rule); padding-left: .9rem; margin: .5rem 0 1.5rem; }
+    a { color: #0645ad; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .caps { text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .section-id { color: var(--muted); font-weight: 500; margin-right: .35rem; }
+    .footer { margin-top: 2.5rem; font-size: .9rem; color: var(--muted); }
+    .badge { display:inline-block; padding:.1rem .45rem; background:#eef7ff; border:1px solid #d8eefc; border-radius:6px; font-size:.78rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Acceptable Use Policy</h1>
+    <p class="muted">This Acceptable Use Policy (“<strong>AUP</strong>”) governs how users may access and use BRidge. It forms part of the <a href="/terms">Terms</a> and <a href="/eula">EULA</a>. Violations may result in throttling, suspension, or termination.</p>
+
+    <div class="topnote">
+      <strong>Short version:</strong> Use BRidge for legitimate commercial workflows. Don’t break laws, abuse resources, redistribute non-public market data, or attempt to manipulate markets or defeat controls.
+    </div>
+
+    <h2>Table of Contents</h2>
+    <div class="toc">
+      <ol>
+        <li><a href="#1-lawful">Lawful Use</a></li>
+        <li><a href="#2-security">Security & Abuse</a></li>
+        <li><a href="#3-content">Prohibited Content & Conduct</a></li>
+        <li><a href="#4-market">Market Integrity & Data Use</a></li>
+        <li><a href="#5-apis">APIs, Automation & Rate Limits</a></li>
+        <li><a href="#6-compliance">Sanctions, KYC/AML & Export</a></li>
+        <li><a href="#7-research">Security Research (Safe Harbor)</a></li>
+        <li><a href="#8-enforcement">Enforcement & Reporting</a></li>
+      </ol>
+    </div>
+
+    <h2 id="1-lawful"><span class="section-id">1.</span>Lawful Use</h2>
+    <ul>
+      <li>Use BRidge only for lawful commercial purposes consistent with applicable regulations and your internal policies.</li>
+      <li>Comply with antitrust/competition laws; no collusion or unfair practices.</li>
+      <li>No use in life-support, emergency services, or other high-risk environments where failure could reasonably result in death, personal injury, or severe environmental damage.</li>
+    </ul>
+
+    <h2 id="2-security"><span class="section-id">2.</span>Security & Abuse</h2>
+    <ul>
+      <li>No introducing malware, exploits, or load intended to degrade BRidge or third-party services.</li>
+      <li>No bypassing authentication, entitlements, idempotency, or kill-switches.</li>
+      <li>No unauthorized access to accounts, data, or non-public endpoints; no credential sharing outside your organization.</li>
+      <li>No scraping or bulk extraction of data beyond provided exports/APIs.</li>
+      <li>No reselling, renting, or sublicensing access; maintain least-privilege access.</li>
+      <li><strong>Operational Monitoring:</strong> You consent to reasonable monitoring, logging, and rate-limiting necessary to operate and secure BRidge. We may investigate suspected violations, including reviewing logs and headers.</li>
+    </ul>
+
+    <h2 id="3-content"><span class="section-id">3.</span>Prohibited Content & Conduct</h2>
+    <ul>
+      <li>Illegal content, harassment, hate, threats, doxxing, or violation of privacy rights.</li>
+      <li>Infringing uploads or misuse of others’ IP (see <a href="/terms#12-dmca">DMCA</a> process).</li>
+      <li>Deceptive practices, misrepresentation of identity, or falsified records (e.g., BOLs, signatures).</li>
+    </ul>
+
+    <h2 id="4-market"><span class="section-id">4.</span>Market Integrity & Data Use</h2>
+    <ul>
+      <li>No spoofing-like behavior, wash-like trading, or attempts to manipulate pricing or indices.</li>
+      <li>Reference prices and Derived Data shown in BRidge are for internal operational use only unless expressly licensed for redistribution.</li>
+      <li>Respect surveillance and audit features; do not attempt to disable logging or chain seals.</li>
+      <li>No attempts to circumvent metering, billing, or usage-based fees (e.g., by masking call origins or rotating identities).</li>
+    </ul>
+
+    <h2 id="5-apis"><span class="section-id">5.</span>APIs, Automation & Rate Limits</h2>
+    <ul>
+      <li>Use issued API keys responsibly; keep them confidential.</li>
+      <li>Comply with <strong>rate limits</strong>, idempotency keys, and fair-use guidelines. We may throttle or block abusive patterns.</li>
+      <li>No automated account creation or credential stuffing.</li>
+      <li>Automated clients must identify via a standard <code>User-Agent</code> and, when feasible, include contact information for operational issues.</li>
+    </ul>
+
+    <h2 id="6-compliance"><span class="section-id">6.</span>Sanctions, KYC/AML & Export</h2>
+    <ul>
+      <li>No use by or for sanctioned parties or embargoed jurisdictions.</li>
+      <li>Do not use BRidge to evade KYC/AML obligations or submit knowingly false compliance attestations.</li>
+      <li>Follow export control laws when transferring software/data across borders.</li>
+    </ul>
+
+    <h2 id="7-research"><span class="section-id">7.</span>Security Research (Safe Harbor)</h2>
+    <p>Good-faith testing in <em>your own tenant</em> that does not harm other tenants is permitted. Do not test shared production endpoints, attempt denial-of-service, or access data you do not own. Report vulnerabilities to <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>; we will not pursue legal action for good-faith reports that comply with this AUP.</p>
+    <p><strong>Scope limits:</strong> Safe Harbor does not permit traffic flooding, production DoS, scanning of shared endpoints, or testing that degrades service. Atlas may revoke Safe Harbor if activity degrades service or risks data.</p>
+    <p><strong>Notification duty:</strong> If you discover a vulnerability or suspected incident affecting your tenant, you must notify Atlas without undue delay at <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>.</p>
+
+    <h2 id="8-enforcement"><span class="section-id">8.</span>Enforcement & Reporting</h2>
+    <ul>
+      <li>We may apply a progressive ladder: warning → temporary throttling → suspension → termination. Severe abuses (e.g., exploitation, data exfiltration, sanctions evasion) may result in immediate suspension and referral to authorities.</li>
+      <li>Report abuse or security issues to <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a> with relevant logs/headers if available.</li>
+    </ul>
+
+    <hr />
+    <p class="footer">
+      <span class="caps">Effective Date:</span> October 6, 2025<br/>
+      <span class="caps">Product:</span> BRidge™ – Contracting, Logistics, Indices &amp; Market Functions Platform<br/>
+      <small class="muted">Version 1.1 — Last updated October 6, 2025</small><br/>
+      © Atlas IP Holdings LLC. All rights reserved.
+    </p>
+  </div>
+</body>
+</html>

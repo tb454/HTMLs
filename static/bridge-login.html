@@ -10,9 +10,12 @@
       background-color: #f4f6f8;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      min-height: 100vh;
+      margin: 0;
       align-items: center;
-      height: 100vh;
+      justify-content: center;
+      gap: 16px;
     }
     .login-box {
       background: white;
@@ -22,157 +25,205 @@
       width: 100%;
       max-width: 400px;
     }
+
+    /* Single-line footer pinned to bottom */
+    footer.legal-footer {
+      width: 100%;
+      text-align: center;
+      font-size: 0.9em;
+      color: #6c757d;
+      white-space: nowrap;        /* keep single line */
+      overflow-x: auto;           /* allow horizontal scroll on very narrow screens */
+      -webkit-overflow-scrolling: touch;
+      padding: 8px 12px;
+      margin-top: auto;           /* push to bottom of viewport */
+      box-sizing: border-box;
+    }
+    footer.legal-footer a {
+      color: #0d6efd;
+      text-decoration: none;
+    }
+    footer.legal-footer a:hover { text-decoration: underline; }
+    .sep { color: #ced4da; margin: 0 .45rem; }
   </style>
 </head>
 <body>
-<div class="login-box">
-  <h3 class="mb-4 text-center">🔐 BRidge Login</h3>
+  <div class="login-box">
+    <h3 class="mb-4 text-center">🔐 BRidge Login</h3>
 
-  <form id="loginForm">
-    <div class="mb-3">
-      <label for="username" class="form-label">Username</label>
-      <input type="text" class="form-control" id="username" required />
-    </div>
-    <div class="mb-3">
-      <label for="password" class="form-label">Password</label>
-      <input type="password" class="form-control" id="password" required />
-    </div>
-    <button type="submit" class="btn btn-primary w-100">Login</button>
-  </form>
+    <form id="loginForm">
+  <div class="mb-3">
+    <label for="username" class="form-label">Username</label>
+    <input type="text" class="form-control" id="username" required />
+  </div>
+  <div class="mb-3">
+    <label for="password" class="form-label">Password</label>
+    <input type="password" class="form-control" id="password" required />
+  </div>
 
-  <!-- Create Account -->
-  <button class="btn btn-link w-100 mt-3" id="showSignup">Create an Account</button>
+  <button type="submit" class="btn btn-primary w-100">Login</button>
+</form>
 
-  <!-- Public Signup (buyers by default) -->
-  <form id="signupForm" style="display:none; margin-top:20px;">
-    <div class="mb-3">
-      <label for="signupEmail" class="form-label">Email</label>
-      <input type="email" class="form-control" id="signupEmail" required />
-    </div>
-    <div class="mb-3">
-      <label for="signupPassword" class="form-label">Password</label>
-      <input type="password" class="form-control" id="signupPassword" minlength="8" required />
-      <div class="form-text">At least 8 characters.</div>
-    </div>
-    <div class="mb-3">
-      <label for="signupRole" class="form-label">Role</label>
-      <select class="form-select" id="signupRole">
-        <option value="buyer" selected>Buyer</option>
-        <option value="seller">Seller</option>
-      </select>
-      <div class="form-text">Sellers may be restricted unless enabled by the admin.</div>
-    </div>
-    <button type="submit" class="btn btn-success w-100">Create Account</button>
-    <button type="button" class="btn btn-outline-secondary w-100 mt-2" id="backToLogin">Back to Login</button>
-  </form>
+<hr class="mt-4 mb-3">
 
-  <div id="error" class="mt-3 text-danger text-center" style="display:none;"></div>
-  <div id="success" class="mt-3 text-success text-center" style="display:none;"></div>
+<div class="text-center">
+  <a class="btn btn-outline-primary w-100" href="/static/apply.html" role="button">
+    Not a member? Apply for Access
+  </a>
 </div>
-<script>
-  // Same-origin calls; leave blank in prod so /login hits this service
-  const endpoint = ""; // e.g. "" in prod, or "http://localhost:10000" for local dev
 
-  // Collapse accidental double slashes
-  function joinURL(base, path) {
-    const b = (base || "").replace(/\/+$/,"");
-    const p = (path || "").replace(/^\/+/,"/");
-    return b + p;
-  }
 
-  async function api(path, opts = {}) {
-    const url = joinURL(endpoint, path);
-    const res = await fetch(url, {
-      ...opts,
-      headers: { "Accept":"application/json", "Content-Type":"application/json", ...(opts.headers||{}) }
-    });
-    return res;
-  }
+    <!-- Create Account -->
+    <button class="btn btn-link w-100 mt-3" id="showSignup">Create an Account</button>
 
-  document.getElementById("loginForm").addEventListener("submit", async function (e) {
-    e.preventDefault();
-    const errBox = document.getElementById("error");
-    errBox.style.display = "none";
+    <!-- Public Signup (buyers by default) -->
+    <form id="signupForm" style="display:none; margin-top:20px;">
+      <div class="mb-3">
+        <label for="signupEmail" class="form-label">Email</label>
+        <input type="email" class="form-control" id="signupEmail" required />
+      </div>
+      <div class="mb-3">
+        <label for="signupPassword" class="form-label">Password</label>
+        <input type="password" class="form-control" id="signupPassword" minlength="8" required />
+        <div class="form-text">At least 8 characters.</div>
+      </div>
+      <div class="mb-3">
+        <label for="signupRole" class="form-label">Role</label>
+        <select class="form-select" id="signupRole">
+          <option value="buyer" selected>Buyer</option>
+          <option value="seller">Seller</option>
+        </select>
+        <div class="form-text">Sellers may be restricted unless enabled by the admin.</div>
+      </div>
+      <button type="submit" class="btn btn-success w-100">Create Account</button>
+      <button type="button" class="btn btn-outline-secondary w-100 mt-2" id="backToLogin">Back to Login</button>
+    </form>
 
-    const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value;
+    <div id="error" class="mt-3 text-danger text-center" style="display:none;"></div>
+    <div id="success" class="mt-3 text-success text-center" style="display:none;"></div>
+  </div>
 
-    try {
-      const res = await api("/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password })
-      });
+  <script>
+    // Same-origin calls; leave blank in prod so /login hits this service
+    const endpoint = ""; // e.g. "" in prod, or "http://localhost:10000" for local dev
 
-      if (!res.ok) {
-        let msg = "Invalid credentials. Try again.";
-        try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch {}
-        errBox.textContent = msg;
-        errBox.style.display = "block";
-        return;
-      }
-
-      const data = await res.json();
-
-      // normalize role + persist minimal state
-      let role = (data.role || "").toLowerCase();
-      if (role === "yard") role = "seller";
-      localStorage.setItem("bridgeUser", JSON.stringify({ role }));
-
-      // Prefer server-provided redirect
-      if (data.redirect) { window.location.href = data.redirect; return; }
-
-      // Fallback by role
-      window.location.href = role === "admin" ? "/admin"
-                           : role ? `/${role}` : "/buyer";
-    } catch (err) {
-      errBox.textContent = "Network error. Please try again.";
-      errBox.style.display = "block";
-      console.error(err);
+    // Collapse accidental double slashes
+    function joinURL(base, path) {
+      const b = (base || "").replace(/\/+$/,"");
+      const p = (path || "").replace(/^\/+/,"/");
+      return b + p;
     }
-  });
 
-  // ----- Optional: wire up the signup UI you already have -----
-  const showSignup = document.getElementById("showSignup");
-  const signupForm = document.getElementById("signupForm");
-  const backToLogin = document.getElementById("backToLogin");
+    async function api(path, opts = {}) {
+      const url = joinURL(endpoint, path);
+      const res = await fetch(url, {
+        ...opts,
+        headers: { "Accept":"application/json", "Content-Type":"application/json", ...(opts.headers||{}) }
+      });
+      return res;
+    }
 
-  if (showSignup && signupForm && backToLogin) {
-    showSignup.onclick = () => { signupForm.style.display = "block"; document.getElementById("loginForm").style.display = "none"; };
-    backToLogin.onclick = () => { signupForm.style.display = "none"; document.getElementById("loginForm").style.display = "block"; };
-
-    signupForm.addEventListener("submit", async (e) => {
+    document.getElementById("loginForm").addEventListener("submit", async function (e) {
       e.preventDefault();
-      const success = document.getElementById("success");
-      const error = document.getElementById("error");
-      success.style.display = "none"; error.style.display = "none";
+      const errBox = document.getElementById("error");
+      errBox.style.display = "none";
 
-      const email = document.getElementById("signupEmail").value.trim();
-      const password = document.getElementById("signupPassword").value;
-      const role = document.getElementById("signupRole").value;
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
 
       try {
-        const r = await api("/signup", { method:"POST", body: JSON.stringify({ email, password, role }) });
-        const j = await r.json();
-        if (!r.ok || j?.ok === false) {
-          error.textContent = (j?.detail || "Signup failed.");
-          error.style.display = "block";
+        const res = await api("/login", {
+          method: "POST",
+          body: JSON.stringify({ username, password })
+        });
+
+        if (!res.ok) {
+          let msg = "Invalid credentials. Try again.";
+          try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch {}
+          errBox.textContent = msg;
+          errBox.style.display = "block";
           return;
         }
-        success.textContent = "Account created. You can log in now.";
-        success.style.display = "block";
-        setTimeout(() => { backToLogin.click(); }, 1200);
-      } catch (e2) {
-        error.textContent = "Network error during signup.";
-        error.style.display = "block";
+
+        const data = await res.json();
+
+        // normalize role + persist minimal state
+        let role = (data.role || "").toLowerCase();
+        if (role === "yard") role = "seller";
+        localStorage.setItem("bridgeUser", JSON.stringify({ role }));
+
+        // Prefer server-provided redirect
+        if (data.redirect) { window.location.href = data.redirect; return; }
+
+        // Fallback by role
+        window.location.href = role === "admin" ? "/admin"
+                             : role ? `/${role}` : "/buyer";
+      } catch (err) {
+        errBox.textContent = "Network error. Please try again.";
+        errBox.style.display = "block";
+        console.error(err);
       }
     });
-  }
-</script>
 
-  <footer style="margin-top: 40px; text-align: center; font-size: 0.9em;">
-  <a href="/terms" target="_blank">Terms of Use</a> | 
-  <a href="/eula" target="_blank">EULA</a> | 
-  <a href="/privacy" target="_blank">Privacy Policy</a>
-</footer>
+    // ----- Optional: wire up the signup UI you already have -----
+    const showSignup = document.getElementById("showSignup");
+    const signupForm = document.getElementById("signupForm");
+    const backToLogin = document.getElementById("backToLogin");
+
+    if (showSignup && signupForm && backToLogin) {
+      showSignup.onclick = () => { signupForm.style.display = "block"; document.getElementById("loginForm").style.display = "none"; };
+      backToLogin.onclick = () => { signupForm.style.display = "none"; document.getElementById("loginForm").style.display = "block"; };
+
+      signupForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const success = document.getElementById("success");
+        const error = document.getElementById("error");
+        success.style.display = "none"; error.style.display = "none";
+
+        const email = document.getElementById("signupEmail").value.trim();
+        const password = document.getElementById("signupPassword").value;
+        const role = document.getElementById("signupRole").value;
+
+        try {
+          const r = await api("/signup", { method:"POST", body: JSON.stringify({ email, password, role }) });
+          const j = await r.json();
+          if (!r.ok || j?.ok === false) {
+            error.textContent = (j?.detail || "Signup failed.");
+            error.style.display = "block";
+            return;
+          }
+          success.textContent = "Account created. You can log in now.";
+          success.style.display = "block";
+          setTimeout(() => { backToLogin.click(); }, 1200);
+        } catch (e2) {
+          error.textContent = "Network error during signup.";
+          error.style.display = "block";
+        }
+      });
+    }
+  </script>
+
+  <!-- Single-line legal footer -->
+  <footer class="legal-footer">
+    <a href="/terms" target="_blank" rel="noopener">Terms of Use</a>
+    <span class="sep">|</span>
+    <a href="/eula" target="_blank" rel="noopener">EULA</a>
+    <span class="sep">|</span>
+    <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+    <span class="sep">|</span>
+    <a href="/aup" target="_blank" rel="noopener">Acceptable Use</a>
+    <span class="sep">|</span>
+    <a href="/cookies" target="_blank" rel="noopener">Cookie Notice</a>
+    <span class="sep">|</span>
+    <a href="/legal/subprocessors" target="_blank" rel="noopener">Subprocessors</a>
+    <span class="sep">|</span>
+    <a href="/legal/dpa" target="_blank" rel="noopener">DPA</a>
+    <span class="sep">|</span>
+    <a href="/legal/sla" target="_blank" rel="noopener">SLA</a>
+    <span class="sep">|</span>
+    <a href="/legal/security" target="_blank" rel="noopener">Security Overview</a>
+    <span class="sep">|</span>
+    <a href="/privacy/appendix" target="_blank" rel="noopener">Privacy Appendix (APAC &amp; CA)</a>
+  </footer>
 </body>
 </html>
