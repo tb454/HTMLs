@@ -698,6 +698,18 @@ async def _ensure_runtime_risk_tables():
 # -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
+@app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use")
+async def terms_page():
+    return FileResponse("static/legal/terms.html")
+
+@app.get("/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement")
+async def eula_page():
+    return FileResponse("static/legal/eula.html")
+
+@app.get("/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy")
+async def privacy_page():
+    return FileResponse("static/legal/privacy.html")
+
 # Cookie Notice (alias: /legal/cookies and /cookies)
 @app.get("/legal/cookies", include_in_schema=True, tags=["Legal"],
          summary="Cookie Notice",
@@ -4212,45 +4224,37 @@ async def update_contract(
 #-------- Contract ID--------       
 
 #-------- Export Contracts as CSV --------
+from fastapi import Response
+
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
     try:
         rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
         dict_rows = [dict(r) for r in rows]
 
-        # Choose a stable header set even if rows are heterogenous
-        if dict_rows:
-            fieldnames = sorted({k for r in dict_rows for k in r.keys()})
-        else:
-            fieldnames = ["id"]  # minimal header when empty
+        # stable header set
+        fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
 
         buf = io.StringIO(newline="")
         writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-
-        # Normalize values so CSV never trips on types mid-stream
         for r in dict_rows:
             writer.writerow({k: _normalize(r.get(k)) for k in fieldnames})
 
-        data = buf.getvalue().encode("utf-8")
+        data = buf.getvalue()
+        headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
 
-        return StreamingResponse(
-            io.BytesIO(data),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
+        # Return *non-streaming* text response
+        return Response(content=data, media_type="text/csv", headers=headers)
+
     except Exception as e:
-        # dev-safe: never kill the socket; return an empty CSV and log
         try:
             logger.warn("contracts_export_csv_failed", err=str(e))
         except Exception:
             pass
-        fallback = "id\n".encode("utf-8")
-        return StreamingResponse(
-            io.BytesIO(fallback),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
+        # Return a minimal, valid CSV so the socket never resets
+        headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        return Response(content="id\n", media_type="text/csv", headers=headers)
 #-------- Export Contracts as CSV --------
 
 # --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
