@@ -17,9 +17,7 @@
     button:disabled{opacity:.6;cursor:not-allowed}
   </style>
 
-  <!-- Toast + endpoint + api helper -->
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
-  <script>
+   <script>
     // Unified API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
@@ -56,7 +54,9 @@
       </div>
       <span class="badge-live" data-health>● Checking…</span>
     </div>
-
+    
+ <!-- Toast + endpoint + api helper -->
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
     <div id="alert" class="alert d-none" role="status" aria-live="polite"></div>
 
     <div class="card p-3 p-md-4">
@@ -65,13 +65,15 @@
           <!-- Org & role -->
           <div class="col-md-4">
             <label class="form-label req" for="entity_type">Entity Type</label>
-            <select id="entity_type" class="form-select" required aria-required="true" name="entity_type">
-              <option value="">Select…</option>
-              <option value="yard">Scrap Yard</option>
-              <option value="buyer">Buyer / Mill</option>
-              <option value="broker">Broker</option>
-              <option value="other">Other</option>
-            </select>
+            <select id="entity_type" class="form-select" required name="entity_type">
+            <option value="">Select…</option>
+            <option value="yard">Scrap Yard</option>
+            <option value="mill">Mill</option>
+            <option value="industrial">Industrial Generator</option>
+            <option value="manufacturer">Manufacturer</option>
+            <option value="broker">Broker</option>
+          </select>
+
           </div>
           <div class="col-md-4">
             <label class="form-label req" for="role">Role</label>
@@ -260,69 +262,7 @@
       }catch{}
     })();
 
-    // Submit
-    form.addEventListener('submit', async (e)=>{
-      e.preventDefault();
-      $('alert').classList.add('d-none');
-
-      if(!form.checkValidity()){
-        const bad=form.querySelector(':invalid'); bad?.focus();
-        show('err','Please fix the highlighted fields.');
-        toast('Fix highlighted fields');
-        return;
-      }
-      if(!required(['entity_type','role','org_name','contact_name','email','plan'])){
-        show('err','Please complete required fields.'); toast('Missing required fields'); return;
-      }
-      if(!$('agree').checked){ show('err','Please accept the Terms & Privacy.'); toast('Accept Terms & Privacy'); return; }
-      if(($('fax_hp')?.value||'').trim()){ show('err','Submission blocked.'); return; }
-
-      // Build backend-shaped payload from form names (map autofill names to API keys)
-      const fd = new FormData(form);
-      const payload = {
-        entity_type:            fd.get('entity_type') || null,
-        role:                   fd.get('role') || null,
-        org_name:               (fd.get('organization') || fd.get('org_name') || '').trim() || null,
-        ein:                    (fd.get('ein') || '').trim() || null,
-        address:                (fd.get('street-address') || fd.get('address') || '').trim() || null,
-        city:                   (fd.get('address-level2') || fd.get('city') || '').trim() || null,
-        region:                 (fd.get('address-level1') || fd.get('region') || '').trim() || null,
-        website:                (fd.get('website') || '').trim() || null,
-        monthly_volume_tons:    fd.get('monthly_volume_tons') ? parseInt(fd.get('monthly_volume_tons'),10) : null,
-        contact_name:           (fd.get('name') || fd.get('contact_name') || '').trim() || null,
-        email:                  (fd.get('email') || '').trim() || null,
-        phone:                  (fd.get('tel') || fd.get('phone') || '').trim() || null,
-        ref_code:               (fd.get('ref_code') || '').trim() || null,
-        materials_buy:          (fd.get('materials_buy') || '').trim() || null,
-        materials_sell:         (fd.get('materials_sell') || '').trim() || null,
-        lanes:                  (fd.get('lanes') || '').trim() || null,
-        compliance_notes:       (fd.get('compliance_notes') || '').trim() || null,
-        plan:                   fd.get('plan') || null,
-        notes:                  (fd.get('notes') || '').trim() || null,
-        ...utm
-      };
-
-      const btn=$('submitBtn'); btn.disabled=true; const old=btn.textContent; btn.textContent='Submitting…';
-      try{
-        await api('/public/apply', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
-        show('ok',"Thanks! Your application has been received. We'll email you after review.");
-        toast('✓ Application submitted');
-        localStorage.removeItem(KEY);
-        form.reset(); $('agree').checked=false;
-      }catch(err){
-        let msg='Could not submit application. Please retry or email support@scrapfutures.com';
-        if(err?.message && err.message.length < 500) msg = err.message;
-        show('err', msg);
-        toast(msg);
-      }finally{
-        btn.disabled=false; btn.textContent=old;
-      }
-    });
-  </script>
+     </script>
   <script>
   // ---- Payment Method flow (Stripe Checkout in setup mode) ----
   async function pmStatus(member){

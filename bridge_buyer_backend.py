@@ -776,23 +776,84 @@ async def upsert_billing_contact(member: str, email: str, request: Request=None)
     """, {"m": member, "e": email})
     return {"ok": True, "member": member, "email": email}
 
-import os
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+# --- OPTIONAL SendGrid import (guarded) ---
+try:
+    from sendgrid import SendGridAPIClient  # type: ignore
+    from sendgrid.helpers.mail import Mail  # type: ignore
+    _SENDGRID_AVAILABLE = True
+except Exception:
+    SendGridAPIClient = None  # type: ignore
+    Mail = None  # type: ignore
+    _SENDGRID_AVAILABLE = False
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "ops@example.com")
 
 async def _send_email(to_email: str, subject: str, html: str, ref_type: str=None, ref_id: str=None):
+    """
+    Try SendGrid if SENDGRID_API_KEY is set and library is available.
+    Otherwise, try SMTP via env (SMTP_HOST/PORT/USER/PASS/FROM).
+    If neither is configured, log to email_logs and return.
+    """
+    # 1) SendGrid path
+    sg_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    if _SENDGRID_AVAILABLE and sg_key:
+        try:
+            sg = SendGridAPIClient(sg_key)
+            msg = Mail(from_email=ADMIN_EMAIL, to_emails=to_email, subject=subject, html_content=html)
+            sg.send(msg)
+            try:
+                await database.execute("""
+                  INSERT INTO email_logs(id,to_email,subject,body,ref_type,ref_id,status)
+                  VALUES (:id,:to,:sub,:body,:rt,:rid,'sent')
+                """, {"id": str(uuid.uuid4()), "to": to_email, "sub": subject, "body": html, "rt": ref_type, "rid": ref_id})
+            except Exception:
+                pass
+            return
+        except Exception:           
+            pass
+
+    # 2) SMTP path (optional)
+    host = os.environ.get("SMTP_HOST", "").strip()
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER", "").strip()
+    pwd  = os.environ.get("SMTP_PASS", "").strip()
+    sender = os.environ.get("SMTP_FROM", ADMIN_EMAIL)
+
+    if host:
+        try:
+            import smtplib
+            from email.message import EmailMessage
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = sender
+            msg["To"] = to_email
+            msg.set_content(html, subtype="html")
+            with smtplib.SMTP(host, port, timeout=30) as s:
+                try:
+                    s.starttls()
+                except Exception:
+                    pass
+                if user and pwd:
+                    s.login(user, pwd)
+                s.send_message(msg)
+            try:
+                await database.execute("""
+                  INSERT INTO email_logs(id,to_email,subject,body,ref_type,ref_id,status)
+                  VALUES (:id,:to,:sub,:body,:rt,:rid,'sent')
+                """, {"id": str(uuid.uuid4()), "to": to_email, "sub": subject, "body": html, "rt": ref_type, "rid": ref_id})
+            except Exception:
+                pass
+            return
+        except Exception:            
+            pass
+
+    # 3) Log-only (no SendGrid/SMTP configured)
     try:
-        sg = SendGridAPIClient(os.environ["SENDGRID_API_KEY"])
-        msg = Mail(from_email=ADMIN_EMAIL, to_emails=to_email, subject=subject, html_content=html)
-        sg.send(msg)
         await database.execute("""
-          INSERT INTO email_logs(id,to_email,subject,body,ref_type,ref_id)
-          VALUES (:id,:to,:sub,:body,:rt,:rid)
+          INSERT INTO email_logs(id,to_email,subject,body,ref_type,ref_id,status)
+          VALUES (:id,:to,:sub,:body,:rt,:rid,'skipped')
         """, {"id": str(uuid.uuid4()), "to": to_email, "sub": subject, "body": html, "rt": ref_type, "rid": ref_id})
     except Exception:
-        # don’t break flows on email failure
         pass
 
 async def _member_billing_email(member: str) -> str | None:
@@ -801,7 +862,10 @@ async def _member_billing_email(member: str) -> str | None:
 
 async def notify_humans(event: str, *, member: str, subject: str, html: str,
                         cc_admin: bool=True, ref_type: str=None, ref_id: str=None):
-    # event is a tag: 'payment.confirmed','contract.signed','bol.delivered', etc.
+    """
+    event: tag like 'payment.confirmed','contract.signed','bol.delivered', etc.
+    Sends to the member's billing contact (if any) and optionally CCs ADMIN_EMAIL.
+    """
     to_member = await _member_billing_email(member)
     if to_member:
         await _send_email(to_member, subject, html, ref_type, ref_id)
