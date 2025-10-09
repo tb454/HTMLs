@@ -1,3 +1,4 @@
+from __future__ import annotations
 # --- ensure sibling modules are importable in CI/pytest ---
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent.resolve()))
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response, Streamin
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, EmailStr, Field 
 from typing import List, Optional, Literal
-from sqlalchemy import create_engine, Table, MetaData, and_, select
+from sqlalchemy import create_engine, Table, MetaData, and_, select, Column, String, DateTime, Integer, Text, Boolean
 import os
 import databases
 import uuid
@@ -59,6 +60,7 @@ from indices_builder import run_indices_builder
 from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
 import smtplib
 from email.message import EmailMessage
+from __future__ import annotations
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -402,7 +404,9 @@ def send_application_email(payload: ApplyRequest, app_id: str):
             s.login(user, pwd)
         s.send_message(msg)
 
-metadata = MetaData() if 'metadata' not in globals() else metadata  # reuse if already declared
+from sqlalchemy import MetaData
+if 'metadata' not in globals():
+    metadata = MetaData()
 
 applications = Table(
     "applications",
@@ -477,13 +481,7 @@ async def security_headers_mw(request, call_next):
     "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
     "connect-src 'self' https://*.stripe.com"   # helpful if you fetch to Stripe APIs from the browser (rare here)
 )
-    resp.headers["Content-Security-Policy"] = (
-        "default-src 'self' https://cdn.jsdelivr.net; "
-        "img-src 'self' data:; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
-    )
+
     return resp
 
 app.middleware("http")(security_headers_mw)
@@ -660,6 +658,20 @@ async def _ensure_billing_core():
         FROM fees_ledger GROUP BY 1,2 ORDER BY 1,2;
     """)
 
+async def _mmi_usd(member: str) -> float:
+    """
+    Minimum Monthly Invoice ($) for the member.
+    Here we use the member's plan price_usd as the MMI.
+    Return 0.0 if the member has no plan assigned.
+    """
+    row = await database.fetch_one("""
+        SELECT bp.price_usd
+          FROM member_plans mp
+          JOIN billing_plans bp ON bp.plan_code = mp.plan_code
+         WHERE mp.member = :m
+    """, {"m": member})
+    return float(row["price_usd"]) if row and row["price_usd"] is not None else 0.0
+
 async def _member_totals(member: str, start: date, end: date):
     rows = await database.fetch_all("""
       SELECT event_type, SUM(COALESCE(fee_amount_usd, fee_amount)) AS amt
@@ -669,7 +681,7 @@ async def _member_totals(member: str, start: date, end: date):
     """, {"m": member, "s": start, "e": end})
     by_ev = {r["event_type"]: float(r["amt"] or 0) for r in rows}
     subtotal = sum(by_ev.values())
-    mmi = await _mmi_usd(member) if " _mmi_usd" in globals() else 0.0
+    mmi = await _mmi_usd(member) if "_mmi_usd" in globals() else 0.0
     trueup = max(0.0, mmi - subtotal) if mmi > 0 else 0.0
     return by_ev, subtotal, mmi, trueup
 
@@ -2203,24 +2215,7 @@ async def stripe_webhook(payload: bytes = Body(...), stripe_signature: str = Hea
                             cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
         return {"ok": True}
 
-    if et == "invoice.payment_failed":
-        inv = event["data"]["object"]
-        member = (inv.get("metadata") or {}).get("member")
-        await notify_humans("payment.failed", member=member,
-                            subject=f"Payment Failed — {member}",
-                            html=f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> failed. Please update your payment method.</div>",
-                            cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
-        return {"ok": True}
-
     return {"ignored": et}
-
-if et == "invoice.payment_failed":
-    inv = event["data"]["object"]
-    member = (inv.get("metadata") or {}).get("member")
-    subj = f"Payment Failed — {member}"
-    html = f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> failed. Please update your payment method.</div>"
-    await notify_humans("payment.failed", member=member, subject=subj, html=html, cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
-    return {"ok": True}
     
 async def _bind_pm(member: str | None, customer_id: str | None, pm_id: str | None):
     # (optional) email “PM added”
@@ -2294,7 +2289,7 @@ async def _stripe_invoice_for_member(member: str, start: date, end: date, invoic
     """, {"m": member, "s": start, "e": end})
     by_ev = {r["event_type"]: float(r["amt"] or 0) for r in rows}
     subtotal = sum(by_ev.values())
-    mmi = await _mmi_usd(member) if " _mmi_usd" in globals() else 0.0
+    mmi = await _mmi_usd(member) if "_mmi_usd" in globals() else 0.0
     trueup = max(0.0, mmi - subtotal) if mmi > 0 else 0.0
 
     # plan line + overages
@@ -4593,17 +4588,6 @@ class AuditAppendIn(BaseModel):
     entity_id: str = ""
     payload: dict = {}
 
-# --- AUDIT (safe models + guarded) ---------------------------------
-
-from pydantic import BaseModel
-
-class AuditAppendIn(BaseModel):
-    actor: str = "system"
-    action: str = "note"
-    entity_type: str = ""
-    entity_id: str = ""
-    payload: dict = {}
-
 @app.post("/admin/audit/log", tags=["Admin"], summary="Append audit event")
 async def admin_audit_log(body: AuditAppendIn = Body(...), request: Request = None):
     # Only enforce admin in production
@@ -5233,30 +5217,6 @@ async def get_all_contracts(
     return await database.fetch_all(query=query, values=values)
 
 # -------- Contract ID --------
-@app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
-async def export_contracts_csv():
-    try:
-        rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-        dict_rows = [dict(r) for r in rows]
-
-        fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
-        return StreamingResponse(
-            _iter_csv(dict_rows, fieldnames),  # uses your _iter_csv + _safe
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
-    except Exception as e:
-        try:
-            logger.warn("contracts_export_csv_failed", err=str(e))
-        except Exception:
-            pass
-        # minimal, never-500 fallback
-        return StreamingResponse(
-            iter(["id\n"]),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
-
 @app.put(
     "/contracts/{contract_id}",
     response_model=ContractOut,
@@ -5984,9 +5944,6 @@ async def _ensure_tenant_applications_schema():
 # ========== Tenant Applications ==========
 
 # --- Public endpoint (replaces /public/yard_signup) ---
-class ApplicationIn(BaseModel):
-    entity_type: str = Field(pattern=r"^(yard|buyer|mill|industrial|manufacturer|broker|other)$")
-
 @app.post(
     "/public/apply",
     tags=["Public"],
