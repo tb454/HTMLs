@@ -57,6 +57,8 @@ from price_sources import pull_comex_home_once
 from forecast_job import run_all as _forecast_run_all
 from indices_builder import run_indices_builder
 from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
+import smtplib
+from email.message import EmailMessage
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -340,6 +342,123 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
             )
         except Exception:
             pass
+
+def send_application_email(payload: ApplyRequest, app_id: str):
+    host = os.environ.get("SMTP_HOST", "")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER", "")
+    pwd  = os.environ.get("SMTP_PASS", "")
+    sender = os.environ.get("SMTP_FROM", "no-reply@scrapfutures.com")
+    to = os.environ.get("SMTP_TO", "info@atlasipholdingsllc.com")
+
+    subject = f"[BRidge] New Access Application — {payload.org_name} ({payload.plan})"
+    lines = [
+        f"Application ID: {app_id}",
+        f"Received At: {datetime.utcnow().isoformat()}Z",
+        "",
+        f"Entity Type: {payload.entity_type}",
+        f"Role: {payload.role}",
+        f"Organization: {payload.org_name}",
+        f"EIN: {payload.ein or '-'}",
+        f"Website: {payload.website or '-'}",
+        f"Monthly Volume (tons): {payload.monthly_volume_tons or '-'}",
+        "",
+        f"Address: {payload.address or '-'}",
+        f"City/Region: {payload.city or '-'} / {payload.region or '-'}",
+        "",
+        f"Contact: {payload.contact_name}",
+        f"Email: {payload.email}",
+        f"Phone: {payload.phone or '-'}",
+        "",
+        f"Materials (buy): {payload.materials_buy or '-'}",
+        f"Materials (sell): {payload.materials_sell or '-'}",
+        f"Lanes: {payload.lanes or '-'}",
+        f"Compliance: {payload.compliance_notes or '-'}",
+        "",
+        f"Plan: {payload.plan}",
+        f"Notes: {payload.notes or '-'}",
+        "",
+        f"UTM Source: {payload.utm_source or '-'}",
+        f"UTM Campaign: {payload.utm_campaign or '-'}",
+        f"UTM Medium: {payload.utm_medium or '-'}",
+    ]
+    body = "\n".join(lines)
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to
+    msg.set_content(body)
+
+    if not host:
+        # If SMTP not configured, just log to console
+        print("[WARN] SMTP not configured — application email not sent.")
+        print(body)
+        return
+
+    with smtplib.SMTP(host, port, timeout=30) as s:
+        s.starttls()
+        if user and pwd:
+            s.login(user, pwd)
+        s.send_message(msg)
+
+metadata = MetaData() if 'metadata' not in globals() else metadata  # reuse if already declared
+
+applications = Table(
+    "applications",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("created_at", DateTime, nullable=False),
+    Column("entity_type", String, nullable=False),
+    Column("role", String, nullable=False),
+    Column("org_name", String, nullable=False),
+    Column("ein", String),
+    Column("address", String),
+    Column("city", String),
+    Column("region", String),
+    Column("website", String),
+    Column("monthly_volume_tons", Integer),
+    Column("contact_name", String, nullable=False),
+    Column("email", String, nullable=False),
+    Column("phone", String),
+    Column("ref_code", String),
+    Column("materials_buy", Text),
+    Column("materials_sell", Text),
+    Column("lanes", String),
+    Column("compliance_notes", Text),
+    Column("plan", String, nullable=False),
+    Column("notes", Text),
+    Column("utm_source", String),
+    Column("utm_campaign", String),
+    Column("utm_medium", String),
+    Column("is_reviewed", Boolean, nullable=False, default=False),
+)
+
+# --- Pydantic payload ---
+class ApplyRequest(BaseModel):
+    entity_type: str = Field(..., pattern="^(yard|buyer|broker|other)$")
+    role: str = Field(..., pattern="^(buyer|seller|both)$")
+    org_name: str = Field(..., min_length=2)
+    ein: Optional[str] = Field(None, pattern=r"^\d{2}-\d{7}$")
+    address: Optional[str] = None
+    city: Optional[str] = None
+    region: Optional[str] = None
+    website: Optional[str] = None
+    monthly_volume_tons: Optional[int] = Field(None, ge=0)
+    contact_name: str = Field(..., min_length=2)
+    email: EmailStr
+    phone: Optional[str] = None
+    ref_code: Optional[str] = None
+    materials_buy: Optional[str] = None
+    materials_sell: Optional[str] = None
+    lanes: Optional[str] = None
+    compliance_notes: Optional[str] = None
+    plan: str = Field(..., pattern="^(starter|standard|enterprise)$")
+    notes: Optional[str] = None
+    # UTM passthrough (optional)
+    utm_source: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_medium: Optional[str] = None
 # ===== /DB bootstrap =====
 
 # ===== Security headers =====
@@ -349,6 +468,15 @@ async def security_headers_mw(request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Permissions-Policy"] = "geolocation=()"
+    resp.headers["Content-Security-Policy"] = (
+    "default-src 'self' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://*.stripe.com; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com; "
+    "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+    "connect-src 'self' https://*.stripe.com"   # helpful if you fetch to Stripe APIs from the browser (rare here)
+)
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self' https://cdn.jsdelivr.net; "
         "img-src 'self' data:; "
@@ -481,6 +609,403 @@ async def _ensure_more_indexes():
         except Exception as e:
             logger.warn("extra_index_bootstrap_failed", sql=s[:100], err=str(e))
 # ----- Extra indexes -----
+
+# ===== Billing core (fees ledger + preview/run) =====
+fees_router = APIRouter(prefix="/billing", tags=["Billing"])
+
+@app.on_event("startup")
+async def _ensure_billing_core():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS fees_ledger(
+      id UUID PRIMARY KEY,
+      member TEXT NOT NULL,
+      event_type TEXT NOT NULL,     -- trade.maker, bol.create, bol.deliver, data.overage, license.*, etc.
+      ref_table TEXT NOT NULL,
+      ref_id TEXT NOT NULL,
+      fee_amount NUMERIC NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      fee_amount_usd NUMERIC,       -- normalized for reporting (optional)
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(event_type, ref_table, ref_id)
+    );
+    CREATE TABLE IF NOT EXISTS billing_invoices(
+      invoice_id UUID PRIMARY KEY,
+      member TEXT NOT NULL,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      subtotal NUMERIC NOT NULL DEFAULT 0,
+      tax NUMERIC NOT NULL DEFAULT 0,
+      total NUMERIC NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'open',  -- open/sent/paid
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS billing_line_items(
+      line_id UUID PRIMARY KEY,
+      invoice_id UUID NOT NULL REFERENCES billing_invoices(invoice_id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      description TEXT,
+      amount NUMERIC NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD'
+    );
+    """)
+    # Helpful indexes
+    await run_ddl_multi("""
+      CREATE INDEX IF NOT EXISTS idx_fees_ledger_member_time ON fees_ledger(member, created_at);
+      CREATE INDEX IF NOT EXISTS idx_invoices_member_period ON billing_invoices(member, period_start, period_end);
+    """)
+    # Daily finance view
+    await run_ddl_multi("""
+    CREATE OR REPLACE VIEW v_fees_by_day AS
+      SELECT date_trunc('day', created_at) AS d, member, SUM(fee_amount_usd) AS amt_usd
+        FROM fees_ledger GROUP BY 1,2 ORDER BY 1,2;
+    """)
+
+async def _member_totals(member: str, start: date, end: date):
+    rows = await database.fetch_all("""
+      SELECT event_type, SUM(COALESCE(fee_amount_usd, fee_amount)) AS amt
+        FROM fees_ledger
+       WHERE member=:m AND created_at::date >= :s AND created_at::date < :e
+       GROUP BY event_type
+    """, {"m": member, "s": start, "e": end})
+    by_ev = {r["event_type"]: float(r["amt"] or 0) for r in rows}
+    subtotal = sum(by_ev.values())
+    mmi = await _mmi_usd(member) if " _mmi_usd" in globals() else 0.0
+    trueup = max(0.0, mmi - subtotal) if mmi > 0 else 0.0
+    return by_ev, subtotal, mmi, trueup
+
+@fees_router.get("/preview", summary="Preview monthly charges per member")
+async def billing_preview(member: str, month: str):
+    y, m = map(int, month.split("-", 1))
+    from datetime import date as _d
+    start = _d(y, m, 1)
+    end = _d(y + (m // 12), (m % 12) + 1, 1)
+    by_ev, subtotal, mmi, trueup = await _member_totals(member, start, end)
+    return {"member": member, "period_start": str(start), "period_end": str(end),
+            "by_event": by_ev, "subtotal": round(subtotal,2),
+            "mmi_usd": round(mmi,2), "trueup": round(trueup,2),
+            "total": round(subtotal+trueup,2)}
+
+@fees_router.post("/run", summary="Generate internal invoice for month (admin)")
+async def billing_run(member: str, month: str, force: bool=False, request: Request=None):
+    if os.getenv("ENV","").lower()=="production":
+        _require_admin(request)
+    y, m = map(int, month.split("-", 1))
+    from datetime import date as _d
+    start = _d(y, m, 1)
+    end = _d(y + (m // 12), (m % 12) + 1, 1)
+
+    # lock (don’t duplicate)
+    exists = await database.fetch_one(
+        "SELECT invoice_id,status FROM billing_invoices WHERE member=:m AND period_start=:s AND period_end=:e",
+        {"m": member, "s": start, "e": end}
+    )
+    if exists and not force:
+        raise HTTPException(409, f"Invoice already exists (status={exists['status']}). Pass force=1 to overwrite.")
+    if exists and force:
+        await database.execute("DELETE FROM billing_line_items WHERE invoice_id=:i", {"i": exists["invoice_id"]})
+        await database.execute("DELETE FROM billing_invoices WHERE invoice_id=:i", {"i": exists["invoice_id"]})
+
+    by_ev, subtotal, mmi, trueup = await _member_totals(member, start, end)
+    invoice_id = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO billing_invoices(invoice_id,member,period_start,period_end,subtotal,tax,total,status)
+      VALUES (:i,:m,:s,:e,:sub,0,:tot,'open')
+    """, {"i": invoice_id, "m": member, "s": start, "e": end,
+          "sub": round(subtotal,2), "tot": round(subtotal+trueup,2)})
+
+    for ev, amt in by_ev.items():
+        await database.execute("""
+          INSERT INTO billing_line_items(line_id,invoice_id,event_type,description,amount,currency)
+          VALUES (:id,:inv,:ev,:desc,:amt,'USD')
+        """, {"id": str(uuid.uuid4()), "inv": invoice_id, "ev": ev,
+              "desc": f"{ev} ({start}–{end})", "amt": round(amt,2)})
+
+    if trueup > 0:
+        await database.execute("""
+          INSERT INTO billing_line_items(line_id,invoice_id,event_type,description,amount,currency)
+          VALUES (:id,:inv,'mmi.trueup',:desc,:amt,'USD')
+        """, {"id": str(uuid.uuid4()), "inv": invoice_id,
+              "desc": f"Minimum monthly invoice true-up ({start}–{end})",
+              "amt": round(trueup,2)})
+
+    return {"ok": True, "invoice_id": invoice_id, "member": member,
+            "period_start": str(start), "period_end": str(end),
+            "total": round(subtotal+trueup,2)}
+
+app.include_router(fees_router)
+# ===== /Billing core =====
+
+# ----- billing contacts and email logs -----
+@app.on_event("startup")
+async def _ensure_billing_contacts_and_email_logs():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS billing_contacts (
+      member TEXT PRIMARY KEY,
+      email  TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS email_logs (
+      id UUID PRIMARY KEY,
+      to_email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL DEFAULT 'sent',
+      ref_type TEXT,         -- e.g., 'invoice','contract','bol'
+      ref_id   TEXT
+    );
+    """)
+
+@app.post("/admin/billing_contact/upsert", tags=["Admin"], summary="Set billing email for a member")
+async def upsert_billing_contact(member: str, email: str, request: Request=None):
+    _require_admin(request)
+    await database.execute("""
+      INSERT INTO billing_contacts(member,email)
+      VALUES (:m,:e)
+      ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, updated_at=NOW()
+    """, {"m": member, "e": email})
+    return {"ok": True, "member": member, "email": email}
+
+import os
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "ops@example.com")
+
+async def _send_email(to_email: str, subject: str, html: str, ref_type: str=None, ref_id: str=None):
+    try:
+        sg = SendGridAPIClient(os.environ["SENDGRID_API_KEY"])
+        msg = Mail(from_email=ADMIN_EMAIL, to_emails=to_email, subject=subject, html_content=html)
+        sg.send(msg)
+        await database.execute("""
+          INSERT INTO email_logs(id,to_email,subject,body,ref_type,ref_id)
+          VALUES (:id,:to,:sub,:body,:rt,:rid)
+        """, {"id": str(uuid.uuid4()), "to": to_email, "sub": subject, "body": html, "rt": ref_type, "rid": ref_id})
+    except Exception:
+        # don’t break flows on email failure
+        pass
+
+async def _member_billing_email(member: str) -> str | None:
+    row = await database.fetch_one("SELECT email FROM billing_contacts WHERE member=:m", {"m": member})
+    return (row and row["email"]) or None
+
+async def notify_humans(event: str, *, member: str, subject: str, html: str,
+                        cc_admin: bool=True, ref_type: str=None, ref_id: str=None):
+    # event is a tag: 'payment.confirmed','contract.signed','bol.delivered', etc.
+    to_member = await _member_billing_email(member)
+    if to_member:
+        await _send_email(to_member, subject, html, ref_type, ref_id)
+    if cc_admin:
+        await _send_email(ADMIN_EMAIL, f"[{event}] " + subject, html, ref_type, ref_id)
+# ----- billing contacts and email logs -----
+
+@app.on_event("startup")
+async def _ensure_payment_profiles():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS billing_payment_profiles(
+      member TEXT PRIMARY KEY,                 -- your 'org_name' or normalized member key
+      email  TEXT NOT NULL,
+      stripe_customer_id TEXT NOT NULL,
+      default_payment_method TEXT,             -- pm_xxx
+      has_default BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+
+import stripe, os
+stripe.api_key = os.environ["STRIPE_SECRET"]
+STRIPE_RETURN_BASE = os.getenv("BILLING_PUBLIC_URL", "https://bridge.scrapfutures.com")
+
+@app.post("/billing/pm/setup_session", tags=["Billing"], summary="Create setup-mode Checkout Session (ACH+Card)")
+async def pm_setup_session(member: str, email: str):
+    # 1) ensure (or create) Stripe Customer
+    row = await database.fetch_one("SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    if row and row["stripe_customer_id"]:
+        cust_id = row["stripe_customer_id"]
+    else:
+        cust = stripe.Customer.create(email=email, name=member, metadata={"member": member})
+        cust_id = cust.id
+        await database.execute("""
+          INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
+          VALUES (:m,:e,:c,false)
+          ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
+        """, {"m": member, "e": email, "c": cust_id})
+
+    # 2) Stripe Checkout (mode=setup) for PM collection (card + ACH bank account)
+    session = stripe.checkout.Session.create(
+        mode="setup",
+        customer=cust_id,
+        payment_method_types=["card", "us_bank_account"],
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
+        metadata={"member": member, "email": email}
+    )
+    return {"url": session.url}
+
+@app.get("/billing/pm/status", tags=["Billing"])
+async def pm_status(member: str):
+    r = await database.fetch_one("SELECT has_default, default_payment_method FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    return {"member": member, "has_default": bool(r and r["has_default"]), "pm": (r and r["default_payment_method"]) or None}
+
+# ----- Stripe billing -----
+import stripe
+stripe.api_key = os.environ["STRIPE_SECRET"]
+STRIPE_RETURN_BASE = os.getenv("BILLING_PUBLIC_URL", "https://bridge.scrapfutures.com")
+SUCCESS_URL = f"{STRIPE_RETURN_BASE}/static/payment_success.html?session={{CHECKOUT_SESSION_ID}}"
+CANCEL_URL  = f"{STRIPE_RETURN_BASE}/static/payment_canceled.html"
+
+def _usd_cents(x: float) -> int:
+    return int(round(float(x) * 100.0))
+
+async def _fetch_invoice(invoice_id: str):
+    return await database.fetch_one("SELECT * FROM billing_invoices WHERE invoice_id=:i", {"i": invoice_id})
+# ----- Stripe billing -----
+
+# ----- billing prefs -----
+@app.on_event("startup")
+async def _ensure_billing_prefs():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS billing_preferences (
+      member TEXT PRIMARY KEY,
+      billing_day INT NOT NULL CHECK (billing_day BETWEEN 2 AND 26),
+      timezone TEXT NOT NULL DEFAULT 'America/New_York',
+      auto_charge BOOLEAN NOT NULL DEFAULT TRUE,
+      next_cycle_start DATE,       -- inclusive usage start (optional; we compute if null)
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+# ----- billing prefs -----
+
+# ---- billing cron -----
+import pytz
+@app.on_event("startup")
+async def _billing_cron():
+    async def _runner():
+        while True:
+            try:
+                prefs = await database.fetch_all("SELECT member,billing_day,timezone,auto_charge,next_cycle_start FROM billing_preferences")
+                now_utc = _dt.now(_tz.utc)
+                for p in prefs:
+                    if not p["auto_charge"]:
+                        continue
+                    tz = pytz.timezone(p["timezone"] or "America/New_York")
+                    now_local = now_utc.astimezone(tz)
+                    if now_local.day != int(p["billing_day"]):
+                        continue  # not their billing day
+
+                    # Determine window
+                    # If we have a stored next_cycle_start, use it; else compute previous billing anchor
+                    if p["next_cycle_start"]:
+                        start = p["next_cycle_start"]
+                    else:
+                        s, e = _cycle_bounds(now_local, int(p["billing_day"]))
+                        start = s
+                    end = now_local.date()  # today (exclusive upper bound)
+
+                    # Skip if start >= end (nothing to bill)
+                    if not start or start >= end:
+                        continue
+
+                    # Create your internal invoice first (recommended), then push to Stripe
+                    # Internal invoice
+                    r = await billing_run(month=f"{end.year}-{end.month:02d}", member=p["member"], force=True)  # optional reuse
+                    # Or build your own internal invoice id:
+                    internal_id = str(uuid.uuid4())
+
+                    await _stripe_invoice_for_member(member=p["member"], start=start, end=end, invoice_id=internal_id)
+
+                    # advance next_cycle_start to end
+                    await database.execute("""
+                      UPDATE billing_preferences SET next_cycle_start=:n, updated_at=NOW() WHERE member=:m
+                    """, {"n": end, "m": p["member"]})
+
+            except Exception:
+                pass
+            # sleep ~1 hour
+            await asyncio.sleep(3600)
+    asyncio.create_task(_runner())
+# ----- billing cron -----
+
+# ----- plans tables -----
+@app.on_event("startup")
+async def _ensure_plans_tables():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS billing_plans (
+      plan_code TEXT PRIMARY KEY,         -- 'starter','standard','enterprise'
+      name TEXT NOT NULL,
+      price_usd NUMERIC NOT NULL,         -- monthly fixed
+      description TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS member_plans (
+      member TEXT PRIMARY KEY,
+      plan_code TEXT NOT NULL REFERENCES billing_plans(plan_code),
+      effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      stripe_price_id TEXT,               -- used only if you choose Subscription mode
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+# ----- plans tables -----
+
+# ----- plan caps and limits -----
+@app.on_event("startup")
+async def _ensure_plan_caps_and_limits():
+    await run_ddl_multi("""
+    -- Plan catalog (already created earlier, kept here for clarity)
+    CREATE TABLE IF NOT EXISTS billing_plans (
+      plan_code TEXT PRIMARY KEY,         -- 'starter','standard','enterprise'
+      name TEXT NOT NULL,
+      price_usd NUMERIC NOT NULL,
+      description TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Member -> plan mapping (already created earlier)
+    CREATE TABLE IF NOT EXISTS member_plans (
+      member TEXT PRIMARY KEY,
+      plan_code TEXT NOT NULL REFERENCES billing_plans(plan_code),
+      effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Feature gates per plan (bool flags). Add more flags as you like.
+    CREATE TABLE IF NOT EXISTS billing_plan_caps (
+      plan_code TEXT PRIMARY KEY REFERENCES billing_plans(plan_code),
+      can_contracts BOOLEAN NOT NULL DEFAULT TRUE,
+      can_bols BOOLEAN NOT NULL DEFAULT TRUE,
+      can_inventory BOOLEAN NOT NULL DEFAULT TRUE,
+      can_receipts BOOLEAN NOT NULL DEFAULT FALSE,
+      can_warrants BOOLEAN NOT NULL DEFAULT FALSE,
+      can_rfq BOOLEAN NOT NULL DEFAULT FALSE,
+      can_clob BOOLEAN NOT NULL DEFAULT FALSE,
+      can_futures BOOLEAN NOT NULL DEFAULT FALSE,
+      can_market_data BOOLEAN NOT NULL DEFAULT TRUE
+    );
+
+    -- Included usage per month + overage prices (USD) per unit
+    -- Pick the metrics that matter for you; these are common ones.
+    CREATE TABLE IF NOT EXISTS billing_plan_limits (
+      plan_code TEXT PRIMARY KEY REFERENCES billing_plans(plan_code),
+
+      -- Included quantities per monthly cycle:
+      inc_bol_create INT NOT NULL DEFAULT 50,          -- included BOL creations
+      inc_bol_deliver_tons NUMERIC NOT NULL DEFAULT 500, -- included delivered tons
+      inc_receipts INT NOT NULL DEFAULT 0,
+      inc_warrants INT NOT NULL DEFAULT 0,
+      inc_ws_msgs BIGINT NOT NULL DEFAULT 50000,       -- included WS messages/month
+
+      -- Overage pricing (USD per unit):
+      over_bol_create_usd NUMERIC NOT NULL DEFAULT 1.00,      -- / BOL beyond included
+      over_deliver_per_ton_usd NUMERIC NOT NULL DEFAULT 0.50, -- $/ton beyond included
+      over_receipt_usd NUMERIC NOT NULL DEFAULT 0.50,         -- / receipt beyond included
+      over_warrant_usd NUMERIC NOT NULL DEFAULT 0.50,         -- / warrant event beyond included
+      over_ws_per_million_usd NUMERIC NOT NULL DEFAULT 5.00   -- per 1,000,000 messages
+    );
+    """)
+# ----- plan caps and limits -----
 
 # ----- Products -----
 @app.on_event("startup")
@@ -1041,6 +1566,7 @@ async def _startup_prices():
     if not hasattr(app.state, "db_pool"):
         app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 # -------------------------------------------------------------------
+
 # -------- Pricing & Indices Routers (drop-in) -------------------------
 async def _fetch_base(symbol: str):
     return await latest_price(app.state.db_pool, symbol)
@@ -1437,6 +1963,71 @@ async def create_user(
 
     return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
+@app.post("/admin/plans/seed_mode_a", tags=["Admin"])
+async def seed_mode_a_plans(request: Request=None):
+    _require_admin(request)
+    plans = [
+      {"plan_code":"starter",    "name":"Starter",    "price_usd":1000.00, "desc":"Contracts & BOLs"},
+      {"plan_code":"standard",   "name":"Standard",   "price_usd":3000.00, "desc":"Contracts+BOLs+Inventory+Receipts"},
+      {"plan_code":"enterprise", "name":"Enterprise","price_usd":10000.00, "desc":"Full stack + Futures/Clearing"}
+    ]
+    await database.execute_many("""
+      INSERT INTO billing_plans(plan_code,name,price_usd,description,active)
+      VALUES (:plan_code,:name,:price_usd,:desc,TRUE)
+      ON CONFLICT (plan_code) DO UPDATE SET name=EXCLUDED.name, price_usd=EXCLUDED.price_usd,
+        description=EXCLUDED.description, active=TRUE
+    """, plans)
+
+    caps = [
+      {"plan_code":"starter",    "can_contracts":True,"can_bols":True,"can_inventory":True,"can_receipts":False,"can_warrants":False,"can_rfq":False,"can_clob":False,"can_futures":False,"can_market_data":True},
+      {"plan_code":"standard",   "can_contracts":True,"can_bols":True,"can_inventory":True,"can_receipts":True,"can_warrants":True,"can_rfq":True,"can_clob":False,"can_futures":False,"can_market_data":True},
+      {"plan_code":"enterprise", "can_contracts":True,"can_bols":True,"can_inventory":True,"can_receipts":True,"can_warrants":True,"can_rfq":True,"can_clob":True,"can_futures":True,"can_market_data":True}
+    ]
+    await database.execute_many("""
+      INSERT INTO billing_plan_caps(plan_code,can_contracts,can_bols,can_inventory,can_receipts,can_warrants,can_rfq,can_clob,can_futures,can_market_data)
+      VALUES (:plan_code,:can_contracts,:can_bols,:can_inventory,:can_receipts,:can_warrants,:can_rfq,:can_clob,:can_futures,:can_market_data)
+      ON CONFLICT (plan_code) DO UPDATE SET
+        can_contracts=EXCLUDED.can_contracts,
+        can_bols=EXCLUDED.can_bols,
+        can_inventory=EXCLUDED.can_inventory,
+        can_receipts=EXCLUDED.can_receipts,
+        can_warrants=EXCLUDED.can_warrants,
+        can_rfq=EXCLUDED.can_rfq,
+        can_clob=EXCLUDED.can_clob,
+        can_futures=EXCLUDED.can_futures,
+        can_market_data=EXCLUDED.can_market_data
+    """, caps)
+
+    limits = [
+      # starter
+      {"plan_code":"starter","inc_bol_create":50,"inc_bol_deliver_tons":500,"inc_receipts":0,"inc_warrants":0,"inc_ws_msgs":50000,
+       "over_bol_create_usd":1.0,"over_deliver_per_ton_usd":0.50,"over_receipt_usd":0.50,"over_warrant_usd":0.50,"over_ws_per_million_usd":5.0},
+      # standard
+      {"plan_code":"standard","inc_bol_create":200,"inc_bol_deliver_tons":2000,"inc_receipts":500,"inc_warrants":200,"inc_ws_msgs":200000,
+       "over_bol_create_usd":0.75,"over_deliver_per_ton_usd":0.35,"over_receipt_usd":0.30,"over_warrant_usd":0.30,"over_ws_per_million_usd":4.0},
+      # enterprise
+      {"plan_code":"enterprise","inc_bol_create":999999,"inc_bol_deliver_tons":999999,"inc_receipts":999999,"inc_warrants":999999,"inc_ws_msgs":5000000,
+       "over_bol_create_usd":0.50,"over_deliver_per_ton_usd":0.25,"over_receipt_usd":0.10,"over_warrant_usd":0.10,"over_ws_per_million_usd":3.0},
+    ]
+    await database.execute_many("""
+      INSERT INTO billing_plan_limits(plan_code,inc_bol_create,inc_bol_deliver_tons,inc_receipts,inc_warrants,inc_ws_msgs,
+                                      over_bol_create_usd,over_deliver_per_ton_usd,over_receipt_usd,over_warrant_usd,over_ws_per_million_usd)
+      VALUES (:plan_code,:inc_bol_create,:inc_bol_deliver_tons,:inc_receipts,:inc_warrants,:inc_ws_msgs,
+              :over_bol_create_usd,:over_deliver_per_ton_usd,:over_receipt_usd,:over_warrant_usd,:over_ws_per_million_usd)
+      ON CONFLICT (plan_code) DO UPDATE SET
+        inc_bol_create=EXCLUDED.inc_bol_create,
+        inc_bol_deliver_tons=EXCLUDED.inc_bol_deliver_tons,
+        inc_receipts=EXCLUDED.inc_receipts,
+        inc_warrants=EXCLUDED.inc_warrants,
+        inc_ws_msgs=EXCLUDED.inc_ws_msgs,
+        over_bol_create_usd=EXCLUDED.over_bol_create_usd,
+        over_deliver_per_ton_usd=EXCLUDED.over_deliver_per_ton_usd,
+        over_receipt_usd=EXCLUDED.over_receipt_usd,
+        over_warrant_usd=EXCLUDED.over_warrant_usd,
+        over_ws_per_million_usd=EXCLUDED.over_ws_per_million_usd
+    """, limits)
+    return {"ok": True}
+
 @app.post("/admin/fees/upsert", tags=["Admin"], summary="Upsert fee schedule for a symbol")
 async def upsert_fee(symbol: str, maker_bps: float = 0.0, taker_bps: float = 0.0, min_fee_cents: float = 0.0, request: Request = None):
     _require_admin(request)  # gate in production
@@ -1449,6 +2040,460 @@ async def upsert_fee(symbol: str, maker_bps: float = 0.0, taker_bps: float = 0.0
             min_fee_cents = EXCLUDED.min_fee_cents
     """, {"s": symbol, "m": maker_bps, "t": taker_bps, "c": min_fee_cents})
     return {"symbol": symbol, "maker_bps": maker_bps, "taker_bps": taker_bps, "min_fee_cents": min_fee_cents}
+
+from fastapi import Body
+
+@app.post("/billing/pay/checkout", tags=["Billing"], summary="Create Stripe Checkout Session for an invoice")
+async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
+    inv = await _fetch_invoice(invoice_id)
+    if not inv:
+        raise HTTPException(404, "invoice not found")
+    if str(inv["status"]).lower() == "paid":
+        return {"already_paid": True}
+
+    member = inv["member"]
+    amount = float(inv["total"])
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        payment_method_types=["card", "us_bank_account"],   # cards + ACH debit
+        success_url=SUCCESS_URL,
+        cancel_url=CANCEL_URL,
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"BRidge Invoice {invoice_id} — {member}"},
+                "unit_amount": _usd_cents(amount),
+            },
+            "quantity": 1,
+        }],
+        metadata={"invoice_id": invoice_id, "member": member}
+    )
+    return {"checkout_url": session.url, "session_id": session.id}
+
+@app.post("/billing/prefs/upsert", tags=["Billing"], summary="Set billing date/timezone")
+async def billing_prefs_upsert(
+    member: str = Body(...),
+    billing_day: int = Body(..., ge=2, le=26),
+    timezone: str = Body("America/New_York"),
+    auto_charge: bool = Body(True),
+):
+    await database.execute("""
+      INSERT INTO billing_preferences(member,billing_day,timezone,auto_charge,next_cycle_start,updated_at)
+      VALUES (:m,:d,:tz,:ac,NULL,NOW())
+      ON CONFLICT (member) DO UPDATE SET
+        billing_day=EXCLUDED.billing_day,
+        timezone=EXCLUDED.timezone,
+        auto_charge=EXCLUDED.auto_charge,
+        updated_at=NOW()
+    """, {"m": member, "d": billing_day, "tz": timezone, "ac": auto_charge})
+    return {"ok": True}
+
+from datetime import datetime as _dt, timezone as _tz
+import pytz
+
+def _cycle_bounds(today_local: _dt, billing_day: int):
+    # given local “now” and target day (2..26), compute current-cycle start & end (open interval [start, end))
+    # If today is billing day, end is today; start = previous billing day (last month or this month).
+    year, month, day = today_local.year, today_local.month, today_local.day
+    # end (the boundary we’ll bill through) is today_local.date() if today==billing_day else None
+    if day < billing_day:
+        # current cycle started last month on 'billing_day', ends this month on that day
+        # compute start
+        sm = month - 1 if month > 1 else 12
+        sy = year if month > 1 else year - 1
+        start = _dt(sy, sm, billing_day, 0, 0, 0)
+        end   = _dt(year, month, billing_day, 0, 0, 0)
+    elif day > billing_day:
+        # cycle started this month on billing_day, ends next month
+        start = _dt(year, month, billing_day, 0, 0, 0)
+        # end is in the future; for “is today the billing day?” logic we won’t use this branch
+        end   = None
+    else:
+        # today is billing_day → end is today @ 00:00, start is previous billing_day
+        sm = month - 1 if month > 1 else 12
+        sy = year if month > 1 else year - 1
+        start = _dt(sy, sm, billing_day, 0, 0, 0)
+        end   = _dt(year, month, billing_day, 0, 0, 0)
+    return (start.date(), (end and end.date()))
+
+@app.post("/billing/pay/card", tags=["Billing"], summary="Create PaymentIntent (card)")
+async def create_pi_card(invoice_id: str = Body(..., embed=True)):
+    inv = await _fetch_invoice(invoice_id)
+    if not inv: raise HTTPException(404, "invoice not found")
+    if str(inv["status"]).lower() == "paid": return {"already_paid": True}
+    amount = float(inv["total"])
+    pi = stripe.PaymentIntent.create(
+        amount=_usd_cents(amount),
+        currency="usd",
+        payment_method_types=["card"],
+        metadata={"invoice_id": invoice_id, "member": inv["member"]}
+    )
+    return {"client_secret": pi.client_secret}
+
+@app.post("/billing/pay/ach", tags=["Billing"], summary="Create PaymentIntent (ACH debit via US bank)")
+async def create_pi_ach(invoice_id: str = Body(..., embed=True)):
+    inv = await _fetch_invoice(invoice_id)
+    if not inv: raise HTTPException(404, "invoice not found")
+    if str(inv["status"]).lower() == "paid": return {"already_paid": True}
+    amount = float(inv["total"])
+    pi = stripe.PaymentIntent.create(
+        amount=_usd_cents(amount),
+        currency="usd",
+        payment_method_types=["us_bank_account"],
+        payment_method_options={"us_bank_account": {"verification_method": "instant"}},
+        metadata={"invoice_id": invoice_id, "member": inv["member"]}
+    )
+    return {"client_secret": pi.client_secret}
+
+from fastapi import Header
+
+@app.post("/stripe/webhook", include_in_schema=False)
+async def stripe_webhook(payload: bytes = Body(...), stripe_signature: str = Header(None, alias="Stripe-Signature")):
+    endpoint_secret = os.environ["STRIPE_WEBHOOK_SECRET"]
+    try:
+        event = stripe.Webhook.construct_event(payload, stripe_signature, endpoint_secret)
+    except Exception as e:
+        raise HTTPException(400, f"invalid webhook: {e}")
+
+    et = event["type"]
+
+    # SetupIntent completed (Elements or mode=setup)
+    if et == "setup_intent.succeeded":
+        si = event["data"]["object"]
+        cust_id = si.get("customer")
+        pm_id  = si.get("payment_method")
+        member = (si.get("metadata") or {}).get("member")
+        await _bind_pm(member, cust_id, pm_id)
+        return {"ok": True}
+
+    # Checkout session completed (mode=setup)
+    if et == "checkout.session.completed":
+        sess = event["data"]["object"]
+        if sess.get("mode") == "setup":
+            cust_id = sess.get("customer")
+            si_id = sess.get("setup_intent")
+            pm_id = None
+            member = (sess.get("metadata") or {}).get("member")
+            if si_id:
+                si = stripe.SetupIntent.retrieve(si_id)
+                pm_id = si.get("payment_method")
+                member = member or (si.get("metadata") or {}).get("member")
+            await _bind_pm(member, cust_id, pm_id)
+        return {"ok": True}
+
+    # PaymentIntent success (manual charge or checkout)
+    if et == "payment_intent.succeeded":
+        pi = event["data"]["object"]
+        invoice_id = (pi.get("metadata") or {}).get("invoice_id")
+        await _handle_invoice_paid(invoice_id, source="payment_intent")
+        return {"ok": True}
+
+    # Stripe invoice success/failure (auto-billing)
+    if et == "invoice.payment_succeeded":
+        inv = event["data"]["object"]
+        member = (inv.get("metadata") or {}).get("member")
+        my_invoice_id = (inv.get("metadata") or {}).get("bridge_invoice_id")
+        total = inv.get("amount_paid", 0) / 100.0
+        if my_invoice_id:
+            await database.execute("UPDATE billing_invoices SET status='paid' WHERE invoice_id=:i", {"i": my_invoice_id})
+        await notify_humans("payment.confirmed", member=member,
+                            subject=f"Payment Succeeded — {member}",
+                            html=f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> paid. Amount: ${total:,.2f}.</div>",
+                            cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
+        return {"ok": True}
+
+    if et == "invoice.payment_failed":
+        inv = event["data"]["object"]
+        member = (inv.get("metadata") or {}).get("member")
+        await notify_humans("payment.failed", member=member,
+                            subject=f"Payment Failed — {member}",
+                            html=f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> failed. Please update your payment method.</div>",
+                            cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
+        return {"ok": True}
+
+    return {"ignored": et}
+
+if et == "invoice.payment_failed":
+    inv = event["data"]["object"]
+    member = (inv.get("metadata") or {}).get("member")
+    subj = f"Payment Failed — {member}"
+    html = f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> failed. Please update your payment method.</div>"
+    await notify_humans("payment.failed", member=member, subject=subj, html=html, cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
+    return {"ok": True}
+    
+async def _bind_pm(member: str | None, customer_id: str | None, pm_id: str | None):
+    # (optional) email “PM added”
+    try:
+        if member:
+            await notify_humans("pm.added", member=member,
+                subject="Payment Method Added",
+                html=f"<div style='font-family:system-ui'>A new default payment method was added for <b>{member}</b>.</div>",
+                cc_admin=True, ref_type="member", ref_id=member)
+    except Exception:
+        pass
+
+    if not (member and customer_id and pm_id):
+        return
+
+    # Set default at Stripe
+    try:
+        stripe.Customer.modify(customer_id, invoice_settings={"default_payment_method": pm_id})
+    except Exception:
+        pass
+
+    # Persist locally
+    await database.execute("""
+      INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,default_payment_method,has_default,updated_at)
+      SELECT :m, COALESCE(email,''), :c, :p, TRUE, NOW()
+      FROM billing_payment_profiles WHERE member=:m
+      ON CONFLICT (member) DO UPDATE
+        SET default_payment_method=:p, has_default=TRUE, stripe_customer_id=:c, updated_at=NOW()
+    """, {"m": member, "c": customer_id, "p": pm_id})
+
+async def _handle_invoice_paid(invoice_id: str | None, source: str):
+    if not invoice_id: return
+    inv = await _fetch_invoice(invoice_id)
+    if not inv: return
+    if str(inv["status"]).lower() == "paid":
+        return  # idempotent
+
+    # mark paid
+    await database.execute("UPDATE billing_invoices SET status='paid' WHERE invoice_id=:i", {"i": invoice_id})
+
+    # email user + admin
+    member = inv["member"]
+    subject = f"Payment Received — Invoice {invoice_id}"
+    html = f"""
+    <div style="font-family:system-ui">
+      <h2>BRidge Payment Confirmation</h2>
+      <p><b>Invoice:</b> {invoice_id}<br/>
+         <b>Member:</b> {member}<br/>
+         <b>Period:</b> {inv['period_start']} → {inv['period_end']}<br/>
+         <b>Total:</b> ${float(inv['total']):,.2f} USD<br/>
+         <b>Source:</b> {source}
+      </p>
+      <p>Thank you. A PDF/CSV copy is available in your dashboard.</p>
+    </div>
+    """
+    await notify_humans("payment.confirmed", member=member, subject=subject, html=html,
+                        cc_admin=True, ref_type="invoice", ref_id=invoice_id)
+    
+async def _stripe_invoice_for_member(member: str, start: date, end: date, invoice_id: str | None=None) -> dict:
+    prof = await database.fetch_one("SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    if not (prof and prof["stripe_customer_id"]):
+        raise HTTPException(402, f"{member} has no Stripe customer / PM")
+    cust_id = prof["stripe_customer_id"]
+
+    # usage aggregation from fees_ledger
+    rows = await database.fetch_all("""
+      SELECT event_type, SUM(COALESCE(fee_amount_usd, fee_amount)) AS amt
+        FROM fees_ledger
+       WHERE member=:m AND created_at::date >= :s AND created_at::date < :e
+       GROUP BY event_type
+    """, {"m": member, "s": start, "e": end})
+    by_ev = {r["event_type"]: float(r["amt"] or 0) for r in rows}
+    subtotal = sum(by_ev.values())
+    mmi = await _mmi_usd(member) if " _mmi_usd" in globals() else 0.0
+    trueup = max(0.0, mmi - subtotal) if mmi > 0 else 0.0
+
+    # plan line + overages
+    plan = await database.fetch_one("""
+      SELECT mp.plan_code, bp.name, bp.price_usd
+        FROM member_plans mp JOIN billing_plans bp ON bp.plan_code = mp.plan_code
+       WHERE mp.member=:m
+    """, {"m": member})
+    limits = await database.fetch_one("SELECT * FROM billing_plan_limits WHERE plan_code=:c", {"c": plan["plan_code"]}) if plan else None
+
+    # usage items
+    for ev, amt in by_ev.items():
+        if amt == 0: continue
+        stripe.InvoiceItem.create(
+            customer=cust_id, currency="usd", amount=_usd_cents(amt),
+            description=f"{ev} ({start}–{end})",
+            metadata={"member": member, "period_start": str(start), "period_end": str(end), "event_type": ev}
+        )
+
+    # plan monthly line
+    if plan and float(plan["price_usd"]) > 0:
+        stripe.InvoiceItem.create(
+            customer=cust_id, currency="usd", amount=_usd_cents(float(plan["price_usd"])),
+            description=f"SaaS Package — {plan['name']} ({plan['plan_code']})",
+            metadata={"member": member, "plan_code": plan["plan_code"], "period_start": str(start), "period_end": str(end)}
+        )
+
+    # overages (Mode A)
+    if limits:
+        # BOL creates
+        row_bolc = await database.fetch_one("""
+          SELECT COUNT(*) AS c FROM bols WHERE created_at::date >= :s AND created_at::date < :e AND seller=:m
+        """, {"s": start, "e": end, "m": member})
+        bol_creates = int(row_bolc["c"] or 0)
+        if bol_creates > int(limits["inc_bol_create"]):
+            over = bol_creates - int(limits["inc_bol_create"])
+            fee = over * float(limits["over_bol_create_usd"])
+            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+              description=f"Overage: BOL creates ({over} over {int(limits['inc_bol_create'])})",
+              metadata={"member": member, "metric":"bol_create_overage","qty_over":str(over)})
+
+        # Delivered tons
+        row_dtons = await database.fetch_one("""
+          SELECT COALESCE(SUM(weight_tons),0) AS t FROM bols
+           WHERE status ILIKE 'Delivered' AND delivery_time::date >= :s AND delivery_time::date < :e AND seller=:m
+        """, {"s": start, "e": end, "m": member})
+        dtons = float(row_dtons["t"] or 0.0)
+        if dtons > float(limits["inc_bol_deliver_tons"]):
+            over_t = dtons - float(limits["inc_bol_deliver_tons"])
+            fee = over_t * float(limits["over_deliver_per_ton_usd"])
+            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+              description=f"Overage: Delivered tons ({over_t:.2f} over {float(limits['inc_bol_deliver_tons']):.2f})",
+              metadata={"member": member, "metric":"deliver_tons_overage","qty_over":f"{over_t:.2f}"})
+
+        # Receipts
+        row_rcp = await database.fetch_one("""
+          SELECT COUNT(*) AS c FROM receipts WHERE created_at::date >= :s AND created_at::date < :e AND seller=:m
+        """, {"s": start, "e": end, "m": member})
+        receipts_c = int(row_rcp["c"] or 0)
+        if receipts_c > int(limits["inc_receipts"]):
+            over = receipts_c - int(limits["inc_receipts"])
+            fee = over * float(limits["over_receipt_usd"])
+            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+              description=f"Overage: Receipts ({over} over {int(limits['inc_receipts'])})",
+              metadata={"member": member, "metric":"receipts_overage","qty_over":str(over)})
+
+        # Warrant events (coarse)
+        row_w = await database.fetch_one("""
+          SELECT COUNT(*) AS c FROM warrants WHERE updated_at::date >= :s AND updated_at::date < :e AND holder=:m
+        """, {"s": start, "e": end, "m": member})
+        w_events = int(row_w["c"] or 0)
+        if w_events > int(limits["inc_warrants"]):
+            over = w_events - int(limits["inc_warrants"])
+            fee = over * float(limits["over_warrant_usd"])
+            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+              description=f"Overage: Warrant events ({over} over {int(limits['inc_warrants'])})",
+              metadata={"member": member, "metric":"warrant_overage","qty_over":str(over)})
+
+        # WebSocket messages
+        row_msg = await database.fetch_one("""
+          SELECT COALESCE(SUM(count),0) AS c FROM data_msg_counters WHERE member=:m AND ts::date >= :s AND ts::date < :e
+        """, {"m": member, "s": start, "e": end})
+        msgs = int(row_msg["c"] or 0)
+        if msgs > int(limits["inc_ws_msgs"]):
+            over = msgs - int(limits["inc_ws_msgs"])
+            fee = (over / 1_000_000.0) * float(limits["over_ws_per_million_usd"])
+            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+              description=f"Overage: Market data messages ({over} over {int(limits['inc_ws_msgs'])})",
+              metadata={"member": member, "metric":"ws_msgs_overage","qty_over":str(over)})
+
+    # MMI true-up
+    if trueup > 0:
+        stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(trueup),
+          description=f"Minimum monthly invoice true-up ({start}–{end})",
+          metadata={"member": member, "mmi": str(mmi)})
+
+    inv = stripe.Invoice.create(
+        customer=cust_id,
+        collection_method="charge_automatically",
+        auto_advance=True,
+        metadata={"member": member, "period_start": str(start), "period_end": str(end), "bridge_invoice_id": invoice_id or ""}
+    )
+    inv = stripe.Invoice.finalize_invoice(inv.id)
+    return {"stripe_invoice_id": inv.id}
+
+    # Finalize (auto-advance will finalize and attempt payment; we can finalize now to trigger immediately)
+    inv = stripe.Invoice.finalize_invoice(inv.id)
+    return {"stripe_invoice_id": inv.id}
+
+@app.post("/billing/pay/charge_now", tags=["Billing"], summary="Charge stored PM for an invoice (off-session)")
+async def billing_charge_now(invoice_id: str = Body(..., embed=True)):
+    inv = await _fetch_invoice(invoice_id)
+    if not inv:
+        raise HTTPException(404, "invoice not found")
+
+    if str(inv["status"]).lower() == "paid":
+        return {"ok": True, "already_paid": True}
+
+    member = inv["member"]
+    prof = await database.fetch_one("""
+      SELECT stripe_customer_id, default_payment_method, has_default
+      FROM billing_payment_profiles WHERE member=:m
+    """, {"m": member})
+    if not (prof and prof["has_default"] and prof["stripe_customer_id"] and prof["default_payment_method"]):
+        raise HTTPException(402, "No default payment method on file for this member")
+
+    amount = float(inv["total"])
+    try:
+        pi = stripe.PaymentIntent.create(
+            amount=_usd_cents(amount),
+            currency="usd",
+            customer=prof["stripe_customer_id"],
+            payment_method=prof["default_payment_method"],
+            off_session=True,
+            confirm=True,
+            description=f"BRidge Invoice {invoice_id} — {member}",
+            metadata={"invoice_id": invoice_id, "member": member}
+        )
+    except stripe.error.CardError as e:
+        # authentication_required etc. → fall back to a hosted checkout if you want
+        raise HTTPException(402, f"Payment failed: {getattr(e, 'user_message', str(e))}")
+    except Exception as e:
+        raise HTTPException(400, f"Error creating charge: {e}")
+
+    if pi.status not in ("succeeded", "requires_capture"):
+        # If you use capture later, handle requires_capture; else treat as failure
+        raise HTTPException(400, f"Unexpected payment status: {pi.status}")
+
+    # mark paid
+    await database.execute("UPDATE billing_invoices SET status='paid' WHERE invoice_id=:i", {"i": invoice_id})
+
+    # email human confirmation
+    subject = f"Payment Received — Invoice {invoice_id}"
+    html = f"""
+    <div style="font-family:system-ui">
+      <h2>BRidge Payment Confirmation</h2>
+      <p><b>Invoice:</b> {invoice_id}<br/>
+         <b>Member:</b> {member}<br/>
+         <b>Period:</b> {inv['period_start']} → {inv['period_end']}<br/>
+         <b>Total:</b> ${amount:,.2f} USD<br/>
+         <b>Method:</b> Stored default (Stripe)<br/>
+      </p>
+    </div>"""
+    await notify_humans("payment.confirmed", member=member, subject=subject, html=html,
+                        cc_admin=True, ref_type="invoice", ref_id=invoice_id)
+
+    return {"ok": True, "invoice_id": invoice_id, "status": "paid", "pi": pi.id}
+
+@app.post("/billing/pm/change_session", tags=["Billing"], summary="Start PM change flow (mode=setup)")
+async def pm_change_session(member: str = Body(..., embed=True)):
+    row = await database.fetch_one("SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    if not row:
+        raise HTTPException(404, "member not found in billing profiles; create a profile first")
+
+    cust_id = row["stripe_customer_id"]
+    email   = row["email"]
+
+    session = stripe.checkout.Session.create(
+        mode="setup",
+        customer=cust_id,
+        payment_method_types=["card", "us_bank_account"],
+        success_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=ok&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=cancel&member={stripe.util.utf8(member)}",
+        metadata={"member": member, "email": email}
+    )
+    return {"url": session.url}
+
+@app.get("/billing/pm/details", tags=["Billing"])
+async def pm_details(member: str):
+    row = await database.fetch_one("SELECT stripe_customer_id, default_payment_method, has_default FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    if not (row and row["has_default"] and row["default_payment_method"]):
+        return {"member": member, "has_default": False}
+    pm = stripe.PaymentMethod.retrieve(row["default_payment_method"])
+    masked = None
+    if pm["type"] == "card":
+        masked = f"Card •••• {pm['card']['last4']} ({pm['card']['brand']})"
+    elif pm["type"] == "us_bank_account":
+        masked = f"Bank •••• {pm['us_bank_account']['last4']} ({pm['us_bank_account']['bank_name']})"
+    return {"member": member, "has_default": True, "label": masked, "type": pm["type"]}
 
 @app.post("/admin/statements/run", tags=["Admin"], summary="Generate nightly statements ZIP for all members")
 async def statements_run(as_of: date, request: Request):
@@ -1569,6 +2614,21 @@ async def compliance_member_set(username: str, kyc: bool=False, aml: bool=False,
     """, {"u":username,"k":kyc,"a":aml,"s":sanctions,"b":boi,"r":bsa_risk})
     return {"ok": True, "user": username}
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
+
+# ======= Member plan ========================
+@app.post("/admin/member/plan/set", tags=["Admin"], summary="Assign plan to member")
+async def set_member_plan(member: str, plan_code: str, request: Request=None):
+    _require_admin(request)
+    # validate plan exists & active
+    p = await database.fetch_one("SELECT 1 FROM billing_plans WHERE plan_code=:c AND active=TRUE", {"c": plan_code})
+    if not p: raise HTTPException(404, "plan not found or inactive")
+    await database.execute("""
+      INSERT INTO member_plans(member,plan_code,effective_date,updated_at)
+      VALUES (:m,:c,CURRENT_DATE,NOW())
+      ON CONFLICT (member) DO UPDATE SET plan_code=:c, updated_at=NOW()
+    """, {"m": member, "c": plan_code})
+    return {"ok": True, "member": member, "plan": plan_code}
+# ======= Member plan ========================
 
 ALLOW_PUBLIC_SELLER_SIGNUP = os.getenv("ALLOW_PUBLIC_SELLER_SIGNUP", "0").lower() in ("1","true","yes")
 
@@ -2778,7 +3838,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             pass
 
     resp = {"ok": True, "upserted": upserted}              # bulk_upsert
-    return await _idem_guard(request, key, resp.dict*())
+    return await _idem_guard(request, key, resp)
 
 async def idem_get(key: str):
     if not key: return None
@@ -2833,7 +3893,7 @@ async def inventory_manual_add(payload: dict, request: Request):
             movement_reason="manual_add", idem_key=idem
         )
     resp = {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
-    return await _idem_guard(request, key, resp.dict())           # manual_add
+    return await _idem_guard(request, key, resp)           # manual_add
 
 # -------- Inventory: CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
@@ -3886,7 +4946,8 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
          qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
          status=status,
      )
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
+
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -4384,8 +5445,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         })
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
-    return await _idem_guard(request, key, resp.dict())
-
+    return await _idem_guard(request, key, resp)
 # ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
 
 # --- MATERIAL PRICE HISTORY (by day, avg) ---
@@ -4753,7 +5813,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
             pass
 
         resp = row
-        return await _idem_guard(request, key, resp.dict())
+        return await _idem_guard(request, key, resp)
 
     # --------------------- fallback path: minimal insert -----------------------------
     except HTTPException:
@@ -4802,6 +5862,16 @@ async def products_add(p: ProductIn):
 # ------- Signed Contract -------
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
+    try:
+            await notify_humans(
+                "contract.signed",
+                member=(request.session.get("username") or "unknown"),
+                subject=f"Contract Signed — {contract_id}",
+                html=f"<div style='font-family:system-ui'>Contract <b>{contract_id}</b> has been signed.</div>",
+                ref_type="contract", ref_id=contract_id
+            )
+    except Exception: pass
+
     # Flip status to Signed (idempotent-ish)
     _ = await database.fetch_one("""
       UPDATE contracts
@@ -4914,6 +5984,9 @@ async def _ensure_tenant_applications_schema():
 # ========== Tenant Applications ==========
 
 # --- Public endpoint (replaces /public/yard_signup) ---
+class ApplicationIn(BaseModel):
+    entity_type: str = Field(pattern=r"^(yard|buyer|mill|industrial|manufacturer|broker|other)$")
+
 @app.post(
     "/public/apply",
     tags=["Public"],
@@ -4941,6 +6014,45 @@ async def public_apply(payload: ApplicationIn, request: Request):
             status="pending",
             message="Application already received. We'll reach out shortly.",
         )
+
+        # Best-effort email (reuses the earlier helper)
+    try:
+        # Build the simple ApplyRequest the email helper expects
+        shim = ApplyRequest(
+            entity_type=payload.entity_type if payload.entity_type in ("yard","buyer","broker","other")
+                         else ("buyer" if payload.entity_type in ("mill","manufacturer","industrial") else "other"),
+            role=payload.role,
+            org_name=payload.org_name,
+            ein=payload.ein,
+            address=payload.address,
+            city=payload.city,
+            region=payload.region,
+            website=payload.website,
+            monthly_volume_tons=payload.monthly_volume_tons,
+            contact_name=payload.contact_name,
+            email=payload.email,
+            phone=payload.phone,
+            ref_code=payload.ref_code,
+            materials_buy=payload.materials_buy,
+            materials_sell=payload.materials_sell,
+            lanes=payload.lanes,
+            compliance_notes=payload.compliance_notes,
+            plan=payload.plan,
+            notes=payload.notes,
+            utm_source=payload.utm_source,
+            utm_campaign=payload.utm_campaign,
+            utm_medium=payload.utm_medium,
+        )
+        send_application_email(shim, application_id)
+    except Exception as e:
+        print("[WARN] application email failed:", e)
+
+         # Require payment method on file BEFORE accepting
+    pay = await database.fetch_one("""
+    SELECT has_default FROM billing_payment_profiles WHERE member=:m OR member=:alt
+    """, {"m": payload.org_name, "alt": (payload.org_name or "").strip()})
+    if not (pay and pay["has_default"]):
+        raise HTTPException(402, detail="Payment method required. Please add a payment method before submitting.")
 
     await database.execute(
         """
@@ -5121,7 +6233,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None,
     }
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
 async def bols_mark_delivered(
@@ -5677,6 +6789,16 @@ async def _require_listing_trading(listing_id: str):
     if r["trading_status"] != "Trading":
         raise HTTPException(423, f"listing not in Trading status (is {r['trading_status']})")
 
+async def _require_plan_cap(member: str, cap: str):
+    row = await database.fetch_one("""
+      SELECT c.* FROM member_plans mp
+      JOIN billing_plan_caps c ON c.plan_code = mp.plan_code
+      WHERE mp.member = :m
+    """, {"m": member})
+    if not row or not bool(row.get(cap)):
+        raise HTTPException(403, f"Your plan does not include '{cap}'. Please upgrade.")
+
+
 # ---- MARKET price-protection helpers ----
 PRICE_BAND_PCT = float(os.getenv("PRICE_BAND_PCT", "0.10"))  # 10% default band
 
@@ -6076,7 +7198,7 @@ async def create_rfq(r: RFQIn, request: Request):
     except Exception:
         pass
     resp = {"rfq_id": rfq_id, "status": "open"}
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 @limiter.limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
@@ -6104,7 +7226,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     except Exception:
         pass
     resp = {"quote_id": quote_id}
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 @limiter.limit("30/minute")
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
@@ -6156,7 +7278,7 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
         pass
 
     resp = {"deal_id": deal_id, "status": "done"}
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 # ===================== CLOB (Symbol-level order book) =====================
 from fastapi import APIRouter
@@ -6680,7 +7802,7 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
     await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
     await _publish_book(o.symbol)
     resp = {"order_id": order_id, "queued": True}
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 # ===== Settlement (VWAP from recent CLOB trades) =====
 @app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
@@ -7049,7 +8171,7 @@ async def place_order(ord_in: OrderIn, request: Request):
 
     await _event_queue.put((int(ev["id"]), "ORDER_FUTURES", {"order_id": order_id}))
     resp = {"order_id": order_id, "queued": True}
-    return await _idem_guard(request, key, resp.dict())
+    return await _idem_guard(request, key, resp)
 
 @trade_router.patch("/orders/{order_id}", summary="Modify order (price/qty) and rematch")
 async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):

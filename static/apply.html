@@ -44,6 +44,7 @@
     }
   </script>
 </head>
+<script src="https://js.stripe.com/v3/"></script>
 <body>
   <div class="container py-4">
     <div class="d-flex align-items-center justify-content-between mb-3">
@@ -171,6 +172,21 @@
             <label class="form-label" for="notes">Notes</label>
             <input id="notes" name="notes" class="form-control" placeholder="Anything else we should know?">
           </div>
+          <!-- Payment Method (required) -->
+          <div class="col-12">
+            <div class="card p-3" style="background:#fff;border:1px dashed #d1d5db">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <label class="form-label req">Payment Method on File</label>
+                  <div id="pmStatus" class="form-hint">No payment method yet.</div>
+                </div>
+                <button type="button" id="addPmBtn" class="btn btn-outline-primary">Add Payment Method</button>
+              </div>
+              <div class="form-hint mt-1">
+                We accept ACH (US bank) and credit/debit cards. You will not be charged at signup.
+              </div>
+            </div>
+          </div>
 
           <!-- Terms -->
           <div class="col-12">
@@ -184,7 +200,6 @@
         </div>
 
         <div class="d-flex gap-2 mt-3">
-          <button type="button" id="testFill" class="btn btn-outline-secondary">Test Fill</button>
           <button type="submit" id="submitBtn" class="btn btn-primary">Submit Application</button>
         </div>
         <div class="form-hint mt-2">Fields marked with <span class="text-danger">*</span> are required.</div>
@@ -323,5 +338,136 @@
       }
     });
   </script>
+  <script>
+  // ---- Payment Method flow (Stripe Checkout in setup mode) ----
+  async function pmStatus(member){
+    const res = await api(`/billing/pm/status?member=${encodeURIComponent(member)}`);
+    return await res.json();
+  }
+
+  async function pmStart(member, email){
+    const res = await api('/billing/pm/setup_session', {
+      method: 'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ member, email })
+    });
+    const j = await res.json();
+    if (j.url) { location.href = j.url; return; }
+    throw new Error('Could not start payment method setup.');
+  }
+
+  function memberKeyFromForm(){
+    // Use Organization as the 'member' key (stable, readable)
+    const m = (document.getElementById('org_name').value || '').trim();
+    return m || (document.getElementById('email').value || '').trim();
+  }
+
+  async function refreshPmBadge(){
+    const member = memberKeyFromForm();
+    if(!member){ return; }
+    try{
+      const s = await pmStatus(member);
+      const ok = !!s.has_default;
+      document.getElementById('pmStatus').textContent = ok
+        ? `Payment method on file: ${s.pm || 'default'}`
+        : 'No payment method yet.';
+      document.getElementById('submitBtn').disabled = !ok;
+      document.getElementById('submitBtn').title = ok ? '' : 'Add a payment method to continue';
+    }catch{
+      // keep submit disabled until we know
+      document.getElementById('submitBtn').disabled = true;
+    }
+  }
+
+  // Hook up the Add PM button
+  document.getElementById('addPmBtn').addEventListener('click', async ()=>{
+    const member = memberKeyFromForm();
+    const email  = (document.getElementById('email').value || '').trim();
+    if(!member || !email){
+      toast('Enter Organization and Email first'); return;
+    }
+    try{
+      await pmStart(member, email);
+    }catch(e){
+      toast(e.message || 'Could not start payment method setup');
+    }
+  });
+
+  // On load: if we arrive from Stripe success (?pm=ok), refresh badge
+  (async ()=>{
+    if (qs.get('pm') === 'ok') {
+      toast('✓ Payment method saved');
+    }
+    await refreshPmBadge();
+  })();
+
+  // Keep PM badge current if org/email changes
+  ['org_name','email'].forEach(id=>{
+    const el = document.getElementById(id);
+    el && el.addEventListener('blur', refreshPmBadge);
+  });
+
+  // --- HARD GATE: require PM before submission ---
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    $('alert').classList.add('d-none');
+
+    if(!form.checkValidity()){
+      const bad=form.querySelector(':invalid'); bad?.focus();
+      show('err','Please fix the highlighted fields.'); return;
+    }
+    if(!$('agree').checked){ show('err','Please accept the Terms & Privacy.'); return; }
+
+    const member = memberKeyFromForm();
+    if(!member){ show('err','Organization or Email is required.'); return; }
+
+    try{
+      const s = await pmStatus(member);
+      if(!s.has_default){
+        show('err','Add a payment method to continue.'); toast('Payment method required'); return;
+      }
+    }catch{
+      show('err','Could not verify payment method. Try again.'); return;
+    }
+
+    // (unchanged) build payload & submit
+    const fd = new FormData(form);
+    const payload = {
+      entity_type: fd.get('entity_type') || null,
+      role: fd.get('role') || null,
+      org_name: (fd.get('organization') || fd.get('org_name') || '').trim() || null,
+      // ... keep all your existing payload mapping ...
+      website: (fd.get('website') || '').trim() || null,
+      monthly_volume_tons: fd.get('monthly_volume_tons') ? parseInt(fd.get('monthly_volume_tons'),10) : null,
+      contact_name: (fd.get('name') || fd.get('contact_name') || '').trim() || null,
+      email: (fd.get('email') || '').trim() || null,
+      phone: (fd.get('tel') || fd.get('phone') || '').trim() || null,
+      ref_code: (fd.get('ref_code') || '').trim() || null,
+      materials_buy: (fd.get('materials_buy') || '').trim() || null,
+      materials_sell: (fd.get('materials_sell') || '').trim() || null,
+      lanes: (fd.get('lanes') || '').trim() || null,
+      compliance_notes: (fd.get('compliance_notes') || '').trim() || null,
+      plan: fd.get('plan') || null,
+      notes: (fd.get('notes') || '').trim() || null,
+      utm_source:  qs.get('utm_source')  || null,
+      utm_campaign:qs.get('utm_campaign')|| null,
+      utm_medium:  qs.get('utm_medium')  || null
+    };
+
+    const btn=$('submitBtn'); btn.disabled=true; const old=btn.textContent; btn.textContent='Submitting…';
+    try{
+      await api('/public/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      show('ok',"Thanks! Your application has been received. We'll email you after review.");
+      toast('✓ Application submitted');
+      localStorage.removeItem('bridge_apply_draft_v1'); form.reset(); $('agree').checked=false;
+      await refreshPmBadge();
+    }catch(err){
+      show('err', err?.message || 'Could not submit application.');
+    }finally{
+      btn.disabled=false; btn.textContent=old;
+    }
+  });
+</script>
+
 </body>
 </html>

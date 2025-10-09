@@ -1,0 +1,41 @@
+<div class="card p-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="form-label">Payment Method</div>
+      <div id="set_pm_label" class="form-hint">Loading…</div>
+    </div>
+    <button class="btn btn-outline-primary" id="set_change_pm">Change</button>
+  </div>
+  <div class="form-hint mt-1">We support ACH (US bank) and credit/debit cards. Changes take effect immediately.</div>
+</div>
+
+<script>
+  const member = new URLSearchParams(location.search).get('member') || localStorage.getItem('member_key') || '';
+
+  async function loadPm(){
+    if(!member){ document.getElementById('set_pm_label').textContent='No member key'; return; }
+    try{
+      const res = await api(`/billing/pm/details?member=${encodeURIComponent(member)}`);
+      const j = await res.json();
+      document.getElementById('set_pm_label').textContent =
+        j.has_default ? (j.label || 'Default on file') : 'No payment method';
+    }catch{ document.getElementById('set_pm_label').textContent = 'Unavailable'; }
+  }
+  document.getElementById('set_change_pm').addEventListener('click', async ()=>{
+    if(!member){ return toast('Missing member key'); }
+    try{
+      const res = await api('/billing/pm/change_session', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ member })
+      });
+      const j = await res.json();
+      if(j.url){ location.href = j.url; } else { toast('Could not start'); }
+    }catch(e){ toast(e.message || 'Could not start'); }
+  });
+
+  (async ()=>{
+    if (new URLSearchParams(location.search).get('pm') === 'ok') {
+      toast('✓ Payment method updated');
+    }
+    await loadPm();
+  })();
+</script>

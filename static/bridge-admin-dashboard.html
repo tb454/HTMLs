@@ -637,6 +637,51 @@
 })();
 </script>
 
+<!-- Admin: Quick Billing Tools -->
+<div class="card p-3 mb-3">
+  <div class="d-flex align-items-end gap-2">
+    <div>
+      <label class="form-label">Invoice ID</label>
+      <input id="adm_invoice_id" class="form-control" placeholder="invoice UUID">
+    </div>
+    <div>
+      <label class="form-label">Member</label>
+      <input id="adm_member" class="form-control" placeholder="member key (Organization)">
+    </div>
+    <button class="btn btn-success" id="adm_bill_now" style="height:38px">Bill Now</button>
+    <button class="btn btn-outline-primary" id="adm_change_pm" style="height:38px">Change Payment Method</button>
+  </div>
+  <div class="form-hint mt-2">Charges the stored default payment method off-session, or opens a Stripe setup session to update the PM.</div>
+</div>
+
+<script>
+  document.getElementById('adm_bill_now').addEventListener('click', async ()=>{
+    const invoice_id = document.getElementById('adm_invoice_id').value.trim();
+    if(!invoice_id){ return toast('Enter an invoice id'); }
+    try{
+      const res = await api('/billing/pay/charge_now', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ invoice_id })
+      });
+      const j = await res.json();
+      toast(j.ok ? '✓ Charged and marked paid' : 'Charge attempt finished');
+    }catch(e){ toast(e.message || 'Charge failed'); }
+  });
+
+  document.getElementById('adm_change_pm').addEventListener('click', async ()=>{
+    const member = document.getElementById('adm_member').value.trim();
+    if(!member){ return toast('Enter member'); }
+    try{
+      const res = await api('/billing/pm/change_session', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ member })
+      });
+      const j = await res.json();
+      if(j.url){ location.href = j.url; } else { toast('Could not start PM change'); }
+    }catch(e){ toast(e.message || 'Could not start PM change'); }
+  });
+</script>
+
   <footer style="margin-top:40px;text-align:center;font-size:.9em;">
     <a href="/terms" target="_blank">Terms of Use</a> |
     <a href="/eula" target="_blank">EULA</a> |
