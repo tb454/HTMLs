@@ -40,7 +40,7 @@ from statistics import mean, stdev
 from collections import defaultdict
 from typing import Optional
 from fastapi import HTTPException
-import io, os, csv, zipfile, datetime
+import io, os, csv, zipfile
 from typing import Dict, Any, List
 import httpx
 from fastapi import BackgroundTasks
@@ -4225,34 +4225,43 @@ async def update_contract(
 
 #-------- Export Contracts as CSV --------
 from fastapi import Response
+import uuid
+
+def _normalize(v):
+    # keep this near the top of the file so it's used by export_contracts_csv
+    from datetime import date, datetime as _dt
+    if isinstance(v, (date, _dt)):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
+    # let csv write str(value) for everything else
+    return v
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
     try:
         rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
         dict_rows = [dict(r) for r in rows]
-
-        # stable header set
         fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
 
         buf = io.StringIO(newline="")
-        writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
+        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
         for r in dict_rows:
-            writer.writerow({k: _normalize(r.get(k)) for k in fieldnames})
+            w.writerow({k: _normalize(r.get(k)) for k in fieldnames})
 
-        data = buf.getvalue()
         headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
-
-        # Return *non-streaming* text response
-        return Response(content=data, media_type="text/csv", headers=headers)
+        return Response(content=buf.getvalue(), media_type="text/csv", headers=headers)
 
     except Exception as e:
         try:
             logger.warn("contracts_export_csv_failed", err=str(e))
         except Exception:
             pass
-        # Return a minimal, valid CSV so the socket never resets
         headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
         return Response(content="id\n", media_type="text/csv", headers=headers)
 #-------- Export Contracts as CSV --------
