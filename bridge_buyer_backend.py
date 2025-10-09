@@ -1089,14 +1089,24 @@ async def run_forecast_now():
 
 @router_fc.get("/latest", summary="Get latest forecast curve for a symbol")
 async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
-    q = """SELECT forecast_date, predicted_price, conf_low, conf_high, model_name
-           FROM bridge_forecasts
-           WHERE symbol=$1 AND horizon_days=$2
-           ORDER BY forecast_date"""
-    rows = await app.state.db_pool.fetch(q, symbol, horizon_days)
-    if not rows:
+    try:
+        q = """SELECT forecast_date, predicted_price, conf_low, conf_high, model_name
+               FROM bridge_forecasts
+               WHERE symbol=$1 AND horizon_days=$2
+               ORDER BY forecast_date"""
+        rows = await app.state.db_pool.fetch(q, symbol, horizon_days)
+        if not rows:
+            raise HTTPException(404, "No forecasts available")
+        return [dict(r) for r in rows]
+    except HTTPException:
+        raise
+    except Exception as e:
+        # dev-safe: treat as "no data yet" instead of a 500
+        try:
+            logger.warn("forecasts_latest_error", err=str(e))
+        except Exception:
+            pass
         raise HTTPException(404, "No forecasts available")
-    return [dict(r) for r in rows]
 
 @router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
 async def run_indices_now():
@@ -1855,6 +1865,15 @@ async def _ensure_futures_schema():
             await database.execute(stmt)
         except Exception as e:
             logger.warn("futures_schema_bootstrap_failed", err=str(e), sql=stmt[:80])
+
+async def _ensure_futures_tables_if_missing():
+    try:
+        # this will raise if the table doesn't exist yet
+        await database.fetch_one("SELECT 1 FROM futures_products LIMIT 1")
+    except Exception:
+        # run the bootstrap once (safe to call repeatedly)
+        await _ensure_futures_schema()
+# ===== /FUTURES schema bootstrap =====
 
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
 @app.on_event("startup")
@@ -2759,7 +2778,7 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             pass
 
     resp = {"ok": True, "upserted": upserted}              # bulk_upsert
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict*())
 
 async def idem_get(key: str):
     if not key: return None
@@ -2814,7 +2833,7 @@ async def inventory_manual_add(payload: dict, request: Request):
             movement_reason="manual_add", idem_key=idem
         )
     resp = {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
-    return await _idem_guard(request, key, resp)           # manual_add
+    return await _idem_guard(request, key, resp.dict())           # manual_add
 
 # -------- Inventory: CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
@@ -3719,20 +3738,20 @@ def verify_signed_token(token: str, max_age_sec: int = 900) -> dict:
         raise HTTPException(status_code=401, detail="Bad link signature")
 
 # -------- Documents: BOL PDF --------
-@app.get(
-    "/bol/{bol_id}/pdf",
-    tags=["Documents"],
-    summary="Download BOL as PDF",
-    description="Generates and returns a downloadable PDF version of the specified BOL.",
-    status_code=200
-)
+from pathlib import Path
+import tempfile
+
+@app.get("/bol/{bol_id}/pdf", tags=["Documents"], summary="Download BOL as PDF", status_code=200)
 async def generate_bol_pdf(bol_id: str):
     row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :bol_id", {"bol_id": bol_id})
     if not row:
         raise HTTPException(status_code=404, detail="BOL not found")
 
+    d = dict(row)  # <-- use a plain dict everywhere below
+
     filename = f"bol_{bol_id}.pdf"
-    filepath = f"/tmp/{filename}"
+    filepath = str(Path(tempfile.gettempdir()) / filename)  # <-- Windows-safe
+
     c = canvas.Canvas(filepath, pagesize=LETTER)
     width, height = LETTER
     margin = 1 * inch
@@ -3749,49 +3768,48 @@ async def generate_bol_pdf(bol_id: str):
         c.drawString(margin, y, f"{label}: {value}")
         y -= line_height
 
-    draw("BOL ID", row["bol_id"])
-    draw("Contract ID", row["contract_id"])
-    draw("Status", row["status"])
-    draw("Buyer", row["buyer"])
-    draw("Seller", row["seller"])
-    draw("Material", row["material"])
-    draw("Weight (tons)", row["weight_tons"])
-    ppu = float(row['price_per_unit']) if row.get('price_per_unit') is not None else 0.0
-    tv = float(row['total_value']) if row.get('total_value') is not None else 0.0
+    draw("BOL ID", d["bol_id"])
+    draw("Contract ID", d["contract_id"])
+    draw("Status", d.get("status") or "—")
+    draw("Buyer", d.get("buyer") or "—")
+    draw("Seller", d.get("seller") or "—")
+    draw("Material", d.get("material") or "—")
+    draw("Weight (tons)", d.get("weight_tons") or "—")
+
+    ppu = float(d["price_per_unit"]) if d.get("price_per_unit") is not None else 0.0
+    tv  = float(d["total_value"])    if d.get("total_value")    is not None else 0.0
     draw("Price per ton", f"${ppu:.2f}")
     draw("Total Value", f"${tv:.2f}")
 
-    draw("Pickup Time", row["pickup_time"].isoformat() if row["pickup_time"] else "—")
-    draw("Delivery Time", row["delivery_time"].isoformat() if row["delivery_time"] else "—")
-    draw("Carrier Name", row["carrier_name"])
-    draw("Driver", row["carrier_driver"])
-    draw("Truck VIN", row["carrier_truck_vin"])
-    draw("Origin Country", row.get("origin_country") or "—")
-    draw("Destination Country", row.get("destination_country") or "—")
-    draw("Port Code", row.get("port_code") or "—")
-    draw("HS Code", row.get("hs_code") or "—")
-    if row.get("duty_usd") is not None:
-        draw("Duty (USD)", f"${float(row['duty_usd']):.2f}")
-    if row.get("tax_pct") is not None:
-        draw("Tax (%)", f"{float(row['tax_pct']):.2f}%")
+    draw("Pickup Time", d["pickup_time"].isoformat() if d.get("pickup_time") else "—")
+    draw("Delivery Time", d["delivery_time"].isoformat() if d.get("delivery_time") else "—")
+    draw("Carrier Name", d.get("carrier_name") or "—")
+    draw("Driver", d.get("carrier_driver") or "—")
+    draw("Truck VIN", d.get("carrier_truck_vin") or "—")
+    draw("Origin Country", d.get("origin_country") or "—")
+    draw("Destination Country", d.get("destination_country") or "—")
+    draw("Port Code", d.get("port_code") or "—")
+    draw("HS Code", d.get("hs_code") or "—")
+    if d.get("duty_usd") is not None:
+        draw("Duty (USD)", f"${float(d['duty_usd']):.2f}")
+    if d.get("tax_pct") is not None:
+        draw("Tax (%)",  f"{float(d['tax_pct']):.2f}%")
 
     y -= line_height
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(margin, y, f"Generated by BRidge on {datetime.utcnow().isoformat()}")
 
     try:
-        d = dict(row)
-        fingerprint = hashlib.sha256(
-            json.dumps(d, sort_keys=True, separators=(",", ":"), default=str).encode()
-        ).hexdigest()[:12]
+        fingerprint = hashlib.sha256(json.dumps(d, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()[:12]
         y -= line_height
         c.setFont("Helvetica", 8)
-        c.drawString(margin, y, f"Verify: https://bridge-buyer.onrender.com/bol/{row['bol_id']}  •  Hash: {fingerprint}")
+        c.drawString(margin, y, f"Verify: https://bridge-buyer.onrender.com/bol/{d['bol_id']}  •  Hash: {fingerprint}")
     except Exception:
         pass
 
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
+# -------- Documents: BOL PDF --------
 
 # -------- Receipts lifecycle --------
 class ReceiptCreateIn(BaseModel):
@@ -3868,7 +3886,7 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
          qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
          status=status,
      )
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -4154,12 +4172,29 @@ async def get_all_contracts(
     return await database.fetch_all(query=query, values=values)
 
 # -------- Contract ID --------
-@app.get("/contracts/{contract_id}", response_model=ContractOut, tags=["Contracts"], summary="Get Contract by ID", status_code=200)
-async def get_contract_by_id(contract_id: str):
-    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
-    if not row:
-        raise HTTPException(status_code=404, detail="Contract not found")
-    return row
+@app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
+async def export_contracts_csv():
+    try:
+        rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
+        dict_rows = [dict(r) for r in rows]
+
+        fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
+        return StreamingResponse(
+            _iter_csv(dict_rows, fieldnames),  # uses your _iter_csv + _safe
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+    except Exception as e:
+        try:
+            logger.warn("contracts_export_csv_failed", err=str(e))
+        except Exception:
+            pass
+        # minimal, never-500 fallback
+        return StreamingResponse(
+            iter(["id\n"]),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
 
 @app.put(
     "/contracts/{contract_id}",
@@ -4349,7 +4384,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         })
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 # ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
 
@@ -4718,7 +4753,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
             pass
 
         resp = row
-        return await _idem_guard(request, key, resp)
+        return await _idem_guard(request, key, resp.dict())
 
     # --------------------- fallback path: minimal insert -----------------------------
     except HTTPException:
@@ -4750,6 +4785,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
 async def products_add(p: ProductIn):
+    quality_json = json.dumps(p.quality or {}, separators=(",", ":"), ensure_ascii=False)
     await database.execute("""
       INSERT INTO public.products(symbol, description, unit, quality)
       VALUES (:s, :d, :u, :q::jsonb)
@@ -4757,13 +4793,13 @@ async def products_add(p: ProductIn):
         SET description = EXCLUDED.description,
             unit        = EXCLUDED.unit,
             quality     = EXCLUDED.quality
-    """, {"s": p.symbol, "d": p.description, "u": p.unit, "q": json.dumps(p.quality)})
+    """, {"s": p.symbol, "d": p.description, "u": p.unit, "q": quality_json})
 
-    # also expose as tradable instrument (in-memory)
     _INSTRUMENTS[p.symbol] = {"lot": 1.0, "tick": 0.01, "desc": p.description}
     return {"symbol": p.symbol, "tradable": True}
 #-------- Products --------
 
+# ------- Signed Contract -------
 @app.post("/contracts/{contract_id}/sign", tags=["Contracts"], summary="Sign a contract", status_code=200)
 async def sign_contract(contract_id: str, request: Request):
     # Flip status to Signed (idempotent-ish)
@@ -4810,7 +4846,9 @@ async def sign_contract(contract_id: str, request: Request):
         pass
 
     return {"status": "ok", "contract_id": contract_id}
+#-------- Signed Contract --------
 
+# ========== Tenant Applications ==========
 class ApplicationIn(BaseModel):
     # use Field(pattern=...) for Pydantic v2; if on v1, switch to constr(regex=...)
     entity_type: str = Field(pattern=r"^(yard|mill|industrial|manufacturer|broker)$")
@@ -4841,7 +4879,6 @@ class ApplicationOut(BaseModel):
     status: str
     message: str
 
-# ========== Tenant Applications ==========
 @app.on_event("startup")
 async def _ensure_tenant_applications_schema():
     await run_ddl_multi("""
@@ -5084,7 +5121,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None,
     }
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
 async def bols_mark_delivered(
@@ -5335,6 +5372,7 @@ async def _compute_mark_for_listing(listing_id: str, mark_date: Optional[_date] 
 
 @futures_router.post("/products", response_model=FuturesProductOut, summary="Create/Upsert a futures product")
 async def create_product(p: FuturesProductIn):
+    await _ensure_futures_tables_if_missing()
     row = await database.fetch_one("""
       INSERT INTO futures_products (id, symbol_root, material, delivery_location, contract_size_tons, tick_size, currency, price_method)
       VALUES (:id,:symbol_root,:material,:delivery_location,:contract_size_tons,:tick_size,:currency,:price_method)
@@ -5351,6 +5389,7 @@ async def create_product(p: FuturesProductIn):
 
 @futures_router.post("/products/{symbol_root}/pricing", summary="Set pricing params")
 async def set_pricing(symbol_root: str, body: PricingParamsIn):
+    await _ensure_futures_tables_if_missing()
     prod = await database.fetch_one("SELECT id FROM futures_products WHERE symbol_root=:s", {"s": symbol_root})
     if not prod:
         raise HTTPException(404, "product not found")
@@ -5369,6 +5408,7 @@ async def set_pricing(symbol_root: str, body: PricingParamsIn):
 
 @futures_router.post("/series/generate", response_model=List[ListingOut], summary="Generate monthly listings")
 async def generate_series(body: ListingGenerateIn):
+    await _ensure_futures_tables_if_missing()
     today = _date.today()
     out = []
     for k in range(body.months_ahead):
@@ -5388,6 +5428,7 @@ async def generate_series(body: ListingGenerateIn):
 
 @futures_router.post("/series/{listing_id}/list", summary="Publish Draft listing to Listed")
 async def list_series(listing_id: str):
+    await _ensure_futures_tables_if_missing()
     await database.execute("UPDATE futures_listings SET status='Listed' WHERE id=:id", {"id": listing_id})
     return {"ok": True}
 
@@ -5396,12 +5437,14 @@ class TradingStatusIn(BaseModel):
 
 @futures_router.post("/series/{listing_id}/trading_status", summary="Set listing trading status")
 async def set_trading_status(listing_id: str, body: TradingStatusIn):
+    await _ensure_futures_tables_if_missing()
     await database.execute("UPDATE futures_listings SET trading_status=:st WHERE id=:id",
                            {"st": body.trading_status, "id": listing_id})
     return {"ok": True, "listing_id": listing_id, "trading_status": body.trading_status}
 
 @futures_router.post("/series/{listing_id}/expire", summary="Expire listing (cash-settled)")
 async def expire_listing(listing_id: str):
+    await _ensure_futures_tables_if_missing()
     await database.execute("""
       UPDATE futures_listings SET trading_status='Expired', status='Expired' WHERE id=:id
     """, {"id": listing_id})
@@ -5409,6 +5452,7 @@ async def expire_listing(listing_id: str):
 
 @futures_router.post("/series/{listing_id}/finalize", summary="Finalize cash settlement at expiry")
 async def finalize_series(listing_id: str, mark_date: Optional[date] = None):
+    await _ensure_futures_tables_if_missing()
     dt = mark_date or _date.today()
 
     cur = await database.fetch_one("""
@@ -5462,6 +5506,7 @@ async def finalize_series(listing_id: str, mark_date: Optional[date] = None):
 
 @futures_router.post("/marks/publish", summary="Publish an official settlement/mark for a listing")
 async def publish_mark(body: PublishMarkIn):
+    await _ensure_futures_tables_if_missing()
     mark_price, method = await _compute_mark_for_listing(body.listing_id, body.mark_date)
     await database.execute("""
       INSERT INTO futures_marks (id, listing_id, mark_date, mark_price, method)
@@ -6031,7 +6076,7 @@ async def create_rfq(r: RFQIn, request: Request):
     except Exception:
         pass
     resp = {"rfq_id": rfq_id, "status": "open"}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 @limiter.limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
@@ -6059,7 +6104,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
     except Exception:
         pass
     resp = {"quote_id": quote_id}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 @limiter.limit("30/minute")
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
@@ -6111,7 +6156,7 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
         pass
 
     resp = {"deal_id": deal_id, "status": "done"}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 # ===================== CLOB (Symbol-level order book) =====================
 from fastapi import APIRouter
@@ -6635,7 +6680,7 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
     await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
     await _publish_book(o.symbol)
     resp = {"order_id": order_id, "queued": True}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 # ===== Settlement (VWAP from recent CLOB trades) =====
 @app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
@@ -6780,37 +6825,39 @@ class FixOrder(BaseModel):
     OrderQty: float
     TimeInForce: Optional[Literal["0","3","4"]] = "0"  # 0=Day,3=IOC,4=FOK
     SenderCompID: Optional[str] = None
-
 @app.post("/fix/order", tags=["FIX"], summary="FIX Order shim → CLOB")
 async def fix_order(o: FixOrder):
     side = "buy" if o.Side == "1" else "sell"
-    tif = {"0":"day","3":"ioc","4":"fok"}[o.TimeInForce or "0"]
+    tif  = {"0":"day","3":"ioc","4":"fok"}[o.TimeInForce or "0"]
 
     member = o.SenderCompID or "fix_member"
-    if _KILL_SWITCH.get(member):
-        raise HTTPException(423, "Kill switch active")
-
-    await price_band_check(o.Symbol, float(o.Price))
-    await _check_position_limit(member, o.Symbol, float(o.OrderQty), side)
-
     # grant runtime entitlement for the member (sessionless)
     _ENTITLEMENTS[member].add("clob.trade")
 
-    # Impersonate a minimal Request with session for clob_place_order()
+    # Build a minimal Request-like object with session
     class _Req:
         session = {"username": member}
 
-    # Reuse your CLOB endpoint directly
-    return await clob_place_order(
-        CLOBOrderIn(
-            symbol=o.Symbol,
-            side=side,
-            price=Decimal(str(o.Price)),
-            qty_lots=Decimal(str(o.OrderQty)),
-            tif=tif,
-        ),
-        _Req,
-    )
+    # Route through the regular CLOB endpoint (it handles kill switch, bands, limits)
+    try:
+        return await clob_place_order(
+            CLOBOrderIn(
+                symbol=o.Symbol,
+                side=side,
+                price=Decimal(str(o.Price)),
+                qty_lots=Decimal(str(o.OrderQty)),
+                tif=tif,
+            ),
+            _Req,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            logger.warn("fix_order_error", err=str(e))
+        except Exception:
+            pass
+        raise HTTPException(400, "invalid FIX order")
 
 @app.post("/fix/dropcopy", tags=["FIX"], summary="Receive Drop Copy (stub)")
 async def fix_dropcopy(payload: dict):
@@ -7002,7 +7049,7 @@ async def place_order(ord_in: OrderIn, request: Request):
 
     await _event_queue.put((int(ev["id"]), "ORDER_FUTURES", {"order_id": order_id}))
     resp = {"order_id": order_id, "queued": True}
-    return await _idem_guard(request, key, resp)
+    return await _idem_guard(request, key, resp.dict())
 
 @trade_router.patch("/orders/{order_id}", summary="Modify order (price/qty) and rematch")
 async def modify_order(order_id: str, body: ModifyOrderIn, request: Request):
