@@ -54,7 +54,7 @@
       </div>
       <span class="badge-live" data-health>● Checking…</span>
     </div>
-    
+
  <!-- Toast + endpoint + api helper -->
   <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
     <div id="alert" class="alert d-none" role="status" aria-live="polite"></div>
@@ -86,7 +86,7 @@
           </div>
           <div class="col-md-4">
             <label class="form-label req" for="org_name">Organization</label>
-            <input id="org_name" name="organization" autocomplete="organization" class="form-control" placeholder="Company / Yard name" required aria-required="true">
+            <input id="org_name" name="org_name" autocomplete="organization" class="form-control" placeholder="Company / Yard name" required aria-required="true">
           </div>
 
           <!-- Company details -->
@@ -355,29 +355,33 @@
       show('err','Could not verify payment method. Try again.'); return;
     }
 
-    // (unchanged) build payload & submit
-    const fd = new FormData(form);
-    const payload = {
-      entity_type: fd.get('entity_type') || null,
-      role: fd.get('role') || null,
-      org_name: (fd.get('organization') || fd.get('org_name') || '').trim() || null,
-      // ... keep all your existing payload mapping ...
-      website: (fd.get('website') || '').trim() || null,
-      monthly_volume_tons: fd.get('monthly_volume_tons') ? parseInt(fd.get('monthly_volume_tons'),10) : null,
-      contact_name: (fd.get('name') || fd.get('contact_name') || '').trim() || null,
-      email: (fd.get('email') || '').trim() || null,
-      phone: (fd.get('tel') || fd.get('phone') || '').trim() || null,
-      ref_code: (fd.get('ref_code') || '').trim() || null,
-      materials_buy: (fd.get('materials_buy') || '').trim() || null,
-      materials_sell: (fd.get('materials_sell') || '').trim() || null,
-      lanes: (fd.get('lanes') || '').trim() || null,
-      compliance_notes: (fd.get('compliance_notes') || '').trim() || null,
-      plan: fd.get('plan') || null,
-      notes: (fd.get('notes') || '').trim() || null,
-      utm_source:  qs.get('utm_source')  || null,
-      utm_campaign:qs.get('utm_campaign')|| null,
-      utm_medium:  qs.get('utm_medium')  || null
-    };
+// build backend-shaped payload
+const fd = new FormData(form);
+const payload = {
+  entity_type:               (fd.get('entity_type') || '').trim() || null,         // yard|mill|industrial|manufacturer|broker
+  role:                      (fd.get('role') || '').trim() || null,                // buyer|seller|both
+  org_name:                  (fd.get('org_name') || fd.get('organization') || '').trim() || null,
+  ein:                       (fd.get('ein') || '').trim() || null,
+  address:                   (fd.get('street-address') || fd.get('address') || '').trim() || null,
+  city:                      (fd.get('address-level2') || fd.get('city') || '').trim() || null,
+  region:                    (fd.get('address-level1') || fd.get('region') || '').trim() || null,
+  website:                   (fd.get('website') || '').trim() || null,
+  monthly_volume_tons:       fd.get('monthly_volume_tons') ? parseInt(fd.get('monthly_volume_tons'),10) : null,
+  contact_name:              (fd.get('name') || fd.get('contact_name') || '').trim() || null,
+  email:                     (fd.get('email') || '').trim() || null,
+  phone:                     (fd.get('tel') || fd.get('phone') || '').trim() || null,
+  ref_code:                  (fd.get('ref_code') || '').trim() || null,
+  materials_buy:             (fd.get('materials_buy') || '').trim() || null,
+  materials_sell:            (fd.get('materials_sell') || '').trim() || null,
+  lanes:                     (fd.get('lanes') || '').trim() || null,
+  compliance_notes:          (fd.get('compliance_notes') || '').trim() || null,
+  plan:                      (fd.get('plan') || '').trim() || null,                // starter|standard|enterprise
+  notes:                     (fd.get('notes') || '').trim() || null,
+  utm_source:                qs.get('utm_source')  || null,
+  utm_campaign:              qs.get('utm_campaign')|| null,
+  utm_medium:                qs.get('utm_medium')  || null
+};
+
 
     const btn=$('submitBtn'); btn.disabled=true; const old=btn.textContent; btn.textContent='Submitting…';
     try{
