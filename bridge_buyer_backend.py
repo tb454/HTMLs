@@ -60,7 +60,6 @@ from indices_builder import run_indices_builder
 from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
 import smtplib
 from email.message import EmailMessage
-from __future__ import annotations
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -405,8 +404,7 @@ def send_application_email(payload: ApplyRequest, app_id: str):
         s.send_message(msg)
 
 from sqlalchemy import MetaData
-if 'metadata' not in globals():
-    metadata = MetaData()
+metadata = MetaData()
 
 applications = Table(
     "applications",
