@@ -5863,10 +5863,11 @@ async def create_contract(contract: ContractInExtended, request: Request):
     key = _idem_key(request)
     if key:
         hit = await idem_get(key)
-        if hit: 
+        if hit:
             return hit
 
     await _check_contract_quota()
+
     cid    = str(uuid.uuid4())
     qty    = float(contract.weight_tons)
     seller = (contract.seller or "").strip()
@@ -5886,17 +5887,32 @@ async def create_contract(contract: ContractInExtended, request: Request):
                     if not contract.pricing_formula:
                         contract.pricing_formula = "COMEX_Cu - 0.25"
         except Exception:
-            # silently skip in dev
             pass
 
-    # Historical import toggle (still honored)
+    # -------- historical mode detection + created_at override -----------
     import_mode = request.headers.get("X-Import-Mode", "").lower() == "historical"
     if os.getenv("ENV", "").lower() == "production" and import_mode:
-        _require_admin(request)
+        _require_admin(request)  # only admins can back-date in prod
+
+    created_at_override: datetime | None = None
+    if import_mode:
+        hdr = (request.headers.get("X-Import-Created-At") or "").strip()
+        try:
+            if hdr:
+                # Accept 'YYYY-MM-DD' or full ISO
+                if len(hdr) == 10 and hdr[4] == "-" and hdr[7] == "-":
+                    created_at_override = datetime.fromisoformat(hdr + "T00:00:00+00:00")
+                else:
+                    created_at_override = datetime.fromisoformat(hdr.replace("Z", "+00:00"))
+            elif contract.reference_timestamp:
+                created_at_override = contract.reference_timestamp
+        except Exception:
+            created_at_override = None
 
     # --------------------- primary path with inventory reserve ----------------------
     try:
         if import_mode:
+            # Historical import: Signed, optional back-dated created_at
             payload = {
                 "id": cid,
                 "buyer": contract.buyer, "seller": contract.seller,
@@ -5909,20 +5925,43 @@ async def create_contract(contract: ContractInExtended, request: Request):
                 "reference_timestamp": contract.reference_timestamp,
                 "currency": contract.currency or "USD",
             }
-            row = await database.fetch_one("""
-                INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,
-                                       pricing_formula,reference_symbol,reference_price,reference_source,reference_timestamp,currency)
-                VALUES (:id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
-                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,:reference_timestamp,:currency)
-                RETURNING *
-            """, payload)
+
+            if created_at_override is not None:
+                row = await database.fetch_one("""
+                    INSERT INTO contracts (
+                        id,buyer,seller,material,weight_tons,price_per_ton,status,
+                        pricing_formula,reference_symbol,reference_price,reference_source,
+                        reference_timestamp,currency,created_at
+                    )
+                    VALUES (
+                        :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
+                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,
+                        :reference_timestamp,:currency,:created_at
+                    )
+                    RETURNING *
+                """, {**payload, "created_at": created_at_override})
+            else:
+                row = await database.fetch_one("""
+                    INSERT INTO contracts (
+                        id,buyer,seller,material,weight_tons,price_per_ton,status,
+                        pricing_formula,reference_symbol,reference_price,reference_source,
+                        reference_timestamp,currency
+                    )
+                    VALUES (
+                        :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
+                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,
+                        :reference_timestamp,:currency
+                    )
+                    RETURNING *
+                """, payload)
 
         else:
+            # LIVE path: reserve inventory, write Pending
             async with database.transaction():
-                # ensure inventory row exists
                 await database.execute("""
                     INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-                    VALUES (:s,:k,0,0,0) ON CONFLICT (seller, sku) DO NOTHING
+                    VALUES (:s,:k,0,0,0)
+                    ON CONFLICT (seller, sku) DO NOTHING
                 """, {"s": seller, "k": sku})
 
                 inv = await database.fetch_one("""
@@ -5948,7 +5987,8 @@ async def create_contract(contract: ContractInExtended, request: Request):
                 await database.execute("""
                     INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
                     VALUES (:s,:k,'reserve',:q,:cid,:m)
-                """, {"s": seller, "k": sku, "q": qty, "cid": cid, "m": json.dumps({"reason": "contract_create"})})
+                """, {"s": seller, "k": sku, "q": qty, "cid": cid,
+                      "m": json.dumps({"reason": "contract_create"})})
 
                 payload = {
                     "id": cid,
@@ -5962,11 +6002,18 @@ async def create_contract(contract: ContractInExtended, request: Request):
                     "reference_timestamp": contract.reference_timestamp,
                     "currency": contract.currency or "USD",
                 }
+
                 row = await database.fetch_one("""
-                    INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,
-                                           pricing_formula,reference_symbol,reference_price,reference_source,reference_timestamp,currency)
-                    VALUES (:id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
-                            :pricing_formula,:reference_symbol,:reference_price,:reference_source,:reference_timestamp,:currency)
+                    INSERT INTO contracts (
+                        id,buyer,seller,material,weight_tons,price_per_ton,status,
+                        pricing_formula,reference_symbol,reference_price,reference_source,
+                        reference_timestamp,currency
+                    )
+                    VALUES (
+                        :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
+                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,
+                        :reference_timestamp,:currency
+                    )
                     RETURNING *
                 """, payload)
 
@@ -5999,7 +6046,6 @@ async def create_contract(contract: ContractInExtended, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        # log and attempt a minimal write so tests don’t fail hard in dev
         try:
             logger.warn("contract_create_failed_primary", err=str(e))
         except Exception:
@@ -6020,7 +6066,8 @@ async def create_contract(contract: ContractInExtended, request: Request):
             except Exception:
                 pass
             raise HTTPException(status_code=500, detail="contract create failed")
-# ========= Admin Exports router ==========
+
+    # ========= Admin Exports router ==========
 
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
