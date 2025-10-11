@@ -310,6 +310,29 @@ async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
         return {"amount": round(amount / _FX[f] * _FX[t], 2), "to": t}
     except KeyError:
         raise HTTPException(422, "Unsupported currency")
+    
+# put near your other routes
+@app.get("/pricing", tags=["Pricing"], summary="Public pricing snapshot")
+async def get_pricing():
+    return {
+        "prices": {
+            "bridge_starter_monthly": 1000,
+            "bridge_standard_monthly": 3000,
+            "bridge_enterprise_monthly": 10000,
+            "bridge_exchange_fee_nonmember": 1.25,
+            "bridge_clearing_fee_nonmember": 0.85,
+            "bridge_delivery_fee": 1.00,
+            "bridge_cash_settle_fee": 0.75,
+            "bridge_giveup_fee": 1.00,
+        },
+        "meters": {
+            "bol_count": 1.00,
+            "delivered_tons": 0.50,
+            "receipts_count": 0.50,
+            "warrants_count": 0.50,
+            "ws_messages_per_1m": 5.00,
+        },
+    }
 # === Prices endpoint ===
 
 # ===== DB bootstrap for CI/staging =====
@@ -922,6 +945,101 @@ async def pm_status(member: str):
     r = await database.fetch_one("SELECT has_default, default_payment_method FROM billing_payment_profiles WHERE member=:m", {"m": member})
     return {"member": member, "has_default": bool(r and r["has_default"]), "pm": (r and r["default_payment_method"]) or None}
 
+USE_STRIPE = os.getenv("ENABLE_STRIPE", "0").lower() in {"1","true","yes"}
+STRIPE_API_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+
+# optional shim so imports don't break in CI
+try:
+    import stripe
+except ModuleNotFoundError:
+    stripe = None
+
+# which lookup keys you want to expose
+PRICE_LOOKUPS = [
+    "bridge_starter_monthly",
+    "bridge_standard_monthly",
+    "bridge_enterprise_monthly",
+    "bridge_exchange_fee_nonmember",
+    "bridge_clearing_fee_nonmember",
+    "bridge_delivery_fee",
+    "bridge_cash_settle_fee",
+    "bridge_giveup_fee",
+]
+
+# if you’re using Stripe Meters, map event_name -> displayed unit price (if any)
+METER_RATES = {
+    "bol_count": None,            # set None to skip or override with a fixed display value
+    "delivered_tons": None,
+    "receipts_count": None,
+    "warrants_count": None,
+    "ws_messages_per_1m": None,
+}
+
+_pricing_cache = {"data": None, "ts": 0}
+_CACHE_TTL = 600  # seconds
+
+def _fetch_prices_from_stripe():
+    # fallback if disabled or stripe is missing
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        return None
+
+    stripe.api_key = STRIPE_API_KEY
+
+    # fetch all prices with those lookup_keys (active only)
+    out = {}
+    # Stripe doesn’t filter directly by lookup_key list; we can list active and pick.
+    prices = stripe.Price.list(active=True, limit=100)
+    for p in prices.auto_paging_iter():
+        lk = p.get("lookup_key")
+        if lk in PRICE_LOOKUPS:
+            # unit_amount is cents for recurring flat prices; for metered “per unit” use unit_amount as well
+            amt = None
+            if p.get("unit_amount") is not None:
+                amt = p["unit_amount"] / 100.0
+            elif p.get("unit_amount_decimal") is not None:
+                amt = float(p["unit_amount_decimal"]) / 100.0
+            if amt is not None:
+                out[lk] = amt
+
+    # optionally: resolve meter rates if you store them as Prices too (recommended),
+    # or keep METER_RATES as env-configured constants.
+    return out
+
+def _get_pricing_snapshot():
+    now = time.time()
+    if _pricing_cache["data"] and (now - _pricing_cache["ts"] < _CACHE_TTL):
+        return _pricing_cache["data"]
+
+    prices = _fetch_prices_from_stripe() or {}
+    # default/fallback values if Stripe didn’t return a key
+    defaults = {
+        "bridge_starter_monthly": 1000,
+        "bridge_standard_monthly": 3000,
+        "bridge_enterprise_monthly": 10000,
+        "bridge_exchange_fee_nonmember": 1.25,
+        "bridge_clearing_fee_nonmember": 0.85,
+        "bridge_delivery_fee": 1.00,
+        "bridge_cash_settle_fee": 0.75,
+        "bridge_giveup_fee": 1.00,
+    }
+    merged_prices = {**defaults, **prices}
+
+    # meters: either fixed numbers here, or pull from Stripe if you model them as prices too
+    meters = {
+        "bol_count": 1.00 if METER_RATES["bol_count"] is None else METER_RATES["bol_count"],
+        "delivered_tons": 0.50 if METER_RATES["delivered_tons"] is None else METER_RATES["delivered_tons"],
+        "receipts_count": 0.50 if METER_RATES["receipts_count"] is None else METER_RATES["receipts_count"],
+        "warrants_count": 0.50 if METER_RATES["warrants_count"] is None else METER_RATES["warrants_count"],
+        "ws_messages_per_1m": 5.00 if METER_RATES["ws_messages_per_1m"] is None else METER_RATES["ws_messages_per_1m"],
+    }
+
+    snapshot = {"prices": merged_prices, "meters": meters}
+    _pricing_cache["data"], _pricing_cache["ts"] = snapshot, now
+    return snapshot
+
+@app.get("/pricing", tags=["Pricing"], summary="Public pricing snapshot (cached 10m)")
+async def get_pricing():
+    return _get_pricing_snapshot()
 # ----- Stripe billing -----
 import stripe
 stripe.api_key = os.environ["STRIPE_SECRET"]
