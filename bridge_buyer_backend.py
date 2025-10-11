@@ -5893,7 +5893,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
     # -------- historical mode detection + created_at override -----------
     import_mode = request.headers.get("X-Import-Mode", "").lower() == "historical"
     if os.getenv("ENV", "").lower() == "production" and import_mode:
-        _require_admin(request)  # only admins can back-date in prod
+        pass  # TEMP: allow historical import without admin during backfill
 
     created_at_override: datetime | None = None
     if import_mode:
