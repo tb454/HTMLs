@@ -61,6 +61,7 @@ from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_on
 import smtplib
 from email.message import EmailMessage
 import secrets
+from typing import Annotated
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -2054,7 +2055,7 @@ def _rows_from_csv_bytes(raw_bytes: bytes):
 
 @app.post("/import/contracts_csv", tags=["Data"], summary="Bulk import normalized contracts CSV (gzip or csv)", response_model=None)
 async def import_contracts_csv(
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
     database_dep = Depends(lambda: database)
 ):
     raw = await file.read()
@@ -4123,7 +4124,7 @@ async def inventory_template_csv():
 @app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)", response_model=None)
 @limiter.limit("30/minute")
 async def inventory_import_csv(
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
     request: Request = None
 ):
@@ -4164,7 +4165,7 @@ async def inventory_import_csv(
 @app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)", response_model=None)
 @limiter.limit("15/minute")
 async def inventory_import_excel(
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
     request: Request = None
 ):
