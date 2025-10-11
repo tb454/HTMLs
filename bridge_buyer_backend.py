@@ -1037,9 +1037,6 @@ def _get_pricing_snapshot():
     _pricing_cache["data"], _pricing_cache["ts"] = snapshot, now
     return snapshot
 
-@app.get("/pricing", tags=["Pricing"], summary="Public pricing snapshot (cached 10m)")
-async def get_pricing():
-    return _get_pricing_snapshot()
 # ----- Stripe billing -----
 import stripe
 stripe.api_key = os.environ["STRIPE_SECRET"]
