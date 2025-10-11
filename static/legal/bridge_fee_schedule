@@ -6,56 +6,79 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; }
-    html, body { background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; line-height:1.55; }
+    html, body { background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.55; }
     .wrap{max-width:960px;margin:0 auto;padding:2.25rem 1.25rem 4rem;}
     h1,h2{line-height:1.25;margin:1.6rem 0 .6rem;} h1{font-size:1.9rem;} h2{font-size:1.35rem;}
-    table{width:100%;border-collapse:collapse;margin:1rem 0;} th,td{border:1px solid var(--rule);padding:.6rem;text-align:left;} th{background:#f6f7f9;}
+    table{width:100%;border-collapse:collapse;margin:1rem 0;border-radius:8px;overflow:hidden}
+    th,td{border:1px solid var(--rule);padding:.6rem;text-align:left;} th{background:#f6f7f9;}
+    th[scope="col"]{text-align:left}
     .note{color:var(--muted);font-size:.95rem;} .muted{color:var(--muted);}
     .download{margin:1rem 0 2rem;} .download a{display:inline-block;padding:.5rem 1rem;background:#0645ad;color:#fff;text-decoration:none;border-radius:6px}
     .download a:hover{background:#043a8b}
+    @media print { .download{display:none} body{background:#fff;color:#000} a[href]:after{content:" (" attr(href) ")"; font-size:.9em; color:#777} }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>BRidge Fee Schedule</h1>
-    <p class="muted">Effective: {{Month YYYY}}</p>
+    <p class="muted" id="effective">Effective: <!-- auto-filled --></p>
 
     <div class="download">
       <a href="/static/legal/bridge_fee_schedule.pdf" target="_blank" rel="noopener">📎 Download PDF</a>
     </div>
 
     <h2>1. Exchange & Clearing Fees (Per-Side, Per-Lot)</h2>
-    <table>
-      <thead><tr><th>Fee Type</th><th>Non-Member</th><th>Member</th><th>Program</th></tr></thead>
+    <table id="fees-exchange" data-section="exchange">
+      <thead>
+        <tr>
+          <th scope="col">Fee Type</th>
+          <th scope="col">Non-Member</th>
+          <th scope="col">Member</th>
+          <th scope="col">Program</th>
+        </tr>
+      </thead>
       <tbody>
-        <tr><td>Exchange Fee</td><td>$1.25</td><td>$0.85</td><td>$0.50</td></tr>
-        <tr><td>Clearing Fee</td><td>$0.85</td><td>$0.60</td><td>$0.40</td></tr>
-        <tr><td>Delivery Fee (if BOL issued)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
-        <tr><td>Cash-Settle Fee</td><td>$0.75</td><td>$0.50</td><td>$0.30</td></tr>
-        <tr><td>Give-Up Fee (if brokered)</td><td>$1.00</td><td>$1.00</td><td>$1.00</td></tr>
+        <tr data-lookup="bridge_exchange_fee_nonmember"><td>Exchange Fee</td><td>$1.25</td><td>$0.85</td><td>$0.50</td></tr>
+        <tr data-lookup="bridge_clearing_fee_nonmember"><td>Clearing Fee</td><td>$0.85</td><td>$0.60</td><td>$0.40</td></tr>
+        <tr data-lookup="bridge_delivery_fee"><td>Delivery Fee (if BOL issued)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
+        <tr data-lookup="bridge_cash_settle_fee"><td>Cash-Settle Fee</td><td>$0.75</td><td>$0.50</td><td>$0.30</td></tr>
+        <tr data-lookup="bridge_giveup_fee"><td>Give-Up Fee (if brokered)</td><td>$1.00</td><td>$1.00</td><td>$1.00</td></tr>
       </tbody>
     </table>
     <p class="note">Assessed per side (buy/sell) per 20-ton lot. Partial lots round up.</p>
 
     <h2>2. SaaS Plan Tiers (Monthly)</h2>
-    <table>
-      <thead><tr><th>Plan</th><th>Monthly</th><th>Included Usage</th></tr></thead>
+    <table id="fees-saas" data-section="saas">
+      <thead>
+        <tr>
+          <th scope="col">Plan</th>
+          <th scope="col">Monthly</th>
+          <th scope="col">Included Usage</th>
+        </tr>
+      </thead>
       <tbody>
-        <tr><td>Starter</td><td>$1,000</td><td>50 BOLs, 500 delivered tons, 50k WS messages</td></tr>
-        <tr><td>Standard</td><td>$3,000</td><td>200 BOLs, 2,000 delivered tons, 200k WS messages</td></tr>
-        <tr><td>Enterprise</td><td>$10,000</td><td>Unlimited + CLOB/RFQ/Futures</td></tr>
+        <tr data-lookup="bridge_starter_monthly"><td>Starter</td><td>$1,000</td><td>50 BOLs, 500 delivered tons, 50k WS messages</td></tr>
+        <tr data-lookup="bridge_standard_monthly"><td>Standard</td><td>$3,000</td><td>200 BOLs, 2,000 delivered tons, 200k WS messages</td></tr>
+        <tr data-lookup="bridge_enterprise_monthly"><td>Enterprise</td><td>$10,000</td><td>Unlimited + CLOB/RFQ/Futures</td></tr>
       </tbody>
     </table>
 
     <h2>3. Usage Overages</h2>
-    <table>
-      <thead><tr><th>Metric</th><th>Starter</th><th>Standard</th><th>Enterprise</th></tr></thead>
+    <table id="fees-usage" data-section="usage">
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          <th scope="col">Starter</th>
+          <th scope="col">Standard</th>
+          <th scope="col">Enterprise</th>
+        </tr>
+      </thead>
       <tbody>
-        <tr><td>Extra BOL (each)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
-        <tr><td>Delivered Tons (per ton)</td><td>$0.50</td><td>$0.35</td><td>$0.25</td></tr>
-        <tr><td>Receipts (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
-        <tr><td>Warrants (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
-        <tr><td>WS Messages (per 1M)</td><td>$5.00</td><td>$4.00</td><td>$3.00</td></tr>
+        <tr data-meter="bol_count"><td>Extra BOL (each)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
+        <tr data-meter="delivered_tons"><td>Delivered Tons (per ton)</td><td>$0.50</td><td>$0.35</td><td>$0.25</td></tr>
+        <tr data-meter="receipts_count"><td>Receipts (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
+        <tr data-meter="warrants_count"><td>Warrants (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
+        <tr data-meter="ws_messages_per_1m"><td>WS Messages (per 1M)</td><td>$5.00</td><td>$4.00</td><td>$3.00</td></tr>
       </tbody>
     </table>
 
@@ -72,5 +95,41 @@
 
     <p class="muted">© Atlas IP Holdings LLC · BRidge™</p>
   </div>
+
+  <script>
+    // Auto "Effective: Month YYYY"
+    (function(){
+      const s = new Date().toLocaleString(undefined, { month:'long', year:'numeric' });
+      const el = document.getElementById('effective'); if(el) el.textContent = `Effective: ${s}`;
+    })();
+
+    // Optional live hydration from /pricing (fallback to hardcoded values if fetch fails)
+    (async function(){
+      try{
+        const res = await fetch('/pricing', { headers: { 'Accept':'application/json' } });
+        if(!res.ok) return;
+        const data = await res.json(); // { prices:{lookup_key:number}, meters:{event_name:number} }
+        const fmt = new Intl.NumberFormat(undefined, { style:'currency', currency:'USD', maximumFractionDigits: 6 });
+
+        document.querySelectorAll('[data-lookup]').forEach(tr=>{
+          const k = tr.getAttribute('data-lookup');
+          const price = data?.prices?.[k];
+          if(price!=null){
+            const cell = tr.querySelector('td:nth-child(2)');
+            if(cell) cell.textContent = fmt.format(Number(price));
+          }
+        });
+
+        document.querySelectorAll('[data-meter]').forEach(tr=>{
+          const ev = tr.getAttribute('data-meter');
+          const rate = data?.meters?.[ev];
+          if(rate!=null){
+            const cell = tr.querySelector('td:nth-child(2)');
+            if(cell) cell.textContent = fmt.format(Number(rate));
+          }
+        });
+      }catch(e){ /* silent fallback */ }
+    })();
+  </script>
 </body>
 </html>
