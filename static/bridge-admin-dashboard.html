@@ -38,7 +38,12 @@
     }
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      const res = await fetch(url, { 
+        ...opts, 
+        credentials: 'include',
+        headers:{ Accept:'application/json', ...(opts.headers||{}), 'X-CSRF': (document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/)||[])[1] || '' }
+      });
+
       if (res.status === 401){
         const next = encodeURIComponent(location.pathname + location.search);
         location.href = `/static/bridge-login.html?next=${next}`;
@@ -56,9 +61,11 @@
     window.addEventListener('DOMContentLoaded', async () => {
       const el = document.querySelector('[data-health-badge]');
       if (!el) return;
-      try { await api('/health'); el.textContent='● Live'; el.setAttribute('data-ok','1'); }
-      catch { el.textContent='● Degraded'; }
+      async function ping(){ try { await api('/health'); el.textContent='● Live'; el.dataset.ok='1'; } catch { el.textContent='● Degraded'; el.dataset.ok='0'; } }
+      await ping();
+      setInterval(ping, 15000);
     });
+
   </script>
 </head>
 <body>
@@ -349,7 +356,9 @@
     function statusColor(s){ return {Open:'secondary',Matched:'info','BOL Issued':'primary','In Transit':'warning',Delivered:'success',Closed:'dark'}[s] || 'light'; }
     function formatTime(iso){ try{ return iso? new Date(iso).toLocaleString() : '—'; }catch{ return '—'; } }
     const safe = v => (v ?? '—');
-    function money(n){ const x = Number(n); return isFinite(x) ? x.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '0.00'; }
+    const _fmtUSD = new Intl.NumberFormat(undefined, { style:'currency', currency:'USD', maximumFractionDigits:2 });
+    const money = n => _fmtUSD.format(Number(n||0));
+    const esc = (s)=>String(s??'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 
     async function _tryDownload(paths){
       for (const p of paths){
@@ -386,10 +395,10 @@
     function clearBusy(tableSel){ setBusy(tableSel, false); }
 
     function downloadCSV(){ _tryDownload([ "/contracts/export_csv", "/admin/contracts/export_csv" ]); }
-    function downloadAll(){ _tryDownload([ "/admin/export_all", "/admin/export_all.zip" ]); }
-    function openOpenAPI(){ window.open(`${window.endpoint}/openapi.json`, "_blank"); }
-    function openHealth(){ window.open(`${window.endpoint}/health`, "_blank"); }
-    function downloadPDF(bolId){ window.open(`${window.endpoint}/bol/${bolId}/pdf`, "_blank"); }
+    function downloadAll(){ _tryDownload([ "/admin/exports/all.zip", "/admin/export_all", "/admin/export_all.zip" ]); }
+    function openOpenAPI(){ window.open(`${window.endpoint}/docs`, "_blank", "noopener,noreferrer"); }
+    function openHealth(){ window.open(`${window.endpoint}/health`, "_blank", "noopener,noreferrer"); }
+    function downloadPDF(bolId){ window.open(`${window.endpoint}/bol/${bolId}/pdf`, "_blank", "noopener,noreferrer"); }
 
     async function loadBOLsAdmin(){
       const qs = new URLSearchParams({ limit:aLimit, offset:aOffset });
@@ -397,8 +406,8 @@
       const start = startDate.value, end = endDate.value;
       if (buyer) qs.set("buyer", buyer);
       if (material) qs.set("material", material);
-      if (start) qs.set("start", new Date(start).toISOString());
-      if (end) qs.set("end", new Date(end).toISOString());
+      if (start){ const d=new Date(start); d.setHours(0,0,0,0); qs.set("start", d.toISOString()); }
+      if (end){ const d=new Date(end); d.setHours(23,59,59,999); qs.set("end", d.toISOString()); }
 
       showSkeleton('#bol-table', 11);
       try {
@@ -406,38 +415,44 @@
         renderBOLTable(rows);
         adminPrevBtn.disabled = aOffset===0;
         adminNextBtn.disabled = rows.length < aLimit;
-        adminPageInfo.textContent = `Showing ${rows.length} • offset ${aOffset}`;
+        adminPageInfo.textContent = `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows`;
       } catch(e){ toast(e.message||'Load failed'); }
       finally { clearBusy('#bol-table'); }
     }
 
     function renderBOLTable(rows){
-      const tbody = document.querySelector("#bol-table tbody"); tbody.innerHTML='';
+      const tbody = document.querySelector("#bol-table tbody");
       if (!rows.length){
         tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-3">No BOLs match your filters.</td></tr>`;
         return;
       }
-      rows.forEach(bol=>{
-        const hashHtml = bol.pdf_sha256 ? `<div class="small text-muted">SHA-256: <code class="small">${String(bol.pdf_sha256).slice(0,12)}…</code></div>` : '';
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${safe(bol.bol_id)}</td>
-          <td>${safe(bol.contract_id)}</td>
-          <td>${safe(bol.buyer)}</td>
-          <td>${safe(bol.material)}</td>
+      const html = rows.map(bol => {
+        const hashHtml = bol.pdf_sha256
+          ? `<div class="small text-muted">SHA-256: <code class="small">${esc(String(bol.pdf_sha256).slice(0,12))}…</code></div>`
+          : '';
+        return `
+        <tr>
+          <td>${esc(bol.bol_id)}</td>
+          <td>${esc(bol.contract_id)}</td>
+          <td>${esc(bol.buyer)}</td>
+          <td>${esc(bol.material)}</td>
           <td>${safe(bol.weight_tons)}</td>
-          <td><span class="badge bg-${statusColor(bol.status)}">${safe(bol.status)}</span></td>
+          <td><span class="badge bg-${statusColor(bol.status)}">${esc(bol.status)}</span></td>
           <td>${formatTime(bol.pickup_time)}</td>
           <td>${formatTime(bol.delivery_time)}</td>
-          <td>$${money(bol.total_value)}</td>
+          <td>${money(bol.total_value)}</td>
           <td>
-            <button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${bol.bol_id}')">📄 PDF</button>
+            <button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${esc(bol.bol_id)}')">📄 PDF</button>
             ${hashHtml}
           </td>
-          <td><div class="btn-group btn-group-sm"><button class="btn btn-outline-secondary" onclick="showDeliveryLog('${bol.bol_id}')">🚚 Log</button></div></td>
-        `;
-        tbody.appendChild(tr);
-      });
+          <td>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary" onclick="showDeliveryLog('${esc(bol.bol_id)}')">🚚 Log</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+      tbody.innerHTML = html;
     }
 
     function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
@@ -536,10 +551,11 @@
       const symbol_root = pricingSymbolSel.value;
       const body = {
         lookback_days: parseInt(document.getElementById('pricingLookback').value||'14',10),
-        basis_per_ton: parseFloat(document.getElementById('pricingBasis').value||'0'),
-        carry_per_ton_per_month: parseFloat(document.getElementById('pricingCarry').value||'0'),
-        manual_mark: document.getElementById('pricingManual').value? parseFloat(document.getElementById('pricingManual').value): null
+        basis_adjustment: parseFloat(document.getElementById('pricingBasis').value||'0'),
+        carry_per_month: parseFloat(document.getElementById('pricingCarry').value||'0'),
+        manual_mark: document.getElementById('pricingManual').value ? parseFloat(document.getElementById('pricingManual').value) : null
       };
+
       try{
         await fetchJSON(`${apiBase}/products/${encodeURIComponent(symbol_root)}/pricing`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         toast('Pricing saved.');
@@ -622,19 +638,26 @@
 <div id="tape" style="font:14px system-ui;background:#0b1220;color:#cde3ff;padding:8px 12px;border-radius:10px;margin:10px 0;white-space:nowrap;overflow:auto"></div>
 
 <script>
-(function(){
+(function tapeWS(){
   const tape = document.getElementById('tape');
-  const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/md/ws');
-  ws.onmessage = (e)=>{
-    const m = JSON.parse(e.data);
-    if(m.type==='trade'){
-      const span = document.createElement('span');
-      span.textContent = ` ${m.symbol} ${m.price.toFixed?m.price.toFixed(4):m.price} × ${m.qty_lots}  |`;
-      tape.appendChild(span);
-      tape.scrollLeft = tape.scrollWidth;
-    }
-  };
+  let backoff = 1000;
+  function connect(){
+    const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/md/ws');
+    ws.onmessage = (e)=>{
+      const m = JSON.parse(e.data);
+      if(m.type==='trade'){
+        const span = document.createElement('span');
+        span.textContent = ` ${m.symbol} ${m.price?.toFixed ? m.price.toFixed(4) : m.price} × ${m.qty_lots}  |`;
+        tape.appendChild(span);
+        tape.scrollLeft = tape.scrollWidth;
+      }
+    };
+    ws.onclose = ()=> setTimeout(()=>{ backoff = Math.min(backoff*1.6, 15000); connect(); }, backoff);
+    ws.onerror = ()=> ws.close();
+  }
+  connect();
 })();
+
 </script>
 
 <!-- Admin: Quick Billing Tools -->

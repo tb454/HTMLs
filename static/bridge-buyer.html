@@ -3,13 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>BRidge Buyer Portal</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <title>BRidge Buyer </title>
+  <meta name="description" content="Purchase open BRidge contracts, post RFQs, and monitor live inventory and BOLs." />
   <link rel="icon" href="/static/favicon.ico">
+
+  <!-- Performance & Integrity -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
+    crossorigin="anonymous"
+  />
+
   <meta name="color-scheme" content="light dark">
   <style>
-    body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
-    .cardy{background:#fff;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,.06);padding:18px;margin-bottom:16px}
+    :root{ --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); }
+    body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
+    .cardy{background:var(--card-bg);border-radius:10px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
     .health-badge{font:12px/1 system-ui;color:#6b7280}
     .health-badge[data-ok="1"]{color:#10b981}
     /* skeletons */
@@ -18,26 +29,116 @@
       animation:sk 1.1s linear infinite; }
     @keyframes sk{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
     button:disabled{opacity:.6;cursor:not-allowed}
+
+    @media (prefers-color-scheme: dark){
+      :root{ --card-bg:#0f172a; --bg:#0b0f14; --fg:#e5e7eb; --muted:#9ca3af; --shadow:0 0 0 1px rgba(255,255,255,.06); }
+      .text-muted{color:var(--muted) !important}
+      .skeleton{background:linear-gradient(90deg,#1f2937,#111827,#1f2937)}
+    }
+    .visually-hidden-focusable:active, .visually-hidden-focusable:focus{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto}
   </style>
 
-  <script>
-    // Single source of truth for API base (same-origin in prod; localhost in dev)
-    window.endpoint = window.endpoint || (
-      location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin
-    );
+  <!-- If you keep inline scripts, add a nonce and mirror it in your CSP as 'nonce-<NONCE>' -->
+  <script id="boot" nonce="{{NONCE}}">
+    window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
+  </script>
+</head>
+<body>
+  <a href="#list" class="visually-hidden visually-hidden-focusable">Skip to content</a>
 
+  <!-- Toast (live region) -->
+  <div id="toast"
+       role="status"
+       aria-live="polite"
+       aria-atomic="true"
+       style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;
+              padding:12px 14px;background:#111827;color:#fff;border-radius:10px;
+              box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui;z-index:9999">
+    <button type="button" aria-label="Close notification" style="float:right;border:0;background:transparent;font-size:18px;line-height:1;color:#fff" onclick="this.parentElement.style.display='none'">&times;</button>
+    <span id="toastMsg"></span>
+  </div>
+
+  <div class="container">
+    <div class="d-flex align-items-center justify-content-between">
+      <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
+      <span class="health-badge" data-health-badge>● Checking…</span>
+    </div>
+
+    <div class="d-flex gap-2 mb-3 align-items-end">
+      <div class="flex-grow-1">
+        <label class="visually-hidden" for="buyerFilter">Filter buyer</label>
+        <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)" autocomplete="off">
+      </div>
+      <div class="flex-grow-1">
+        <label class="visually-hidden" for="materialFilter">Filter material/SKU</label>
+        <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
+      </div>
+      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
+    </div>
+
+    <!-- RFQ (two-click) -->
+    <div class="cardy" id="rfqCard">
+      <div class="d-flex gap-2 align-items-end" style="max-width:620px">
+        <div style="flex:1">
+          <label class="form-label mb-1" for="rfqSym">Symbol</label>
+          <select id="rfqSym" class="form-select">
+            <option>CU-SHRED-1M</option>
+            <option>AL-6061-1M</option>
+          </select>
+        </div>
+        <div style="width:140px">
+          <label class="form-label mb-1" for="rfqSide">Side</label>
+          <select id="rfqSide" class="form-select">
+            <option>buy</option>
+            <option>sell</option>
+          </select>
+        </div>
+        <div style="width:160px">
+          <label class="form-label mb-1" for="rfqQty">Qty (lots)</label>
+          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="1">
+        </div>
+        <div>
+          <label class="form-label mb-1" style="opacity:0">.</label>
+          <button id="rfqGo" class="btn btn-primary" type="button">RFQ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- live region for loading text (a11y) -->
+    <div id="loadingStatus" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <div id="list" aria-busy="false"></div>
+
+    <div class="d-flex gap-2 mt-2 align-items-center">
+      <button class="btn btn-outline-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
+      <button class="btn btn-outline-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
+      <label class="small text-muted mb-0" for="pageSize">Rows:</label>
+      <select id="pageSize" class="form-select form-select-sm" style="width:auto">
+        <option>25</option><option selected>100</option><option>200</option>
+      </select>
+      <span class="small text-muted" id="pageInfo"></span>
+    </div>
+  </div>
+
+  <script nonce="{{NONCE}}">
+    // Unified endpoint (already set in boot) and helpers
     function toast(msg, ms=2800){
-      const t = document.getElementById('toast');
-      if(!t){ alert(typeof msg === 'string' ? msg : (msg?.message || 'Error')); return; }
-      t.textContent = typeof msg === 'string' ? msg : (msg?.message || 'Error');
-      t.style.display = 'block';
-      setTimeout(()=>{ t.style.display = 'none'; }, ms);
+      const wrap = document.getElementById('toast');
+      const msgEl = document.getElementById('toastMsg');
+      const text = typeof msg === 'string' ? msg : (msg?.message || 'Error');
+      if (!wrap || !msgEl){ alert(text); return; }
+      msgEl.textContent = text; // safe text only
+      wrap.style.display = 'block';
+      setTimeout(()=>{ wrap.style.display = 'none'; }, ms);
     }
 
-    // Uniform fetch with JSON Accept + 401→login + error→toast
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      const res = await fetch(url, {
+        credentials: 'include', // ensure cookies
+        ...opts,
+        headers: { Accept:'application/json', ...(opts.headers||{}) }
+      });
       if(res.status === 401){
         const next = encodeURIComponent(location.pathname + location.search);
         location.href = `/static/bridge-login.html?next=${next}`;
@@ -52,7 +153,7 @@
       return res;
     }
 
-    // Tiny health check badge for “live” feel
+    // Health badge
     window.addEventListener('DOMContentLoaded', async ()=>{
       const el = document.querySelector('[data-health-badge]');
       if(!el) return;
@@ -60,70 +161,13 @@
       catch{ el.textContent = '● Degraded'; el.removeAttribute('data-ok'); }
     });
   </script>
-</head>
-<body>
-  <!-- Toast (must live in <body>, not <head>) -->
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
 
-  <div class="container">
-    <div class="d-flex align-items-center justify-content-between">
-      <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
-      <span class="health-badge" data-health-badge>● Checking…</span>
-    </div>
+  <script nonce="{{NONCE}}">
+    const endpoint = window.endpoint;
+    let offset = 0, limit = 100; // pagination
+    let loadCtl = null;          // AbortController for overlapping loads
+    let refreshTimer = null;     // interval handle
 
-    <div class="d-flex gap-2 mb-3">
-      <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)">
-      <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)">
-      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">Refresh</button>
-    </div>
-
-    <!-- RFQ (two-click) -->
-    <div class="cardy" id="rfqCard">
-      <div class="d-flex gap-2 align-items-end" style="max-width:520px">
-        <div style="flex:1">
-          <label class="form-label mb-1">Symbol</label>
-          <select id="rfqSym" class="form-select">
-            <option>CU-SHRED-1M</option>
-            <option>AL-6061-1M</option>
-          </select>
-        </div>
-        <div style="width:120px">
-          <label class="form-label mb-1">Side</label>
-          <select id="rfqSide" class="form-select">
-            <option>buy</option>
-            <option>sell</option>
-          </select>
-        </div>
-        <div style="width:140px">
-          <label class="form-label mb-1">Qty (lots)</label>
-          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="1">
-        </div>
-        <div>
-          <label class="form-label mb-1" style="opacity:0">.</label>
-          <button id="rfqGo" class="btn btn-primary">RFQ</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- live region for loading text (a11y) -->
-    <div id="loadingStatus" class="visually-hidden" role="status" aria-live="polite"></div>
-
-    <div id="list"></div>
-
-    <div class="d-flex gap-2 mt-2">
-      <button class="btn btn-outline-secondary btn-sm" id="prevBtn">◀ Prev</button>
-      <button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next ▶</button>
-      <span class="small text-muted" id="pageInfo"></span>
-    </div>
-  </div>
-
-  <script>
-    const endpoint = window.endpoint;            // unified base
-    let offset = 0, limit = 100;                 // pagination
-    let loadCtl = null;                          // AbortController for overlapping loads
-    let refreshTimer = null;                     // interval handle
-
-    // Role guard helper (kept for compatibility)
     function currentRole(){
       try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
       catch{ return ''; }
@@ -137,41 +181,73 @@
       for(let i=0;i<n;i++){
         const div = document.createElement('div');
         div.className = 'cardy';
-        div.innerHTML = `
-          <div class="d-flex justify-content-between align-items-start">
-            <div style="flex:1; padding-right:12px;">
-              <div class="skeleton" style="width:40%; margin-bottom:10px;"></div>
-              <div class="skeleton" style="width:60%; margin-bottom:8px;"></div>
-              <div class="skeleton" style="width:55%; margin-bottom:6px;"></div>
-              <div class="skeleton" style="width:50%;"></div>
-            </div>
-            <div style="width:90px;"><div class="skeleton"></div></div>
-          </div>`;
-        root.appendChild(div);
+        const row = document.createElement('div'); row.className='d-flex justify-content-between align-items-start';
+        const left = document.createElement('div'); left.style.flex='1'; left.style.paddingRight='12px';
+        const s1 = document.createElement('div'); s1.className='skeleton'; s1.style.cssText='width:40%;margin-bottom:10px;';
+        const s2 = document.createElement('div'); s2.className='skeleton'; s2.style.cssText='width:60%;margin-bottom:8px;';
+        const s3 = document.createElement('div'); s3.className='skeleton'; s3.style.cssText='width:55%;margin-bottom:6px;';
+        const s4 = document.createElement('div'); s4.className='skeleton'; s4.style.cssText='width:50%;';
+        left.append(s1,s2,s3,s4);
+        const right = document.createElement('div'); right.style.width='90px';
+        const s5 = document.createElement('div'); s5.className='skeleton'; right.append(s5);
+        row.append(left,right); div.append(row); root.append(div);
       }
     }
 
     function _syncQuery(params){
       const u = new URL(location.href);
-      for (const [k,v] of Object.entries(params)) {
+      for (const [k,v] of Object.entries(params)){
         if (v === '' || v == null) u.searchParams.delete(k);
         else u.searchParams.set(k, v);
       }
       history.replaceState({}, '', u);
     }
 
-    // Optional nicety: disable nav buttons while loading
     function setLoadingUI(isLoading){
       const ids = ['prevBtn','nextBtn','refreshBtn'];
       ids.forEach(id=>{
         const el = document.getElementById(id);
-        if (el) el.disabled = isLoading;
+        if (el){ el.disabled = isLoading; el.setAttribute('aria-disabled', String(isLoading)); }
       });
     }
 
-    // Abortable loader with button-state + URL sync
+    function rowCard(r){
+      const div = document.createElement('div');
+      div.className = 'cardy';
+
+      const left = document.createElement('div');
+      const title = document.createElement('h5'); title.className='mb-1'; title.textContent = r?.material ?? '';
+      const seller = document.createElement('div'); seller.className='text-muted small'; seller.textContent = `Seller: ${r?.seller ?? ''}`;
+      const buyer  = document.createElement('div'); buyer .className='text-muted small'; buyer .textContent = `Buyer: ${r?.buyer ?? ''}`;
+
+      const wt = Number(r?.weight_tons ?? 0);
+      const pt = Number(r?.price_per_ton ?? 0);
+      const total = wt * pt;
+      const line = document.createElement('div'); line.className='small';
+      line.textContent = `Tons: ${wt} @ $${pt}/ton · Total $${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+
+      const created = document.createElement('div'); created.className='small text-muted';
+      if (r?.created_at) created.textContent = `Created: ${new Date(r.created_at).toLocaleString()}`;
+
+      left.append(title, seller, buyer, line, created);
+
+      const right = document.createElement('div'); right.className='text-end';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary btn-sm';
+      btn.type = 'button';
+      btn.textContent = 'Buy';
+      btn.addEventListener('click', (ev)=> buy(ev, r.id));
+      right.append(btn);
+
+      const row = document.createElement('div');
+      row.className = 'd-flex justify-content-between align-items-start';
+      row.append(left, right);
+
+      div.append(row);
+      return div;
+    }
+
     async function loadOpenContracts(){
-      // cancel any in-flight load
       if (loadCtl) loadCtl.abort();
       loadCtl = new AbortController();
 
@@ -179,6 +255,7 @@
       const ls = document.getElementById('loadingStatus');
       if (ls) ls.textContent = 'Loading contracts…';
       setLoadingUI(true);
+      root.setAttribute('aria-busy','true');
       showSkeletonCards(5);
 
       const q = new URLSearchParams({ status: 'Pending', limit, offset });
@@ -189,7 +266,6 @@
       if (buyerVal) q.set('buyer', buyerVal);
       if (matVal)   q.set('material', matVal);
 
-      // save filters/page to URL
       const page = Math.floor(offset/limit)+1;
       _syncQuery({ buyer: buyerVal || '', material: matVal || '', page });
 
@@ -199,47 +275,27 @@
 
         root.innerHTML = '';
         if (!Array.isArray(rows) || rows.length === 0) {
-          root.innerHTML = `<div class="text-muted">No open contracts.</div>`;
+          const empty = document.createElement('div');
+          empty.className = 'text-muted';
+          empty.textContent = 'No open contracts.';
+          root.append(empty);
           const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing 0 • offset ${offset}`;
           if (ls) ls.textContent = 'Loaded.';
           return;
         }
 
-        const role = currentRole();
-        rows.forEach(r=>{
-          const div = document.createElement('div');
-          div.className = 'cardy';
-          const wt = Number(r?.weight_tons ?? 0);
-          const pt = Number(r?.price_per_ton ?? 0);
-          const total = wt * pt;
-          const buyBtn = (role === 'buyer')
-            ? `<button class="btn btn-primary btn-sm" data-id="${r.id}" onclick="buy(event,'${r.id}')">Buy</button>`
-            : `<button class="btn btn-secondary btn-sm" disabled title="Login as Buyer to purchase">Buy</button>`;
-          div.innerHTML = `
-            <div class="d-flex justify-content-between align-items-start">
-              <div>
-                <h5 class="mb-1">${r?.material ?? ''}</h5>
-                <div class="text-muted small">Seller: ${r?.seller ?? ''}</div>
-                <div class="text-muted small">Buyer: ${r?.buyer ?? ''}</div>
-                <div class="small">Tons: <b>${wt}</b> @ $<b>${pt}</b>/ton · Total $<b>${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</b></div>
-                <div class="small text-muted">Created: ${r?.created_at ? new Date(r.created_at).toLocaleString() : ''}</div>
-              </div>
-              <div class="text-end">
-                ${buyBtn}
-              </div>
-            </div>`;
-          root.appendChild(div);
-        });
+        const frag = document.createDocumentFragment();
+        for (const r of rows) frag.append(rowCard(r));
+        root.append(frag);
 
         const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing ${rows.length} • offset ${offset}`;
-      }catch(e){
-        if (e.name !== 'AbortError') {
-          // api() already toasted
-        }
-      }finally{
+      } catch(e){
+        if (e.name !== 'AbortError') {/* api() already toasted */}
+      } finally{
         if (ls) ls.textContent = 'Loaded.';
         loadCtl = null;
         setLoadingUI(false);
+        root.setAttribute('aria-busy','false');
       }
     }
 
@@ -251,20 +307,19 @@
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': crypto.randomUUID()
+            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))
           },
           body: JSON.stringify({ op:'purchase', expected_status:'Pending' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
         loadOpenContracts();
-      }catch(e){
-        // api() already showed toast
-      }finally{
+      } catch(e) { /* toast already shown */ }
+      finally{
         if (btn){ btn.disabled = false; btn.textContent = 'Buy'; }
       }
     }
-    window.buy = buy; // expose for inline onclick
+    window.buy = buy; // expose for inline
 
     // Wire UI
     document.getElementById('refreshBtn')?.addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
@@ -272,6 +327,10 @@
     document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
     document.getElementById('prevBtn')?.addEventListener('click', ()=>{ offset = Math.max(0, offset - limit); loadOpenContracts(); });
     document.getElementById('nextBtn')?.addEventListener('click', ()=>{ offset += limit; loadOpenContracts(); });
+    document.getElementById('pageSize')?.addEventListener('change', e=>{
+      const v = Math.max(1, parseInt(e.target.value||'100', 10));
+      limit = v; offset = 0; loadOpenContracts();
+    });
 
     // Hydrate filters/page from URL on first load
     (function hydrateFromURL(){
@@ -295,9 +354,8 @@
   </script>
 
   <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
-  <script>
+  <script nonce="{{NONCE}}">
     (function(){
-      // Hide RFQ for non-buyers (client-side courtesy; server should still enforce)
       const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
       const rfqCard = document.getElementById('rfqCard');
       if (rfqCard && role !== 'buyer') rfqCard.classList.add('d-none');
@@ -305,7 +363,6 @@
       const btn = document.getElementById('rfqGo');
       if(!btn) return;
 
-      // default side to 'buy' for buyers
       if (role === 'buyer') {
         const sideSel = document.getElementById('rfqSide');
         if (sideSel) sideSel.value = 'buy';
@@ -317,13 +374,15 @@
         const q   = +(document.getElementById('rfqQty')?.value || 0);
         if (!q) return toast('Enter qty');
         const exp = new Date(Date.now() + 20*60*1000).toISOString();
-        const r = await api('/rfq', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
-        });
-        toast('RFQ posted');
-        try { console.log(await r.json()); } catch {}
+        try{
+          const r = await api('/rfq', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
+          });
+          toast('RFQ posted');
+          try { console.log(await r.json()); } catch {}
+        }catch(e){ /* toast already shown */ }
       };
     })();
   </script>

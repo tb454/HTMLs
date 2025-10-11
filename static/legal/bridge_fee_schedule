@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BRidge Fee Schedule</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#111; --muted:#555; --rule:#ddd; --bg:#fff; }
+    html, body { background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; line-height:1.55; }
+    .wrap{max-width:960px;margin:0 auto;padding:2.25rem 1.25rem 4rem;}
+    h1,h2{line-height:1.25;margin:1.6rem 0 .6rem;} h1{font-size:1.9rem;} h2{font-size:1.35rem;}
+    table{width:100%;border-collapse:collapse;margin:1rem 0;} th,td{border:1px solid var(--rule);padding:.6rem;text-align:left;} th{background:#f6f7f9;}
+    .note{color:var(--muted);font-size:.95rem;} .muted{color:var(--muted);}
+    .download{margin:1rem 0 2rem;} .download a{display:inline-block;padding:.5rem 1rem;background:#0645ad;color:#fff;text-decoration:none;border-radius:6px}
+    .download a:hover{background:#043a8b}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>BRidge Fee Schedule</h1>
+    <p class="muted">Effective: {{Month YYYY}}</p>
+
+    <div class="download">
+      <a href="/static/legal/bridge_fee_schedule.pdf" target="_blank" rel="noopener">📎 Download PDF</a>
+    </div>
+
+    <h2>1. Exchange & Clearing Fees (Per-Side, Per-Lot)</h2>
+    <table>
+      <thead><tr><th>Fee Type</th><th>Non-Member</th><th>Member</th><th>Program</th></tr></thead>
+      <tbody>
+        <tr><td>Exchange Fee</td><td>$1.25</td><td>$0.85</td><td>$0.50</td></tr>
+        <tr><td>Clearing Fee</td><td>$0.85</td><td>$0.60</td><td>$0.40</td></tr>
+        <tr><td>Delivery Fee (if BOL issued)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
+        <tr><td>Cash-Settle Fee</td><td>$0.75</td><td>$0.50</td><td>$0.30</td></tr>
+        <tr><td>Give-Up Fee (if brokered)</td><td>$1.00</td><td>$1.00</td><td>$1.00</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Assessed per side (buy/sell) per 20-ton lot. Partial lots round up.</p>
+
+    <h2>2. SaaS Plan Tiers (Monthly)</h2>
+    <table>
+      <thead><tr><th>Plan</th><th>Monthly</th><th>Included Usage</th></tr></thead>
+      <tbody>
+        <tr><td>Starter</td><td>$1,000</td><td>50 BOLs, 500 delivered tons, 50k WS messages</td></tr>
+        <tr><td>Standard</td><td>$3,000</td><td>200 BOLs, 2,000 delivered tons, 200k WS messages</td></tr>
+        <tr><td>Enterprise</td><td>$10,000</td><td>Unlimited + CLOB/RFQ/Futures</td></tr>
+      </tbody>
+    </table>
+
+    <h2>3. Usage Overages</h2>
+    <table>
+      <thead><tr><th>Metric</th><th>Starter</th><th>Standard</th><th>Enterprise</th></tr></thead>
+      <tbody>
+        <tr><td>Extra BOL (each)</td><td>$1.00</td><td>$0.75</td><td>$0.50</td></tr>
+        <tr><td>Delivered Tons (per ton)</td><td>$0.50</td><td>$0.35</td><td>$0.25</td></tr>
+        <tr><td>Receipts (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
+        <tr><td>Warrants (each)</td><td>$0.50</td><td>$0.30</td><td>$0.10</td></tr>
+        <tr><td>WS Messages (per 1M)</td><td>$5.00</td><td>$4.00</td><td>$3.00</td></tr>
+      </tbody>
+    </table>
+
+    <h2>4. Optional / Add-Ons</h2>
+    <ul>
+      <li>Late Payment Fee: $25 per invoice &gt; 5 days past due</li>
+      <li>API + Data Feed (BR-Index, tick data): $500/month</li>
+      <li>Premium Onboarding (white-glove): $199</li>
+      <li>Audit ZIP/PDF export: Free</li>
+    </ul>
+
+    <h2>5. Payment</h2>
+    <p>Billing is processed via Stripe (ACH & cards). Invoices are generated at the start of each billing cycle and due within 5 calendar days.</p>
+
+    <p class="muted">© Atlas IP Holdings LLC · BRidge™</p>
+  </div>
+</body>
+</html>

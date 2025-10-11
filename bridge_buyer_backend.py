@@ -6,7 +6,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.resolve()))
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, EmailStr, Field 
 from typing import List, Optional, Literal
@@ -60,6 +60,7 @@ from indices_builder import run_indices_builder
 from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
 import smtplib
 from email.message import EmailMessage
+import secrets
 
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -1424,9 +1425,27 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return FileResponse("static/bridge-login.html")
 
+# --- Dynamic buyer page with per-request nonce + strict CSP ---
+with open("static/bridge-buyer.html", "r", encoding="utf-8") as f:
+    _BUYER_HTML_TEMPLATE = f.read()
+
 @app.get("/buyer", include_in_schema=False)
-async def buyer_page():
-    return FileResponse("static/bridge-buyer.html")
+async def buyer_page_dynamic():
+    nonce = secrets.token_urlsafe(16)
+    html = _BUYER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
+
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: https://*.stripe.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src 'self'; "
+        "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+        "connect-src 'self' https://*.stripe.com; "
+        "form-action 'self'; upgrade-insecure-requests"
+    )
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
 
 @app.get("/admin", include_in_schema=False)
 async def admin_page():
@@ -2610,11 +2629,12 @@ async def login(body: LoginIn, request: Request):
     row = await database.fetch_one(
         """
         SELECT
-          COALESCE(username, '') AS username,          
-          role
+        COALESCE(username, '') AS username,
+        COALESCE(email, '')    AS email,
+        role
         FROM public.users
         WHERE (LOWER(COALESCE(email, '')) = :ident OR LOWER(COALESCE(username, '')) = :ident)
-          AND password_hash = crypt(:pwd, password_hash)
+        AND password_hash = crypt(:pwd, password_hash)
         LIMIT 1
         """,
         {"ident": ident, "pwd": pwd},
@@ -2632,6 +2652,13 @@ async def login(body: LoginIn, request: Request):
 
     return LoginOut(ok=True, role=role, redirect=f"/{role}")
 # ======= AUTH ========
+
+@app.get("/me", tags=["Auth"])
+async def me(request: Request):
+    return {
+        "username": (request.session.get("username") or "Guest"),
+        "role": (request.session.get("role") or "")
+    }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
 @app.on_event("startup")
@@ -2671,6 +2698,18 @@ async def compliance_member_set(username: str, kyc: bool=False, aml: bool=False,
     """, {"u":username,"k":kyc,"a":aml,"s":sanctions,"b":boi,"r":bsa_risk})
     return {"ok": True, "user": username}
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
+
+# ======= fee schedule ========================      
+@app.get("/fees", tags=["Legal"], summary="BRidge Fee Schedule")
+async def fees_doc():
+    pdf_path = Path("static/legal/bridge_fee_schedule.pdf")
+    html_path = Path("static/legal/bridge_fee_schedule.html")
+    if pdf_path.exists():
+        return FileResponse(str(pdf_path))
+    if html_path.exists():
+        return FileResponse(str(html_path))
+    return HTMLResponse("<h1>BRidge Fee Schedule</h1><p>Document not yet published.</p>")
+# ======= fee schedule ========================
 
 # ======= Member plan ========================
 @app.post("/admin/member/plan/set", tags=["Admin"], summary="Assign plan to member")
@@ -3451,10 +3490,11 @@ async def _manual_upsert_absolute_tx(
     movement_reason: str = "manual_add", idem_key: str | None = None,
 ):
     s, k = seller.strip(), sku.strip()
+    k_norm = k.upper()
 
     cur = await database.fetch_one(
-        "SELECT qty_on_hand FROM inventory_items WHERE seller=:s AND sku=:k FOR UPDATE",
-        {"s": s, "k": k}
+        "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+        {"s": s, "k": k_norm}
     )
     if cur is None:
         await database.execute("""
@@ -3462,11 +3502,12 @@ async def _manual_upsert_absolute_tx(
                                        qty_on_hand, qty_reserved, qty_committed, source, updated_at)
           VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW())
           ON CONFLICT (seller, sku) DO NOTHING
-        """, {"s": s, "k": k, "d": description, "u": (uom or "ton"),
-              "loc": location, "src": source or "manual"})
+        """, {"s": s, "k": k_norm, "d": description, "u": (uom or "ton"),
+                "loc": location, "src": source or "manual"}
+        )
         cur = await database.fetch_one(
-            "SELECT qty_on_hand FROM inventory_items WHERE seller=:s AND sku=:k FOR UPDATE",
-            {"s": s, "k": k}
+            "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+            {"s": s, "k": k_norm}
         )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
@@ -3479,9 +3520,9 @@ async def _manual_upsert_absolute_tx(
              uom=:u, location=COALESCE(:loc, location),
              description=COALESCE(:desc, description),
              source=COALESCE(:src, source)
-       WHERE seller=:s AND sku=:k
+       WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
     """, {"new": new_qty, "u": (uom or "ton"), "loc": location, "desc": description,
-          "src": (source or "manual"), "s": s, "k": k})
+          "src": (source or "manual"), "s": s, "k": k_norm})
 
     meta_json = json.dumps({"from": old, "to": new_qty, "reason": movement_reason, "idem_key": idem_key})
     try:
@@ -3603,10 +3644,10 @@ async def list_inventory(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
 ):
-    q = "SELECT * FROM inventory_available WHERE seller = :seller"
+    q = "SELECT * FROM inventory_available WHERE LOWER(seller) = LOWER(:seller)"
     vals = {"seller": seller}
     if sku:
-        q += " AND sku = :sku"
+        q += " AND LOWER(sku) = LOWER(:sku)"
         vals["sku"] = sku
     q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
     vals["limit"], vals["offset"] = limit, offset
@@ -3628,10 +3669,10 @@ async def list_movements(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    q = "SELECT * FROM inventory_movements WHERE seller=:seller"
+    q = "SELECT * FROM inventory_movements WHERE LOWER(seller)=LOWER(:seller)"
     vals = {"seller": seller, "limit": limit, "offset": offset}
     if sku:
-        q += " AND sku=:sku"; vals["sku"] = sku
+        q += " AND LOWER(sku)=LOWER(:sku)"; vals["sku"] = sku.upper()
     if movement_type:
         q += " AND movement_type=:mt"; vals["mt"] = movement_type
     if start:
@@ -3931,7 +3972,7 @@ async def inventory_manual_add(payload: dict, request: Request):
         raise HTTPException(401, "login required")
 
     seller = (payload.get("seller") or "").strip()
-    sku    = (payload.get("sku") or "").strip()
+    sku    = (payload.get("sku") or "").strip().upper()
     if not (seller and sku):
         raise HTTPException(400, "seller and sku are required")
 
@@ -4073,6 +4114,8 @@ async def _ensure_perf_indexes():
         "CREATE INDEX IF NOT EXISTS idx_inv_mov_sku_time ON inventory_movements(seller, sku, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_orders_acct_status ON orders(account_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_orders_audit_order_time ON orders_audit(order_id, at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_inventory_items_norm ON inventory_items (LOWER(seller), LOWER(sku))",
+        "CREATE INDEX IF NOT EXISTS idx_inventory_movements_norm ON inventory_movements (LOWER(seller), LOWER(sku), created_at DESC)"
     ]
     for s in ddl:
         try:
@@ -5414,7 +5457,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
 
         inv = await database.fetch_one("""
             SELECT qty_reserved FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
             FOR UPDATE
         """, {"seller": seller, "sku": sku})
         reserved = float(inv["qty_reserved"]) if inv else 0.0
@@ -5426,7 +5469,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             SET qty_reserved = qty_reserved - :q,
                 qty_committed = qty_committed + :q,
                 updated_at = NOW()
-            WHERE seller=:seller AND sku=:sku
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
         """, {"q": qty, "seller": seller, "sku": sku})
 
         await database.execute("""
@@ -5770,7 +5813,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
                 inv = await database.fetch_one("""
                     SELECT qty_on_hand, qty_reserved, qty_committed
                     FROM inventory_items
-                    WHERE seller=:s AND sku=:k
+                    WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
                     FOR UPDATE
                 """, {"s": seller, "k": sku})
 
@@ -5784,7 +5827,7 @@ async def create_contract(contract: ContractInExtended, request: Request):
                 await database.execute("""
                     UPDATE inventory_items
                        SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-                     WHERE seller=:s AND sku=:k
+                     WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
                 """, {"q": qty, "s": seller, "k": sku})
 
                 await database.execute("""
@@ -6391,16 +6434,16 @@ async def cancel_contract(contract_id: str):
 
         _ = await database.fetch_one("""
             SELECT qty_reserved FROM inventory_items
-            WHERE seller=:seller AND sku=:sku
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
             FOR UPDATE
-        """, {"seller": seller, "sku": sku})
+        """, {"s": seller, "k": sku})
 
         await database.execute("""
             UPDATE inventory_items
             SET qty_reserved = GREATEST(0, qty_reserved - :q),
                 updated_at = NOW()
-            WHERE seller=:seller AND sku=:sku
-        """, {"q": qty, "seller": seller, "sku": sku})
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+        """, {"q": qty, "s": seller, "k": sku})
 
         await database.execute("""
             INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)

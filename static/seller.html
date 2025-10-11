@@ -43,14 +43,35 @@
     @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
   </style>
 
-  <!-- Gate by role early -->
-  <script>
-    const u = JSON.parse(localStorage.getItem('bridgeUser') || '{}');
-    const role = (u.role || '').toLowerCase();
-    if (role !== 'seller' && role !== 'yard' && role !== 'admin') {
-      window.location.href = '/static/bridge-login.html';
+  <!-- Gate by role early (session-probed) -->
+<script>
+  (async () => {
+    try {
+      // optional: warm cookies
+      await fetch('/healthz', { credentials: 'include' });
+      const r = await fetch('/me', { credentials: 'include', headers: { 'Accept': 'application/json' }});
+      if (!r.ok) throw new Error('no session');
+      const me = await r.json(); // expect: { username, role }
+      window.__bridgeUser = me;
+      if (!me?.role || !['seller','yard','admin','buyer'].includes((me.role||'').toLowerCase())) {
+        location.href = '/static/bridge-login.html';
+        return;
+      }
+      // UI role gates
+      document.addEventListener('DOMContentLoaded', () => {
+        const role = (me.role||'').toLowerCase();
+        const userEl = document.getElementById('current-user');
+        if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
+        document.querySelectorAll('[data-role="admin"]').forEach(el => el.hidden = role!=='admin');
+        document.querySelectorAll('[data-role="seller"]').forEach(el => el.hidden = !(role==='seller'||role==='admin'||role==='yard'));
+        document.querySelectorAll('[data-role="buyer"]').forEach(el => el.hidden = role!=='buyer');
+      });
+    } catch {
+      location.href = '/static/bridge-login.html';
     }
-  </script>
+  })();
+</script>
+
 </head>
 <body>
   <div class="container">
@@ -59,13 +80,20 @@
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span id="current-user">User: Guest</span>
-        <button onclick="showLoginModal()">Login</button>
-        <button onclick="document.getElementById('current-user').innerText='User: Guest'">Logout</button>
-        <button onclick="window.location.href='/static/Spec-ferrous.html'">Spec Sheet Ferrous</button>
-        <button onclick="window.location.href='/static/Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
-        <button onclick="window.location.href='/static/Shipping terms.html'">Shipping Terms</button>
-        <button onclick="window.location.href='/static/Contract-specs.html'">Contract Specs</button>
-        <button onclick="window.location.href='/static/mixed-load.html'">Mixed Load</button>
+        <button type="button" onclick="showLoginModal()">Login</button>
+        <button type="button" onclick="doLogout()">Logout</button>
+<script>
+  async function doLogout(){
+    try { await fetch('/logout', { method:'POST', credentials:'include' }); } catch {}
+    localStorage.removeItem('bridgeUser');
+    location.href='/static/bridge-login.html';
+  }
+</script>
+        <button type="button" onclick="location.href='/static/spec-ferrous.html'">Spec Sheet Ferrous</button>
+        <button type="button" onclick="location.href='/static/spec-nonferrous.html'">Spec Sheet Nonferrous</button>
+        <button type="button" onclick="location.href='/static/shipping-terms.html'">Shipping Terms</button>
+        <button type="button" onclick="location.href='/static/contract-specs.html'">Contract Specs</button>
+        <button type="button" onclick="location.href='/static/mixed-load.html'">Mixed Load</button>
         <span id="header-date">—</span>
         <span class="health-badge" data-health-badge>● Checking…</span>
       </div>
@@ -76,16 +104,21 @@
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
         <div id="finished-goods-card" class="card-custom">
-          <div><strong>Finished Goods</strong></div>
-          <div id="finishedGoodsInfo">Loading...</div>
-          <canvas id="finishedGoodsChart" width="250" height="200"></canvas>
+        <div><strong>Finished Goods</strong></div>
+        <div id="finishedGoodsInfo">Loading...</div>
+        <div class="chart-container" style="height:220px">
+          <canvas id="finishedGoodsChart"></canvas>
         </div>
+      </div>
+
         <div class="card-custom">
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
           <div id="active-contracts-margin">Margin: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
-          <canvas id="activeContractsChart" width="250" height="200"></canvas>
+          <div class="chart-container" style="height:220px">
+            <canvas id="activeContractsChart"></canvas>
+          </div>
         </div>
         <div class="card-custom">
           <div class="d-flex align-items-center justify-content-center gap-2">
@@ -121,7 +154,7 @@
         <label>Material:
           <input id="matInput" class="form-control" placeholder="e.g., #1 or AL6063_OldExtrusion" style="width:260px; display:inline-block; margin: 0 8px;"/>
         </label>
-        <button class="btn btn-primary" id="btnQuote">Quote</button>
+        <button type="button" class="btn btn-primary" id="btnQuote">Quote</button>
         <div id="quoteOut" class="text-muted" style="margin-top:8px;"></div>
       </div>
     </section>
@@ -131,6 +164,7 @@
       <div class="section-title">Finished Goods Inventory</div>
       <div class="table-responsive">
         <table id="greenspark-table" class="table">
+          <caption class="visually-hidden">Finished goods inventory by SKU</caption>
           <thead class="sticky">
             <tr>
               <th>Commodities</th>
@@ -169,19 +203,19 @@
           <input id="invDefaultSeller" class="form-control" placeholder="yard name">
         </div>
         <div class="col-md-2">
-          <button class="btn btn-primary w-100" id="uploadInvBtn">Upload</button>
+          <button type="button" class="btn btn-primary w-100" id="uploadInvBtn">Upload</button>
         </div>
         <div class="col-md-3">
-          <a class="btn btn-outline-secondary w-100" href="#" id="dlTemplateBtn">Download CSV template</a>
+          <a class="btn btn-outline-secondary w-100" href="/inventory/template.csv" download id="dlTemplateBtn">Download CSV template</a>
         </div>
       </div>
 
       <div class="row g-2 mt-3">
-        <div class="col-md-3"><input id="invSku" class="form-control" placeholder="SKU (e.g., SHRED)"></div>
+        <div class="col-md-3"><input id="invSku" class="form-control" placeholder="SKU (e.g., SHRED)" autocapitalize="off" autocomplete="off" spellcheck="false" list="skuList"></div>
         <div class="col-md-2"><input id="invQty" type="number" step="0.01" class="form-control" placeholder="Qty on hand (tons)"></div>
         <div class="col-md-2"><input id="invLocation" class="form-control" placeholder="Location"></div>
         <div class="col-md-3"><input id="invDesc" class="form-control" placeholder="Description (optional)"></div>
-        <div class="col-md-2"><button class="btn btn-success w-100" id="manualAddBtn">Manual Add/Set</button></div>
+        <div class="col-md-2"><button type="button" class="btn btn-success w-100" id="manualAddBtn">Manual Add/Set</button></div>
       </div>
 
       <div id="invUploadMsg" class="small text-muted mt-2"></div>
@@ -191,16 +225,25 @@
     <section class="section">
       <div class="section-title">Create Contract</div>
       <div class="row g-2 mb-2">
-        <div class="col-md-3"><input id="sellerName" class="form-control" placeholder="Seller"></div>
-        <div class="col-md-3"><input id="buyerName" class="form-control" placeholder="Buyer (mark open or designate)"></div>
-        <div class="col-md-3"><input id="material" class="form-control" placeholder="Material / SKU (e.g., SHRED)"></div>
-        <div class="col-md-1"><input id="tons" type="number" class="form-control" placeholder="Tons"></div>
-        <div class="col-md-2"><input id="price" type="number" class="form-control" placeholder="$/ton" step="0.01"></div>
+        <div class="col-md-3">
+          <input id="sellerName" class="form-control" placeholder="Seller" autocapitalize="off" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="col-md-3">
+          <input id="buyerName" class="form-control" placeholder="Buyer (mark open or designate)">
+        </div>
+        <div class="col-md-3">
+          <input id="material" class="form-control" placeholder="Material / SKU (e.g., SHRED)"
+                autocapitalize="off" autocomplete="off" spellcheck="false" list="skuList">
+        </div>
+        <div class="col-md-1">
+          <input id="tons" type="number" class="form-control" placeholder="Tons" min="0.01" step="0.01">
+        </div>
+        <div class="col-md-2">
+          <input id="price" type="number" class="form-control" placeholder="$/ton" min="0.01" step="0.01">
+        </div>
       </div>
-      <div>
-        <button class="action-btn" id="createContractBtn" data-role="seller">Create Contract</button>
-        <small class="text-muted ms-2">Creates a real contract via POST /contracts</small>
-      </div>
+      <!-- place ONE shared datalist somewhere once in the page (you already have it under Inventory; if not, keep this): -->
+      <datalist id="skuList"></datalist>
 
       <!-- RFQ (two-click) -->
       <div class="card p-3 mt-3" style="max-width:520px">
@@ -213,8 +256,8 @@
             <option>buy</option>
             <option>sell</option>
           </select>
-          <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)">
-          <button id="rfqGo" class="btn btn-primary">RFQ</button>
+          <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)" min="0.01" step="0.01">
+          <button type="button" id="rfqGo" class="btn btn-primary">RFQ</button>
         </div>
       </div>
     </section>
@@ -233,14 +276,15 @@
         <div class="col-md-3"><input id="filterStatus" class="form-control form-control-sm" placeholder="Status (e.g., Pending)"></div>
         <div class="col-md-3"><input id="filterStart" type="date" class="form-control form-control-sm" placeholder="Start (ISO)"></div>
         <div class="col-md-3"><input id="filterEnd" type="date" class="form-control form-control-sm" placeholder="End (ISO)"></div>
-        <div class="col-md-3 d-flex gap-2">
-          <button class="btn btn-outline-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
-          <button class="btn btn-outline-secondary btn-sm" id="clearFiltersBtn">Clear</button>
+       <div class="col-md-3 d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="clearFiltersBtn">Clear</button>
         </div>
       </div>
 
       <div class="table-responsive">
         <table class="table table-sm" id="sellerContractsTable">
+  <caption class="visually-hidden">Contracts list with filters and paging</caption>
           <thead class="sticky">
             <tr>
               <th>ID</th><th>Buyer</th><th>Material</th><th>Tons</th><th>$/ton</th><th>Status</th><th>Created</th>
@@ -261,6 +305,7 @@
     <section class="section">
       <div class="section-title">Trade Log</div>
       <table id="trade-log-table" class="table">
+        <caption class="visually-hidden">Recent trade log</caption>
         <thead class="sticky"><tr><th>Time</th><th>Material</th><th>Quantity (tons)</th><th>Price/ton</th><th>Total Contract Value</th><th>Location</th></tr></thead>
         <tbody></tbody>
       </table>
@@ -270,6 +315,7 @@
     <section class="section">
       <div class="section-title">Metals Market Overview</div>
       <table id="metals-market-table" class="table">
+        <caption class="visually-hidden">Metals market overview</caption>
         <thead class="sticky"><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
         <tbody>
           <tr><td>GCJ25</td><td>Gold (Apr '25)</td><td>2,953.25</td><td>-2.90</td><td>2,957.50</td><td>2,964.70</td><td>2,920.00</td><td>155,552</td><td>02/21/25</td></tr>
@@ -282,7 +328,11 @@
     <!-- KPIs -->
     <section class="section">
       <div class="section-title">Key Performance Indicators (KPIs)</div>
-      <div class="kpi-content"><canvas id="kpiChart" width="400" height="200"></canvas></div>
+      <div class="kpi-content">
+  <div class="chart-container" style="height:220px">
+    <canvas id="kpiChart"></canvas>
+  </div>
+</div>
     </section>
   </div>
 
@@ -310,25 +360,34 @@
     </div></div>
   </div>
 
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script>
     // endpoint + api + toast + health
-    window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
-    function toast(msg, ms=2800){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
-    async function api(path, opts={}) {
-      const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+    const ORIGIN = location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin;
+let __toastTimer;
+function toast(msg, ms=2800){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  clearTimeout(__toastTimer); __toastTimer=setTimeout(()=>t.style.display='none', ms);
+}
+async function api(path, opts={}) {
+  const url = path.startsWith('http') ? path : `${ORIGIN}${path}`;
+  const res = await fetch(url, {
+    credentials: 'include',
+    ...opts,
+    headers:{ 'Accept':'application/json', ...(opts.headers||{}) }
+  });
+
       if (res.status === 401) { const next = encodeURIComponent(location.pathname + location.search); location.href = `/static/bridge-login.html?next=${next}`; throw new Error('Unauthorized'); }
       if (!res.ok) { let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ m=await res.text()||m; } toast(m); throw new Error(m); }
       return res;
     }
-    window.addEventListener('DOMContentLoaded', async ()=>{ try{ const r=await api('/health'); if(r.ok){ const b=document.querySelector('[data-health-badge]'); b.textContent='● Live'; b.setAttribute('data-ok','1'); } }catch{} });
+    window.addEventListener('DOMContentLoaded', async ()=>{ try{ const r=await api('/healthz'); if(r.ok){ const b=document.querySelector('[data-health-badge]'); b.textContent='● Live'; b.setAttribute('data-ok','1'); } }catch{} });
 
-    const endpoint = window.endpoint;
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => { el.style.borderColor = accentColor; el.style.color = accentColor; });
 
@@ -337,7 +396,10 @@
     let finishedGoodsChartLabels = [], finishedGoodsChartData = [];
     let kpiChartLabels = [], kpiChartData = [];
 
-    document.addEventListener('DOMContentLoaded', async () => {
+            document.addEventListener('DOMContentLoaded', () => {
+      // ensure buttons are wired:
+      try { wireSellerUI(); } catch {}
+
       const hd = document.getElementById('header-date'); if (hd) hd.textContent = new Date().toLocaleDateString();
 
       const activeCanvas = document.getElementById('activeContractsChart');
@@ -345,7 +407,7 @@
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
           type: 'line',
           data: { labels: activeContractsChartLabels, datasets: [{ label: 'Total Change', data: activeContractsChangeHistory, borderColor: accentColor, backgroundColor:'rgba(52,152,219,0.2)', fill:true, tension:0.1 }]},
-          options: { scales: { y: { beginAtZero: true } } }
+          options: { responsive:true, maintainAspectRatio:false, scales: { y: { beginAtZero: true } } }
         });
       }
       const finishedCanvas = document.getElementById('finishedGoodsChart');
@@ -353,7 +415,7 @@
         finishedGoodsChart = new Chart(finishedCanvas.getContext('2d'), {
           type: 'line',
           data: { labels: finishedGoodsChartLabels, datasets: [{ label: 'Total Tons', data: finishedGoodsChartData, borderColor: accentColor, backgroundColor:'rgba(52,152,219,0.2)', fill:true, tension:0.1 }]},
-          options: { scales: { y: { beginAtZero: true } } }
+          options: { responsive:true, maintainAspectRatio:false, scales: { y: { beginAtZero: true } } }
         });
       }
       const kpiCanvas = document.getElementById('kpiChart');
@@ -370,7 +432,11 @@
             { label:'Brass',           data:d2, backgroundColor:'rgba(46,204,113,0.6)' },
             { label:'Insulated Wire',  data:d3, backgroundColor:'rgba(231,76,60,0.6)' }
           ]},
-          options: { scales: { x:{ stacked:true }, y:{ stacked:true, beginAtZero:true } } }
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { x:{ stacked:true }, y:{ stacked:true, beginAtZero:true } }
+          }
         });
       }
 
@@ -440,7 +506,6 @@
 
     // Seller logic
     let offset = 0, limit = 50;
-    const toISO = (d) => d ? new Date(d).toISOString() : undefined;
 
     async function loadFinishedGoods(seller) {
       const tbody = document.querySelector('#greenspark-table tbody');
@@ -476,6 +541,22 @@
           });
         }
         updatePurchaseValues();
+        try {
+          const dl = document.getElementById('skuList');
+          if (dl && Array.isArray(rows)) {
+            dl.innerHTML = '';
+            const seen = new Set();
+            rows.forEach(item => {
+              const sku = (item.sku || '').toString();
+              if (sku && !seen.has(sku.toLowerCase())) {
+                seen.add(sku.toLowerCase());
+                const opt = document.createElement('option');
+                opt.value = sku;
+                dl.appendChild(opt);
+              }
+            });
+          }
+        } catch {}
       } catch (e) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Finished goods not available yet.</td></tr>`;
         updatePurchaseValues();
@@ -530,7 +611,7 @@
 
       const res = await api(`/contracts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now())) },
         body: JSON.stringify({ seller, buyer, material, weight_tons, price_per_ton })
       });
 
@@ -580,6 +661,11 @@
         });
       }
       document.getElementById("pageInfo").textContent = `Showing ${rows.length} • offset ${offset}`;
+      const prev = document.getElementById('prevBtn');
+      const next = document.getElementById('nextBtn');
+      if (prev) prev.disabled = offset === 0;
+      if (next) next.disabled = rows.length < limit;
+
     }
 
     // saved filters in URL
@@ -619,6 +705,18 @@
       document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
       document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
 
+      const sellerInput = document.getElementById('sellerName');
+      if (sellerInput) {
+        const onSellerChange = async () => {
+          offset = 0;
+          refreshFinishedFromInputs();
+          try { await listContracts(); } catch {}
+        };
+        sellerInput.addEventListener('change', onSellerChange);
+        sellerInput.addEventListener('blur', onSellerChange);
+        sellerInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') onSellerChange(); });
+      }
+
       setTimeout(listContracts, 200);
     }
 
@@ -647,7 +745,7 @@
 
       const resp = await api(`/inventory/manual_add`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID?.() || String(Date.now())) },
         body: JSON.stringify({
           seller, sku, qty_on_hand: qty, uom: 'ton',
           location: location || undefined, description: description || undefined,
@@ -659,8 +757,7 @@
       refreshFinishedFromInputs();
     }
 
-    document.addEventListener("DOMContentLoaded", wireSellerUI);
-    document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', () => {
       const userEl = document.getElementById("current-user");
       const sellerEl = document.getElementById("sellerName");
       if (userEl && sellerEl) {
@@ -679,8 +776,7 @@
       refreshFinishedFromInputs();
       document.getElementById('uploadInvBtn')?.addEventListener('click', uploadInvFile);
       document.getElementById('manualAddBtn')?.addEventListener('click', manualAddInventory);
-      document.getElementById('dlTemplateBtn')?.addEventListener('click', (e) => { e.preventDefault(); window.open(`/inventory/template.csv`, '_blank'); });
-    });
+          });
 
     // Login modal + focus restore
     let loginTriggerBtn = null;
@@ -700,9 +796,9 @@
         const data = await resp.json();
         document.getElementById("current-user").innerText = `User: ${username}`;
         const sellerEl = document.getElementById("sellerName");
-        if (sellerEl) sellerEl.value = username;
-        localStorage.setItem('bridgeUser', JSON.stringify({ role: (data.role||'').toLowerCase()==='yard' ? 'seller' : (data.role||'buyer') }));
+        if (sellerEl) sellerEl.value = username;      
         refreshFinishedFromInputs();
+        try { if (document.getElementById('sellerName')?.value.trim()) { await listContracts(); } } catch {}
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
         if (data?.redirect) window.location.href = data.redirect;
       } catch (err) {
@@ -710,13 +806,6 @@
       }
     });
 
-    // Role-guard examples
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role || '').toLowerCase();
-      document.querySelectorAll('[data-role="admin"]').forEach(el => el.style.display = (role==='admin') ? '' : 'none');
-      document.querySelectorAll('[data-role="seller"]').forEach(el => el.style.display = (role==='seller'||role==='admin') ? '' : 'none');
-      document.querySelectorAll('[data-role="buyer"]').forEach(el => el.style.display = (role==='buyer') ? '' : 'none');
-    });
   </script>
   <script>
     document.addEventListener('DOMContentLoaded', ()=>{
@@ -728,9 +817,10 @@
         const q   = +document.getElementById('rfqQty').value;
         if (!q) return toast('Enter qty');
         const exp = new Date(Date.now() + 20*60*1000).toISOString();
+        const idem = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
         const r = await api('/rfq', {
           method:'POST',
-          headers:{'Content-Type':'application/json'},
+          headers:{'Content-Type':'application/json', 'Idempotency-Key': idem},
           body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
         });
         toast('RFQ posted');

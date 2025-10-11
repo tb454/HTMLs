@@ -184,6 +184,7 @@
                   <div id="pmStatus" class="form-hint">No payment method yet.</div>
                 </div>
                 <button type="button" id="addPmBtn" class="btn btn-outline-primary">Add Payment Method</button>
+                <button type="button" id="refreshPmBtn" class="btn btn-outline-secondary ms-2">Refresh</button>
               </div>
               <div class="form-hint mt-1">
                 We accept ACH (US bank) and credit/debit cards. You will not be charged at signup.
@@ -202,6 +203,12 @@
           </div>
         </div>
 
+        <div class="form-check my-3">
+          <input class="form-check-input" type="checkbox" id="feesAgree" required>
+          <label class="form-check-label" for="feesAgree">
+            I have read and agree to the <a href="/fees" target="_blank" rel="noopener">BRidge Fee Schedule</a>.
+          </label>
+        </div>
         <div class="d-flex gap-2 mt-3">
           <button type="submit" id="submitBtn" class="btn btn-primary" disabled>Submit Application</button>
         </div>
@@ -307,6 +314,7 @@
 
   // Hook up the Add PM button
   document.getElementById('addPmBtn').addEventListener('click', async ()=>{
+  document.getElementById('refreshPmBtn')?.addEventListener('click', refreshPmBadge);  
     const member = memberKeyFromForm();
     const email  = (document.getElementById('email').value || '').trim();
     if(!member || !email){
@@ -386,7 +394,12 @@ const payload = {
 
     const btn=$('submitBtn'); btn.disabled=true; const old=btn.textContent; btn.textContent='Submitting…';
     try{
-      await api('/public/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const idem = (self.crypto?.randomUUID?.() || String(Date.now()) + Math.random());
+      await api('/public/apply', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Idempotency-Key': idem},
+        body: JSON.stringify(payload)
+      });
       show('ok',"Thanks! Your application has been received. We'll email you after review.");
       toast('✓ Application submitted');
       localStorage.removeItem('bridge_apply_draft_v1'); form.reset(); $('agree').checked=false;
