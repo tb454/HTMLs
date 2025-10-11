@@ -946,7 +946,7 @@ async def pm_status(member: str):
     return {"member": member, "has_default": bool(r and r["has_default"]), "pm": (r and r["default_payment_method"]) or None}
 
 USE_STRIPE = os.getenv("ENABLE_STRIPE", "0").lower() in {"1","true","yes"}
-STRIPE_API_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_API_KEY = os.getenv("STRIPE_SECRET", "")
 
 # optional shim so imports don't break in CI
 try:
