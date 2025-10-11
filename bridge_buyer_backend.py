@@ -2052,7 +2052,7 @@ def _rows_from_csv_bytes(raw_bytes: bytes):
         except (KeyError, InvalidOperation, ValueError):
             continue
 
-@app.post("/import/contracts_csv", tags=["Data"], summary="Bulk import normalized contracts CSV (gzip or csv)")
+@app.post("/import/contracts_csv", tags=["Data"], summary="Bulk import normalized contracts CSV (gzip or csv)", response_model=None)
 async def import_contracts_csv(
     file: UploadFile = File(...),
     database_dep = Depends(lambda: database)
@@ -4120,7 +4120,7 @@ async def inventory_template_csv():
                              headers={"Content-Disposition": 'attachment; filename="inventory_template.csv"'})
 
 # -------- Inventory: Import CSV (gated + unit-aware) --------
-@app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)")
+@app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)", response_model=None)
 @limiter.limit("30/minute")
 async def inventory_import_csv(
     file: UploadFile = File(...),
@@ -4161,7 +4161,7 @@ async def inventory_import_csv(
     return {"ok": True, "upserted": upserted, "errors": errors}
 
 # -------- Inventory: Import Excel (gated + unit-aware) --------
-@app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)")
+@app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)", response_model=None)
 @limiter.limit("15/minute")
 async def inventory_import_excel(
     file: UploadFile = File(...),
