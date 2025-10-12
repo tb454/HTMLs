@@ -183,11 +183,15 @@
                   <label class="form-label req">Payment Method on File</label>
                   <div id="pmStatus" class="form-hint">No payment method yet.</div>
                 </div>
-                <button type="button" id="addPmBtn" class="btn btn-outline-primary">Add Payment Method</button>
-                <button type="button" id="refreshPmBtn" class="btn btn-outline-secondary ms-2">Refresh</button>
+                <div class="d-flex gap-2">
+                  <button type="button" id="addPmBtn" class="btn btn-outline-primary">Add Payment Method</button>
+                  <button type="button" id="refreshPmBtn" class="btn btn-outline-secondary">Refresh</button>
+                  <button type="button" id="startSubBtn" class="btn btn-success" disabled>Start Subscription</button>
+                </div>
               </div>
               <div class="form-hint mt-1">
-                We accept ACH (US bank) and credit/debit cards. You will not be charged at signup.
+                We accept ACH (US bank) and credit/debit cards. You will not be charged at signup.<br>
+                <span id="subHint" class="text-muted">Choose a plan and add a payment method to enable “Start Subscription”.</span>
               </div>
             </div>
           </div>
@@ -228,7 +232,6 @@
     (async ()=>{ const el=document.querySelector('[data-health]'); if(!el) return;
       try{ await api('/health'); el.textContent='● Live'; el.setAttribute('data-ok','1'); }
       catch{ el.textContent='● Degraded'; }
-    })();
 
     const $ = (id)=>document.getElementById(id);
     const qs = new URLSearchParams(location.search);
@@ -297,43 +300,97 @@
 
   async function refreshPmBadge(){
     const member = memberKeyFromForm();
+    const plan = (document.getElementById('plan').value || '').trim();
     if(!member){ return; }
     try{
       const s = await pmStatus(member);
-      const ok = !!s.has_default;
-      document.getElementById('pmStatus').textContent = ok
+      const hasPm = !!s.has_default;
+      document.getElementById('pmStatus').textContent = hasPm
         ? `Payment method on file: ${s.pm || 'default'}`
         : 'No payment method yet.';
-      document.getElementById('submitBtn').disabled = !ok;
-      document.getElementById('submitBtn').title = ok ? '' : 'Add a payment method to continue';
+      // Submit application hard gate still controlled by PM:
+      document.getElementById('submitBtn').disabled = !hasPm;
+
+      // Only enable Start Subscription when PM exists AND plan chosen
+      const subBtn = document.getElementById('startSubBtn');
+      const canStart = hasPm && !!plan;
+      subBtn.disabled = !canStart;
+      document.getElementById('subHint').textContent =
+        canStart ? 'Ready to start subscription.' : 'Choose a plan and add a payment method to enable “Start Subscription”.';
+
     }catch{
-      // keep submit disabled until we know
       document.getElementById('submitBtn').disabled = true;
+      const subBtn = document.getElementById('startSubBtn');
+      if (subBtn) subBtn.disabled = true;
+    }
+    // Keep PM/Subscription readiness current if org/email/plan changes
+  ['org_name','email','plan'].forEach(id=>{
+    const el = document.getElementById(id);
+    el && el.addEventListener('blur', refreshPmBadge);
+    el && el.addEventListener('change', refreshPmBadge);
+  });
+  }
+  // Hook up Start Subscription button
+  document.getElementById('startSubBtn')?.addEventListener('click', async ()=>{
+    const member = memberKeyFromForm();
+    const plan = (document.getElementById('plan').value || '').trim().toLowerCase();
+    if (!member || !plan) { toast('Set Organization and Plan first'); return; }
+    try {
+      await startSubscription(member, plan);
+    } catch (e) {
+      toast(e.message || 'Could not start subscription checkout.');
+    }
+  });
+  
+  // Hook up the Add PM button
+    document.getElementById('addPmBtn').addEventListener('click', async ()=>{
+    document.getElementById('refreshPmBtn')?.addEventListener('click', refreshPmBadge);  
+      const member = memberKeyFromForm();
+      const email  = (document.getElementById('email').value || '').trim();
+      if(!member || !email){
+        toast('Enter Organization and Email first'); return;
+      }
+      try{
+        await pmStart(member, email);
+      }catch(e){
+        toast(e.message || 'Could not start payment method setup');
+      }
+    });
+  // On load: finalize PM (?pm=ok&sess=...) and/or Subscription (?sub=ok&session=...)
+  (async ()=>{
+    // --- PM finalize ---
+    const pmOk   = qs.get('pm') === 'ok';
+    const pmSess = qs.get('sess');  // set by pm_setup_session success_url
+    if (pmOk && pmSess) {
+      const member = memberKeyFromForm() || (qs.get('member') || '');
+      try {
+        await api(`/billing/pm/finalize_from_session?sess=${encodeURIComponent(pmSess)}&member=${encodeURIComponent(member)}`);
+        toast('✓ Payment method saved');
+      } catch (e) {
+        console.warn('PM finalize failed', e);
+        toast('Payment method saved');
+      }
+    } else if (pmOk) {
+      toast('✓ Payment method saved');
+    }
+
+  // --- Subscription finalize ---
+  const subOk = qs.get('sub') === 'ok';
+  const subSession = qs.get('session');   // set by subscribe/checkout success_url
+  if (subOk && subSession) {
+    const member = memberKeyFromForm() || (qs.get('member') || '');
+    try {
+      const res = await api(`/billing/subscribe/finalize_from_session?sess=${encodeURIComponent(subSession)}&member=${encodeURIComponent(member)}`);
+      const j = await res.json();
+      toast(`✓ Subscription active — ${j.plan || 'plan'}`);
+    } catch (e) {
+      console.warn('Subscription finalize failed', e);
+      toast('Subscription recorded. If status is not updated, refresh.');
     }
   }
 
-  // Hook up the Add PM button
-  document.getElementById('addPmBtn').addEventListener('click', async ()=>{
-  document.getElementById('refreshPmBtn')?.addEventListener('click', refreshPmBadge);  
-    const member = memberKeyFromForm();
-    const email  = (document.getElementById('email').value || '').trim();
-    if(!member || !email){
-      toast('Enter Organization and Email first'); return;
-    }
-    try{
-      await pmStart(member, email);
-    }catch(e){
-      toast(e.message || 'Could not start payment method setup');
-    }
-  });
-
-  // On load: if we arrive from Stripe success (?pm=ok), refresh badge
-  (async ()=>{
-    if (qs.get('pm') === 'ok') {
-      toast('✓ Payment method saved');
-    }
-    await refreshPmBadge();
-  })();
+  await refreshPmBadge();
+})();
 
   // Keep PM badge current if org/email changes
   ['org_name','email'].forEach(id=>{
@@ -410,7 +467,18 @@ const payload = {
       btn.disabled=false; btn.textContent=old;
     }
   });
-</script>
 
+// ---- Plan Subscription (Stripe Checkout in subscription mode) ----
+async function startSubscription(member, plan) {
+  const res = await api('/billing/subscribe/checkout', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ member, plan })
+  });
+  const j = await res.json();
+  if (j.url) { location.href = j.url; return; }
+  throw new Error('Could not start subscription checkout.');
+}
+</script>
 </body>
 </html>

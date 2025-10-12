@@ -915,6 +915,190 @@ import stripe, os
 stripe.api_key = os.environ["STRIPE_SECRET"]
 STRIPE_RETURN_BASE = os.getenv("BILLING_PUBLIC_URL", "https://bridge.scrapfutures.com")
 
+# === Self-serve subscription via hosted Checkout (Stripe handles billing) ===
+# Base plan lookup keys must match your Stripe dashboard:
+BASE_PLAN_LOOKUP = {
+    "starter": "bridge_starter_monthly",
+    "standard": "bridge_standard_monthly",
+    "enterprise": "bridge_enterprise_monthly",
+}
+
+# Add-on metered price lookup keys (you already created these):
+PLAN_LOOKUP_TO_ADDON_KEYS = {
+    "starter": [
+        "bol_overage_starter",
+        "delivered_tons_overage_starter",
+        "receipts_overage_starter",
+        "warrants_overage_starter",
+        "ws_messages_overage_1m_starter",
+    ],
+    "standard": [
+        "bol_overage_standard",
+        "delivered_tons_overage_standard",
+        "receipts_overage_standard",
+        "warrants_overage_standard",
+        "ws_messages_overage_1m_standard",
+    ],
+    "enterprise": [
+        # include only the metrics you want overage for; omit if truly unlimited
+        "bol_overage_enterprise",
+        "delivered_tons_overage_enterprise",
+        "receipts_overage_enterprise",
+        "warrants_overage_enterprise",
+        "ws_messages_overage_1m_enterprise",
+    ],
+}
+
+def _price_id_for_lookup(lookup_key: str) -> str:
+    prices = stripe.Price.list(active=True, limit=100)
+    for p in prices.auto_paging_iter():
+        if getattr(p, "lookup_key", None) == lookup_key:
+            return p["id"]
+    raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
+
+@app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
+async def start_subscription_checkout(member: str, email: str, plan: str):
+    plan = (plan or "").lower()
+    if plan not in BASE_PLAN_LOOKUP:
+        raise HTTPException(400, "plan must be starter|standard|enterprise")
+
+    # Ensure Stripe Customer
+    row = await database.fetch_one("SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    if row and row["stripe_customer_id"]:
+        cust_id = row["stripe_customer_id"]
+        try:
+            stripe.Customer.modify(cust_id, email=email, name=member)
+        except Exception:
+            pass
+    else:
+        cust = stripe.Customer.create(email=email, name=member, metadata={"member": member})
+        cust_id = cust.id
+        await database.execute("""
+          INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
+          VALUES (:m,:e,:c,false)
+          ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
+        """, {"m": member, "e": email, "c": cust_id})
+
+    # Resolve base + add-on price IDs
+    base_price = _price_id_for_lookup(BASE_PLAN_LOOKUP[plan])
+    addon_prices = [ _price_id_for_lookup(k) for k in PLAN_LOOKUP_TO_ADDON_KEYS.get(plan, []) ]
+
+    # Hosted Checkout: Stripe bills, invoices, taxes, retries, emails
+    session = stripe.checkout.Session.create(
+        mode="subscription",
+        customer=cust_id,
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
+        line_items=[{"price": base_price, "quantity": 1}] + [{"price": pid} for pid in addon_prices],
+        allow_promotion_codes=True,
+        subscription_data={"metadata": {"member": member, "plan": plan}},
+    )
+    return {"url": session.url}
+
+@app.get("/billing/subscribe/finalize_from_session", tags=["Billing"], summary="Finalize plan after Checkout success (no webhook)")
+async def finalize_subscription_from_session(sess: str, member: Optional[str] = None):
+    try:
+        s = stripe.checkout.Session.retrieve(sess, expand=["subscription", "customer"])
+        sub = s.get("subscription")
+        cust = s.get("customer")
+
+        # Resolve plan/member from metadata (subscription first, session as fallback)
+        sub_meta = (sub.get("metadata") if isinstance(sub, dict) else {}) or {}
+        sess_meta = (s.get("metadata") or {})
+        plan = (sub_meta.get("plan") or sess_meta.get("plan") or "").lower()
+        m = member or sess_meta.get("member") or sub_meta.get("member")
+
+        if plan not in {"starter", "standard", "enterprise"}:
+            raise ValueError("Could not infer plan (starter|standard|enterprise).")
+        if not m:
+            raise ValueError("Missing member key.")
+
+        # Upsert plan mapping for the member
+        await database.execute("""
+          INSERT INTO member_plans(member, plan_code, effective_date, updated_at)
+          VALUES (:m, :p, CURRENT_DATE, NOW())
+          ON CONFLICT (member) DO UPDATE
+            SET plan_code=:p, updated_at=NOW()
+        """, {"m": m, "p": plan})
+
+        # Ensure column exists once; then persist stripe_subscription_id
+        sub_id = (sub.get("id") if isinstance(sub, dict) else sub) or None
+        if sub_id:
+            await database.execute("""
+              ALTER TABLE IF NOT EXISTS member_plans
+              ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT
+            """)
+            await database.execute("""
+              UPDATE member_plans SET stripe_subscription_id=:sid, updated_at=NOW()
+              WHERE member=:m
+            """, {"sid": sub_id, "m": m})
+
+        # Upsert stripe_customer_id without fabricating email
+        cust_id = (cust.get("id") if isinstance(cust, dict) else (cust if isinstance(cust, str) else None)) or None
+        if cust_id:
+            await database.execute("""
+              INSERT INTO billing_payment_profiles(member, email, stripe_customer_id, has_default, updated_at)
+              VALUES (
+                :m,
+                COALESCE((SELECT email FROM billing_payment_profiles WHERE member=:m), ''),
+                :c,
+                COALESCE((SELECT has_default FROM billing_payment_profiles WHERE member=:m), FALSE),
+                NOW()
+              )
+              ON CONFLICT (member) DO UPDATE
+                SET stripe_customer_id=:c, updated_at=NOW()
+            """, {"m": m, "c": cust_id})
+
+        return {"ok": True, "member": m, "plan": plan, "subscription_id": sub_id}
+    except Exception as e:
+        raise HTTPException(400, f"subscription finalize failed: {e}")
+# === Self-serve subscription via hosted Checkout (Stripe handles billing) ===
+
+# === Stripe Meter Events: WS messages ===
+def _get_customer_id_sync(member: str) -> str | None:
+    try:
+        r = engine.execute(sqlalchemy.text(
+            "SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m"
+        ), {"m": member}).first()
+        return (r and r[0]) or None
+    except Exception:
+        return None
+
+def _member_plan_sync(member: str) -> str:
+    try:
+        r = engine.execute(sqlalchemy.text(
+            "SELECT plan_code FROM member_plans WHERE member=:m"
+        ), {"m": member}).first()
+        return (r and str(r[0]).lower()) or "starter"
+    except Exception:
+        return "starter"
+
+# These must match the "Event name" for each Meter in your Stripe dashboard.
+def _ws_meter_event_name(plan: str) -> str:
+    return {
+        "starter": "ws_messages_per_1m_starter",
+        "standard": "ws_messages_per_1m_standard",
+        "enterprise": "ws_messages_per_1m_enterprise",
+    }.get(plan, "ws_messages_per_1m_starter")
+
+def emit_ws_usage(member: str, raw_count: int) -> None:
+    if raw_count <= 0:
+        return
+    cust = _get_customer_id_sync(member)
+    if not cust:
+        return
+    plan = _member_plan_sync(member)
+    ev = _ws_meter_event_name(plan)
+    try:
+        stripe.billing.MeterEvent.create(
+            event_name=ev,
+            payload={"stripe_customer_id": cust, "value": int(raw_count)},
+            # identifier=f"{member}:ws:{int(time.time())}"  # Optional dedupe
+        )
+    except Exception:
+        pass
+# === Stripe Meter Events: WS messages ===
+
 @app.post("/billing/pm/setup_session", tags=["Billing"], summary="Create setup-mode Checkout Session (ACH+Card)")
 async def pm_setup_session(member: str, email: str):
     # 1) ensure (or create) Stripe Customer
@@ -932,14 +1116,38 @@ async def pm_setup_session(member: str, email: str):
 
     # 2) Stripe Checkout (mode=setup) for PM collection (card + ACH bank account)
     session = stripe.checkout.Session.create(
-        mode="setup",
+        mode="subscription",
         customer=cust_id,
-        payment_method_types=["card", "us_bank_account"],
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&member={stripe.util.utf8(member)}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
-        metadata={"member": member, "email": email}
+        line_items=[{"price": base_price, "quantity": 1}] + [{"price": pid} for pid in addon_prices],
+        allow_promotion_codes=True,
+        subscription_data={"metadata": {"member": member, "plan": plan}},  # keep plan/member on the Subscription
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
     )
     return {"url": session.url}
+
+@app.get("/billing/pm/finalize_from_session", tags=["Billing"], summary="Finalize default payment method from Checkout Session (no webhook)")
+async def pm_finalize_from_session(sess: str, member: Optional[str] = None):
+    """
+    Use this when you don't have webhooks: call from your success page with the "sess" query param.
+    It fetches the Checkout Session, extracts the SetupIntent → PaymentMethod, and binds as default.
+    """
+    try:
+        s = stripe.checkout.Session.retrieve(sess, expand=["setup_intent"])
+        cust_id = s.get("customer")
+        si_obj = s.get("setup_intent")
+        pm_id = None
+        if isinstance(si_obj, dict):
+            pm_id = si_obj.get("payment_method")
+        elif isinstance(si_obj, str):
+            # fallback fetch if expand failed
+            si = stripe.SetupIntent.retrieve(si_obj)
+            pm_id = si.get("payment_method")
+        m = member or ((s.get("metadata") or {}).get("member"))
+        await _bind_pm(m, cust_id, pm_id)
+        return {"ok": True, "member": m, "customer": cust_id, "pm": pm_id}
+    except Exception as e:
+        raise HTTPException(400, f"pm finalize failed: {e}")
 
 @app.get("/billing/pm/status", tags=["Billing"])
 async def pm_status(member: str):
@@ -1071,6 +1279,10 @@ async def _ensure_billing_prefs():
 import pytz
 @app.on_event("startup")
 async def _billing_cron():
+    # BILL_MODE=subscriptions → Stripe Subscriptions + Meters bill everything; skip internal cron
+    if os.getenv("BILL_MODE", "subscriptions").lower() == "subscriptions":
+        return
+
     async def _runner():
         while True:
             try:
@@ -1082,40 +1294,59 @@ async def _billing_cron():
                     tz = pytz.timezone(p["timezone"] or "America/New_York")
                     now_local = now_utc.astimezone(tz)
                     if now_local.day != int(p["billing_day"]):
-                        continue  # not their billing day
+                        continue
 
-                    # Determine window
-                    # If we have a stored next_cycle_start, use it; else compute previous billing anchor
                     if p["next_cycle_start"]:
                         start = p["next_cycle_start"]
                     else:
                         s, e = _cycle_bounds(now_local, int(p["billing_day"]))
                         start = s
-                    end = now_local.date()  # today (exclusive upper bound)
-
-                    # Skip if start >= end (nothing to bill)
+                    end = now_local.date()
                     if not start or start >= end:
                         continue
 
-                    # Create your internal invoice first (recommended), then push to Stripe
-                    # Internal invoice
-                    r = await billing_run(month=f"{end.year}-{end.month:02d}", member=p["member"], force=True)  # optional reuse
-                    # Or build your own internal invoice id:
                     internal_id = str(uuid.uuid4())
-
+                    # Only used in internal-billing mode:
                     await _stripe_invoice_for_member(member=p["member"], start=start, end=end, invoice_id=internal_id)
 
-                    # advance next_cycle_start to end
                     await database.execute("""
                       UPDATE billing_preferences SET next_cycle_start=:n, updated_at=NOW() WHERE member=:m
                     """, {"n": end, "m": p["member"]})
-
             except Exception:
                 pass
-            # sleep ~1 hour
             await asyncio.sleep(3600)
     asyncio.create_task(_runner())
+
 # ----- billing cron -----
+
+# ---- ws meter flush -----
+@app.on_event("startup")
+async def _ws_meter_flush():
+    """
+    Hourly: sum new WS message counts from data_msg_counters and emit to Stripe as raw counts.
+    Assumes table: data_msg_counters(member TEXT, count BIGINT, ts TIMESTAMPTZ).
+    """
+    async def _run():
+        last_ts = None
+        while True:
+            try:
+                q = """
+                  SELECT member, COALESCE(SUM(count),0) AS cnt
+                    FROM data_msg_counters
+                   WHERE (:ts IS NULL OR ts > :ts)
+                   GROUP BY member
+                """
+                rows = await database.fetch_all(q, {"ts": last_ts})
+                for r in rows:
+                    cnt = int(r["cnt"] or 0)
+                    if cnt > 0:
+                        emit_ws_usage(r["member"], cnt)
+                last_ts = datetime.utcnow()
+            except Exception:
+                pass
+            await asyncio.sleep(3600)  # hourly
+    asyncio.create_task(_run())
+# ----- ws meter flush -----
 
 # ----- plans tables -----
 @app.on_event("startup")
@@ -2280,6 +2511,30 @@ async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
     )
     return {"checkout_url": session.url, "session_id": session.id}
 
+@app.get("/billing/pay/finalize_from_session", tags=["Billing"], summary="Finalize internal invoice after Checkout success (no webhook)")
+async def finalize_from_session(sess: str):
+    """
+    Called by your /static/payment_success.html with ?session=sessid.
+    Retrieves the Checkout Session → PaymentIntent → metadata.invoice_id, and marks your invoice paid.
+    """
+    try:
+        s = stripe.checkout.Session.retrieve(sess, expand=["payment_intent"])
+        pi = s.get("payment_intent")
+        if isinstance(pi, dict):
+            meta = pi.get("metadata") or {}
+        elif isinstance(pi, str):
+            pi_obj = stripe.PaymentIntent.retrieve(pi)
+            meta = pi_obj.get("metadata") or {}
+        else:
+            meta = {}
+        invoice_id = meta.get("invoice_id")
+        if not invoice_id:
+            raise ValueError("No invoice_id on PaymentIntent.metadata")
+        await _handle_invoice_paid(invoice_id, source="checkout.session")
+        return {"ok": True, "invoice_id": invoice_id}
+    except Exception as e:
+        raise HTTPException(400, f"finalize from session failed: {e}")
+
 @app.post("/billing/prefs/upsert", tags=["Billing"], summary="Set billing date/timezone")
 async def billing_prefs_upsert(
     member: str = Body(...),
@@ -2472,6 +2727,9 @@ async def _handle_invoice_paid(invoice_id: str | None, source: str):
                         cc_admin=True, ref_type="invoice", ref_id=invoice_id)
     
 async def _stripe_invoice_for_member(member: str, start: date, end: date, invoice_id: str | None=None) -> dict:
+        # BILL_MODE=subscriptions → Stripe Subscriptions + Meters generate the invoice; skip manual items
+    if os.getenv("BILL_MODE", "subscriptions").lower() == "subscriptions":
+        return {"skipped": "subscriptions_mode"}
     prof = await database.fetch_one("SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
     if not (prof and prof["stripe_customer_id"]):
         raise HTTPException(402, f"{member} has no Stripe customer / PM")
@@ -2497,25 +2755,30 @@ async def _stripe_invoice_for_member(member: str, start: date, end: date, invoic
     """, {"m": member})
     limits = await database.fetch_one("SELECT * FROM billing_plan_limits WHERE plan_code=:c", {"c": plan["plan_code"]}) if plan else None
 
-    # usage items
-    for ev, amt in by_ev.items():
-        if amt == 0: continue
+    # Guarded: only push manual items if explicitly allowed
+    if os.getenv("PUSH_INTERNAL_ITEMS_TO_STRIPE", "0").lower() in ("1", "true", "yes"):
+        # usage items
+        for ev, amt in by_ev.items():
+            if amt == 0:
+                continue
         stripe.InvoiceItem.create(
             customer=cust_id, currency="usd", amount=_usd_cents(amt),
             description=f"{ev} ({start}–{end})",
             metadata={"member": member, "period_start": str(start), "period_end": str(end), "event_type": ev}
         )
 
-    # plan monthly line
-    if plan and float(plan["price_usd"]) > 0:
-        stripe.InvoiceItem.create(
-            customer=cust_id, currency="usd", amount=_usd_cents(float(plan["price_usd"])),
-            description=f"SaaS Package — {plan['name']} ({plan['plan_code']})",
-            metadata={"member": member, "plan_code": plan["plan_code"], "period_start": str(start), "period_end": str(end)}
-        )
+    # Guarded: plan line only if explicitly allowed
+    if os.getenv("PUSH_INTERNAL_ITEMS_TO_STRIPE", "0").lower() in ("1", "true", "yes"):
+        if plan and float(plan["price_usd"]) > 0:
+            stripe.InvoiceItem.create(
+                customer=cust_id, currency="usd", amount=_usd_cents(float(plan["price_usd"])),
+                description=f"SaaS Package — {plan['name']} ({plan['plan_code']})",
+                metadata={"member": member, "plan_code": plan["plan_code"], "period_start": str(start), "period_end": str(end)}
+            )
+
 
     # overages (Mode A)
-    if limits:
+    if limits and os.getenv("PUSH_INTERNAL_ITEMS_TO_STRIPE", "0").lower() in ("1", "true", "yes"):
         # BOL creates
         row_bolc = await database.fetch_one("""
           SELECT COUNT(*) AS c FROM bols WHERE created_at::date >= :s AND created_at::date < :e AND seller=:m
@@ -2565,17 +2828,19 @@ async def _stripe_invoice_for_member(member: str, start: date, end: date, invoic
               description=f"Overage: Warrant events ({over} over {int(limits['inc_warrants'])})",
               metadata={"member": member, "metric":"warrant_overage","qty_over":str(over)})
 
-        # WebSocket messages
-        row_msg = await database.fetch_one("""
-          SELECT COALESCE(SUM(count),0) AS c FROM data_msg_counters WHERE member=:m AND ts::date >= :s AND ts::date < :e
-        """, {"m": member, "s": start, "e": end})
-        msgs = int(row_msg["c"] or 0)
-        if msgs > int(limits["inc_ws_msgs"]):
-            over = msgs - int(limits["inc_ws_msgs"])
-            fee = (over / 1_000_000.0) * float(limits["over_ws_per_million_usd"])
-            stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
-              description=f"Overage: Market data messages ({over} over {int(limits['inc_ws_msgs'])})",
-              metadata={"member": member, "metric":"ws_msgs_overage","qty_over":str(over)})
+        # WebSocket messages (DISABLED: Stripe Meters handle WS billing)
+        if os.getenv("BILL_INTERNAL_WS", "0").lower() in ("1","true","yes"):
+            row_msg = await database.fetch_one("""
+              SELECT COALESCE(SUM(count),0) AS c FROM data_msg_counters WHERE member=:m AND ts::date >= :s AND ts::date < :e
+            """, {"m": member, "s": start, "e": end})
+            msgs = int(row_msg["c"] or 0)
+            if msgs > int(limits["inc_ws_msgs"]):
+                over = msgs - int(limits["inc_ws_msgs"])
+                fee = (over / 1_000_000.0) * float(limits["over_ws_per_million_usd"])
+                stripe.InvoiceItem.create(customer=cust_id, currency="usd", amount=_usd_cents(fee),
+                  description=f"Overage: Market data messages ({over} over {int(limits['inc_ws_msgs'])})",
+                  metadata={"member": member, "metric":"ws_msgs_overage","qty_over":str(over)})
+
 
     # MMI true-up
     if trueup > 0:

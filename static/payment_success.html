@@ -44,11 +44,17 @@
   </div>
 
   <script>
-    (function () {
-      const p = new URLSearchParams(location.search);
-      const id = p.get("session");
-      if (id) document.getElementById("sess").textContent = id;
-    })();
+  (function () {
+    const p = new URLSearchParams(location.search);
+    const id = p.get("session");                           // provided by SUCCESS_URL
+    if (id) {
+      document.getElementById("sess").textContent = id;
+      fetch(`/billing/pay/finalize_from_session?sess=${encodeURIComponent(id)}`)
+        .then(r => r.json())
+        .then(() => console.log('Invoice finalized'))
+        .catch(e => console.warn('Finalize failed', e));
+    }
+  })();
   </script>
 </body>
 </html>
