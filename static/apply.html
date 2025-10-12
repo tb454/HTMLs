@@ -322,13 +322,7 @@
       document.getElementById('submitBtn').disabled = true;
       const subBtn = document.getElementById('startSubBtn');
       if (subBtn) subBtn.disabled = true;
-    }
-    // Keep PM/Subscription readiness current if org/email/plan changes
-  ['org_name','email','plan'].forEach(id=>{
-    const el = document.getElementById(id);
-    el && el.addEventListener('blur', refreshPmBadge);
-    el && el.addEventListener('change', refreshPmBadge);
-  });
+    }    
   }
   // Hook up Start Subscription button
   document.getElementById('startSubBtn')?.addEventListener('click', async ()=>{
@@ -391,12 +385,6 @@
 
   await refreshPmBadge();
 })();
-
-  // Keep PM badge current if org/email changes
-  ['org_name','email'].forEach(id=>{
-    const el = document.getElementById(id);
-    el && el.addEventListener('blur', refreshPmBadge);
-  });
 
   // --- HARD GATE: require PM before submission ---
   form.addEventListener('submit', async (e)=>{
@@ -479,6 +467,14 @@ async function startSubscription(member, plan) {
   if (j.url) { location.href = j.url; return; }
   throw new Error('Could not start subscription checkout.');
 }
+// Keep PM/Subscription readiness current if org/email/plan changes
+['org_name','email','plan'].forEach(id=>{
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('blur', refreshPmBadge);
+  el.addEventListener('change', refreshPmBadge);
+});
+
 </script>
 </body>
 </html>
