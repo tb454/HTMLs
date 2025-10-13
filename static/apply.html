@@ -232,7 +232,7 @@
     (async ()=>{ const el=document.querySelector('[data-health]'); if(!el) return;
       try{ await api('/health'); el.textContent='● Live'; el.setAttribute('data-ok','1'); }
       catch{ el.textContent='● Degraded'; }
-
+    })();
     const $ = (id)=>document.getElementById(id);
     const qs = new URLSearchParams(location.search);
     function setVal(id,v){ const el=$(id); if(el!=null) el.value = v; }
@@ -271,11 +271,11 @@
           if (byId) byId.value = v;
         });
       }catch{}
-    })();
-
-     </script>
+    })();    
+    </script>
   <script>
-  // ---- Payment Method flow (Stripe Checkout in setup mode) ----
+    
+  // ---- Payment Method flow (Stripe Checkout in setup mode) ----    
   async function pmStatus(member){
     const res = await api(`/billing/pm/status?member=${encodeURIComponent(member)}`);
     return await res.json();

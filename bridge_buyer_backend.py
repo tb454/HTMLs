@@ -961,15 +961,16 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
     plan = (plan or "").lower()
     if plan not in BASE_PLAN_LOOKUP:
         raise HTTPException(400, "plan must be starter|standard|enterprise")
-    
+
+    # Ensure (or create) Stripe Customer and persist locally
     row = await database.fetch_one(
         "SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member}
     )
     if row and row["stripe_customer_id"]:
         cust_id = row["stripe_customer_id"]
-        try: 
+        try:
             stripe.Customer.modify(cust_id, email=(email or row["email"]), name=member)
-        except Exception: 
+        except Exception:
             pass
     else:
         cust = stripe.Customer.create(email=(email or ""), name=member, metadata={"member": member})
@@ -977,21 +978,27 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
         await database.execute("""
             INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
             VALUES (:m,:e,:c,false)
-            ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
+            ON CONFLICT (member) DO UPDATE
+              SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
         """, {"m": member, "e": (email or ""), "c": cust_id})
 
     # Resolve base + add-on price IDs
     base_price = _price_id_for_lookup(BASE_PLAN_LOOKUP[plan])
-    addon_prices = [ _price_id_for_lookup(k) for k in PLAN_LOOKUP_TO_ADDON_KEYS.get(plan, []) ]
+    addon_prices = [_price_id_for_lookup(k) for k in PLAN_LOOKUP_TO_ADDON_KEYS.get(plan, [])]
 
-    # Hosted Checkout: Stripe bills, invoices, taxes, retries, emails
+    # Build line items: base plan (qty=1) + metered add-ons (no quantity needed)
+    line_items = [{"price": base_price, "quantity": 1}] + [{"price": pid} for pid in addon_prices]
+
+    # Hosted Checkout in SUBSCRIPTION mode
     session = stripe.checkout.Session.create(
-        mode="setup",
+        mode="subscription",
         customer=cust_id,
-        payment_method_types=["card", "us_bank_account"],
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
-        metadata={"member": member, "email": email},
+        line_items=line_items,
+        allow_promotion_codes=True,
+        subscription_data={"metadata": {"member": member, "plan": plan}},
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
+        metadata={"member": member, "email": (email or row["email"] if row else "")},
     )
     return {"url": session.url}
 
@@ -1118,12 +1125,12 @@ async def pm_setup_session(member: str, email: str):
     session = stripe.checkout.Session.create(
         mode="setup",
         customer=cust_id,
-    payment_method_types=["card", "us_bank_account"],
-    success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
-    cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
-    metadata={"member": member, "email": email},
-)
-return {"url": session.url}
+        payment_method_types=["card", "us_bank_account"],
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
+        metadata={"member": member, "email": email},
+    )
+    return {"url": session.url}
 
 @app.get("/billing/pm/finalize_from_session", tags=["Billing"], summary="Finalize default payment method from Checkout Session (no webhook)")
 async def pm_finalize_from_session(sess: str, member: Optional[str] = None):
