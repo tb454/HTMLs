@@ -957,7 +957,7 @@ def _price_id_for_lookup(lookup_key: str) -> str:
     raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
 
 @app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
-async def start_subscription_checkout(member: str, email: str, plan: str):
+async def start_subscription_checkout(member: str, plan: str, email: Optional[str] = None):
     plan = (plan or "").lower()
     if plan not in BASE_PLAN_LOOKUP:
         raise HTTPException(400, "plan must be starter|standard|enterprise")
@@ -967,8 +967,10 @@ async def start_subscription_checkout(member: str, email: str, plan: str):
     )
     if row and row["stripe_customer_id"]:
         cust_id = row["stripe_customer_id"]
-        try: stripe.Customer.modify(cust_id, email=(email or row["email"]), name=member)
-        except Exception: pass
+        try: 
+            stripe.Customer.modify(cust_id, email=(email or row["email"]), name=member)
+        except Exception: 
+            pass
     else:
         cust = stripe.Customer.create(email=(email or ""), name=member, metadata={"member": member})
         cust_id = cust.id
@@ -977,23 +979,6 @@ async def start_subscription_checkout(member: str, email: str, plan: str):
             VALUES (:m,:e,:c,false)
             ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
         """, {"m": member, "e": (email or ""), "c": cust_id})
-
-    # Ensure Stripe Customer
-    row = await database.fetch_one("SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
-    if row and row["stripe_customer_id"]:
-        cust_id = row["stripe_customer_id"]
-        try:
-            stripe.Customer.modify(cust_id, email=email, name=member)
-        except Exception:
-            pass
-    else:
-        cust = stripe.Customer.create(email=email, name=member, metadata={"member": member})
-        cust_id = cust.id
-        await database.execute("""
-          INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
-          VALUES (:m,:e,:c,false)
-          ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
-        """, {"m": member, "e": email, "c": cust_id})
 
     # Resolve base + add-on price IDs
     base_price = _price_id_for_lookup(BASE_PLAN_LOOKUP[plan])
@@ -1131,15 +1116,14 @@ async def pm_setup_session(member: str, email: str):
 
     # 2) Stripe Checkout (mode=setup) for PM collection (card + ACH bank account)
     session = stripe.checkout.Session.create(
-        mode="subscription",
+        mode="setup",
         customer=cust_id,
-        line_items=[{"price": base_price, "quantity": 1}] + [{"price": pid} for pid in addon_prices],
-        allow_promotion_codes=True,
-        subscription_data={"metadata": {"member": member, "plan": plan}},  # keep plan/member on the Subscription
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
-    )
-    return {"url": session.url}
+    payment_method_types=["card", "us_bank_account"],
+    success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
+    cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
+    metadata={"member": member, "email": email},
+)
+return {"url": session.url}
 
 @app.get("/billing/pm/finalize_from_session", tags=["Billing"], summary="Finalize default payment method from Checkout Session (no webhook)")
 async def pm_finalize_from_session(sess: str, member: Optional[str] = None):
