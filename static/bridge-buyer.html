@@ -51,6 +51,7 @@
        role="status"
        aria-live="polite"
        aria-atomic="true"
+       tabindex="-1"
        style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;
               padding:12px 14px;background:#111827;color:#fff;border-radius:10px;
               box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui;z-index:9999">
@@ -64,6 +65,22 @@
       <span class="health-badge" data-health-badge>● Checking…</span>
     </div>
 
+    <!-- Auth/health banner -->
+    <div id="authBanner" class="mb-2" style="display:none;border-radius:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffeeba;color:#856404;">
+      <strong>Status:</strong> <span id="authMsg">Checking…</span>
+      <a href="/static/bridge-login.html" style="margin-left:10px">Re-authenticate</a>
+    </div>
+
+    <!-- Compliance cues -->
+    <div class="small text-muted mb-2">
+      KYC/AML verified • Data retention 7y • ICE-ready OpenAPI
+      — <a href="/legal/security">Security</a> • <a href="/terms">Terms</a>
+    </div>
+
+    <!-- Timezone hint -->
+    <div class="small text-muted mb-2" id="tzHint"></div>
+
+    <!-- Controls -->
     <div class="d-flex gap-2 mb-3 align-items-end">
       <div class="flex-grow-1">
         <label class="visually-hidden" for="buyerFilter">Filter buyer</label>
@@ -74,6 +91,15 @@
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
       <button class="btn btn-outline-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
+      <select id="sortBy" class="form-select form-select-sm" style="width:auto">
+        <option value="created_at_desc" selected>Newest</option>
+        <option value="price_per_ton_asc">Price ↑</option>
+        <option value="price_per_ton_desc">Price ↓</option>
+        <option value="weight_tons_desc">Tons ↓</option>
+      </select>
+      <div class="small text-muted" id="unitBadge" style="margin-left:auto">
+        Units: US short tons • Currency: USD
+      </div>
     </div>
 
     <!-- RFQ (two-click) -->
@@ -121,6 +147,11 @@
   </div>
 
   <script nonce="{{NONCE}}">
+    // Cookie reader for CSRF etc.
+    function _cookie(name){
+      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
     // Unified endpoint (already set in boot) and helpers
     function toast(msg, ms=2800){
       const wrap = document.getElementById('toast');
@@ -129,6 +160,7 @@
       if (!wrap || !msgEl){ alert(text); return; }
       msgEl.textContent = text; // safe text only
       wrap.style.display = 'block';
+      try{ wrap.focus(); }catch{}
       setTimeout(()=>{ wrap.style.display = 'none'; }, ms);
     }
 
@@ -144,7 +176,7 @@
           credentials: 'include',
           ...opts,
           signal: ctl.signal,
-          headers: { Accept:'application/json', ...(opts.headers||{}) }
+          headers: { Accept:'application/json', 'X-CSRF': _cookie('XSRF-TOKEN'), ...(opts.headers||{}) }
         });
         if (res.status === 401) {
           const next = encodeURIComponent(location.pathname + location.search);
@@ -166,18 +198,62 @@
 
     // Health badge
     window.addEventListener('DOMContentLoaded', async ()=>{
-      const el = document.querySelector('[data-health-badge]');
-      if(!el) return;
-      try{ await api('/health'); el.textContent = '● Live'; el.setAttribute('data-ok','1'); }
-      catch{ el.textContent = '● Degraded'; el.removeAttribute('data-ok'); }
+      const hb = document.querySelector('[data-health-badge]');
+      const banner = document.getElementById('authBanner');
+      const msg = document.getElementById('authMsg');
+
+      try{
+        await api('/health');
+        if (hb){ hb.textContent = '● Live'; hb.setAttribute('data-ok','1'); }
+      }catch{
+        if (hb){ hb.textContent = '● Degraded'; hb.removeAttribute('data-ok'); }
+        if (banner && msg){ banner.style.display='block'; msg.textContent = 'Service degraded'; }
+      }
+ 
+      try{
+        const r = await api('/me'); const j = await r.json();
+        if (!j?.username){
+          if (banner && msg){ banner.style.display='block'; msg.textContent = 'Not logged in'; }
+        }
+      }catch{
+        if (banner && msg){ banner.style.display='block'; msg.textContent = 'Auth unknown'; }
+      }
     });
   </script>
 
   <script nonce="{{NONCE}}">
     const endpoint = window.endpoint;
     let offset = 0, limit = 100; // pagination
+    let sortBy = 'created_at_desc';
     let loadCtl = null;          // AbortController for overlapping loads
     let refreshTimer = null;     // interval handle
+    let paused = false;
+
+    // ---- Timezone toggle (UTC vs local) ----
+    let useUTC = localStorage.getItem('buyer.useUTC') === '1';
+
+    function _fmtDate(d){
+      const dt = new Date(d);
+      return useUTC
+        ? dt.toLocaleString('en-US', { timeZone:'UTC', timeZoneName:'short' })
+        : dt.toLocaleString();
+    }
+
+    function _renderTZHint(){
+      const el = document.getElementById('tzHint');
+      if (!el) return;
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      el.innerHTML = `Times shown in <b>${useUTC ? 'UTC' : tz}</b> • <a href="#" id="toggleTZ">${useUTC ? 'Use local' : 'Use UTC'}</a>`;
+      document.getElementById('toggleTZ')?.addEventListener('click', (e)=>{
+        e.preventDefault();
+        useUTC = !useUTC;
+        localStorage.setItem('buyer.useUTC', useUTC ? '1':'0');
+        _renderTZHint();
+        loadOpenContracts();
+      });
+    }
+    document.addEventListener('DOMContentLoaded', _renderTZHint);
+    // ---- /Timezone toggle ----
 
     function currentRole(){
       try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
@@ -238,7 +314,7 @@
       line.textContent = `Tons: ${wt} @ $${pt}/ton · Total $${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 
       const created = document.createElement('div'); created.className='small text-muted';
-      if (r?.created_at) created.textContent = `Created: ${new Date(r.created_at).toLocaleString()}`;
+      if (r?.created_at) created.textContent = `Created: ${_fmtDate(r.created_at)}`;
 
       left.append(title, seller, buyer, line, created);
 
@@ -247,6 +323,7 @@
       btn.className = 'btn btn-primary btn-sm';
       btn.type = 'button';
       btn.textContent = 'Buy';
+      btn.setAttribute('aria-label', `Buy contract ${r?.material||''} from ${r?.seller||''}`);
       btn.addEventListener('click', (ev)=> buy(ev, r.id));
       right.append(btn);
 
@@ -269,7 +346,7 @@
       root.setAttribute('aria-busy','true');
       showSkeletonCards(5);
 
-      const q = new URLSearchParams({ status: 'Pending', limit, offset });
+      const q = new URLSearchParams({ status: 'Pending', limit, offset, sort: sortBy });
       const buyerEl = document.getElementById('buyerFilter');
       const matEl   = document.getElementById('materialFilter');
       const buyerVal = (buyerEl?.value || '').trim();
@@ -283,13 +360,29 @@
       try{
         const res  = await api(`/contracts?` + q.toString(), { signal: loadCtl.signal });
         const rows = await res.json();
+        const total = +(res.headers.get('X-Total-Count')||0);
 
         root.innerHTML = '';
         if (!Array.isArray(rows) || rows.length === 0) {
-          const empty = document.createElement('div');
-          empty.className = 'text-muted';
-          empty.textContent = 'No open contracts.';
-          root.append(empty);
+          const wrap = document.createElement('div');
+          wrap.className = 'text-muted';
+          wrap.innerHTML = `
+            <div>No open contracts.</div>
+            <div class="mt-2 d-flex gap-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="clearFiltersBtn">Clear filters</button>
+              <button type="button" class="btn btn-sm btn-primary" id="reqQuoteBtn">Request Quote</button>
+            </div>`;
+          root.append(wrap);
+          document.getElementById('clearFiltersBtn')?.addEventListener('click', ()=>{
+            document.getElementById('buyerFilter').value='';
+            document.getElementById('materialFilter').value='';
+            offset=0; loadOpenContracts();
+          });
+          document.getElementById('reqQuoteBtn')?.addEventListener('click', ()=>{
+            const q = document.getElementById('rfqQty'); if (q){ q.focus(); }
+            toast('Enter RFQ quantity and submit.');
+          });
+         
           const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing 0 • offset ${offset}`;
           if (ls) ls.textContent = 'Loaded.';
           return;
@@ -299,7 +392,12 @@
         for (const r of rows) frag.append(rowCard(r));
         root.append(frag);
 
-        const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing ${rows.length} • offset ${offset}`;
+        const pi = document.getElementById('pageInfo');
+        if (pi) {
+          pi.textContent = total
+            ? `Showing ${rows.length} • ${offset+1}–${offset+rows.length} of ${total}`
+            : `Showing ${rows.length} • offset ${offset}`;
+        }
         // enable/disable paging buttons based on results/offset
         const prev = document.getElementById('prevBtn');
         const next = document.getElementById('nextBtn');
@@ -318,21 +416,24 @@
 
     async function buy(ev, id){
       const btn = ev?.currentTarget;
+      if (!confirm('Confirm purchase of this contract?')) return;
       if (btn){ btn.disabled = true; btn.textContent = 'Purchasing…'; }
       try{
         const res = await api(`/contracts/${id}/purchase`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))
+            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),            
           },
           body: JSON.stringify({ op:'purchase', expected_status:'Pending' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
         loadOpenContracts();
-      } catch(e) { /* toast already shown */ }
-      finally{
+      } catch(e) {
+        // api() already toasted details
+        toast('Purchase failed');
+      } finally {
         if (btn){ btn.disabled = false; btn.textContent = 'Buy'; }
       }
     }
@@ -340,8 +441,17 @@
 
     // Wire UI
     document.getElementById('refreshBtn')?.addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
-    document.getElementById('buyerFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
-    document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
+    document.getElementById('buyerFilter')?.addEventListener('input', debounce(()=>{
+      offset = 0;
+      localStorage.setItem('buyer.filter.buyer', document.getElementById('buyerFilter').value||'');
+      loadOpenContracts();
+    }, 250));
+    document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{
+      offset = 0;
+      localStorage.setItem('buyer.filter.material', document.getElementById('materialFilter').value||'');
+      loadOpenContracts();
+    }, 250));
+
     document.getElementById('prevBtn')?.addEventListener('click', ()=>{
       offset = Math.max(0, offset - limit);
       const page = Math.floor(offset/limit)+1;
@@ -352,6 +462,12 @@
       offset += limit;
       const page = Math.floor(offset/limit)+1;
       _syncQuery({ page, rows: String(limit) });
+      loadOpenContracts();
+    });
+
+    document.getElementById('sortBy')?.addEventListener('change', e=>{
+      sortBy = e.target.value; offset = 0;
+      localStorage.setItem('buyer.sortBy', sortBy);
       loadOpenContracts();
     });
 
@@ -370,23 +486,28 @@
     // Hydrate filters/page from URL on first load
     (function hydrateFromURL(){
       const q = new URL(location.href).searchParams;
-      const buyer = q.get('buyer') || '';
-      const material = q.get('material') || '';
+      const buyer = q.get('buyer') || localStorage.getItem('buyer.filter.buyer') || '';
+      const material = q.get('material') || localStorage.getItem('buyer.filter.material') || '';
       const page = Math.max(1, parseInt(q.get('page')||'1', 10));
       const rows = parseInt(q.get('rows')||'', 10);
+      const savedSort = localStorage.getItem('buyer.sortBy') || 'created_at_desc';
+      sortBy = savedSort;
 
       const bf = document.getElementById('buyerFilter'); if (bf) bf.value = buyer;
       const mf = document.getElementById('materialFilter'); if (mf) mf.value = material;
+      const sb = document.getElementById('sortBy'); if (sb) sb.value = savedSort;
 
       if (!Number.isNaN(rows) && rows > 0) {
         limit = rows;
         const ps = document.getElementById('pageSize'); if (ps) ps.value = String(rows);
       }
       offset = (page - 1) * limit;
-    })();
 
-    // Auto-refresh controls (pause + jitter)
-    let paused = false;
+      const p = localStorage.getItem('buyer.paused') === '1';
+      if (p) { paused = true; const pb = document.getElementById('pauseBtn'); if (pb) pb.textContent = 'Resume'; }
+    })();
+  
+    // Auto-refresh controls (pause + jitter)    
     const MIN_MS = 35000;  // 35s
     const MAX_MS = 55000;  // 55s
     function _jitter() { return Math.floor(MIN_MS + Math.random() * (MAX_MS - MIN_MS)); }
@@ -416,9 +537,10 @@
       btn.className = 'btn btn-outline-secondary btn-sm';
       btn.type = 'button';
       btn.id = 'pauseBtn';
-      btn.textContent = 'Pause';
+      btn.textContent = paused ? 'Resume' : 'Pause';
       btn.onclick = () => {
         paused = !paused;
+        localStorage.setItem('buyer.paused', paused ? '1':'0');
         btn.textContent = paused ? 'Resume' : 'Pause';
         if (!paused) { loadOpenContracts(); startAuto(); } else { stopAuto(); }
       };
@@ -453,7 +575,9 @@
         try{
           const r = await api('/rfq', {
             method:'POST',
-            headers:{'Content-Type':'application/json'},
+            headers: {
+              'Content-Type':'application/json',            
+            },
             body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
           });
           toast('RFQ posted');
