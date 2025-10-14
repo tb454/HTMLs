@@ -5840,30 +5840,7 @@ async def get_contract_by_id(contract_id: str):
     row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
     if not row:
         raise HTTPException(status_code=404, detail="contract not found")
-    return dict(row)
-
-@app.patch("/contracts/{id}/purchase", tags=["Contracts"], summary="Mark contract purchased")
-async def contract_purchase(id: str):
-    # read current state
-    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
-    if not row:
-        raise HTTPException(status_code=404, detail="contract not found")
-
-    status = row.get("status") if isinstance(row, dict) else row["status"]
-    if status in ("purchased", "cancelled"):
-        # idempotent / conflict for invalid transition
-        raise HTTPException(status_code=409, detail=f"invalid state {status}")
-
-    try:
-        await database.execute(
-            "UPDATE contracts SET status = :s, updated_at = now() WHERE id = :id",
-            {"s": "purchased", "id": id},
-        )
-        out = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
-        return dict(out)
-    except Exception as e:
-        # never crash process
-        raise HTTPException(status_code=500, detail=f"purchase failed: {type(e).__name__}: {e}")    
+    return dict(row) 
 
 @app.put(
     "/contracts/{contract_id}",
@@ -5972,27 +5949,76 @@ def _normalize(v):
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
+    # Streamed CSV, ultra-guarded. Never crashes the worker, even with odd types/NULLs.
     try:
         rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-        dict_rows = [dict(r) for r in rows]
-        fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
-
-        buf = io.StringIO(newline="")
-        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        for r in dict_rows:
-            w.writerow({k: _normalize(r.get(k)) for k in fieldnames})
-
-        headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        return Response(content=buf.getvalue(), media_type="text/csv", headers=headers)
-
     except Exception as e:
         try:
-            logger.warn("contracts_export_csv_failed", err=str(e))
+            logger.warn("contracts_export_csv_query_failed", err=str(e))
         except Exception:
             pass
-        headers = {"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        return Response(content="id\n", media_type="text/csv", headers=headers)
+        return StreamingResponse(
+            iter(["id\n"]), media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+
+    # Normalize to list of dicts up front
+    dict_rows = []
+    try:
+        for r in rows:
+            dict_rows.append(dict(r))
+    except Exception as e:
+        try:
+            logger.warn("contracts_export_csv_row_cast_failed", err=str(e))
+        except Exception:
+            pass
+        return StreamingResponse(
+            iter(["id\n"]), media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+
+    # Figure out headers safely
+    fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
+
+    def _norm(v):
+        try:
+            # fast path common types
+            if v is None: return ""
+            if isinstance(v, (int, float, str)): return v
+            from datetime import date, datetime as _dt
+            import uuid as _uuid
+            if isinstance(v, (date, _dt)): return v.isoformat()
+            if isinstance(v, Decimal): return float(v)
+            if isinstance(v, _uuid.UUID): return str(v)
+            if isinstance(v, (dict, list)): return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
+            return str(v)
+        except Exception:
+            return ""
+
+    async def _gen():
+        buf = io.StringIO(newline="")
+        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+        # header
+        w.writeheader(); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+        # rows
+        for r in dict_rows:
+            try:
+                w.writerow({k: _norm(r.get(k)) for k in fieldnames})
+            except Exception:
+                # write a minimal, non-breaking row
+                safe = {}
+                for k in fieldnames:
+                    try:
+                        safe[k] = _norm(r.get(k))
+                    except Exception:
+                        safe[k] = ""
+                w.writerow(safe)
+            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+    return StreamingResponse(
+        _gen(), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+    )
 #-------- Export Contracts as CSV --------
 
 # --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
