@@ -38,7 +38,6 @@
     .visually-hidden-focusable:active, .visually-hidden-focusable:focus{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto}
   </style>
 
-  <!-- If you keep inline scripts, add a nonce and mirror it in your CSP as 'nonce-<NONCE>' -->
   <script id="boot" nonce="{{NONCE}}">
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
   </script>
@@ -73,7 +72,7 @@
 
     <!-- Compliance cues -->
     <div class="small text-muted mb-2">
-      KYC/AML verified • Data retention 7y • ICE-ready OpenAPI
+      KYC/AML verified • Data retention 7y 
       — <a href="/legal/security">Security</a> • <a href="/terms">Terms</a>
     </div>
 
