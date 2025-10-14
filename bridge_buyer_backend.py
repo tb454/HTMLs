@@ -322,8 +322,7 @@ async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
         return {"amount": round(amount / _FX[f] * _FX[t], 2), "to": t}
     except KeyError:
         raise HTTPException(422, "Unsupported currency")
-    
-# put near your other routes
+
 @app.get("/pricing", tags=["Pricing"], summary="Public pricing snapshot")
 async def get_pricing():
     return {
@@ -497,7 +496,38 @@ class ApplyRequest(BaseModel):
     utm_source: Optional[str] = None
     utm_campaign: Optional[str] = None
     utm_medium: Optional[str] = None
-# ===== /DB bootstrap =====
+# ===== DB bootstrap =====
+
+# ---- CSRF helpers (top-level) ----
+def _csrf_issue_token(request: Request) -> str:
+    """Create a new CSRF token and store it in the session."""
+    token = secrets.token_urlsafe(32)
+    request.session["csrf_token"] = token
+    return token
+# ---- role helper ----
+def _require_role(request: Request, allowed: set[str]):
+    role = (request.session.get("role") or "").lower()
+    if role not in allowed:
+        raise HTTPException(status_code=403, detail=f"forbidden: requires one of {sorted(list(allowed))}")
+# ---- /role helper ----
+
+def _csrf_get_or_create(request: Request) -> str:
+    """Re-use an existing token if present; otherwise issue one."""
+    tok = request.session.get("csrf_token")
+    return tok if isinstance(tok, str) and len(tok) > 0 else _csrf_issue_token(request)
+
+async def csrf_protect(
+    request: Request,
+    x_csrf: str | None = Header(default=None, alias="X-CSRF")
+):
+    """
+    Validate CSRF token for mutating requests.
+    Frontend sends: 'X-CSRF': cookie('XSRF-TOKEN').
+    """
+    sess_token = request.session.get("csrf_token")
+    if not (sess_token and x_csrf and x_csrf == sess_token):
+        raise HTTPException(status_code=401, detail="bad csrf")
+# ---- /CSRF helpers ----
 
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
@@ -968,7 +998,7 @@ def _price_id_for_lookup(lookup_key: str) -> str:
     raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
 
 @app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
-async def start_subscription_checkout(member: str, plan: str, email: Optional[str] = None):
+async def start_subscription_checkout(member: str, plan: str, email: Optional[str] = None, _=Depends(csrf_protect)):
     plan = (plan or "").lower()
     if plan not in BASE_PLAN_LOOKUP:
         raise HTTPException(400, "plan must be starter|standard|enterprise")
@@ -1118,7 +1148,7 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
 # === Stripe Meter Events: WS messages ===
 
 @app.post("/billing/pm/setup_session", tags=["Billing"], summary="Create setup-mode Checkout Session (ACH+Card)")
-async def pm_setup_session(member: str, email: str):
+async def pm_setup_session(member: str, email: str, _=Depends(csrf_protect)):
     # 1) ensure (or create) Stripe Customer
     row = await database.fetch_one("SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
     if row and row["stripe_customer_id"]:
@@ -1799,9 +1829,13 @@ with open("static/bridge-buyer.html", "r", encoding="utf-8") as f:
     _BUYER_HTML_TEMPLATE = f.read()
 
 @app.get("/buyer", include_in_schema=False)
-async def buyer_page_dynamic():
+async def buyer_page_dynamic(request: Request):
     nonce = secrets.token_urlsafe(16)
     html = _BUYER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
+
+    # CSRF tied to session; expose via readable cookie for JS
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
 
     csp = (
         "default-src 'self'; "
@@ -1814,7 +1848,11 @@ async def buyer_page_dynamic():
         "connect-src 'self' https://*.stripe.com; "
         "form-action 'self'; upgrade-insecure-requests"
     )
-    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    # optional client hint (non-authoritative)
+    resp.set_cookie("BRIDGE-ROLE", (request.session.get("role") or "").lower(), httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
 
 @app.get("/admin", include_in_schema=False)
 async def admin_page():
@@ -1949,7 +1987,33 @@ async def healthz():
         return JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
     
 @app.get("/health", include_in_schema=False)
-async def health_alias(): return await healthz()
+async def health_alias(request: Request):
+    """
+    Health alias that also issues an XSRF-TOKEN cookie so static pages
+    can read it and send 'X-CSRF' on subsequent requests.
+    """
+    # 1) issue CSRF token bound to the session    
+    token = _csrf_get_or_create(request)
+
+    # 2) do the same health check you already had
+    try:
+        await database.execute("SELECT NOW()")
+        resp = JSONResponse({"status": "ok"})
+    except Exception as e:
+        resp = JSONResponse(status_code=503, content={"status": "degraded", "error": str(e)})
+
+    # 3) set the cookie (readable by JS; Secure in prod)
+    import os
+    prod = os.getenv("ENV","").lower() == "production"
+    resp.set_cookie(
+        key="XSRF-TOKEN",
+        value=token,
+        httponly=False,   # must be readable by JS (_cookie('XSRF-TOKEN'))
+        samesite="lax",
+        secure=prod,
+        path="/"
+    )
+    return resp
     
 @app.get("/__diag/users_count", tags=["Health"])
 async def diag_users_count():
@@ -5392,6 +5456,7 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
         hit = await idem_get(key)
     if hit: return hit
 
+
     """
     Populates symbol, lot_size, qty_lots, location at write time.
     """
@@ -5668,6 +5733,10 @@ async def public_ticker(listing_id: str):
     }
 
 # -------- Contracts (with Inventory linkage) --------
+from fastapi import Response, Query
+from typing import Optional
+from datetime import datetime
+
 @app.get(
     "/contracts",
     response_model=List[ContractOut],
@@ -5683,11 +5752,17 @@ async def get_all_contracts(
     status: Optional[str] = Query(None),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime]   = Query(None),
-    reference_source: Optional[str] = Query(None),    
+    reference_source: Optional[str] = Query(None),
     reference_symbol: Optional[str] = Query(None),
+    sort: Optional[str] = Query(
+        None,
+        description="created_at_desc|price_per_ton_asc|price_per_ton_desc|weight_tons_desc"
+    ),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    response: Response = None,   # lets us set X-Total-Count
 ):
+    # normalize inputs
     buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
     seller   = seller.strip()   if isinstance(seller, str) else seller
     material = material.strip() if isinstance(material, str) else material
@@ -5695,33 +5770,57 @@ async def get_all_contracts(
     reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
     reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
 
+    # base query
     query = "SELECT * FROM contracts"
     conditions, values = [], {}
 
     if buyer:
-        conditions.append("buyer ILIKE :buyer"); values["buyer"] = f"%{buyer}%"
+        conditions.append("buyer ILIKE :buyer");               values["buyer"] = f"%{buyer}%"
     if seller:
-        conditions.append("seller ILIKE :seller"); values["seller"] = f"%{seller}%"
+        conditions.append("seller ILIKE :seller");             values["seller"] = f"%{seller}%"
     if material:
-        conditions.append("material ILIKE :material"); values["material"] = f"%{material}%"
+        conditions.append("material ILIKE :material");         values["material"] = f"%{material}%"
     if status:
-        conditions.append("status ILIKE :status"); values["status"] = f"%{status}%"
+        conditions.append("status ILIKE :status");             values["status"] = f"%{status}%"
     if start:
-        conditions.append("created_at >= :start"); values["start"] = start
+        conditions.append("created_at >= :start");             values["start"] = start
     if end:
-        conditions.append("created_at <= :end"); values["end"] = end
+        conditions.append("created_at <= :end");               values["end"] = end
     if reference_source:
-        conditions.append("reference_source = :ref_src");         values["ref_src"] = reference_source
+        conditions.append("reference_source = :ref_src");      values["ref_src"] = reference_source
     if reference_symbol:
-        # allow exact or prefix (search "4409" or "4409#")
-        conditions.append("reference_symbol ILIKE :ref_sym");     values["ref_sym"] = f"%{reference_symbol}%"
+        conditions.append("reference_symbol ILIKE :ref_sym");  values["ref_sym"] = f"%{reference_symbol}%"
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    query += " ORDER BY created_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
-    values["limit"], values["offset"] = limit, offset
+    # --- total count header ---
+    count_sql = "SELECT COUNT(*) AS c FROM contracts"
+    if conditions:
+        count_sql += " WHERE " + " AND ".join(conditions)
+    row_count = await database.fetch_one(count_sql, values)
+    try:
+        if response is not None:
+            response.headers["X-Total-Count"] = str(int(row_count["c"] or 0))
+    except Exception:
+        pass
 
+    # --- sort mapping ---
+    order_clause = "created_at DESC NULLS LAST"
+    if sort:
+        s = sort.lower()
+        if s == "price_per_ton_asc":
+            order_clause = "price_per_ton ASC NULLS LAST, created_at DESC NULLS LAST"
+        elif s == "price_per_ton_desc":
+            order_clause = "price_per_ton DESC NULLS LAST, created_at DESC NULLS LAST"
+        elif s == "weight_tons_desc":
+            order_clause = "weight_tons DESC NULLS LAST, created_at DESC NULLS LAST"
+        else:
+            order_clause = "created_at DESC NULLS LAST"
+
+    # finalize + fetch
+    query += f" ORDER BY {order_clause} LIMIT :limit OFFSET :offset"
+    values["limit"], values["offset"] = limit, offset
     return await database.fetch_all(query=query, values=values)
 
 # -------- Contract ID --------
@@ -5836,7 +5935,7 @@ async def export_contracts_csv():
            summary="Purchase (atomic)",
            description="Atomically change a Pending contract to Signed, move reserved→committed, and auto-create a Scheduled BOL.",
            status_code=200)
-async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request):    
+async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request, _=Depends(csrf_protect)):    
     key = _idem_key(request) or getattr(body, "idempotency_key", None)
     hit = None
     if key:
@@ -6505,7 +6604,7 @@ async def _ensure_tenant_applications_schema():
     response_model=ApplicationOut,
     status_code=201,
 )
-async def public_apply(payload: ApplicationIn, request: Request):
+async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_protect)):
     application_id = str(uuid.uuid4())
 
     # Prevent spam/dupes for 24h by org+email

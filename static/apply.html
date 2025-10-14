@@ -29,7 +29,11 @@
     function toast(msg, ms=2800){
       const t=document.getElementById('toast'); if(!t){ alert(msg); return; }
       t.textContent=typeof msg==='string'?msg:(msg?.message||'');
-      t.style.display='block'; setTimeout(()=>t.style.display='none', ms);
+      t.style.display='block';
+      try {
+        setTimeout(()=>t.style.display='none', ms);
+      }
+      catch{}
     }
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
@@ -65,7 +69,12 @@
     </div>
 
  <!-- Toast + endpoint + api helper -->
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+  <div id="toast"
+     role="status" aria-live="polite" aria-atomic="true" tabindex="-1"
+     style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;
+            padding:12px 14px;background:#111827;color:#fff;border-radius:10px;
+            box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui"></div>
+
     <div id="alert" class="alert d-none" role="status" aria-live="polite"></div>
 
     <div class="card p-3 p-md-4">
