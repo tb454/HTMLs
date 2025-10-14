@@ -5834,7 +5834,37 @@ async def get_all_contracts(
     values["limit"], values["offset"] = limit, offset
     return await database.fetch_all(query=query, values=values)
 
-# -------- Contract ID --------
+# ------- Contract ID--------
+@app.get("/contracts/{contract_id}", tags=["Contracts"], summary="Fetch contract by id")
+async def get_contract_by_id(contract_id: str):
+    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
+    if not row:
+        raise HTTPException(status_code=404, detail="contract not found")
+    return dict(row)
+
+@app.patch("/contracts/{id}/purchase", tags=["Contracts"], summary="Mark contract purchased")
+async def contract_purchase(id: str):
+    # read current state
+    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
+    if not row:
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    status = row.get("status") if isinstance(row, dict) else row["status"]
+    if status in ("purchased", "cancelled"):
+        # idempotent / conflict for invalid transition
+        raise HTTPException(status_code=409, detail=f"invalid state {status}")
+
+    try:
+        await database.execute(
+            "UPDATE contracts SET status = :s, updated_at = now() WHERE id = :id",
+            {"s": "purchased", "id": id},
+        )
+        out = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
+        return dict(out)
+    except Exception as e:
+        # never crash process
+        raise HTTPException(status_code=500, detail=f"purchase failed: {type(e).__name__}: {e}")    
+
 @app.put(
     "/contracts/{contract_id}",
     response_model=ContractOut,
@@ -5895,7 +5925,32 @@ async def update_contract(
         if cur:
             return cur
         raise HTTPException(status_code=500, detail="contract update failed")
-#-------- Contract ID--------       
+    
+@app.post("/contracts/{id}/cancel", tags=["Contracts"], summary="Cancel contract")
+async def contract_cancel(id: str):
+    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
+    if not row:
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    status = row.get("status") if isinstance(row, dict) else row["status"]
+
+    if status == "cancelled":
+        # idempotent return
+        return {"id": id, "status": "cancelled"}
+
+    if status == "purchased":
+        raise HTTPException(status_code=409, detail="cannot cancel purchased contract")
+
+    try:
+        await database.execute(
+            "UPDATE contracts SET status = :s, updated_at = now() WHERE id = :id",
+            {"s": "cancelled", "id": id},
+        )
+        out = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
+        return dict(out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"cancel failed: {type(e).__name__}: {e}")
+# ------- Contract ID--------       
 
 #-------- Export Contracts as CSV --------
 from fastapi import Response
