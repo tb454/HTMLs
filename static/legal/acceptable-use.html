@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>BRidge Acceptable Use Policy (AUP)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/static/favicon.ico">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root{ --ink:#0b1220; --muted:#6b7280; --card:#fff; --bg:#f7fafc; }
+    body{ background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
+    .wrap{ max-width:980px; margin:40px auto; padding:0 16px; }
+    h1,h2,h3{ scroll-margin-top: 90px; }
+    .card{ background:var(--card); border:1px solid #e5e7eb; }
+    .muted{ color:var(--muted); }
+    code { font-size: .9em; }
+    .toc a{ text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="mb-4">
+      <h1 class="mb-1">BRidge™ Acceptable Use Policy (AUP)</h1>
+      <div class="muted">Effective Date: <strong>__FILL_IN__</strong> • Version: <strong>__FILL_IN__</strong></div>
+      <div class="muted">This AUP is part of the <a href="/terms">Terms of Use</a> and <a href="/eula">EULA</a>.</div>
+    </header>
+
+    <!-- TOC -->
+    <section class="card p-3 mb-4">
+      <h2 class="h5 mb-2">Contents</h2>
+      <nav class="toc small">
+        <ol class="mb-0">
+          <li><a href="#scope">Scope & Lawful Use</a></li>
+          <li><a href="#access">Account Security & Access Controls</a></li>
+          <li><a href="#integrity">System Integrity & Abuse</a></li>
+          <li><a href="#content">Prohibited Content & Conduct</a></li>
+          <li><a href="#markets">Market Integrity & Data Usage</a></li>
+          <li><a href="#apis">APIs, Automation & Fair Use</a></li>
+          <li><a href="#privacy">Data Protection, Privacy & Transfers</a></li>
+          <li><a href="#sanctions">Sanctions, KYC/AML & Export</a></li>
+          <li><a href="#research">Security Research (Limited Safe Harbor)</a></li>
+          <li><a href="#incident">Incident Reporting & Cooperation</a></li>
+          <li><a href="#enforcement">Enforcement Ladder</a></li>
+          <li><a href="#changes">Changes to this AUP</a></li>
+          <li><a href="#definitions">Definitions (Summary)</a></li>
+        </ol>
+      </nav>
+    </section>
+
+    <!-- 1 -->
+    <section id="scope" class="card p-3 mb-3">
+      <h2 class="h4">1) Scope & Lawful Use</h2>
+      <ol>
+        <li>You may access BRidge solely for legitimate, lawful commercial purposes consistent with applicable laws and your internal policies.</li>
+        <li>You must comply with anti-corruption, sanctions, antitrust/competition, export controls, and record-keeping obligations.</li>
+        <li><strong>High-risk exclusions.</strong> Do not use BRidge in environments where failure could reasonably lead to death, personal injury, or severe environmental damage (e.g., life-support, emergency services).</li>
+        <li>Where regional privacy or data obligations provide additional rights or duties, those apply as set out in the <a href="/privacy">Privacy Policy</a>, Data Processing Addendum, and any jurisdictional appendices (e.g., <a href="/privacy/appendix">APAC & Canada</a>).</li>
+      </ol>
+    </section>
+
+    <!-- 2 -->
+    <section id="access" class="card p-3 mb-3">
+      <h2 class="h4">2) Account Security & Access Controls</h2>
+      <ol>
+        <li>Protect authentication factors (passwords, API keys, OAuth clients, signing secrets). Do not share beyond least privilege.</li>
+        <li>Use only assigned roles and entitlements; do not bypass authentication, authorization, rate-limits, idempotency, or kill switches.</li>
+        <li>You are responsible for the actions of users, service accounts, and automated clients under your tenant.</li>
+      </ol>
+    </section>
+
+    <!-- 3 -->
+    <section id="integrity" class="card p-3 mb-3">
+      <h2 class="h4">3) System Integrity & Abuse</h2>
+      <ol>
+        <li>Do not introduce malware, exploits, or excessive load intended to degrade BRidge or third-party services.</li>
+        <li>Do not probe, scan, or test shared production endpoints without a written Safe-Harbor scope grant; no DoS or traffic flooding.</li>
+        <li>Do not attempt to access data or endpoints you are not authorized to access; do not disable logging, audit chains, or integrity seals.</li>
+        <li><strong>Monitoring.</strong> You consent to operational monitoring, logging, and rate-limiting necessary to secure and operate the service. See <a href="/subprocessors">Subprocessors</a> for infrastructure vendors and safeguards.</li>
+      </ol>
+    </section>
+
+    <!-- 4 -->
+    <section id="content" class="card p-3 mb-3">
+      <h2 class="h4">4) Prohibited Content & Conduct</h2>
+      <ol>
+        <li>No illegal content; no threats, harassment, hate, or privacy violations (including doxxing).</li>
+        <li>No infringement or misappropriation of IP; follow the posted notice/takedown process (e.g., DMCA) in the Terms.</li>
+        <li>No deceptive practices, identity misrepresentation, or falsification of business records (including BOLs, signatures, customs/tax forms).</li>
+      </ol>
+    </section>
+
+    <!-- 5 -->
+    <section id="markets" class="card p-3 mb-3">
+      <h2 class="h4">5) Market Integrity & Data Usage</h2>
+      <ol>
+        <li><strong>No manipulation.</strong> Prohibit spoof-like behavior, wash-like trading, artificial volume, or other schemes designed to move prices or indices.</li>
+        <li><strong>Reference & Derived Data.</strong> Unless explicitly licensed for redistribution, BRidge reference prices, indices, and derived outputs are for internal operational use only.</li>
+        <li><strong>Surveillance & audit.</strong> Do not tamper with surveillance signals, audit logs, or settlement/mark processes.</li>
+        <li><strong>Metering & fees.</strong> Do not circumvent metering, billing, or usage-based fees (e.g., rotating identities or masking origins to evade limits).</li>
+      </ol>
+    </section>
+
+    <!-- 6 -->
+    <section id="apis" class="card p-3 mb-3">
+      <h2 class="h4">6) APIs, Automation & Fair Use</h2>
+      <ol>
+        <li>Identify automated clients via a standard <code>User-Agent</code> and, where feasible, include contact info for operations.</li>
+        <li>Honor published rate-limits, idempotency keys, pagination, and backoff policies; BRidge may throttle or block abusive patterns.</li>
+        <li>No automated account creation or credential stuffing; no scraping/bulk extraction beyond documented exports/APIs.</li>
+      </ol>
+    </section>
+
+    <!-- 7 -->
+    <section id="privacy" class="card p-3 mb-3">
+      <h2 class="h4">7) Data Protection, Privacy & Transfers</h2>
+      <ol>
+        <li>Handle personal data and Customer Content in accordance with your contracts (Terms, DPA) and the <a href="/privacy">Privacy Policy</a>, including cross-border transfer safeguards and regional appendices.</li>
+        <li>You are responsible for subprocessors and integrations you enable in your environment (e.g., webhooks, exports) and must ensure those third parties meet your compliance obligations. Atlas’ authorized infrastructure subprocessors are listed on the <a href="/subprocessors">Subprocessors</a> page.</li>
+        <li>Do not upload sensitive data categories unless contractually permitted and protected by suitable controls.</li>
+      </ol>
+    </section>
+
+    <!-- 8 -->
+    <section id="sanctions" class="card p-3 mb-3">
+      <h2 class="h4">8) Sanctions, KYC/AML & Export</h2>
+      <ol>
+        <li>Do not use BRidge for or on behalf of sanctioned parties or embargoed jurisdictions; do not attempt to evade KYC/AML obligations.</li>
+        <li>Follow export control laws for software/data transfers, including re-exports and deemed exports; implement regional restrictions as required.</li>
+      </ol>
+    </section>
+
+    <!-- 9 -->
+    <section id="research" class="card p-3 mb-3">
+      <h2 class="h4">9) Security Research (Limited Safe Harbor)</h2>
+      <ol>
+        <li>Good-faith testing within your tenant that does not harm other tenants is permitted. Do <strong>not</strong> test shared production endpoints, perform DoS, or access data you do not own.</li>
+        <li>Report vulnerabilities to <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>; Atlas will not pursue legal action for good-faith reports that follow this AUP and coordinated-disclosure practices.</li>
+        <li>Atlas may revoke Safe Harbor if activity degrades service or risks data.</li>
+      </ol>
+    </section>
+
+    <!-- 10 -->
+    <section id="incident" class="card p-3 mb-3">
+      <h2 class="h4">10) Incident Reporting & Cooperation</h2>
+      <ol>
+        <li>If you suspect account compromise, data leakage, or integrity issues (e.g., settlement marks, audit chain), notify Atlas without undue delay at <a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a>.</li>
+        <li>You will cooperate in reasonable investigations, including providing relevant request IDs, headers, client versions, or automation fingerprints.</li>
+      </ol>
+    </section>
+
+    <!-- 11 -->
+    <section id="enforcement" class="card p-3 mb-3">
+      <h2 class="h4">11) Enforcement Ladder</h2>
+      <ol>
+        <li>Atlas may apply a progressive ladder proportionate to risk and harm: <strong>warning → temporary throttling → suspension → termination</strong>.</li>
+        <li>Severe abuses (e.g., exploitation, data exfiltration, sanctions evasion, destructive automation) may result in immediate suspension and referral to authorities.</li>
+        <li>Reinstatement may require remediation steps (key rotation, re-KYC, risk plans, or attestations).</li>
+      </ol>
+    </section>
+
+    <!-- 12 -->
+    <section id="changes" class="card p-3 mb-3">
+      <h2 class="h4">12) Changes to this AUP</h2>
+      <ol>
+        <li>Atlas may update this AUP to reflect new features, risk controls, regulatory changes, or infrastructure changes.</li>
+        <li>Updates will be posted on the legal site; where required, Atlas will provide advance notice consistent with the change-management approach in your legal pages.</li>
+      </ol>
+    </section>
+
+    <!-- 13 -->
+    <section id="definitions" class="card p-3 mb-4">
+      <h2 class="h4">13) Definitions (Summary)</h2>
+      <dl class="row">
+        <dt class="col-sm-3">Customer Content</dt>
+        <dd class="col-sm-9">Data you upload or generate in BRidge (e.g., contracts, BOLs, inventory, indices inputs).</dd>
+        <dt class="col-sm-3">Derived Data</dt>
+        <dd class="col-sm-9">Outputs generated by BRidge (e.g., indices snapshots, reference-price transforms, forecasts).</dd>
+        <dt class="col-sm-3">Reference Prices</dt>
+        <dd class="col-sm-9">Third-party or internal basis prices surfaced for operational use.</dd>
+        <dt class="col-sm-3">Tenant</dt>
+        <dd class="col-sm-9">Your BRidge organizational account and all associated users, roles, and integrations.</dd>
+      </dl>
+    </section>
+
+    <footer class="pb-5">
+      <div class="small muted">
+        © <span id="y"></span> Atlas IP Holdings LLC • BRidge Platform • <a href="/terms">Terms</a> • <a href="/eula">EULA</a> • <a href="/privacy">Privacy</a> • <a href="/subprocessors">Subprocessors</a>
+      </div>
+    </footer>
+  </main>
+  <script>
+  document.getElementById('y').textContent = new Date().getFullYear();
+
+  </script>
+
+
+<footer class="legal-footer">
+    <a href="/legal/terms" target="_blank" rel="noopener">Terms of Use</a>
+    <span class="sep">|</span>
+    <a href="/legal/eula" target="_blank" rel="noopener">EULA</a>
+    <span class="sep">|</span>
+    <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+    <span class="sep">|</span>
+    <a href="/legal/aup" target="_blank" rel="noopener">Acceptable Use</a>
+    <span class="sep">|</span>
+    <a href="/legal/cookies" target="_blank" rel="noopener">Cookie Notice</a>
+    <span class="sep">|</span>
+    <a href="/legal/subprocessors" target="_blank" rel="noopener">Subprocessors</a>
+    <span class="sep">|</span>
+    <a href="/legal/dpa" target="_blank" rel="noopener">DPA</a>
+    <span class="sep">|</span>
+    <a href="/legal/sla" target="_blank" rel="noopener">SLA</a>
+    <span class="sep">|</span>
+    <a href="/legal/security" target="_blank" rel="noopener">Security Overview</a>
+    <span class="sep">|</span>
+    <a href="/legal/appendix" target="_blank" rel="noopener">Privacy Appendix (APAC &amp; CA)</a>
+  </footer>
+</body>
+</html>
+
