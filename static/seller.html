@@ -84,10 +84,11 @@
         <button type="button" onclick="doLogout()">Logout</button>
 <script>
   async function doLogout(){
-    try { await fetch('/logout', { method:'POST', credentials:'include' }); } catch {}
+    try { await api('/logout', { method:'POST' }); } catch {}
     localStorage.removeItem('bridgeUser');
     location.href='/static/bridge-login.html';
   }
+
 </script>
         <button type="button" onclick="location.href='/static/spec-ferrous.html'">Spec Sheet Ferrous</button>
         <button type="button" onclick="location.href='/static/spec-nonferrous.html'">Spec Sheet Nonferrous</button>
@@ -252,7 +253,7 @@
       <datalist id="skuList"></datalist>
 
       <!-- RFQ (two-click) -->
-      <div class="card p-3 mt-3" style="max-width:520px">
+      <div class="card p-3 mt-3" style="max-width:520px" data-role="buyer">
         <div class="d-flex gap-2">
           <select id="rfqSym" class="form-select">
             <option>CU-SHRED-1M</option>
@@ -353,20 +354,61 @@
 
   <!-- Login Modal -->
   <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
-    <div class="modal-dialog"><div class="modal-content">
-      <form id="login-form">
-        <div class="modal-header"><h5 class="modal-title" id="loginModalLabel">Login</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-        <div class="modal-body">
-          <div class="mb-3"><label for="username" class="form-label">Username:</label><input type="text" id="username" name="username" class="form-control" required></div>
-          <div class="mb-3"><label for="password" class="form-label">Password:</label><input type="password" id="password" name="password" class="form-control" required></div>
-          <div id="login-error" class="text-danger small"></div>
-        </div>
-        <div class="modal-footer"><button type="submit" class="action-btn">Login</button><button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button></div>
-      </form>
-    </div></div>
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="login-form" autocomplete="on">
+          <div class="modal-header">
+            <h5 class="modal-title" id="loginModalLabel">Login</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="username" class="form-label">Username</label>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                class="form-control"
+                required
+                autocomplete="username"
+                inputmode="email"
+                enterkeyhint="go">
+            </div>
+
+            <div class="mb-3">
+              <label for="password" class="form-label">Password</label>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                class="form-control"
+                required
+                autocomplete="current-password"
+                enterkeyhint="done">
+            </div>
+
+            <div id="login-error" class="text-danger small" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="submit" class="action-btn">Login</button>
+            <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="toast"
+     role="status"
+     aria-live="polite"
+     aria-atomic="true"
+     tabindex="-1"
+     style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;
+            padding:12px 14px;background:#111827;color:#fff;border-radius:10px;
+            box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui;z-index:9999">
+    </div>
 
   <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -374,18 +416,27 @@
   <script>
     // endpoint + api + toast + health
     const ORIGIN = location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin;
+    function _cookie(name){
+      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+
 let __toastTimer;
 function toast(msg, ms=2800){
   const t=document.getElementById('toast');
-  t.textContent=msg; t.style.display='block';
-  clearTimeout(__toastTimer); __toastTimer=setTimeout(()=>t.style.display='none', ms);
+  t.textContent = msg;
+  t.style.display = 'block';
+  try { t.focus(); } catch {}
+  clearTimeout(__toastTimer);
+  __toastTimer = setTimeout(()=>{ t.style.display='none'; }, ms);
 }
+
 async function api(path, opts={}) {
   const url = path.startsWith('http') ? path : `${ORIGIN}${path}`;
   const res = await fetch(url, {
     credentials: 'include',
     ...opts,
-    headers:{ 'Accept':'application/json', ...(opts.headers||{}) }
+    headers:{ 'Accept':'application/json', 'X-CSRF': _cookie('XSRF-TOKEN'), ...(opts.headers||{}) }
   });
 
       if (res.status === 401) { const next = encodeURIComponent(location.pathname + location.search); location.href = `/static/bridge-login.html?next=${next}`; throw new Error('Unauthorized'); }
@@ -395,6 +446,36 @@ async function api(path, opts={}) {
     window.addEventListener('DOMContentLoaded', async ()=>{ try{ const r=await api('/healthz'); if(r.ok){ const b=document.querySelector('[data-health-badge]'); b.textContent='● Live'; b.setAttribute('data-ok','1'); } }catch{} });
 
     const accentColor = '#3498db';
+    // ---- Timezone toggle (UTC vs local) ----
+    let __useUTC = localStorage.getItem('seller.useUTC') === '1';
+    function _fmtDate(d){
+      const dt = new Date(d);
+      return __useUTC
+        ? dt.toLocaleString('en-US', { timeZone:'UTC', timeZoneName:'short' })
+        : dt.toLocaleString();
+    }
+    function _renderTZHintSeller(){
+      let el = document.getElementById('header-date');
+      if (!el) return;
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      el.title = `Times shown in ${__useUTC ? 'UTC' : tz} — click to toggle`;
+      el.style.cursor = 'pointer';
+      el.onclick = () => {
+        __useUTC = !__useUTC;
+        localStorage.setItem('seller.useUTC', __useUTC ? '1':'0');
+        // re-render views with dates
+        try { listContracts(); } catch{}
+        try {
+          const seller = (document.getElementById("sellerName")?.value || '').trim();
+          const mat = (document.getElementById("material")?.value || '').trim();
+          renderRecentMovements(seller, mat);
+        } catch{}
+        _renderTZHintSeller();
+      };
+    }
+    document.addEventListener('DOMContentLoaded', _renderTZHintSeller);
+// ---- /Timezone toggle ----
+
     document.querySelectorAll('.section-title').forEach(el => { el.style.borderColor = accentColor; el.style.color = accentColor; });
 
     let activeContractsChart, finishedGoodsChart, kpiChart;
@@ -406,7 +487,7 @@ async function api(path, opts={}) {
       // ensure buttons are wired:
       try { wireSellerUI(); } catch {}
 
-      const hd = document.getElementById('header-date'); if (hd) hd.textContent = new Date().toLocaleDateString();
+      const hd = document.getElementById('header-date'); if (hd) hd.textContent = _fmtDate(new Date());
 
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
@@ -501,7 +582,7 @@ async function api(path, opts={}) {
         const contractsAvailable = Math.floor(sumFinished/20000);
         info.innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
         if (finishedGoodsChart) {
-          const now = new Date().toLocaleTimeString();
+          const now = _fmtDate(new Date());
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
           if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
@@ -590,7 +671,7 @@ async function api(path, opts={}) {
         rows.forEach(mv => {
           const li = document.createElement("li");
           li.className = "list-group-item d-flex justify-content-between align-items-center";
-          const when = mv.created_at ? new Date(mv.created_at).toLocaleString() : "";
+          const when = mv.created_at ? _fmtDate(mv.created_at) : "";
           const qty = (mv.qty !== undefined && mv.qty !== null) ? Number(mv.qty).toLocaleString() : "";
           li.innerHTML = `
             <div>
@@ -644,6 +725,7 @@ async function api(path, opts={}) {
       tbody.innerHTML=''; for(let i=0;i<5;i++){ const tr=document.createElement('tr'); tr.className='skeleton-row'; tr.innerHTML=Array.from({length:7},()=>'<td><span class="skeleton"></span></td>').join(''); tbody.appendChild(tr); }
 
       const res = await api(`/contracts?${qs.toString()}`);
+      const totalCount = +(res.headers.get('X-Total-Count') || 0);
       const rows = await res.json();
 
       tbody.innerHTML = "";
@@ -654,7 +736,7 @@ async function api(path, opts={}) {
       } else {
         rows.forEach(r => {
           const tr = document.createElement("tr");
-          const created = r.created_at ? new Date(r.created_at).toLocaleString() : "";
+          const created = r.created_at ? _fmtDate(r.created_at) : "";
           tr.innerHTML = `
             <td>${r.id}</td>
             <td>${r.buyer}</td>
@@ -666,7 +748,10 @@ async function api(path, opts={}) {
           tbody.appendChild(tr);
         });
       }
-      document.getElementById("pageInfo").textContent = `Showing ${rows.length} • offset ${offset}`;
+
+      document.getElementById("pageInfo").textContent = totalCount
+        ? `Showing ${rows.length} • ${offset+1}–${offset+rows.length} of ${totalCount}`
+        : `Showing ${rows.length} • offset ${offset}`;
       const prev = document.getElementById('prevBtn');
       const next = document.getElementById('nextBtn');
       if (prev) prev.disabled = offset === 0;
