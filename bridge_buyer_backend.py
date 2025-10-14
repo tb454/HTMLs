@@ -4271,7 +4271,7 @@ async def _ensure_audit_seal_schema():
 
 # -------- Inventory: Bulk Upsert (unit-aware, HMAC in prod, replay guard, logs) --------
 @app.post(
-        _harvester_guard()
+        _harvester_guard(),
     "/inventory/bulk_upsert",
     tags=["Inventory"],
     summary="Bulk upsert inventory items (absolute, unit-aware)",
