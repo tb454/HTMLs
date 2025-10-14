@@ -5903,30 +5903,53 @@ async def update_contract(
             return cur
         raise HTTPException(status_code=500, detail="contract update failed")
     
-@app.post("/contracts/{id}/cancel", tags=["Contracts"], summary="Cancel contract")
-async def contract_cancel(id: str):
-    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
+@app.post("/contracts/{id}/cancel", tags=["Contracts"], summary="Cancel Pending contract (unreserve inventory)")
+async def contract_cancel(id: str):    
+    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id FOR UPDATE", {"id": id})
     if not row:
         raise HTTPException(status_code=404, detail="contract not found")
 
-    status = row.get("status") if isinstance(row, dict) else row["status"]
+    status = (row["status"] if not isinstance(row, dict) else row.get("status")) or ""
+    status = str(status)
 
-    if status == "cancelled":
-        # idempotent return
-        return {"id": id, "status": "cancelled"}
+    # Idempotent
+    if status == "Cancelled":
+        return {"ok": True, "contract_id": id, "status": "Cancelled"}
 
-    if status == "purchased":
-        raise HTTPException(status_code=409, detail="cannot cancel purchased contract")
+    # Only allow cancel from Pending. Block once Signed/Dispatched/Fulfilled.
+    if status in ("Signed", "Dispatched", "Fulfilled"):
+        raise HTTPException(status_code=409, detail=f"cannot cancel contract in state {status}")
+    if status != "Pending":
+        raise HTTPException(status_code=409, detail=f"only Pending contracts can be cancelled (got {status})")
 
-    try:
+    # Unreserve the inventory that was reserved at create time
+    qty = float(row["weight_tons"] or 0.0)
+    seller = (row["seller"] or "").strip()
+    sku    = (row["material"] or "").strip()
+
+    async with database.transaction():        
+        await database.execute("""
+            UPDATE inventory_items
+               SET qty_reserved = GREATEST(qty_reserved - :q, 0),
+                   updated_at   = NOW()
+             WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+        """, {"q": qty, "s": seller, "k": sku})
+
+        try:
+            await database.execute("""
+              INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+              VALUES (:s,:k,'unreserve',:q,:cid,:m)
+            """, {"s": seller, "k": sku, "q": qty, "cid": id, "m": json.dumps({"reason":"cancel"})})
+        except Exception:            
+            pass
+
         await database.execute(
-            "UPDATE contracts SET status = :s, updated_at = now() WHERE id = :id",
-            {"s": "cancelled", "id": id},
+            "UPDATE contracts SET status='Cancelled', updated_at=NOW() WHERE id=:id",
+            {"id": id}
         )
-        out = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": id})
-        return dict(out)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"cancel failed: {type(e).__name__}: {e}")
+
+    out = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": id})
+    return dict(out)
 # ------- Contract ID--------       
 
 #-------- Export Contracts as CSV --------
@@ -5973,16 +5996,15 @@ async def export_contracts_csv():
         except Exception:
             pass
         return StreamingResponse(
-            iter(["id\n"]), media_type="text/csv",
+            iter(["id\n"]),
+            media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
         )
 
-    # Figure out headers safely
     fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
 
     def _norm(v):
-        try:
-            # fast path common types
+        try:            
             if v is None: return ""
             if isinstance(v, (int, float, str)): return v
             from datetime import date, datetime as _dt
