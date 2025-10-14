@@ -132,25 +132,36 @@
       setTimeout(()=>{ wrap.style.display = 'none'; }, ms);
     }
 
+    let __inflight = new Map();
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-      const res = await fetch(url, {
-        credentials: 'include', // ensure cookies
-        ...opts,
-        headers: { Accept:'application/json', ...(opts.headers||{}) }
-      });
-      if(res.status === 401){
-        const next = encodeURIComponent(location.pathname + location.search);
-        location.href = `/static/bridge-login.html?next=${next}`;
-        throw new Error('Unauthorized');
+      // abort same-URL inflight to avoid piling up when user types filters
+      if (__inflight.has(url)) { try { __inflight.get(url).abort(); } catch{} }
+      const ctl = new AbortController(); __inflight.set(url, ctl);
+      const to = setTimeout(()=>ctl.abort(), 9000); // 9s guard
+      try{
+        const res = await fetch(url, {
+          credentials: 'include',
+          ...opts,
+          signal: ctl.signal,
+          headers: { Accept:'application/json', ...(opts.headers||{}) }
+        });
+        if (res.status === 401) {
+          const next = encodeURIComponent(location.pathname + location.search);
+          location.href = `/static/bridge-login.html?next=${next}`;
+          throw new Error('Unauthorized');
+        }
+        if (!res.ok) {
+          let m='Request failed';
+          try { m=(await res.clone().json()).detail||m; } catch { try { m=await res.clone().text()||m; } catch{} }
+          toast(m);
+          throw new Error(m);
+        }
+        return res;
+      } finally {
+        clearTimeout(to);
+        __inflight.delete(url);
       }
-      if(!res.ok){
-        let msg = 'Request failed';
-        try{ msg = (await res.clone().json()).detail || msg; } catch { try { msg = await res.clone().text() || msg; } catch {} }
-        toast(msg);
-        throw new Error(msg);
-      }
-      return res;
     }
 
     // Health badge
@@ -267,7 +278,7 @@
       if (matVal)   q.set('material', matVal);
 
       const page = Math.floor(offset/limit)+1;
-      _syncQuery({ buyer: buyerVal || '', material: matVal || '', page });
+      _syncQuery({ buyer: buyerVal || '', material: matVal || '', page, rows: String(limit) });
 
       try{
         const res  = await api(`/contracts?` + q.toString(), { signal: loadCtl.signal });
@@ -289,6 +300,12 @@
         root.append(frag);
 
         const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing ${rows.length} • offset ${offset}`;
+        // enable/disable paging buttons based on results/offset
+        const prev = document.getElementById('prevBtn');
+        const next = document.getElementById('nextBtn');
+        if (prev) prev.disabled = (offset <= 0);
+        if (next) next.disabled = (rows.length < limit);
+
       } catch(e){
         if (e.name !== 'AbortError') {/* api() already toasted */}
       } finally{
@@ -325,11 +342,29 @@
     document.getElementById('refreshBtn')?.addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
     document.getElementById('buyerFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
     document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{ offset = 0; loadOpenContracts(); }, 250));
-    document.getElementById('prevBtn')?.addEventListener('click', ()=>{ offset = Math.max(0, offset - limit); loadOpenContracts(); });
-    document.getElementById('nextBtn')?.addEventListener('click', ()=>{ offset += limit; loadOpenContracts(); });
+    document.getElementById('prevBtn')?.addEventListener('click', ()=>{
+      offset = Math.max(0, offset - limit);
+      const page = Math.floor(offset/limit)+1;
+      _syncQuery({ page, rows: String(limit) });
+      loadOpenContracts();
+    });
+    document.getElementById('nextBtn')?.addEventListener('click', ()=>{
+      offset += limit;
+      const page = Math.floor(offset/limit)+1;
+      _syncQuery({ page, rows: String(limit) });
+      loadOpenContracts();
+    });
+
     document.getElementById('pageSize')?.addEventListener('change', e=>{
       const v = Math.max(1, parseInt(e.target.value||'100', 10));
-      limit = v; offset = 0; loadOpenContracts();
+      limit = v; 
+      offset = 0; 
+      // keep URL in sync with page size + reset to page 1
+      const u = new URL(location.href);
+      u.searchParams.set('rows', String(v));
+      u.searchParams.set('page', '1');
+      history.replaceState({}, '', u);
+      loadOpenContracts();
     });
 
     // Hydrate filters/page from URL on first load
@@ -338,16 +373,57 @@
       const buyer = q.get('buyer') || '';
       const material = q.get('material') || '';
       const page = Math.max(1, parseInt(q.get('page')||'1', 10));
+      const rows = parseInt(q.get('rows')||'', 10);
+
       const bf = document.getElementById('buyerFilter'); if (bf) bf.value = buyer;
       const mf = document.getElementById('materialFilter'); if (mf) mf.value = material;
+
+      if (!Number.isNaN(rows) && rows > 0) {
+        limit = rows;
+        const ps = document.getElementById('pageSize'); if (ps) ps.value = String(rows);
+      }
       offset = (page - 1) * limit;
     })();
 
-    // Auto-refresh controls (pause when hidden)
-    function startAuto(){ if (!refreshTimer) refreshTimer = setInterval(loadOpenContracts, 10000); }
-    function stopAuto(){ if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
-    document.addEventListener('visibilitychange', ()=> document.hidden ? stopAuto() : (loadOpenContracts(), startAuto()));
+    // Auto-refresh controls (pause + jitter)
+    let paused = false;
+    const MIN_MS = 35000;  // 35s
+    const MAX_MS = 55000;  // 55s
+    function _jitter() { return Math.floor(MIN_MS + Math.random() * (MAX_MS - MIN_MS)); }
 
+    function tickAuto(){
+      if (paused) return;
+      loadOpenContracts().catch(()=>{});
+      refreshTimer = setTimeout(tickAuto, _jitter());
+    }
+
+    function startAuto(){
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(tickAuto, _jitter());
+    }
+    function stopAuto(){
+      if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    } 
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopAuto(); else { loadOpenContracts(); startAuto(); }
+    });
+
+    // Add a Pause/Resume button next to Refresh
+    (function addPause(){
+      const bar = document.querySelector('.d-flex.gap-2.mb-3.align-items-end');
+      if (!bar) return;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-outline-secondary btn-sm';
+      btn.type = 'button';
+      btn.id = 'pauseBtn';
+      btn.textContent = 'Pause';
+      btn.onclick = () => {
+        paused = !paused;
+        btn.textContent = paused ? 'Resume' : 'Pause';
+        if (!paused) { loadOpenContracts(); startAuto(); } else { stopAuto(); }
+      };
+      bar.appendChild(btn);
+    })(); 
     // Initial load + start timer
     loadOpenContracts();
     startAuto();
