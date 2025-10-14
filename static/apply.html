@@ -21,6 +21,11 @@
     // Unified API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
+    function _cookie(name){
+      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,'\\$1')+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+
     function toast(msg, ms=2800){
       const t=document.getElementById('toast'); if(!t){ alert(msg); return; }
       t.textContent=typeof msg==='string'?msg:(msg?.message||'');
@@ -28,7 +33,10 @@
     }
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-      const res = await fetch(url, { ...opts, headers:{ Accept:'application/json', ...(opts.headers||{}) }});
+      const res = await fetch(url, {
+        ...opts,
+        headers:{ Accept:'application/json', 'X-CSRF': _cookie('XSRF-TOKEN'), ...(opts.headers||{}) }
+      });
       if(res.status===401){
         const next = encodeURIComponent(location.pathname + location.search);
         location.href = `/static/bridge-login.html?next=${next}`;
@@ -93,7 +101,8 @@
           <!-- Company details -->
           <div class="col-md-4">
             <label class="form-label" for="ein">EIN</label>
-            <input id="ein" name="ein" class="form-control" pattern="^\d{2}-\d{7}$" placeholder="12-3456789">
+            <input id="ein" name="ein" class="form-control" inputmode="numeric"
+                   pattern="^\d{2}-\d{7}$" title="Format: 12-3456789" placeholder="12-3456789">
           </div>
           <div class="col-md-6">
             <label class="form-label" for="website">Website</label>
@@ -199,9 +208,9 @@
           <!-- Terms -->
           <div class="col-12">
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="agree">
+              <input class="form-check-input" type="checkbox" id="agree" required>
               <label class="form-check-label" for="agree">
-                I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy</a>.
+                I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>.
               </label>
             </div>
           </div>
@@ -221,18 +230,39 @@
     </div>
 
     <footer class="text-center text-muted mt-4" style="font-size:.9rem">
-      <hr>
-      <div><strong>BRidge Platform</strong> — Powered by ScrapFutures.com</div>
+      <hr class="mb-3">
+      <nav class="small d-flex flex-wrap gap-2 justify-content-center" aria-label="Legal navigation">
+        <a href="/terms"               class="link-secondary" rel="noopener noreferrer">Terms of Use</a><span>·</span>
+        <a href="/eula"                class="link-secondary" rel="noopener noreferrer">EULA</a><span>·</span>
+        <a href="/privacy"             class="link-secondary" rel="noopener noreferrer">Privacy Policy</a><span>·</span>
+        <a href="/aup"                 class="link-secondary" rel="noopener noreferrer">Acceptable Use</a><span>·</span>
+        <a href="/cookies"             class="link-secondary" rel="noopener noreferrer">Cookie Notice</a><span>·</span>
+        <a href="/legal/subprocessors" class="link-secondary" rel="noopener noreferrer">Subprocessors</a><span>·</span>
+        <a href="/legal/dpa"           class="link-secondary" rel="noopener noreferrer">DPA</a><span>·</span>
+        <a href="/legal/sla"           class="link-secondary" rel="noopener noreferrer">SLA</a><span>·</span>
+        <a href="/legal/security"      class="link-secondary" rel="noopener noreferrer">Security Overview</a><span>·</span>
+        <a href="/privacy/appendix"    class="link-secondary" rel="noopener noreferrer">Privacy Appendix (APAC &amp; CA)</a><span>·</span>
+        <a href="/fees"                class="link-secondary" rel="noopener noreferrer">Fee Schedule</a>
+      </nav>
+
+      <div class="mt-3"><strong>BRidge Platform</strong> — Powered by ScrapFutures.com</div>
       <div>Need help? <a href="mailto:support@scrapfutures.com">support@scrapfutures.com</a></div>
     </footer>
   </div>
 
   <script>
+
     // Health badge
-    (async ()=>{ const el=document.querySelector('[data-health]'); if(!el) return;
-      try{ await api('/health'); el.textContent='● Live'; el.setAttribute('data-ok','1'); }
-      catch{ el.textContent='● Degraded'; }
-    })();
+  (async ()=>{
+    const el = document.querySelector('[data-health]');
+    if (!el) return;
+    try {
+      const r = await api('/health', { headers:{Accept:'application/json'} });
+      if (r && r.ok) { el.textContent = '● Live'; el.setAttribute('data-ok','1'); return; }
+    } catch {}
+    el.textContent = '● Degraded';
+  })();
+
     const $ = (id)=>document.getElementById(id);
     const qs = new URLSearchParams(location.search);
     function setVal(id,v){ const el=$(id); if(el!=null) el.value = v; }
@@ -255,6 +285,7 @@
     // Draft autosave/restore
     const KEY='bridge_apply_draft_v1';
     const form=$('applyForm');
+    document.getElementById('refreshPmBtn')?.addEventListener('click', refreshPmBadge);
     form.addEventListener('input', ()=> {
       const data = Object.fromEntries(new FormData(form).entries());
       localStorage.setItem(KEY, JSON.stringify(data));
@@ -293,9 +324,9 @@
   }
 
   function memberKeyFromForm(){
-    // Use Organization as the 'member' key (stable, readable)
-    const m = (document.getElementById('org_name').value || '').trim();
-    return m || (document.getElementById('email').value || '').trim();
+    const org = (document.getElementById('org_name')?.value || '').trim();
+    const mail = (document.getElementById('email')?.value || '').trim();
+    return org || mail || '';
   }
 
   async function refreshPmBadge(){
@@ -325,20 +356,23 @@
     }    
   }
   // Hook up Start Subscription button
-  document.getElementById('startSubBtn')?.addEventListener('click', async ()=>{
+  document.getElementById('startSubBtn')?.addEventListener('click', async (ev)=>{
+    const btn = ev.currentTarget;
     const member = memberKeyFromForm();
     const plan = (document.getElementById('plan').value || '').trim().toLowerCase();
     if (!member || !plan) { toast('Set Organization and Plan first'); return; }
+    btn.disabled = true; const old=btn.textContent; btn.textContent='Starting…';
     try {
       await startSubscription(member, plan);
     } catch (e) {
       toast(e.message || 'Could not start subscription checkout.');
+      btn.disabled = false; 
+      btn.textContent = old;
     }
   });
   
   // Hook up the Add PM button
-    document.getElementById('addPmBtn').addEventListener('click', async ()=>{
-    document.getElementById('refreshPmBtn')?.addEventListener('click', refreshPmBadge);  
+    document.getElementById('addPmBtn').addEventListener('click', async ()=>{    
       const member = memberKeyFromForm();
       const email  = (document.getElementById('email').value || '').trim();
       if(!member || !email){
@@ -362,7 +396,7 @@
         toast('✓ Payment method saved');
       } catch (e) {
         console.warn('PM finalize failed', e);
-        toast('Payment method saved');
+        toast('Payment method saved (finalization deferred)');
       }
     } else if (pmOk) {
       toast('✓ Payment method saved');
@@ -390,7 +424,13 @@
   form.addEventListener('submit', async (e)=>{
     e.preventDefault();
     $('alert').classList.add('d-none');
-
+    
+  // Honeypot check
+  if ((document.getElementById('fax_hp')?.value || '').trim()) {
+    show('err','Submission blocked.'); 
+    return;
+  }
+  
     if(!form.checkValidity()){
       const bad=form.querySelector(':invalid'); bad?.focus();
       show('err','Please fix the highlighted fields.'); return;
