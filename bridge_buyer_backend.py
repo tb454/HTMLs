@@ -535,17 +535,21 @@ async def security_headers_mw(request, call_next):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    resp.headers["Cross-Origin-Embedder-Policy"] = "credentialless"
+    resp.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    resp.headers["X-Download-Options"] = "noopen"
     resp.headers["Permissions-Policy"] = "geolocation=()"
     resp.headers["Content-Security-Policy"] = (
-    "default-src 'self' https://cdn.jsdelivr.net; "
-    "img-src 'self' data: https://*.stripe.com; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com; "
-    "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-    "connect-src 'self' https://*.stripe.com"   # helpful if you fetch to Stripe APIs from the browser (rare here)
-)
-
+        "default-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "img-src 'self' data: https://*.stripe.com; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+        "connect-src 'self' https://*.stripe.com; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'"
+    )
     return resp
 
 app.middleware("http")(security_headers_mw)
@@ -3087,6 +3091,7 @@ class LoginOut(BaseModel):
     redirect: str | None = None
 
 @app.post("/login", tags=["Auth"], response_model=LoginOut, summary="Login with email or username")
+@limiter.limit("5/minute")
 async def login(body: LoginIn, request: Request):
     ident = (body.username or "").strip().lower()
     pwd   = body.password or ""
@@ -3112,6 +3117,7 @@ async def login(body: LoginIn, request: Request):
     if role == "yard":  
         role = "seller"
 
+    request.session.clear()
     request.session["username"] = (row["username"] or row["email"])
     request.session["role"] = role
 
@@ -4430,7 +4436,7 @@ async def idem_put(key: str, resp: dict):
     status_code=200
 )
 @limiter.limit("60/minute")
-async def inventory_manual_add(payload: dict, request: Request): 
+async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
     if key and key in _idem_cache:
         return _idem_cache[key]   
@@ -4476,7 +4482,8 @@ async def inventory_template_csv():
 async def inventory_import_csv(
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
-    request: Request = None
+    request: Request = None,
+    _=Depends(csrf_protect)
 ):
     
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
@@ -4518,7 +4525,8 @@ async def inventory_import_csv(
 async def inventory_import_excel(
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
-    request: Request = None
+    request: Request = None,
+    _=Depends(csrf_protect)
 ):
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
@@ -6244,7 +6252,7 @@ class ContractInExtended(ContractIn):
     currency: Optional[str] = "USD"
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
-async def create_contract(contract: ContractInExtended, request: Request):
+async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
     if key:
         hit = await idem_get(key)
@@ -7776,7 +7784,7 @@ async def _rfq_symbol(rfq_id: str) -> str:
 
 @limiter.limit("30/minute")
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
-async def create_rfq(r: RFQIn, request: Request):
+async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
     hit = None
     if key:
@@ -7811,7 +7819,7 @@ async def create_rfq(r: RFQIn, request: Request):
 
 @limiter.limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
-async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request):
+async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
     hit = None
     if key:
