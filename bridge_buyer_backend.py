@@ -1467,7 +1467,7 @@ async def _ensure_plan_caps_and_limits():
     );
 
     -- Included usage per month + overage prices (USD) per unit
-    -- Pick the metrics that matter for you; these are common ones.
+    -- Pick the metrics that matter for you;
     CREATE TABLE IF NOT EXISTS billing_plan_limits (
       plan_code TEXT PRIMARY KEY REFERENCES billing_plans(plan_code),
 
