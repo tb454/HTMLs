@@ -137,6 +137,15 @@ def _round2(x: float) -> float:
 
 load_dotenv()
 
+# ---- Harvester hard block (set BLOCK_HARVESTER=1 to disable any inbound dumping) ----
+BLOCK_HARVESTER = os.getenv("BLOCK_HARVESTER", "").lower() in ("1","true","yes")
+
+def _harvester_guard():
+    if BLOCK_HARVESTER:
+        # Gone (410) so existing clients stop trying, with a human-readable message.
+        raise HTTPException(status_code=410, detail="Inbound harvester ingestion is disabled")
+# ---- /Harvester hard block ----
+
 # ---- SaaS soft quotas (optional) ----
 MAX_CONTRACTS_PER_DAY = int(os.getenv("MAX_CONTRACTS_PER_DAY", "0"))  # 0 = disabled
 
@@ -1268,14 +1277,20 @@ async def _fetch_invoice(invoice_id: str):
 
 # ----- billing prefs -----
 @app.on_event("startup")
-async def _ensure_billing_prefs():
+async def _ensure_billing_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_preferences (
       member TEXT PRIMARY KEY,
-      billing_day INT NOT NULL CHECK (billing_day BETWEEN 2 AND 26),
-      timezone TEXT NOT NULL DEFAULT 'America/New_York',
-      auto_charge BOOLEAN NOT NULL DEFAULT TRUE,
-      next_cycle_start DATE,       -- inclusive usage start (optional; we compute if null)
+      billing_day INT NOT NULL CHECK (billing_day BETWEEN 1 AND 28),
+      invoice_cc_emails TEXT[] DEFAULT '{}',
+      autopay BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS billing_plan_limits (
+      plan_code TEXT PRIMARY KEY,
+      max_users INT NOT NULL DEFAULT 5,
+      max_contracts_per_day INT NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     """)
@@ -4256,6 +4271,7 @@ async def _ensure_audit_seal_schema():
 
 # -------- Inventory: Bulk Upsert (unit-aware, HMAC in prod, replay guard, logs) --------
 @app.post(
+        _harvester_guard()
     "/inventory/bulk_upsert",
     tags=["Inventory"],
     summary="Bulk upsert inventory items (absolute, unit-aware)",
