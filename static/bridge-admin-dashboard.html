@@ -31,6 +31,11 @@
     // Single source of truth for API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
+    function _cookie(name){
+      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,'\\$1')+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+    // Toast notification (non-blocking)
     function toast(msg, ms=2800){
       const t=document.getElementById('toast'); if(!t){ alert(typeof msg==='string'?msg:(msg?.message||'')); return; }
       t.textContent = (typeof msg==='string'? msg : (msg?.message||''));
@@ -41,7 +46,7 @@
       const res = await fetch(url, { 
         ...opts, 
         credentials: 'include',
-        headers:{ Accept:'application/json', ...(opts.headers||{}), 'X-CSRF': (document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/)||[])[1] || '' }
+        headers:{ Accept:'application/json', ...(opts.headers||{}), 'X-CSRF': _cookie('XSRF-TOKEN') }
       });
 
       if (res.status === 401){
@@ -139,7 +144,7 @@
       <option>buy</option>
       <option>sell</option>
     </select>
-    <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)" style="max-width:160px" min="1" aria-label="Quantity in lots">
+    <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)" style="max-width:160px" min="0.01" step="0.01" aria-label="Quantity in lots">
     <button id="rfqGo" class="btn btn-primary">RFQ</button>
   </div>
 </div>
@@ -411,11 +416,17 @@
 
       showSkeleton('#bol-table', 11);
       try {
-        const rows = await fetchJSON(`/bols?${qs.toString()}`, { headers:{ "Accept":"application/json" }});
+        const res = await api(`/bols?${qs.toString()}`, { headers:{ "Accept":"application/json" }});
+        const total = +(res.headers.get('X-Total-Count') || 0);
+        const rows = await res.json();
+
         renderBOLTable(rows);
         adminPrevBtn.disabled = aOffset===0;
         adminNextBtn.disabled = rows.length < aLimit;
-        adminPageInfo.textContent = `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows`;
+        adminPageInfo.textContent = total
+          ? `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows • ${aOffset+1}–${aOffset+rows.length} of ${total}`
+          : `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows`;
+
       } catch(e){ toast(e.message||'Load failed'); }
       finally { clearBusy('#bol-table'); }
     }
@@ -618,7 +629,7 @@
           <td>${r.symbol_root}</td>
           <td>${contract}</td>
           <td>${r.mark_date}</td>
-          <td>$${money(r.mark_price)}</td>
+          <td>${money(r.mark_price)}</td>
           <td><span class="badge badge-pill ${methodClass}">${r.method}</span></td>
         `;
         tbody.appendChild(tr);
@@ -643,13 +654,14 @@
   let backoff = 1000;
   function connect(){
     const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/md/ws');
+    ws.onopen = ()=> backoff = 1000;
     ws.onmessage = (e)=>{
       const m = JSON.parse(e.data);
       if(m.type==='trade'){
         const span = document.createElement('span');
         span.textContent = ` ${m.symbol} ${m.price?.toFixed ? m.price.toFixed(4) : m.price} × ${m.qty_lots}  |`;
         tape.appendChild(span);
-        tape.scrollLeft = tape.scrollWidth;
+        tape.scrollLeft = tape.scrollWidth;  
       }
     };
     ws.onclose = ()=> setTimeout(()=>{ backoff = Math.min(backoff*1.6, 15000); connect(); }, backoff);
@@ -657,7 +669,6 @@
   }
   connect();
 })();
-
 </script>
 
 <!-- Admin: Quick Billing Tools -->
@@ -705,10 +716,26 @@
   });
 </script>
 
-  <footer style="margin-top:40px;text-align:center;font-size:.9em;">
-    <a href="/terms" target="_blank">Terms of Use</a> |
-    <a href="/eula" target="_blank">EULA</a> |
-    <a href="/privacy" target="_blank">Privacy Policy</a>
+  <footer class="legal-footer">
+    <a href="/legal/terms" target="_blank" rel="noopener">Terms of Use</a>
+    <span class="sep">|</span>
+    <a href="/legal/eula" target="_blank" rel="noopener">EULA</a>
+    <span class="sep">|</span>
+    <a href="/legal/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+    <span class="sep">|</span>
+    <a href="/legal/aup" target="_blank" rel="noopener">Acceptable Use</a>
+    <span class="sep">|</span>
+    <a href="/legal/cookies" target="_blank" rel="noopener">Cookie Notice</a>
+    <span class="sep">|</span>
+    <a href="/legal/subprocessors" target="_blank" rel="noopener">Subprocessors</a>
+    <span class="sep">|</span>
+    <a href="/legal/dpa" target="_blank" rel="noopener">DPA</a>
+    <span class="sep">|</span>
+    <a href="/legal/sla" target="_blank" rel="noopener">SLA</a>
+    <span class="sep">|</span>
+    <a href="/legal/security" target="_blank" rel="noopener">Security Overview</a>
+    <span class="sep">|</span>
+    <a href="/legal/appendix" target="_blank" rel="noopener">Privacy Appendix (APAC &amp; CA)</a>
   </footer>
 </body>
 </html>
