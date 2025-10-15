@@ -1704,23 +1704,26 @@ async def _ensure_runtime_risk_tables():
 # -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
-@app.get("/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Use")
+@app.get("/legal/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Service")
 async def terms_page():
     return FileResponse("static/legal/terms.html")
 
-@app.get("/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement")
+@app.get("/legal/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement")
 async def eula_page():
     return FileResponse("static/legal/eula.html")
 
-@app.get("/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy")
+@app.get("/legal/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy")
 async def privacy_page():
     return FileResponse("static/legal/privacy.html")
+@app.get("/legal/aup", include_in_schema=True, tags=["Legal"], summary="Acceptable Use Policy")
+async def aup_page():
+    return FileResponse("static/legal/aup.html")
 
 # Cookie Notice (alias: /legal/cookies and /cookies)
 @app.get("/legal/cookies", include_in_schema=True, tags=["Legal"],
          summary="Cookie Notice",
          description="View the BRidge Cookie Notice.", status_code=200)
-@app.get("/cookies", include_in_schema=False)
+@app.get("/legal/cookies.html", include_in_schema=False)
 async def cookies_page():
     return FileResponse("static/legal/cookies.html")
 
@@ -1728,7 +1731,7 @@ async def cookies_page():
 @app.get("/legal/subprocessors", include_in_schema=True, tags=["Legal"],
          summary="Subprocessors",
          description="View the current list of BRidge subprocessors.", status_code=200)
-@app.get("/subprocessors", include_in_schema=False)
+@app.get("/legal/subprocessors.html", include_in_schema=False)
 async def subprocessors_page():
     return FileResponse("static/legal/subprocessors.html")
 
@@ -1736,7 +1739,7 @@ async def subprocessors_page():
 @app.get("/legal/dpa", include_in_schema=True, tags=["Legal"],
          summary="Data Processing Addendum (DPA)",
          description="View the BRidge Data Processing Addendum.", status_code=200)
-@app.get("/dpa", include_in_schema=False)
+@app.get("/legal/dpa.html", include_in_schema=False)
 async def dpa_page():
     return FileResponse("static/legal/dpa.html")
 
@@ -1744,7 +1747,7 @@ async def dpa_page():
 @app.get("/legal/sla", include_in_schema=True, tags=["Legal"],
          summary="Service Level Addendum (SLA)",
          description="View the BRidge Service Level Addendum.", status_code=200)
-@app.get("/sla", include_in_schema=False)
+@app.get("/legal/sla", include_in_schema=False)
 async def sla_page():
     return FileResponse("static/legal/sla.html")
 
@@ -1752,7 +1755,7 @@ async def sla_page():
 @app.get("/legal/security", include_in_schema=True, tags=["Legal"],
          summary="Security Controls Overview",
          description="View the BRidge Security Controls Overview / Security Whitepaper.", status_code=200)
-@app.get("/security", include_in_schema=False)
+@app.get("/legal/security", include_in_schema=False)
 async def security_page():
     return FileResponse("static/legal/security.html")
 
@@ -1760,7 +1763,7 @@ async def security_page():
 @app.get("/legal/privacy-appendix", include_in_schema=True, tags=["Legal"],
          summary="Jurisdictional Privacy Appendix (APAC & Canada)",
          description="View region-specific privacy disclosures for APAC & Canada.", status_code=200)
-@app.get("/privacy/appendix", include_in_schema=False)
+@app.get("/legal/privacy-appendix", include_in_schema=False)
 async def privacy_appendix_page():
     return FileResponse("static/legal/privacy-appendix.html")
 # -------- Legal pages --------
