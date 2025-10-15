@@ -4898,12 +4898,6 @@ class ProductIn(BaseModel):
     unit: str
     quality: Optional[dict] = {}
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-    class Config:
-        schema_extra = {"example": {"username":"admin","password":"securepass123"}}
-
 class ContractIn(BaseModel):
     buyer: str
     seller: str
