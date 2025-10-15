@@ -13,13 +13,124 @@
     crossorigin="anonymous"
   />
   <style>
-    body{background:#f7f9fb}
-    .card{border:1px solid #e5e7eb;box-shadow:0 4px 14px rgba(0,0,0,.04)}
-    .badge-live{font:12px system-ui;color:#6b7280}
-    .badge-live[data-ok="1"]{color:#10b981}
-    .req::after{content:" *"; color:#e11d48}
-    .form-hint{font-size:.85rem;color:#6b7280}
-    button:disabled{opacity:.6;cursor:not-allowed}
+    :root{
+      --bg: #f6f8fb;
+      --card-bg:#fff;
+      --card-br:#e7eaf0;
+      --ink:#0f172a;
+      --muted:#6b7280;
+      --brand:#0f62fe;
+      --ok:#10b981;
+      --err:#e11d48;
+      --radius:14px;
+      --radius-sm:10px;
+      --shadow: 0 12px 30px rgba(22,29,37,.06), 0 4px 14px rgba(22,29,37,.04);
+      --focus: 0 0 0 4px rgba(15,98,254,.14), 0 0 0 1px rgba(15,98,254,.55) inset;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root{
+        --bg:#0b1020;
+        --card-bg:#0f1426;
+        --card-br:#1e2745;
+        --ink:#e5e7eb;
+        --muted:#96a0b8;
+        --shadow: 0 12px 30px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.25);
+        --focus: 0 0 0 4px rgba(15,98,254,.35), 0 0 0 1px rgba(15,98,254,.6) inset;
+      }
+    }
+
+    html,body{height:100%}
+    body{
+      background: var(--bg);
+      color: var(--ink);
+      font: 15.5px/1.45 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Constrain page for a “composed” feel */
+    .container{ max-width: 980px; }
+
+    /* Header */
+    h1.h4{
+      font-weight: 650;
+      letter-spacing:.2px;
+    }
+    .badge-live{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:6px 10px;border-radius:999px;background:#fff;
+      border:1px solid var(--card-br); box-shadow: var(--shadow);
+      font: 12px/1.2 system-ui; color: var(--muted);
+    }
+    .badge-live::before{
+      content:""; width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;
+    }
+    .badge-live[data-ok="1"]{ color: var(--ok); }
+    .badge-live[data-ok="1"]::before{ background: var(--ok); }
+
+    /* Cards */
+    .card{
+      border:1px solid var(--card-br);
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    /* Form */
+    label.form-label{ font-weight: 600; color: var(--ink); }
+    .req::after{ content:" *"; color: var(--err); }
+
+    .form-control, .form-select{
+      border: 1px solid var(--card-br);
+      background: var(--card-bg);
+      color: var(--ink);
+      height: 44px;
+      border-radius: var(--radius-sm);
+      transition: box-shadow .15s ease, border-color .15s ease, background-color .2s ease;
+    }
+    .form-control::placeholder, .form-hint{ color: var(--muted); }
+    .form-control:focus, .form-select:focus{ box-shadow: var(--focus); border-color: transparent; }
+
+    /* Section card for Stripe PM */
+    .pm-card{
+      background: var(--card-bg);
+      border:1px dashed #d1d5db;
+      border-radius: var(--radius-sm);
+    }
+    @media (prefers-color-scheme: dark){
+      .pm-card{ border-color:#2a355d; }
+    }
+
+    /* Buttons */
+    .btn{ border-radius: 12px; }
+    .btn-primary{
+      background: linear-gradient(180deg, #2b78ff, #0f62fe);
+      border-color: #0f62fe;
+    }
+    .btn-primary:hover{ filter: brightness(1.03); }
+    .btn-outline-primary{ border-color:#b9ccff; }
+    .btn-success{ background: linear-gradient(180deg, #15c58c, #10b981); border-color:#0fb07d; }
+    button:disabled{ opacity:.6; cursor:not-allowed; }
+    /* Toast */ 
+    #toast{
+      position:fixed; right:16px; bottom:16px; z-index:1055;
+      max-width:360px; display:none;
+      padding:12px 14px; background:#0b1324; color:#fff; border-radius:12px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.35);
+      font: 14px/1.35 system-ui;
+    }
+
+    /* Alerts */
+    .alert{ border-radius: 12px; }
+
+    /* Footer links */
+    footer a{ text-decoration: none; }
+    footer a:hover{ text-decoration: underline; }
+
+    /* Fine-tune grid spacing on larger screens */
+    @media (min-width: 992px){
+      .row.g-3{ row-gap: 1rem; }
+    }
   </style>
 
    <script>
