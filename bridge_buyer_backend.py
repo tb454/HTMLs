@@ -509,28 +509,76 @@ def _require_role(request: Request, allowed: set[str]):
     role = (request.session.get("role") or "").lower()
     if role not in allowed:
         raise HTTPException(status_code=403, detail=f"forbidden: requires one of {sorted(list(allowed))}")
-# ---- /role helper ----
+# ---- role helper ----
 
+#--- CSRF helpers ----
 def _csrf_get_or_create(request: Request) -> str:
     """Re-use an existing token if present; otherwise issue one."""
     tok = request.session.get("csrf_token")
     return tok if isinstance(tok, str) and len(tok) > 0 else _csrf_issue_token(request)
+
+# --- Smart CSRF toggles ---
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+CSRF_EXEMPT_PATHS = {
+    "/login", "/signup", "/logout",
+    "/stripe/webhook", "/ice/webhook", "/qbo/callback", "/admin/qbo/peek"
+}
+
+def _is_same_site_browser(request: Request) -> bool:
+    """
+    CSRF only applies to same-site browser flows that carry cookies.
+    Heuristics: Sec-Fetch-Site header or Origin host == request host.
+    """
+    sfs = (request.headers.get("Sec-Fetch-Site") or "").lower()
+    if sfs in ("same-origin", "same-site"):
+        return True
+
+    origin = request.headers.get("Origin")
+    if not origin:
+        return False
+    try:
+        from urllib.parse import urlparse
+        o = urlparse(origin)
+        return o.hostname == request.url.hostname
+    except Exception:
+        return False
+# ---  Smart CSRF toggles ---
 
 async def csrf_protect(
     request: Request,
     x_csrf: str | None = Header(default=None, alias="X-CSRF")
 ):
     """
-    Validate CSRF token for mutating requests.
-    Frontend sends: 'X-CSRF': cookie('XSRF-TOKEN').
+    Enforce CSRF only in production, only for unsafe methods,
+    only for same-site browser requests that carry a session cookie,
+    and skip known webhook/auth endpoints.
     """
+    # Only enforce in production
     if os.getenv("ENV", "").lower() != "production":
-        # Dev/CI/tests: allow through
         return
+
+    # Safe methods need no CSRF
+    if request.method in SAFE_METHODS:
+        return
+
+    # Skip known non-browser endpoints / webhooks / auth
+    if request.url.path in CSRF_EXEMPT_PATHS:
+        return
+
+    # Only enforce if this looks like a same-site browser request
+    if not _is_same_site_browser(request):
+        return
+
+    # Require a session-bound CSRF token and a matching header
     sess_token = request.session.get("csrf_token")
-    if not (sess_token and x_csrf and x_csrf == sess_token):
+    if not sess_token:
+        # Issue one so the client can retry
+        _csrf_issue_token(request)
         raise HTTPException(status_code=401, detail="bad csrf")
-# ---- /CSRF helpers ----
+
+    if x_csrf != sess_token:
+        raise HTTPException(status_code=401, detail="bad csrf")
+# ---- CSRF helpers ----
 
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
@@ -1865,16 +1913,28 @@ async def buyer_page_dynamic(request: Request):
     return resp
 
 @app.get("/admin", include_in_schema=False)
-async def admin_page():
-    return FileResponse("static/bridge-admin-dashboard.html")
+async def admin_page(request: Request):
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
+    resp = FileResponse("static/bridge-admin-dashboard.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
 
 @app.get("/seller", include_in_schema=False)
-async def seller_page():
-    return FileResponse("static/seller.html")
+async def seller_page(request: Request):
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
+    resp = FileResponse("static/seller.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
 
 @app.get("/indices-dashboard", include_in_schema=False)
-async def indices_page():
-    return FileResponse("static/indices.html")
+async def indices_page(request: Request):
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
+    resp = FileResponse("static/indices.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
 # -------- Static HTML --------
 
 # alias: support any old links that hit /yard
