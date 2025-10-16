@@ -11,12 +11,12 @@
 
     async function api(path, opts = {}) {
       const url = joinURL(endpoint, path);
-      const res = await fetch(url, {
-        ...opts,
-        headers: { "Accept":"application/json", "Content-Type":"application/json", ...(opts.headers||{}) }
+      const res = await api("/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password })
       });
-      return res;
-    }
+        return res;
+      }
 
     // ?next= handling + loading state + show/hide password
     const qs   = new URLSearchParams(location.search);
