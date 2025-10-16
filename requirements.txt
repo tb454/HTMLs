@@ -1,4 +1,4 @@
-
+--prefer-binary
 
 numpy==2.2.2
 scipy==1.14.1
