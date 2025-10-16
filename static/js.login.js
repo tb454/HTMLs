@@ -1,7 +1,17 @@
 // static/js.login.js
 
-// Same-origin in prod; set to "http://127.0.0.1:8000" for local dev if you’re serving HTML elsewhere
-const endpoint = "";
+// Same-origin by default
+const endpoint = (window.ENDPOINT && typeof window.ENDPOINT === "string")
+  ? window.ENDPOINT
+  : ""; // "" means same-origin
+
+// Eagerly mint XSRF-TOKEN so the SPA can echo X-CSRF immediately (harmless for /login which is exempt)
+(async () => {
+  try {
+    await fetch(joinURL(endpoint, "/health"), { credentials: "include" });
+  } catch (_) {}
+})();
+
 
 // Collapse accidental double slashes
 function joinURL(base, path) {
@@ -10,7 +20,7 @@ function joinURL(base, path) {
   return b + p;
 }
 
-// Basic cookie reader for optional CSRF (your /login doesn’t require CSRF, but this is harmless)
+// Basic cookie reader for optional CSRF
 function getCookie(name) {
   return document.cookie
     .split(";")
@@ -32,7 +42,7 @@ async function api(path, opts = {}) {
     method: opts.method || "GET",
     headers,
     body: opts.body,
-    credentials: "include", // <- keep session cookies
+    credentials: "include", 
   });
   return res;
 }

@@ -1879,8 +1879,16 @@ async def _ensure_qbo_oauth_events_table():
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", include_in_schema=False)
-async def root():
-    return FileResponse("static/bridge-login.html")
+async def root(request: Request):
+    """
+    Serve login page and (like /buyer,/seller,/admin) also mint XSRF-TOKEN so the SPA
+    can immediately echo it in X-CSRF if/when needed.
+    """
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
+    resp = FileResponse("static/bridge-login.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
 
 # --- Dynamic buyer page with per-request nonce + strict CSP ---
 with open("static/bridge-buyer.html", "r", encoding="utf-8") as f:
