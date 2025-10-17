@@ -162,3 +162,34 @@ footer .sep{ color:#cbd5e1; margin:0 .45rem; }
   float:right; border:0; background:transparent;
   font-size:18px; line-height:1; color:#fff;
 }
+
+/* ===== Seller/Dashboard layout===== */
+
+/* Sections & cards */
+section.section { padding:20px; margin-bottom:20px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.overview-cards { display:flex; gap:15px; flex-wrap:wrap; }
+.card-custom { flex:1; min-width:260px; background:#fff; border:1px solid #e1e4e8; border-radius:12px; padding:20px; text-align:center; display:flex; flex-direction:column; transition:transform .2s ease, box-shadow .2s ease; }
+.card-custom:hover { transform:translateY(-2px); box-shadow:0 8px 18px rgba(0,0,0,.08); }
+
+.section-title { font-weight:700; margin-bottom:15px; font-size:20px; border-bottom:3px solid #3498db; padding-bottom:5px; text-transform:uppercase; letter-spacing:1px; color:#3498db; }
+
+/* Sticky table header (Bootstrap table already present) */
+.table thead.sticky { position:sticky; top:0; background:#fff; z-index:3; box-shadow:0 1px 0 rgba(0,0,0,.06); }
+
+/* Header band that used to be inline */
+header.header { background:linear-gradient(90deg,#2c3e50,#34495e); color:#fff; padding:15px 20px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+header.header h1 { font-size:28px; margin:0; }
+.user-info { font-size:14px; }
+
+/* Chart shell height (replaces inline styles) */
+.chart-container { background:#fff; padding:20px; border-radius:8px; border:1px solid #e1e4e8; box-shadow:0 4px 8px rgba(0,0,0,.05); }
+.h-220 { height:220px; }
+
+/* Footer used by seller page */
+footer.legal-footer { margin-top:40px; padding:20px; text-align:center; font-size:14px; color:#777; }
+footer.legal-footer nav { gap:8px; }
+footer.legal-footer a { color:#6c757d; text-decoration:none; }
+footer.legal-footer a:hover { text-decoration:underline; }
+
+/* Tiny util the page referenced */
+.maxw-260 { max-width:260px; }
