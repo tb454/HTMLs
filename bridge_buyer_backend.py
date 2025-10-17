@@ -2435,7 +2435,8 @@ def _rows_from_csv_bytes(raw_bytes: bytes):
                 weight_tons = Decimal(str(r["weight_tons"]))
 
             ts = (r["created_at"] or "").strip().replace("Z", "+00:00")
-            created_at = datetime.fromisoformat(ts)
+            dt = datetime.fromisoformat(ts)
+            created_at = (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc))
 
             raw_key = f"{seller}|{buyer}|{material}|{price_per_ton}|{weight_tons}|{created_at.isoformat()}"
             dedupe_key = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -3166,7 +3167,15 @@ class LoginOut(BaseModel):
 
 @app.post("/login", tags=["Auth"], response_model=LoginOut, summary="Login with email or username")
 @limiter.limit("5/minute")
-async def login(body: LoginIn, request: Request):
+async def login(request: Request):
+    # Accept JSON or classic HTML form
+    try:
+        data = await request.json()
+    except Exception:
+        form = await request.form()
+        data = {"username": (form.get("username") or ""), "password": (form.get("password") or "")}
+
+    body = LoginIn(**data)
     ident = (body.username or "").strip().lower()
     pwd   = body.password or ""
 
@@ -6447,7 +6456,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     contract.reference_price     = float(j.get("last"))
                     contract.reference_source    = "COMEX (derived/internal, delayed)"
                     contract.reference_symbol    = "HG=F"
-                    contract.reference_timestamp = datetime.utcnow()
+                    contract.reference_timestamp = utcnow() 
                     if not contract.pricing_formula:
                         contract.pricing_formula = "COMEX_Cu - 0.25"
         except Exception:
@@ -6463,13 +6472,22 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         hdr = (request.headers.get("X-Import-Created-At") or "").strip()
         try:
             if hdr:
-                # Accept 'YYYY-MM-DD' or full ISO
+                # Accept 'YYYY-MM-DD' or full ISO, then coerce to aware UTC
                 if len(hdr) == 10 and hdr[4] == "-" and hdr[7] == "-":
-                    created_at_override = datetime.fromisoformat(hdr + "T00:00:00+00:00")
+                    dt = datetime.fromisoformat(hdr + "T00:00:00")
                 else:
-                    created_at_override = datetime.fromisoformat(hdr.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(hdr.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    from datetime import timezone as _tz
+                    dt = dt.replace(tzinfo=_tz.utc)
+                else:
+                    dt = dt.astimezone(_tz.utc)
+                created_at_override = dt
             elif contract.reference_timestamp:
-                created_at_override = contract.reference_timestamp
+                # ensure aware UTC
+                rt = contract.reference_timestamp
+                created_at_override = (rt.astimezone(_tz.utc)
+                                       if rt.tzinfo else rt.replace(tzinfo=_tz.utc))
         except Exception:
             created_at_override = None
 
