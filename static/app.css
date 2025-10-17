@@ -192,6 +192,12 @@ section.section{ background:#fff; border:1px solid #e5e7eb; border-radius:12px;
   grid-template-columns: repeat(3, minmax(260px, 1fr));
   gap:15px; align-items:stretch;
 }
+@media (max-width: 992px){
+  .overview-cards{ grid-template-columns: repeat(2, minmax(240px,1fr)); }
+}
+@media (max-width: 576px){
+  .overview-cards{ grid-template-columns: 1fr; }
+}
 .card-custom{
   background:#fff; border:1px solid #e1e4e8; border-radius:8px;
   padding:20px; text-align:center;
@@ -227,11 +233,4 @@ footer.legal-footer nav a:hover{ text-decoration:underline; }
 
 /* Chart canvases should consume the container height */
 .chart-container canvas{ width:100% !important; height:100% !important; display:block; }
-
-/* Make charts actually render visible height */
-.chart-container canvas{
-  width:100% !important;
-  height:100% !important;
-  display:block;
-}
 
