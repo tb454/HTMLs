@@ -18,9 +18,25 @@
 
   <meta name="color-scheme" content="light dark">
   <style>
+    @media (prefers-color-scheme: dark){
+      #authBanner{
+        background:#3a2f12;            /* deep amber */
+        border-color:#735b1a;
+        color:#f6e7b2;
+      }
+      #authBanner a { color:#ffd66b; }
+    }
+    @media (prefers-color-scheme: dark){
+      .btn-outline-secondary{
+        border-color:#9aa4b2; color:#e5e7eb;
+      }
+      .btn-outline-secondary:hover{
+        background:#6c757d; color:#fff;
+      }
+    }
     :root{ --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); }
     body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
-    .cardy{background:var(--card-bg);border-radius:10px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
+    .cardy{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
     .health-badge{font:12px/1 system-ui;color:#6b7280}
     .health-badge[data-ok="1"]{color:#10b981}
     /* skeletons */
@@ -89,7 +105,7 @@
         <label class="visually-hidden" for="materialFilter">Filter material/SKU</label>
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
-      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
+      <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
       <select id="sortBy" class="form-select form-select-sm" style="width:auto">
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
@@ -120,7 +136,7 @@
         </div>
         <div style="width:160px">
           <label class="form-label mb-1" for="rfqQty">Qty (lots)</label>
-          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="1">
+          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="0.01" step="0.01">
         </div>
         <div>
           <label class="form-label mb-1" style="opacity:0">.</label>
@@ -135,13 +151,13 @@
     <div id="list" aria-busy="false"></div>
 
     <div class="d-flex gap-2 mt-2 align-items-center">
-      <button class="btn btn-outline-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
-      <button class="btn btn-outline-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
+      <button class="btn btn-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
+      <button class="btn btn-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
       <label class="small text-muted mb-0" for="pageSize">Rows:</label>
       <select id="pageSize" class="form-select form-select-sm" style="width:auto">
         <option>25</option><option selected>100</option><option>200</option>
       </select>
-      <span class="small text-muted" id="pageInfo"></span>
+      <span class="small text-muted" id="pageInfo" aria-live="polite"></span>
     </div>
   </div>
 
@@ -202,13 +218,19 @@
       const msg = document.getElementById('authMsg');
 
       try{
-        await api('/health');
-        if (hb){ hb.textContent = '● Live'; hb.setAttribute('data-ok','1'); }
+        let ok=false;
+        try { ok = (await api('/health')).ok; } catch {}
+        if (!ok) { try { ok = (await api('/healthz')).ok; } catch {} }
+        if (ok){ hb?.setAttribute('data-ok','1'); if(hb) hb.textContent='● Live'; }
+        else {
+          hb?.removeAttribute('data-ok'); if(hb) hb.textContent='● Degraded';
+          if (banner && msg){ banner.style.display='block'; msg.textContent = 'Service degraded'; }
+        }
       }catch{
-        if (hb){ hb.textContent = '● Degraded'; hb.removeAttribute('data-ok'); }
+        hb?.removeAttribute('data-ok'); if(hb) hb.textContent='● Degraded';
         if (banner && msg){ banner.style.display='block'; msg.textContent = 'Service degraded'; }
       }
- 
+
       try{
         const r = await api('/me'); const j = await r.json();
         if (!j?.username){
@@ -368,7 +390,7 @@
           wrap.innerHTML = `
             <div>No open contracts.</div>
             <div class="mt-2 d-flex gap-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="clearFiltersBtn">Clear filters</button>
+              <button type="button" class="btn btn-sm btn-secondary" id="clearFiltersBtn">Clear filters</button>
               <button type="button" class="btn btn-sm btn-primary" id="reqQuoteBtn">Request Quote</button>
             </div>`;
           root.append(wrap);
@@ -533,14 +555,16 @@
       const bar = document.querySelector('.d-flex.gap-2.mb-3.align-items-end');
       if (!bar) return;
       const btn = document.createElement('button');
-      btn.className = 'btn btn-outline-secondary btn-sm';
+      btn.className = 'btn btn-secondary btn-sm';
       btn.type = 'button';
       btn.id = 'pauseBtn';
       btn.textContent = paused ? 'Resume' : 'Pause';
+      btn.setAttribute('aria-pressed', String(!paused));
       btn.onclick = () => {
         paused = !paused;
         localStorage.setItem('buyer.paused', paused ? '1':'0');
         btn.textContent = paused ? 'Resume' : 'Pause';
+        btn.setAttribute('aria-pressed', String(!paused));
         if (!paused) { loadOpenContracts(); startAuto(); } else { stopAuto(); }
       };
       bar.appendChild(btn);
@@ -575,7 +599,8 @@
           const r = await api('/rfq', {
             method:'POST',
             headers: {
-              'Content-Type':'application/json',            
+              'Content-Type':'application/json',
+              'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))           
             },
             body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
           });
@@ -583,6 +608,9 @@
           try { console.log(await r.json()); } catch {}
         }catch(e){ /* toast already shown */ }
       };
+      document.getElementById('rfqQty')?.addEventListener('keydown', (e)=>{
+        if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
+      });
     })();
   </script>
 
