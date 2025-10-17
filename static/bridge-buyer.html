@@ -116,7 +116,6 @@
       <select id="pageSize" class="form-select form-select-sm" style="width:auto">
         <option>25</option><option selected>100</option><option>200</option>
       </select>
-      </select>
       <span class="small text-muted" id="pageInfo" aria-live="polite"></span>
     </div>
   </div>
@@ -146,7 +145,7 @@
         if (t) t.classList.remove('show');
       }
     });
-    
+
     let __inflight = new Map();
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
