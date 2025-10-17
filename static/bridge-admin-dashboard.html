@@ -5,43 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="/static/favicon.ico" />
-    <style>
-    body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}    
-    .table th,.table td{vertical-align:middle}
-    .filters{margin-bottom:20px}    
-    .form-hint{font-size:.85rem;color:#6c757d}    
-    .muted{color:#6c757d}
-    code.small{font-size:.8rem}    
-    .table-scroll{max-height:70vh;overflow:auto;border-radius:10px}
-    .skeleton-row td{height:14px;padding:10px}
-    .skeleton{display:block;width:100%;height:10px;border-radius:6px;background:linear-gradient(90deg,#eee,#f6f7f8,#eee);background-size:200% 100%;animation:sk 1.1s linear infinite}
-    @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
-    button:disabled{opacity:.6;cursor:not-allowed}
-    .health-badge{font:12px/1 system-ui;color:#6b7280}
-    .health-badge[data-ok="1"]{color:#10b981}
-  /* --- Pro dashboard baseline (light only) --- */
-    :root { color-scheme: only light; }
-    body { background:#f5f7fb; }
-    .table-container, .card {
-      background:#fff;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      box-shadow:0 1px 2px rgba(0,0,0,.04);
-    }
-    .nav-tabs .nav-link { font-weight:600; }
-    .nav-tabs .nav-link.active {
-      background:#fff;
-      border-color:#dee2e6 #dee2e6 #fff;
-    }
-    .table { --bs-table-striped-bg:#fafbfc; }
-    .table thead.sticky { position:sticky; top:0; background:#fff; z-index:3; box-shadow:0 1px 0 rgba(0,0,0,.06); }
-    .badge { font-weight:600; }
-    .rounded-pill { border-radius:50rem!important; }
-    /* Outline buttons feel washed out on white cards */
-    .btn-outline-primary, .btn-outline-secondary { --bs-btn-border-color:#cfd6df; }
-  </style>
-
+    
   <script>
     // Single source of truth for API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
@@ -98,7 +64,7 @@
 </head>
 <body>
   <!-- Toast lives in <body> (valid HTML) -->
-  <div id="toast" style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;padding:12px 14px;background:#111827;color:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
 
   <div class="container-fluid">
     <div class="d-flex align-items-center justify-content-between mb-2">
@@ -159,15 +125,15 @@
 <div class="card p-3 mb-2">
   <h5 class="m-0 mb-2">Quick RFQ</h5>
   <div class="d-flex gap-2">
-    <select id="rfqSym" class="form-select" style="max-width:200px" aria-label="Symbol">
+    <select id="rfqSym" class="form-select maxw-200" aria-label="Symbol">
       <option>CU-SHRED-1M</option>
       <option>AL-6061-1M</option>
     </select>
-    <select id="rfqSide" class="form-select" style="max-width:120px" aria-label="Side">
+    <select id="rfqSide" class="form-select maxw-120" aria-label="Side">
       <option>buy</option>
       <option>sell</option>
     </select>
-    <input id="rfqQty" class="form-control" type="number" placeholder="Qty (lots)" style="max-width:160px" min="0.01" step="0.01" aria-label="Quantity in lots">
+    <input id="rfqQty" class="form-control maxw-160" type="number" placeholder="Qty (lots)" min="0.01" step="0.01" aria-label="Quantity in lots">
     <button id="rfqGo" class="btn btn-primary">RFQ</button>
   </div>
 </div>
@@ -303,9 +269,9 @@
               <div class="d-flex align-items-center justify-content-between">
                 <h5 class="mb-3">Listings</h5>
                 <div class="d-flex gap-2 align-items-center">
-                  <input type="date" id="markDate" class="form-control form-control-sm" style="width:170px;" />
+                  <input type="date" id="markDate" class="form-control form-control-sm maxw-170" />
                   <span class="muted small">Backfill Mark Date (optional)</span>
-                  <select id="filterSeriesProduct" class="form-select form-select-sm" style="width:220px;"></select>
+                  <select id="filterSeriesProduct" class="form-select form-select-sm maxw-220"></select>
                   <select id="filterSeriesStatus" class="form-select form-select-sm" style="width:160px;">
                     <option value="">(all statuses)</option>
                     <option>Draft</option><option>Listed</option><option>Halted</option><option>Expired</option>
@@ -675,7 +641,7 @@
       else { await refreshSeries(); await refreshMarks(); }
     });
   </script>
-<div id="tape" style="font:14px system-ui;background:#0b1220;color:#cde3ff;padding:8px 12px;border-radius:10px;margin:10px 0;white-space:nowrap;overflow:auto"></div>
+<div id="tape"></div>
 
 <script>
 (function tapeWS(){
@@ -711,8 +677,8 @@
       <label class="form-label">Member</label>
       <input id="adm_member" class="form-control" placeholder="member key (Organization)">
     </div>
-    <button class="btn btn-success" id="adm_bill_now" style="height:38px">Bill Now</button>
-    <button class="btn btn-outline-primary" id="adm_change_pm" style="height:38px">Change Payment Method</button>
+    <button class="btn btn-success btn-h38" id="adm_bill_now">Bill Now</button>
+    <button class="btn btn-outline-primary btn-h38" id="adm_change_pm">Change Payment Method</button>
   </div>
   <div class="form-hint mt-2">Charges the stored default payment method off-session, or opens a Stripe setup session to update the PM.</div>
 </div>

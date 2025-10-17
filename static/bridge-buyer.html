@@ -15,44 +15,9 @@
     integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
     crossorigin="anonymous"
   />
+  <link rel="stylesheet" href="/static/app.css">
 
   <meta name="color-scheme" content="light dark">
-  <style>
-    @media (prefers-color-scheme: dark){
-      #authBanner{
-        background:#3a2f12;            /* deep amber */
-        border-color:#735b1a;
-        color:#f6e7b2;
-      }
-      #authBanner a { color:#ffd66b; }
-    }
-    @media (prefers-color-scheme: dark){
-      .btn-outline-secondary{
-        border-color:#9aa4b2; color:#e5e7eb;
-      }
-      .btn-outline-secondary:hover{
-        background:#6c757d; color:#fff;
-      }
-    }
-    :root{ --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); }
-    body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
-    .cardy{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
-    .health-badge{font:12px/1 system-ui;color:#6b7280}
-    .health-badge[data-ok="1"]{color:#10b981}
-    /* skeletons */
-    .skeleton{ display:block; width:100%; height:14px; border-radius:6px;
-      background:linear-gradient(90deg,#ececec,#f6f7f8,#ececec); background-size:200% 100%;
-      animation:sk 1.1s linear infinite; }
-    @keyframes sk{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
-    button:disabled{opacity:.6;cursor:not-allowed}
-
-    @media (prefers-color-scheme: dark){
-      :root{ --card-bg:#0f172a; --bg:#0b0f14; --fg:#e5e7eb; --muted:#9ca3af; --shadow:0 0 0 1px rgba(255,255,255,.06); }
-      .text-muted{color:var(--muted) !important}
-      .skeleton{background:linear-gradient(90deg,#1f2937,#111827,#1f2937)}
-    }
-    .visually-hidden-focusable:active, .visually-hidden-focusable:focus{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto}
-  </style>
 
   <script id="boot" nonce="{{NONCE}}">
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
@@ -62,14 +27,7 @@
   <a href="#list" class="visually-hidden visually-hidden-focusable">Skip to content</a>
 
   <!-- Toast (live region) -->
-  <div id="toast"
-       role="status"
-       aria-live="polite"
-       aria-atomic="true"
-       tabindex="-1"
-       style="position:fixed;right:16px;bottom:16px;max-width:360px;display:none;
-              padding:12px 14px;background:#111827;color:#fff;border-radius:10px;
-              box-shadow:0 6px 24px rgba(0,0,0,.2);font:14px system-ui;z-index:9999">
+  <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
     <button type="button" aria-label="Close notification" style="float:right;border:0;background:transparent;font-size:18px;line-height:1;color:#fff" onclick="this.parentElement.style.display='none'">&times;</button>
     <span id="toastMsg"></span>
   </div>
@@ -81,7 +39,7 @@
     </div>
 
     <!-- Auth/health banner -->
-    <div id="authBanner" class="mb-2" style="display:none;border-radius:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffeeba;color:#856404;">
+    <div id="authBanner" class="mb-2">
       <strong>Status:</strong> <span id="authMsg">Checking…</span>
       <a href="/static/bridge-login.html" style="margin-left:10px">Re-authenticate</a>
     </div>
@@ -112,14 +70,14 @@
         <option value="price_per_ton_desc">Price ↓</option>
         <option value="weight_tons_desc">Tons ↓</option>
       </select>
-      <div class="small text-muted" id="unitBadge" style="margin-left:auto">
+      <div class="small text-muted ms-auto" id="unitBadge">
         Units: US short tons • Currency: USD
       </div>
     </div>
 
     <!-- RFQ (two-click) -->
     <div class="cardy" id="rfqCard">
-      <div class="d-flex gap-2 align-items-end" style="max-width:620px">
+      <div class="d-flex gap-2 align-items-end maxw-620">
         <div style="flex:1">
           <label class="form-label mb-1" for="rfqSym">Symbol</label>
           <select id="rfqSym" class="form-select">
@@ -127,19 +85,19 @@
             <option>AL-6061-1M</option>
           </select>
         </div>
-        <div style="width:140px">
+        <div class="maxw-140">
           <label class="form-label mb-1" for="rfqSide">Side</label>
           <select id="rfqSide" class="form-select">
             <option>buy</option>
             <option>sell</option>
           </select>
         </div>
-        <div style="width:160px">
+        <div class="maxw-160">
           <label class="form-label mb-1" for="rfqQty">Qty (lots)</label>
           <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="0.01" step="0.01">
         </div>
         <div>
-          <label class="form-label mb-1" style="opacity:0">.</label>
+          <label class="form-label mb-1 vis-hidden-label">.</label>
           <button id="rfqGo" class="btn btn-primary" type="button">RFQ</button>
         </div>
       </div>

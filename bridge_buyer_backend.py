@@ -580,6 +580,12 @@ async def csrf_protect(
         raise HTTPException(status_code=401, detail="bad csrf")
 # ---- CSRF helpers ----
 
+@app.middleware("http")
+async def nonce_mint_mw(request: Request, call_next):
+    # Per-request CSP nonce used for <script nonce> and (optionally) <style nonce>
+    request.state.csp_nonce = secrets.token_urlsafe(16)
+    return await call_next(request)
+
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
@@ -592,15 +598,16 @@ async def security_headers_mw(request, call_next):
     resp.headers["X-Download-Options"] = "noopen"
     resp.headers["Permissions-Policy"] = "geolocation=()"
     resp.headers["Content-Security-Policy"] = (
-        "default-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
-        "img-src 'self' data: https://*.stripe.com; "
-        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
-        "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob: https://*.stripe.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}'; "
+        "style-src-attr 'none'; "
+        "script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' https://*.stripe.com; "
-        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'"
-    )
+        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com"
+    ).format(nonce=getattr(request.state, "csp_nonce", ""))
     return resp
 
 app.middleware("http")(security_headers_mw)
@@ -1894,6 +1901,13 @@ async def root(request: Request):
 with open("static/bridge-buyer.html", "r", encoding="utf-8") as f:
     _BUYER_HTML_TEMPLATE = f.read()
 
+with open("static/seller.html", "r", encoding="utf-8") as f:
+    _SELLER_HTML_TEMPLATE = f.read()
+
+with open("static/bridge-admin-dashboard.html", "r", encoding="utf-8") as f:
+    _ADMIN_HTML_TEMPLATE = f.read()
+
+
 @app.get("/buyer", include_in_schema=False)
 async def buyer_page_dynamic(request: Request):
     nonce = secrets.token_urlsafe(16)
@@ -1906,13 +1920,14 @@ async def buyer_page_dynamic(request: Request):
     csp = (
         "default-src 'self'; "
         "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "img-src 'self' data: https://*.stripe.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "font-src 'self'; "
+        "img-src 'self' data: blob: https://*.stripe.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
+        "style-src-attr 'none'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' https://*.stripe.com; "
-        "form-action 'self'; upgrade-insecure-requests"
+        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "form-action 'self'"
     )
     resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
@@ -1922,17 +1937,49 @@ async def buyer_page_dynamic(request: Request):
 
 @app.get("/admin", include_in_schema=False)
 async def admin_page(request: Request):
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
+    html = _ADMIN_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
+
     token = _csrf_get_or_create(request)
     prod = os.getenv("ENV","").lower() == "production"
-    resp = FileResponse("static/bridge-admin-dashboard.html")
+
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob: https://*.stripe.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
+        "style-src-attr 'none'; "
+        "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "form-action 'self'"
+    )
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
 
 @app.get("/seller", include_in_schema=False)
 async def seller_page(request: Request):
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
+    html = _SELLER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
+
     token = _csrf_get_or_create(request)
     prod = os.getenv("ENV","").lower() == "production"
-    resp = FileResponse("static/seller.html")
+
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob: https://*.stripe.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
+        "style-src-attr 'none'; "
+        "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "form-action 'self'"
+    )
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
 

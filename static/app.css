@@ -1,0 +1,158 @@
+/* --- Global tokens / shared --- */
+:root { --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); }
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+
+/* Admin table/card polish */
+.table-container, .card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.table thead.sticky { position:sticky; top:0; background:#fff; z-index:3; box-shadow:0 1px 0 rgba(0,0,0,.06); }
+.table-scroll{max-height:70vh;overflow:auto;border-radius:10px}
+.badge{font-weight:600}
+.rounded-pill{border-radius:50rem!important}
+.btn-outline-primary,.btn-outline-secondary{--bs-btn-border-color:#cfd6df}
+
+/* Buyer/Seller cards + health */
+.cardy{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
+.health-badge{font:12px/1 system-ui;color:#6b7280}
+.health-badge[data-ok="1"]{color:#10b981}
+
+/* Skeleton shimmer */
+.skeleton{display:block;width:100%;height:14px;border-radius:6px;background:linear-gradient(90deg,#ececec,#f6f7f8,#ececec);background-size:200% 100%;animation:sk 1.1s linear infinite}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+button:disabled{opacity:.6;cursor:not-allowed}
+
+/* Toast (replaces the giant inline style) */
+.toast-bridge{
+  position:fixed; right:16px; bottom:16px; max-width:360px; display:none;
+  padding:12px 14px; background:#111827; color:#fff; border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.2); font:14px system-ui; z-index:9999;
+}
+
+/* Buyer auth banner (was inline) */
+#authBanner{display:none;border-radius:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffeeba;color:#856404}
+@media (prefers-color-scheme: dark){
+  #authBanner{ background:#3a2f12; border-color:#735b1a; color:#f6e7b2; }
+  #authBanner a { color:#ffd66b; }
+}
+
+/* Small width helpers to replace inline widths */
+.maxw-140{max-width:140px}
+.maxw-160{max-width:160px}
+.maxw-170{max-width:170px}
+.maxw-200{max-width:200px}
+.maxw-220{max-width:220px}
+.maxw-260{max-width:260px}
+.maxw-520{max-width:520px}
+.maxw-620{max-width:620px}
+.w-90{width:90px}
+
+/* Heights used for charts that were inline */
+.h-220{height:220px}
+
+/* Margins/padding previously inline */
+.mt-12{margin-top:12px}
+.mb-12{margin-bottom:12px}
+.p-12{padding:12px}
+
+/* Colored tape bar (admin) */
+#tape{font:14px system-ui;background:#0b1220;color:#cde3ff;padding:8px 12px;border-radius:10px;margin:10px 0;white-space:nowrap;overflow:auto}
+
+/* Admin buttons fixed height */
+.btn-h38{height:38px}
+
+/* Buyer: hide label text with CSS, not inline opacity */
+.vis-hidden-label{opacity:0}
+
+/* (Optional) tiny utilities you referenced */
+.di{display:inline-block}
+.ib-mx{margin:0 8px}
+
+/* ===== Login Page (bridge-login.html) ===== */
+:root{
+  --bg:#f6f8fb;
+  --card:#fff;
+  --ink:#0f172a;
+  --muted:#6b7280;
+  --brand:#0f62fe;
+  --err:#e11d48;
+  --ok:#10b981;
+  --br:#e7eaf0;
+  --r-lg:16px;
+  --r-sm:12px;
+  --shadow:0 12px 30px rgba(22,29,37,.06), 0 4px 14px rgba(22,29,37,.05);
+  --focus:0 0 0 4px rgba(15,98,254,.14), 0 0 0 1px rgba(15,98,254,.55) inset;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0b1020; --card:#0f1426; --ink:#e5e7eb; --muted:#96a0b8; --br:#1e2745;
+    --shadow:0 12px 30px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.25);
+    --focus:0 0 0 4px rgba(15,98,254,.35), 0 0 0 1px rgba(15,98,254,.6) inset;
+  }
+}
+
+/* layout container */
+html, body { height:100%; }
+body.login-theme {
+  background:var(--bg);
+  color:var(--ink);
+  font:15.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  margin:0; gap:16px; padding:16px;
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+}
+
+/* card */
+.login-box{
+  background:var(--card);
+  width:100%; max-width:420px;
+  padding:28px 26px;
+  border:1px solid var(--br);
+  border-radius:var(--r-lg);
+  box-shadow:var(--shadow);
+}
+
+/* header */
+.login-title{
+  font-weight:700; letter-spacing:.2px;
+  display:flex; align-items:center; justify-content:center; gap:10px;
+  margin-bottom:18px !important;
+}
+.brand-badge{
+  width:28px;height:28px;border-radius:8px;
+  display:inline-grid; place-items:center;
+  background:#e8f0ff; color:#1b5cff; font-weight:800;
+}
+
+/* form controls */
+.form-label{font-weight:600;}
+.login-box .form-control{
+  height:44px; border-radius:12px;
+  border:1px solid var(--br); background:var(--card); color:var(--ink);
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.login-box .form-control::placeholder{color:var(--muted)}
+.login-box .form-control:focus{ box-shadow:var(--focus); border-color:transparent; }
+
+/* buttons */
+.login-box .btn{ border-radius:12px; }
+.login-box .btn-primary{
+  background:linear-gradient(180deg,#2b78ff,#0f62fe);
+  border-color:#0f62fe;
+}
+.login-box .btn-outline-primary{ border-color:#b9ccff; }
+
+/* status boxes */
+#error, #success{
+  border-radius:12px; padding:10px 12px; font-weight:600;
+}
+#error{ color:#b91c1c; background:rgba(225,29,72,.10); border:1px solid rgba(225,29,72,.25); }
+#success{ color:#047857; background:rgba(16,185,129,.10); border:1px solid rgba(16,185,129,.25); }
+
+/* footer */
+footer.legal-footer{
+  width:100%; text-align:center; font-size:.9em; color:var(--muted);
+  white-space:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  padding:8px 12px; margin-top:auto; box-sizing:border-box;
+}
+footer.legal-footer a{ color:#0f62fe; text-decoration:none; }
+footer.legal-footer a:hover{ text-decoration:underline; }
+footer .sep{ color:#cbd5e1; margin:0 .45rem; }
