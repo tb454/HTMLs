@@ -165,31 +165,73 @@ footer .sep{ color:#cbd5e1; margin:0 .45rem; }
 
 /* ===== Seller/Dashboard layout===== */
 
-/* Sections & cards */
-section.section { padding:20px; margin-bottom:20px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-.overview-cards { display:flex; gap:15px; flex-wrap:wrap; }
-.card-custom { flex:1; min-width:260px; background:#fff; border:1px solid #e1e4e8; border-radius:12px; padding:20px; text-align:center; display:flex; flex-direction:column; transition:transform .2s ease, box-shadow .2s ease; }
-.card-custom:hover { transform:translateY(-2px); box-shadow:0 8px 18px rgba(0,0,0,.08); }
+/* header bar */
+header.header{
+  background:linear-gradient(90deg,#2c3e50,#34495e);
+  color:#fff;
+  padding:15px 20px;
+  border-radius:8px;
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:20px;
+}
+header.header h1{ font-size:28px; margin:0; }
+.user-info{ font-size:14px; }
 
-.section-title { font-weight:700; margin-bottom:15px; font-size:20px; border-bottom:3px solid #3498db; padding-bottom:5px; text-transform:uppercase; letter-spacing:1px; color:#3498db; }
+/* section wrapper + title */
+section.section{ background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04); padding:20px; margin-bottom:20px; }
+.section-title{
+  font-weight:700; margin-bottom:15px; font-size:20px;
+  border-bottom:3px solid #3498db; padding-bottom:5px;
+  text-transform:uppercase; letter-spacing:1px; color:#3498db;
+}
 
-/* Sticky table header (Bootstrap table already present) */
-.table thead.sticky { position:sticky; top:0; background:#fff; z-index:3; box-shadow:0 1px 0 rgba(0,0,0,.06); }
+/* top 3 cards row */
+.overview-cards{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap:15px; align-items:stretch;
+}
+.card-custom{
+  background:#fff; border:1px solid #e1e4e8; border-radius:8px;
+  padding:20px; text-align:center;
+  display:flex; flex-direction:column; gap:10px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04);
+}
+.card-custom:hover{ transform:translateY(-2px); box-shadow:0 8px 16px rgba(0,0,0,.08); }
 
-/* Header band that used to be inline */
-header.header { background:linear-gradient(90deg,#2c3e50,#34495e); color:#fff; padding:15px 20px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
-header.header h1 { font-size:28px; margin:0; }
-.user-info { font-size:14px; }
+/* tables & sticky headers (light) */
+.table thead.sticky{ position:sticky; top:0; background:#fff; z-index:3;
+  box-shadow:0 1px 0 rgba(0,0,0,.06); }
+.table{ --bs-table-striped-bg:#fafbfc; }
 
-/* Chart shell height (replaces inline styles) */
-.chart-container { background:#fff; padding:20px; border-radius:8px; border:1px solid #e1e4e8; box-shadow:0 4px 8px rgba(0,0,0,.05); }
-.h-220 { height:220px; }
+/* chart containers */
+.chart-container{
+  background:#fff; border:1px solid #e1e4e8; border-radius:8px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04); padding:16px;
+}
+.h-220{ height:220px; }  /* already present, keep for canvases */
 
-/* Footer used by seller page */
-footer.legal-footer { margin-top:40px; padding:20px; text-align:center; font-size:14px; color:#777; }
-footer.legal-footer nav { gap:8px; }
-footer.legal-footer a { color:#6c757d; text-decoration:none; }
-footer.legal-footer a:hover { text-decoration:underline; }
+/* tiny helpers used in page */
+.maxw-220{ max-width:220px; }
+.maxw-260{ max-width:260px; }
+.mt-12{ margin-top:12px; }
+.p-12{ padding:12px; }
 
-/* Tiny util the page referenced */
-.maxw-260 { max-width:260px; }
+/* footer polish */
+footer.legal-footer{
+  margin-top:40px; padding:20px; text-align:center; font-size:14px; color:#777;
+}
+footer.legal-footer nav a{ color:#6b7280; text-decoration:none; }
+footer.legal-footer nav a:hover{ text-decoration:underline; }
+
+/* Chart canvases should consume the container height */
+.chart-container canvas{ width:100% !important; height:100% !important; display:block; }
+
+/* Make charts actually render visible height */
+.chart-container canvas{
+  width:100% !important;
+  height:100% !important;
+  display:block;
+}
+
