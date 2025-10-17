@@ -390,10 +390,10 @@ let __toastTimer;
 function toast(msg, ms=2800){
   const t=document.getElementById('toast');
   t.textContent = msg;
-  t.style.display = 'block';
+  t.classList.add('show');
   try { t.focus(); } catch {}
   clearTimeout(__toastTimer);
-  __toastTimer = setTimeout(()=>{ t.style.display='none'; }, ms);
+  __toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, ms);
 }
 
 async function api(path, opts={}) {

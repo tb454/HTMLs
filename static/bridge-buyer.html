@@ -28,7 +28,8 @@
 
   <!-- Toast (live region) -->
   <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
-    <button type="button" class="toast-close" aria-label="Close notification" onclick="this.parentElement.style.display='none'">&times;</button>
+    <button type="button" class="toast-close" aria-label="Close notification">&times;</button>
+
     <span id="toastMsg"></span>
   </div>
 
@@ -64,6 +65,7 @@
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
+      <select id="sortBy" class="form-select form-select-sm" style="width:auto"></select>
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
         <option value="price_per_ton_desc">Price ↓</option>
@@ -111,7 +113,9 @@
       <button class="btn btn-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
       <button class="btn btn-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
       <label class="small text-muted mb-0" for="pageSize">Rows:</label>
+      <select id="pageSize" class="form-select form-select-sm" style="width:auto">
         <option>25</option><option selected>100</option><option>200</option>
+      </select>
       </select>
       <span class="small text-muted" id="pageInfo" aria-live="polite"></span>
     </div>
@@ -130,11 +134,19 @@
       const text = typeof msg === 'string' ? msg : (msg?.message || 'Error');
       if (!wrap || !msgEl){ alert(text); return; }
       msgEl.textContent = text; // safe text only
-      wrap.style.display = 'block';
+      wrap.classList.add('show');
       try{ wrap.focus(); }catch{}
-      setTimeout(()=>{ wrap.style.display = 'none'; }, ms);
+      setTimeout(()=>{ wrap.classList.remove('show'); }, ms);
     }
 
+    // Close toast via delegated click (no inline handlers)
+    document.addEventListener('click', (e)=>{
+      if (e.target && e.target.classList.contains('toast-close')) {
+        const t = e.target.closest('.toast-bridge');
+        if (t) t.classList.remove('show');
+      }
+    });
+    
     let __inflight = new Map();
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;

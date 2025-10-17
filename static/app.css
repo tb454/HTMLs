@@ -26,6 +26,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
   padding:12px 14px; background:#111827; color:#fff; border-radius:10px;
   box-shadow:0 6px 24px rgba(0,0,0,.2); font:14px system-ui; z-index:9999;
 }
+.toast-bridge.show { display:block; }
 
 /* Buyer auth banner (was inline) */
 #authBanner{display:none;border-radius:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffeeba;color:#856404}

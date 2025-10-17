@@ -20,7 +20,7 @@
     function toast(msg, ms=2800){
       const t=document.getElementById('toast'); if(!t){ alert(typeof msg==='string'?msg:(msg?.message||'')); return; }
       t.textContent = (typeof msg==='string'? msg : (msg?.message||''));
-      t.style.display='block'; setTimeout(()=>t.style.display='none', ms);
+      t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), ms);
     }
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
