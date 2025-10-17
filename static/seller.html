@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -10,29 +10,32 @@
   <link rel="icon" href="/static/favicon.ico">
 
   <style>
+    :root { color-scheme: only light; } /* prevent OS dark from flipping controls */
+
+    /* Subtle card and table polish */
+    .table thead.sticky { position: sticky; top: 0; background: #fff; z-index: 3; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+    .table { --bs-table-striped-bg: #fafbfc; }
+    .card, section.section {
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      box-shadow:0 1px 2px rgba(0,0,0,.04);
+    }
+    section.section { padding:20px; margin-bottom:20px; }
     body{font-family:'Roboto',sans-serif;background:#f4f6f8;margin:0;padding:20px;color:#333}
     .container{max-width:100%;margin:auto}
     header.header{background:linear-gradient(90deg,#2c3e50,#34495e);color:#fff;padding:15px 20px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
     header.header h1{font-size:28px;margin:0}
     .user-info{font-size:14px}
-    .user-info button{margin:0 6px;padding:6px 14px;border:none;background:#e74c3c;color:#fff;border-radius:4px;cursor:pointer;transition:background-color .3s}
-    .user-info button:hover{background:#c0392b}
-    section.section{background:#fff;padding:20px;margin-bottom:20px;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,.05)}
     .section-title{font-weight:700;margin-bottom:15px;font-size:20px;border-bottom:3px solid #3498db;padding-bottom:5px;text-transform:uppercase;letter-spacing:1px;color:#3498db}
     .overview-cards{display:flex;gap:15px;flex-wrap:wrap}
     .card-custom{flex:1;min-width:250px;background:#fff;border:1px solid #e1e4e8;border-radius:8px;padding:20px;text-align:center;cursor:pointer;transition:transform .3s,box-shadow .3s;display:flex;flex-direction:column}
     .card-custom:hover{transform:translateY(-3px);box-shadow:0 8px 16px rgba(0,0,0,.1)}
-    table{width:100%;border-collapse:collapse;margin-bottom:10px}
-    thead.sticky{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+    table{width:100%;border-collapse:collapse;margin-bottom:10px}    
     th,td{padding:12px 15px;border-bottom:1px solid #e1e4e8;text-align:left}
     th{background:#f7f7f7;font-weight:500}
     tr:hover{background:#f9f9f9}
     tr.group-header{background:#e9ecef}
-    .action-btn{padding:10px 20px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:15px;transition:.3s}
-    .action-btn:hover{background:#2980b9}
-    .secondary-btn,.danger-btn{padding:6px 12px;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:14px;transition:.3s;margin-right:5px}
-    .secondary-btn{background:#27ae60}.secondary-btn:hover{background:#1e8449}
-    .danger-btn{background:#e74c3c}.danger-btn:hover{background:#c0392b}
     select,input[type="number"],input[type="date"]{margin-right:8px;padding:8px;font-size:14px;border:1px solid #ced4da;border-radius:4px}
     .chart-container{background:#fff;padding:20px;border-radius:8px;border:1px solid #e1e4e8;box-shadow:0 4px 8px rgba(0,0,0,.05)}
     button:disabled{opacity:.6;cursor:not-allowed}
@@ -80,8 +83,8 @@
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span id="current-user">User: Guest</span>
-        <button type="button" onclick="showLoginModal()">Login</button>
-        <button type="button" onclick="doLogout()">Logout</button>
+        <button type="button" class="btn btn-outline-primary btn-sm" onclick="showLoginModal()">Login</button>
+        <button type="button" class="btn btn-outline-danger btn-sm" onclick="doLogout()">Logout</button>
 <script>
   async function doLogout(){
     try { await api('/logout', { method:'POST' }); } catch {}
@@ -90,11 +93,11 @@
   }
 
 </script>
-        <button type="button" onclick="location.href='/static/spec-ferrous.html'">Spec Sheet Ferrous</button>
-        <button type="button" onclick="location.href='/static/spec-nonferrous.html'">Spec Sheet Nonferrous</button>
-        <button type="button" onclick="location.href='/static/shipping-terms.html'">Shipping Terms</button>
-        <button type="button" onclick="location.href='/static/contract-specs.html'">Contract Specs</button>
-        <button type="button" onclick="location.href='/static/mixed-load.html'">Mixed Load</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/spec-ferrous.html'">Spec Sheet Ferrous</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/spec-nonferrous.html'">Spec Sheet Nonferrous</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/shipping-terms.html'">Shipping Terms</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/contract-specs.html'">Contract Specs</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/mixed-load.html'">Mixed Load</button>
         <span id="header-date">—</span>
         <span class="health-badge" data-health-badge>● Checking…</span>
       </div>
@@ -164,7 +167,7 @@
     <section class="section">
       <div class="section-title">Finished Goods Inventory</div>
       <div class="table-responsive">
-        <table id="greenspark-table" class="table">
+        <table id="greenspark-table" class="table table-striped table-hover align-middle">
           <caption class="visually-hidden">Finished goods inventory by SKU</caption>
           <thead class="sticky">
             <tr>
@@ -207,7 +210,7 @@
           <button type="button" class="btn btn-primary w-100" id="uploadInvBtn">Upload</button>
         </div>
         <div class="col-md-3">
-          <a class="btn btn-outline-secondary w-100" href="/inventory/template.csv" download id="dlTemplateBtn">Download CSV template</a>
+          <a class="btn btn-secondary w-100" href="/inventory/template.csv" download id="dlTemplateBtn">Download CSV template</a>
         </div>
       </div>
 
@@ -284,13 +287,13 @@
         <div class="col-md-3"><input id="filterStart" type="date" class="form-control form-control-sm" placeholder="Start (ISO)"></div>
         <div class="col-md-3"><input id="filterEnd" type="date" class="form-control form-control-sm" placeholder="End (ISO)"></div>
        <div class="col-md-3 d-flex gap-2">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="clearFiltersBtn">Clear</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="clearFiltersBtn">Clear</button>
         </div>
       </div>
 
       <div class="table-responsive">
-        <table class="table table-sm" id="sellerContractsTable">
+        <table class="table table-sm table-striped table-hover align-middle" id="sellerContractsTable">
   <caption class="visually-hidden">Contracts list with filters and paging</caption>
           <thead class="sticky">
             <tr>
@@ -302,8 +305,8 @@
       </div>
 
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-outline-secondary btn-sm" id="prevBtn">◀ Prev</button>
-        <button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next ▶</button>
+        <button class="btn btn-secondary btn-sm" id="prevBtn">◀ Prev</button>
+        <button class="btn btn-secondary btn-sm" id="nextBtn">Next ▶</button>
         <span class="small text-muted" id="pageInfo"></span>
       </div>
     </section>
@@ -311,7 +314,7 @@
     <!-- Trade Log (placeholder) -->
     <section class="section">
       <div class="section-title">Trade Log</div>
-      <table id="trade-log-table" class="table">
+      <table id="trade-log-table" class="table table-striped table-hover align-middle">
         <caption class="visually-hidden">Recent trade log</caption>
         <thead class="sticky"><tr><th>Time</th><th>Material</th><th>Quantity (tons)</th><th>Price/ton</th><th>Total Contract Value</th><th>Location</th></tr></thead>
         <tbody></tbody>
@@ -321,7 +324,7 @@
     <!-- Metals Market Overview (static demo) -->
     <section class="section">
       <div class="section-title">Metals Market Overview</div>
-      <table id="metals-market-table" class="table">
+      <table id="metals-market-table" class="table table-striped table-hover align-middle">
         <caption class="visually-hidden">Metals market overview</caption>
         <thead class="sticky"><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
         <tbody>
@@ -392,8 +395,8 @@
           </div>
 
           <div class="modal-footer">
-            <button type="submit" class="action-btn">Login</button>
-            <button type="button" class="secondary-btn" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Login</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           </div>
         </form>
       </div>
@@ -449,7 +452,14 @@ async function api(path, opts={}) {
       if (!res.ok) { let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ m=await res.text()||m; } toast(m); throw new Error(m); }
       return res;
     }
-    window.addEventListener('DOMContentLoaded', async ()=>{ try{ const r=await api('/healthz'); if(r.ok){ const b=document.querySelector('[data-health-badge]'); b.textContent='● Live'; b.setAttribute('data-ok','1'); } }catch{} });
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      try{
+        let ok=false;
+        try { ok = (await api('/healthz')).ok; } catch {}
+        if (!ok) { try { ok = (await api('/health')).ok; } catch {} }
+        if (ok) { const b=document.querySelector('[data-health-badge]'); if(b){ b.textContent='● Live'; b.setAttribute('data-ok','1'); } }
+      } catch {}
+    });
 
     const accentColor = '#3498db';
     // ---- Timezone toggle (UTC vs local) ----

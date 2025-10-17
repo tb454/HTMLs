@@ -1,23 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link rel="icon" href="/static/favicon.ico" />
-  <meta name="color-scheme" content="light dark" />
-  <style>
-    body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}
-    .table-container{background:#fff;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,.1);padding:20px}
+    <style>
+    body{background:#f4f6f8;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;padding:20px}    
     .table th,.table td{vertical-align:middle}
-    .filters{margin-bottom:20px}
-    .signature-pad{border:1px solid #ccc;border-radius:6px;width:100%;height:150px;background:#fff;margin-top:10px}
-    .form-hint{font-size:.85rem;color:#6c757d}
-    .badge-pill{border-radius:50rem;padding:.35em .6em}
+    .filters{margin-bottom:20px}    
+    .form-hint{font-size:.85rem;color:#6c757d}    
     .muted{color:#6c757d}
-    code.small{font-size:.8rem}
-    table thead.sticky{position:sticky;top:0;background:#fff;z-index:2;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+    code.small{font-size:.8rem}    
     .table-scroll{max-height:70vh;overflow:auto;border-radius:10px}
     .skeleton-row td{height:14px;padding:10px}
     .skeleton{display:block;width:100%;height:10px;border-radius:6px;background:linear-gradient(90deg,#eee,#f6f7f8,#eee);background-size:200% 100%;animation:sk 1.1s linear infinite}
@@ -25,6 +20,26 @@
     button:disabled{opacity:.6;cursor:not-allowed}
     .health-badge{font:12px/1 system-ui;color:#6b7280}
     .health-badge[data-ok="1"]{color:#10b981}
+  /* --- Pro dashboard baseline (light only) --- */
+    :root { color-scheme: only light; }
+    body { background:#f5f7fb; }
+    .table-container, .card {
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      box-shadow:0 1px 2px rgba(0,0,0,.04);
+    }
+    .nav-tabs .nav-link { font-weight:600; }
+    .nav-tabs .nav-link.active {
+      background:#fff;
+      border-color:#dee2e6 #dee2e6 #fff;
+    }
+    .table { --bs-table-striped-bg:#fafbfc; }
+    .table thead.sticky { position:sticky; top:0; background:#fff; z-index:3; box-shadow:0 1px 0 rgba(0,0,0,.06); }
+    .badge { font-weight:600; }
+    .rounded-pill { border-radius:50rem!important; }
+    /* Outline buttons feel washed out on white cards */
+    .btn-outline-primary, .btn-outline-secondary { --bs-btn-border-color:#cfd6df; }
   </style>
 
   <script>
@@ -66,7 +81,15 @@
     window.addEventListener('DOMContentLoaded', async () => {
       const el = document.querySelector('[data-health-badge]');
       if (!el) return;
-      async function ping(){ try { await api('/health'); el.textContent='● Live'; el.dataset.ok='1'; } catch { el.textContent='● Degraded'; el.dataset.ok='0'; } }
+      async function ping(){
+        try {
+          try { await api('/health'); }
+          catch { await api('/healthz'); }
+          el.textContent='● Live'; el.dataset.ok='1';
+        } catch {
+          el.textContent='● Degraded'; el.dataset.ok='0';
+        }
+      }
       await ping();
       setInterval(ping, 15000);
     });
@@ -96,15 +119,15 @@
     <div class="tab-content" id="adminTabsContent">
 
       <!-- BR-Indices Controls -->
-      <div class="card" style="padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:10px;">
+      <div class="card p-3 mb-2">
         <div class="d-flex align-items-center justify-content-between">
           <h3 class="m-0">BR-Indices Controls</h3>
           <a class="btn btn-link btn-sm" href="/static/indices.html">Open Indices Dashboard →</a>
         </div>
         <div class="d-flex flex-wrap gap-2 mt-2">
-          <button class="btn btn-outline-secondary btn-sm" id="btnPullRefs">Pull Reference Prices</button>
-          <button class="btn btn-outline-secondary btn-sm" id="btnBuildIndices">Build Today's Indices</button>
-          <button class="btn btn-outline-secondary btn-sm" id="btnRunForecasts">Run Forecasts</button>
+          <button class="btn btn-primary btn-sm" id="btnPullRefs">Pull Reference Prices</button>
+          <button class="btn btn-primary btn-sm" id="btnBuildIndices">Build Today's Indices</button>
+          <button class="btn btn-primary btn-sm" id="btnRunForecasts">Run Forecasts</button>
         </div>
         <div id="idxCtlMsg" class="mt-2 small text-muted"></div>
       </div>
@@ -133,7 +156,7 @@
       </script>
 
 <!-- RFQ (two-click) -->
-<div class="card" style="padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:10px;">
+<div class="card p-3 mb-2">
   <h5 class="m-0 mb-2">Quick RFQ</h5>
   <div class="d-flex gap-2">
     <select id="rfqSym" class="form-select" style="max-width:200px" aria-label="Symbol">
@@ -178,20 +201,20 @@
           <div class="col-md-3"><input type="text" class="form-control" id="buyerFilter" placeholder="Filter by Buyer" /></div>
           <div class="col-md-3"><input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" /></div>
 
-          <div class="col-md-3"><button class="btn btn-outline-primary w-100" onclick="downloadCSV()">📤 Export CSV</button></div>
-          <div class="col-md-3"><button class="btn btn-outline-primary w-100" onclick="downloadAll()">📦 Download All (ZIP)</button></div>
-          <div class="col-md-3"><button class="btn btn-outline-primary w-100" onclick="openOpenAPI()">📜 OpenAPI</button></div>
-          <div class="col-md-3"><button class="btn btn-outline-primary w-100" onclick="openHealth()">🟢 Health</button></div>
+          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="downloadCSV()">📤 Export CSV</button></div>
+          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="downloadAll()">📦 Download All (ZIP)</button></div>
+          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="openOpenAPI()">📜 OpenAPI</button></div>
+          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="openHealth()">🟢 Health</button></div>
         </div>
 
         <div class="d-flex gap-2 mb-2">
-          <button id="adminPrevBtn" class="btn btn-outline-secondary btn-sm">◀ Prev</button>
-          <button id="adminNextBtn" class="btn btn-outline-secondary btn-sm">Next ▶</button>
+          <button id="adminPrevBtn" class="btn btn-secondary btn-sm">◀ Prev</button>
+          <button id="adminNextBtn" class="btn btn-secondary btn-sm">Next ▶</button>
           <span id="adminPageInfo" class="small text-muted"></span>
         </div>
 
         <div class="table-container table-scroll">
-          <table class="table table-bordered table-striped" id="bol-table" aria-busy="false">
+          <table class="table table-striped table-hover align-middle" id="bol-table" aria-busy="false">
             <thead class="table-dark sticky">
               <tr>
                 <th>BOL ID</th>
@@ -291,7 +314,7 @@
                 </div>
               </div>
               <div class="table-scroll">
-                <table class="table table-bordered table-striped" id="series-table" aria-busy="false">
+                <table class="table table-striped table-hover align-middle" id="series-table" aria-busy="false">
                   <thead class="table-dark sticky">
                     <tr>
                       <th>Symbol</th><th>Material</th><th>Month</th><th>Year</th><th>Expiry</th><th>Status</th><th class="text-center">Actions</th>
@@ -313,7 +336,7 @@
                 </div>
               </div>
               <div class="table-scroll">
-                <table class="table table-bordered table-striped" id="marks-table" aria-busy="false">
+                <table class="table table-striped table-hover align-middle" id="marks-table" aria-busy="false">
                   <thead class="table-dark sticky">
                     <tr><th>Symbol</th><th>Contract</th><th>Mark Date</th><th>Mark Price</th><th>Method</th></tr>
                   </thead>
@@ -339,8 +362,8 @@
       <div class="modal-body">
         <div id="logStats" class="small text-muted mb-2"></div>
         <div class="table-scroll" style="max-height:50vh">
-          <table class="table table-sm table-striped">
-            <thead class="sticky"><tr><th>Attempt</th><th>When (UTC)</th><th>Status</th><th>Latency (ms)</th><th>Response</th></tr></thead>
+          <table class="table table-sm table-striped table-hover align-middle">
+            <thead class="table-dark sticky"><tr><th>Attempt</th><th>When (UTC)</th><th>Status</th><th>Latency (ms)</th><th>Response</th></tr></thead>
             <tbody id="logTbody"></tbody>
           </table>
         </div>
@@ -459,12 +482,12 @@
           <td>${formatTime(bol.delivery_time)}</td>
           <td>${money(bol.total_value)}</td>
           <td>
-            <button class="btn btn-sm btn-outline-dark" onclick="downloadPDF('${esc(bol.bol_id)}')">📄 PDF</button>
+            <button class="btn btn-sm btn-dark" onclick="downloadPDF('${esc(bol.bol_id)}')">📄 PDF</button>
             ${hashHtml}
           </td>
           <td>
             <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-secondary" onclick="showDeliveryLog('${esc(bol.bol_id)}')">🚚 Log</button>
+              <button class="btn btn-secondary" onclick="showDeliveryLog('${esc(bol.bol_id)}')">🚚 Log</button>
             </div>
           </td>
         </tr>`;
@@ -611,8 +634,8 @@
         const p = productById[r.product_id] || {};
         const sym = p.symbol_root || '—', mat = p.material || '—';
         const actions = [];
-        if (r.status === "Draft") actions.push(`<button class="btn btn-sm btn-outline-success me-2" onclick="listSeries('${r.id}')">List</button>`);
-        actions.push(`<button class="btn btn-sm btn-outline-primary" onclick="publishMark('${r.id}')">Publish Mark</button>`);
+        if (r.status === "Draft") actions.push(`<button class="btn btn-sm btn-success me-2" onclick="listSeries('${r.id}')">List</button>`);
+        actions.push(`<button class="btn btn-sm btn-primary" onclick="publishMark('${r.id}')">Publish Mark</button>`);
         const tr=document.createElement('tr');
         tr.innerHTML = `
           <td>${sym}</td><td>${mat}</td><td>${r.contract_month}</td><td>${r.contract_year}</td>
@@ -636,7 +659,7 @@
           <td>${contract}</td>
           <td>${r.mark_date}</td>
           <td>${money(r.mark_price)}</td>
-          <td><span class="badge badge-pill ${methodClass}">${r.method}</span></td>
+          <td><span class="badge rounded-pill ${methodClass}">${r.method}</span></td>
         `;
         tbody.appendChild(tr);
       });
@@ -678,7 +701,7 @@
 </script>
 
 <!-- Admin: Quick Billing Tools -->
-<div class="card p-3 mb-3">
+<div class="card p-3 mb-2">
   <div class="d-flex align-items-end gap-2">
     <div>
       <label class="form-label">Invoice ID</label>
