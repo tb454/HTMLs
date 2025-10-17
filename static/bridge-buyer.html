@@ -28,7 +28,7 @@
 
   <!-- Toast (live region) -->
   <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
-    <button type="button" aria-label="Close notification" style="float:right;border:0;background:transparent;font-size:18px;line-height:1;color:#fff" onclick="this.parentElement.style.display='none'">&times;</button>
+    <button type="button" class="toast-close" aria-label="Close notification" onclick="this.parentElement.style.display='none'">&times;</button>
     <span id="toastMsg"></span>
   </div>
 
@@ -64,7 +64,6 @@
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
-      <select id="sortBy" class="form-select form-select-sm" style="width:auto">
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
         <option value="price_per_ton_desc">Price ↓</option>
@@ -112,7 +111,6 @@
       <button class="btn btn-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
       <button class="btn btn-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
       <label class="small text-muted mb-0" for="pageSize">Rows:</label>
-      <select id="pageSize" class="form-select form-select-sm" style="width:auto">
         <option>25</option><option selected>100</option><option>200</option>
       </select>
       <span class="small text-muted" id="pageInfo" aria-live="polite"></span>

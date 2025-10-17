@@ -156,3 +156,8 @@ footer.legal-footer{
 footer.legal-footer a{ color:#0f62fe; text-decoration:none; }
 footer.legal-footer a:hover{ text-decoration:underline; }
 footer .sep{ color:#cbd5e1; margin:0 .45rem; }
+
+.toast-close{
+  float:right; border:0; background:transparent;
+  font-size:18px; line-height:1; color:#fff;
+}
