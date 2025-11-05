@@ -133,7 +133,7 @@
     }
   </style>
 
-   <script>
+   <script nonce="{{NONCE}}"
     // Unified API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
@@ -375,7 +375,7 @@
     </footer>
   </div>
 
-  <script>
+  <script nonce="{{NONCE}}"
 
     // Health badge
   (async ()=>{
@@ -429,7 +429,7 @@
       }catch{}
     })();    
     </script>
-  <script>
+  <script nonce="{{NONCE}}"
     
   // ---- Payment Method flow (Stripe Checkout in setup mode) ----    
   async function pmStatus(member){

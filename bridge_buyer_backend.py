@@ -583,8 +583,55 @@ async def csrf_protect(
 @app.middleware("http")
 async def nonce_mint_mw(request: Request, call_next):
     # Per-request CSP nonce used for <script nonce> and (optionally) <style nonce>
-    request.state.csp_nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     return await call_next(request)
+# ---- Nonce injector (HTML) ----
+import re
+from starlette.responses import Response
+
+# precompile once
+_RE_SCRIPT_MISSING_NONCE = re.compile(r'<script(?![^>]*\bnonce=)', re.IGNORECASE)
+
+@app.middleware("http")
+async def inject_nonce_attr(request: Request, call_next):
+    """
+    For text/html responses:
+      1) Replace {{NONCE}} with request.state.csp_nonce
+      2) Add nonce="..." to any <script> tag missing it (inline or external)
+    """
+    resp = await call_next(request)
+
+    ctype = resp.headers.get("content-type", "")
+    # only touch small-ish HTML responses (skip JSON, files, etc.)
+    if "text/html" not in ctype.lower():
+        return resp
+
+    # Pull the full body (works for FileResponse/StreamingResponse too)
+    body_bytes = b""
+    async for chunk in resp.body_iterator:
+        body_bytes += chunk
+
+    try:
+        html = body_bytes.decode(resp.charset or "utf-8", errors="ignore")
+    except Exception:
+        # If decoding fails, send original
+        return Response(content=body_bytes, status_code=resp.status_code, headers=dict(resp.headers), media_type=resp.media_type)
+
+    nonce = getattr(request.state, "csp_nonce", "")
+    if nonce:
+        # 1) Replace template placeholders if present
+        if "{{NONCE}}" in html:
+            html = html.replace("{{NONCE}}", nonce)
+
+        # 2) Inject nonce on any <script> missing it
+        #    <script …>  ->  <script nonce="…"
+        html = _RE_SCRIPT_MISSING_NONCE.sub(f'<script nonce="{nonce}"', html)
+
+    # Rebuild response (preserve headers minus stale content-length)
+    headers = dict(resp.headers)
+    headers.pop("content-length", None)
+    return Response(content=html, status_code=resp.status_code, headers=headers, media_type=resp.media_type)
+# ---- /Nonce injector ----
 
 # ===== Security headers =====
 async def security_headers_mw(request, call_next):
@@ -606,7 +653,7 @@ async def security_headers_mw(request, call_next):
         "style-src-attr 'none'; "
         "script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com"
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
     ).format(nonce=getattr(request.state, "csp_nonce", ""))
     return resp
 
@@ -1802,7 +1849,7 @@ async def dpa_page():
 @app.get("/legal/sla", include_in_schema=True, tags=["Legal"],
          summary="Service Level Addendum (SLA)",
          description="View the BRidge Service Level Addendum.", status_code=200)
-@app.get("/legal/sla", include_in_schema=False)
+@app.get("/legal/sla.html", include_in_schema=False)
 async def sla_page():
     return FileResponse("static/legal/sla.html")
 
@@ -1810,7 +1857,7 @@ async def sla_page():
 @app.get("/legal/security", include_in_schema=True, tags=["Legal"],
          summary="Security Controls Overview",
          description="View the BRidge Security Controls Overview / Security Whitepaper.", status_code=200)
-@app.get("/legal/security", include_in_schema=False)
+@app.get("/legal/security.html", include_in_schema=False)
 async def security_page():
     return FileResponse("static/legal/security.html")
 
@@ -1818,7 +1865,7 @@ async def security_page():
 @app.get("/legal/privacy-appendix", include_in_schema=True, tags=["Legal"],
          summary="Jurisdictional Privacy Appendix (APAC & Canada)",
          description="View region-specific privacy disclosures for APAC & Canada.", status_code=200)
-@app.get("/legal/privacy-appendix", include_in_schema=False)
+@app.get("/legal/privacy-appendix.html", include_in_schema=False)
 async def privacy_appendix_page():
     return FileResponse("static/legal/privacy-appendix.html")
 # -------- Legal pages --------
@@ -1910,7 +1957,7 @@ with open("static/bridge-admin-dashboard.html", "r", encoding="utf-8") as f:
 
 @app.get("/buyer", include_in_schema=False)
 async def buyer_page_dynamic(request: Request):
-    nonce = secrets.token_urlsafe(16)
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     html = _BUYER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
 
     # CSRF tied to session; expose via readable cookie for JS
@@ -1926,7 +1973,7 @@ async def buyer_page_dynamic(request: Request):
         "style-src-attr 'none'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
         "form-action 'self'"
     )
     resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
@@ -1952,7 +1999,7 @@ async def admin_page(request: Request):
         "style-src-attr 'none'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
         "form-action 'self'"
     )
     resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
@@ -1976,7 +2023,7 @@ async def seller_page(request: Request):
         "style-src-attr 'none'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
         "form-action 'self'"
     )
     resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})

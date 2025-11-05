@@ -11,8 +11,8 @@
   <link rel="icon" href="/static/favicon.ico">
   <script defer nonce="{{NONCE}}" src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- Gate by role early (session-probed) -->
-<script>
+<!-- Gate by role early (session-probed) -->
+<script nonce="{{NONCE}}">
   (async () => {
     try {
       // optional: warm cookies
@@ -48,21 +48,29 @@
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span id="current-user">User: Guest</span>
-        <button type="button" class="btn btn-outline-primary btn-sm" onclick="showLoginModal()">Login</button>
-        <button type="button" class="btn btn-outline-danger btn-sm" onclick="doLogout()">Logout</button>
-<script>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btnLogin">Login</button>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="btnLogout">Logout</button>
+
+<script nonce="{{NONCE}}">
+(async function(){
   async function doLogout(){
     try { await api('/logout', { method:'POST' }); } catch {}
     localStorage.removeItem('bridgeUser');
     location.href='/static/bridge-login.html';
   }
+  Object.assign(window, { doLogout, showLoginModal });
 
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('btnLogin')?.addEventListener('click', (e)=>{ e.preventDefault(); showLoginModal(); });
+    document.getElementById('btnLogout')?.addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
+  });
+})();
 </script>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/spec-ferrous.html'">Spec Sheet Ferrous</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/spec-nonferrous.html'">Spec Sheet Nonferrous</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/shipping-terms.html'">Shipping Terms</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/contract-specs.html'">Contract Specs</button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.href='/static/mixed-load.html'">Mixed Load</button>
+        <a class="btn btn-secondary btn-sm" href="/static/spec-ferrous.html">Spec Sheet Ferrous</a>
+        <a class="btn btn-secondary btn-sm" href="/static/spec-nonferrous.html">Spec Sheet Nonferrous</a>
+        <a class="btn btn-secondary btn-sm" href="/static/shipping-terms.html">Shipping Terms</a>
+        <a class="btn btn-secondary btn-sm" href="/static/contract-specs.html">Contract Specs</a>
+        <a class="btn btn-secondary btn-sm" href="/static/mixed-load.html">Mixed Load</a>
         <span id="header-date">—</span>
         <span class="health-badge" data-health-badge>● Checking…</span>
       </div>
@@ -341,7 +349,7 @@
                 required
                 autocomplete="username"
                 inputmode="email"
-                enterkeyhint="go">
+                enterkeyhint="go" />
             </div>
 
             <div class="mb-3">
@@ -353,7 +361,7 @@
                 class="form-control"
                 required
                 autocomplete="current-password"
-                enterkeyhint="done">
+                enterkeyhint="done" />
             </div>
 
             <div id="login-error" class="text-danger small" role="alert" aria-live="polite"></div>
@@ -377,7 +385,7 @@
     crossorigin="anonymous"
   ></script>
 
-  <script>
+  <script nonce="{{NONCE}}">
     // endpoint + api + toast + health
     const ORIGIN = location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin;
     function _cookie(name){
@@ -869,7 +877,7 @@ async function api(path, opts={}) {
     });
 
   </script>
-  <script>
+  <script nonce="{{NONCE}}">
     document.addEventListener('DOMContentLoaded', ()=>{
       const btn = document.getElementById('rfqGo');
       if(!btn) return;

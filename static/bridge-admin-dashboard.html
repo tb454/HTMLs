@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="/static/favicon.ico" />
     
-  <script>
+  <script nonce="{{NONCE}}">
     // Single source of truth for API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
@@ -98,7 +98,7 @@
         <div id="idxCtlMsg" class="mt-2 small text-muted"></div>
       </div>
 
-      <script>
+      <script nonce="{{NONCE}}">
         async function postJSON(url, body){
           const r = await api(url, { method:'POST', headers: body? {'Content-Type':'application/json'}:undefined, body: body? JSON.stringify(body): undefined });
           return r.json().catch(()=> ({}));
@@ -138,7 +138,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{NONCE}}">
   (function(){
     const btn = document.getElementById('rfqGo');
     if(!btn) return;
@@ -167,10 +167,18 @@
           <div class="col-md-3"><input type="text" class="form-control" id="buyerFilter" placeholder="Filter by Buyer" /></div>
           <div class="col-md-3"><input type="text" class="form-control" id="materialFilter" placeholder="Filter by Material/SKU (e.g., SHRED)" /></div>
 
-          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="downloadCSV()">📤 Export CSV</button></div>
-          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="downloadAll()">📦 Download All (ZIP)</button></div>
-          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="openOpenAPI()">📜 OpenAPI</button></div>
-          <div class="col-md-3"><button class="btn btn-secondary w-100" onclick="openHealth()">🟢 Health</button></div>
+          <div class="col-md-3">
+            <button class="btn btn-secondary w-100" data-call="downloadCSV">📤 Export CSV</button>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-secondary w-100" data-call="downloadAll">📦 Download All (ZIP)</button>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-secondary w-100" data-call="openOpenAPI">📜 OpenAPI</button>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-secondary w-100" data-call="openHealth">🟢 Health</button>
+          </div>
         </div>
 
         <div class="d-flex gap-2 mb-2">
@@ -208,7 +216,7 @@
           <div class="col-lg-6">
             <div class="table-container">
               <h5 class="mb-3">Create Product</h5>
-              <form id="productForm" onsubmit="event.preventDefault(); createProduct(this);">
+              <form id="productForm">
                 <div class="row g-3">
                   <div class="col-md-4"><label class="form-label">Symbol Root</label><input name="symbol_root" class="form-control" placeholder="HMS" required /></div>
                   <div class="col-md-8"><label class="form-label">Material</label><input name="material" class="form-control" placeholder="Shred Steel" required /></div>
@@ -235,7 +243,7 @@
           <div class="col-lg-6">
             <div class="table-container">
               <h5 class="mb-3">Pricing Params</h5>
-              <form id="pricingForm" onsubmit="event.preventDefault(); submitPricing();">
+              <form id="pricingForm">
                 <div class="row g-3">
                   <div class="col-md-5"><label class="form-label">Product (Symbol Root)</label><select id="pricingSymbol" class="form-select" required></select></div>
                   <div class="col-md-3"><label class="form-label">Lookback (days)</label><input id="pricingLookback" type="number" class="form-control" value="14" /></div>
@@ -252,7 +260,7 @@
           <div class="col-lg-6">
             <div class="table-container">
               <h5 class="mb-3">Generate Series (12 months)</h5>
-              <form id="seriesForm" onsubmit="event.preventDefault(); submitGenerateSeries();">
+              <form id="seriesForm">
                 <div class="row g-3">
                   <div class="col-md-6"><label class="form-label">Product</label><select id="seriesProduct" class="form-select" required></select></div>
                   <div class="col-md-3"><label class="form-label">Expiry Day</label><input id="seriesDay" type="number" min="1" max="28" class="form-control" value="15" /></div>
@@ -276,7 +284,7 @@
                     <option value="">(all statuses)</option>
                     <option>Draft</option><option>Listed</option><option>Halted</option><option>Expired</option>
                   </select>
-                  <button class="btn btn-outline-secondary btn-sm" onclick="refreshSeries()">Refresh</button>
+                  <button class="btn btn-outline-secondary btn-sm" data-call="refreshSeries">Refresh</button>
                 </div>
               </div>
               <div class="table-scroll">
@@ -298,7 +306,7 @@
               <div class="d-flex align-items-center justify-content-between">
                 <h5 class="mb-3">Recent Marks</h5>
                 <div class="d-flex gap-2">
-                  <button class="btn btn-outline-secondary btn-sm" onclick="refreshMarks()">Refresh</button>
+                  <button class="btn btn-outline-secondary btn-sm" data-call="refreshMarks">Refresh</button>
                 </div>
               </div>
               <div class="table-scroll">
@@ -344,13 +352,14 @@
   </div>
 
   <script
+    nonce="{{NONCE}}"
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
     defer
     integrity="sha384-ENjdO4Dr2bkBIFxQpeoTz1HIcje39Wm4jDKdf19U8Y5nUj0v+0U5r2Xq5PW9KSkP"
     crossorigin="anonymous"
   ></script>
 
-  <script>
+  <script nonce="{{NONCE}}">
     // ----- helpers -----
     async function fetchJSON(url, opts){ const r = await api(url, opts||{}); return r.json(); }
     function statusColor(s){ return {Open:'secondary',Matched:'info','BOL Issued':'primary','In Transit':'warning',Delivered:'success',Closed:'dark'}[s] || 'light'; }
@@ -448,12 +457,12 @@
           <td>${formatTime(bol.delivery_time)}</td>
           <td>${money(bol.total_value)}</td>
           <td>
-            <button class="btn btn-sm btn-dark" onclick="downloadPDF('${esc(bol.bol_id)}')">📄 PDF</button>
+            <button class="btn btn-sm btn-dark" data-call="downloadPDF" data-bol-id="${esc(bol.bol_id)}">📄 PDF</button>
             ${hashHtml}
           </td>
           <td>
             <div class="btn-group btn-group-sm">
-              <button class="btn btn-secondary" onclick="showDeliveryLog('${esc(bol.bol_id)}')">🚚 Log</button>
+              <button class="btn btn-secondary" data-call="showDeliveryLog" data-bol-id="${esc(bol.bol_id)}">🚚 Log</button>
             </div>
           </td>
         </tr>`;
@@ -600,8 +609,8 @@
         const p = productById[r.product_id] || {};
         const sym = p.symbol_root || '—', mat = p.material || '—';
         const actions = [];
-        if (r.status === "Draft") actions.push(`<button class="btn btn-sm btn-success me-2" onclick="listSeries('${r.id}')">List</button>`);
-        actions.push(`<button class="btn btn-sm btn-primary" onclick="publishMark('${r.id}')">Publish Mark</button>`);
+        if (r.status === "Draft") actions.push(`<button class="btn btn-sm btn-success me-2" data-call="listSeries" data-listing-id="${r.id}">List</button>`);
+        actions.push(`<button class="btn btn-sm btn-primary" data-call="publishMark" data-listing-id="${r.id}">Publish Mark</button>`);
         const tr=document.createElement('tr');
         tr.innerHTML = `
           <td>${sym}</td><td>${mat}</td><td>${r.contract_month}</td><td>${r.contract_year}</td>
@@ -641,9 +650,32 @@
       else { await refreshSeries(); await refreshMarks(); }
     });
   </script>
+  <script nonce="{{NONCE}}">
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('productForm')?.addEventListener('submit', (e)=>{ 
+      e.preventDefault(); 
+      createProduct(e.currentTarget); 
+    });
+    document.getElementById('pricingForm')?.addEventListener('submit', (e)=>{ 
+      e.preventDefault(); 
+      submitPricing(); 
+    });
+    document.getElementById('seriesForm')?.addEventListener('submit', (e)=>{ 
+      e.preventDefault(); 
+      submitGenerateSeries(); 
+    });
+  });
+  </script>
+  <script nonce="{{NONCE}}">
+Object.assign(window, {
+  downloadCSV, downloadAll, openOpenAPI, openHealth,
+  downloadPDF, showDeliveryLog, listSeries, publishMark
+});
+</script>
+
 <div id="tape"></div>
 
-<script>
+<script nonce="{{NONCE}}">
 (function tapeWS(){
   const tape = document.getElementById('tape');
   let backoff = 1000;
@@ -683,7 +715,7 @@
   <div class="form-hint mt-2">Charges the stored default payment method off-session, or opens a Stripe setup session to update the PM.</div>
 </div>
 
-<script>
+<script nonce="{{NONCE}}">
   document.getElementById('adm_bill_now').addEventListener('click', async ()=>{
     const invoice_id = document.getElementById('adm_invoice_id').value.trim();
     if(!invoice_id){ return toast('Enter an invoice id'); }
@@ -732,5 +764,18 @@
     <div><a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a></div>
     <div class="mt-2">&copy; 2025 BRidge Technologies. All rights reserved.</div>
   </footer>
+  <script nonce="{{NONCE}}">
+  document.addEventListener('DOMContentLoaded', () => {
+    document.body.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-call]');
+      if (!el) return;
+      const fnName = el.dataset.call;
+      const fn = window[fnName];
+      if (typeof fn !== 'function') return;
+      e.preventDefault();
+      fn(el.dataset.bolId || el.dataset.listingId || e);
+    });
+  });
+</script>
 </body>
 </html>

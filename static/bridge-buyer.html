@@ -65,12 +65,13 @@
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
-      <select id="sortBy" class="form-select form-select-sm" style="width:auto"></select>
+      <select id="sortBy" class="form-select form-select-sm" style="width:auto">
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
         <option value="price_per_ton_desc">Price ↓</option>
         <option value="weight_tons_desc">Tons ↓</option>
       </select>
+
       <div class="small text-muted ms-auto" id="unitBadge">
         Units: US short tons • Currency: USD
       </div>

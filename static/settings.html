@@ -9,7 +9,7 @@
   <div class="form-hint mt-1">We support ACH (US bank) and credit/debit cards. Changes take effect immediately.</div>
 </div>
 
-<script>
+<script nonce="{{NONCE}}"
   const member = new URLSearchParams(location.search).get('member') || localStorage.getItem('member_key') || '';
 
   async function loadPm(){

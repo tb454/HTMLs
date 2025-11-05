@@ -96,7 +96,7 @@
     <p class="muted">© Atlas IP Holdings LLC · BRidge™</p>
   </div>
 
-  <script>
+  <script nonce="{{NONCE}}"
     // Auto "Effective: Month YYYY"
     (function(){
       const s = new Date().toLocaleString(undefined, { month:'long', year:'numeric' });

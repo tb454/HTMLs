@@ -229,7 +229,7 @@
   </style>
   
   <!-- Material Arrays and Pricing Formulas -->
-  <script>
+  <script nonce="{{NONCE}}"
     // ----------------------------
     // Material Name Arrays
     // ----------------------------
@@ -861,7 +861,7 @@ async function closeContract(contractId) {
   </script>
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator -->
-  <script>
+  <script nonce="{{NONCE}}"
     const scrapMaterialCodes = {
       copper: {
         "CUB": "Barley (Cu BB)",
@@ -1325,7 +1325,7 @@ async function closeContract(contractId) {
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <!-- Main Application Script -->
-  <script>
+  <script nonce="{{NONCE}}"
     // Accent color for charts
     const accentColor = '#3498db';
     document.querySelectorAll('.section-title').forEach(el => {
@@ -1524,7 +1524,7 @@ async function closeContract(contractId) {
   </script>
   
   <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
-  <script>
+  <script nonce="{{NONCE}}"
     document.addEventListener('DOMContentLoaded', () => {
       // Update Greenspark inventory every 5 minutes (300000 ms)
       setInterval(updateInventoryIncrementally, 300000);
@@ -1638,7 +1638,7 @@ document.addEventListener("DOMContentLoaded", () => {
   </script>
   
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
-  <script>
+  <script nonce="{{NONCE}}"
     function normalizeString(str) {
       return str.toLowerCase().replace(/[\s_]+/g, "");
     }
@@ -1674,7 +1674,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
-  <script>
+  <script nonce="{{NONCE}}"
     async function fetchAnalytics() {
       try {
         // Call your analytics endpoint on your backend
@@ -1698,7 +1698,7 @@ document.addEventListener("DOMContentLoaded", () => {
       fetchAnalytics();
     });
   </script>
- <script>
+ <script nonce="{{NONCE}}"
   // Establish a WebSocket connection to the FastAPI backend.
   const socket = new WebSocket("ws://localhost:8000/ws/futures");
 
@@ -1729,7 +1729,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Optionally implement reconnection logic here.
   };
 </script>
-<script>
+<script nonce="{{NONCE}}"
   // Helper function to set up headers for authenticated requests
   function getAuthHeaders() {
     const token = localStorage.getItem("access_token");
@@ -2065,7 +2065,7 @@ document.addEventListener("DOMContentLoaded", () => {
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </script>
-<script>
+<script nonce="{{NONCE}}"
   // Function to show the login modal (using Bootstrap)
   function showLoginModal() {
     const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
@@ -2112,7 +2112,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loginUser(username, password);
   });
 </script>
-<script>
+<script nonce="{{NONCE}}"
   async function updateInventoryFromAPI() {
     try {
       const token = localStorage.getItem("access_token");
