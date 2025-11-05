@@ -10,13 +10,23 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="icon" href="/static/favicon.ico">
   <script defer nonce="{{NONCE}}" src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script nonce="{{NONCE}}">
+  // run now if DOM is ready, else when DOMContentLoaded fires
+  function onReady(fn){
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn);
+    } else {
+      try { fn(); } catch(e){ console.error(e); }
+    }
+  }
+</script>
 
 <!-- Gate by role early (session-probed) -->
 <script nonce="{{NONCE}}">
   (async () => {
     try {
       // optional: warm cookies
-      await fetch('/healthz', { credentials: 'include' });
+      await fetch('/health', { credentials: 'include' });
       const r = await fetch('/me', { credentials: 'include', headers: { 'Accept': 'application/json' }});
       if (!r.ok) throw new Error('no session');
       const me = await r.json(); // expect: { username, role }
@@ -26,7 +36,7 @@
         return;
       }
       // UI role gates
-      document.addEventListener('DOMContentLoaded', () => {
+      onReady(() => {
         const role = (me.role||'').toLowerCase();
         const userEl = document.getElementById('current-user');
         if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
@@ -60,7 +70,7 @@
   }
   Object.assign(window, { doLogout, showLoginModal });
 
-  document.addEventListener('DOMContentLoaded', () => {
+  onReady(() => {
     document.getElementById('btnLogin')?.addEventListener('click', (e)=>{ e.preventDefault(); showLoginModal(); });
     document.getElementById('btnLogout')?.addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
   });
@@ -403,26 +413,37 @@ function toast(msg, ms=2800){
   __toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, ms);
 }
 
-async function api(path, opts={}) {
+async function api(path, opt = {}) {
   const url = path.startsWith('http') ? path : `${ORIGIN}${path}`;
-  const res = await fetch(url, {
-    credentials: 'include',
-    ...opts,
-    headers:{ 'Accept':'application/json', 'X-CSRF': _cookie('XSRF-TOKEN'), ...(opts.headers||{}) }
-  });
+  const method = (opt.method || 'GET').toUpperCase();
+  const headers = { 'Accept':'application/json', ...(opt.headers || {}) };
+  // add CSRF header only for unsafe methods
+  if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
+    headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
+  }
+  const res = await fetch(url, { credentials:'include', ...opt, headers });
+  if (res.status === 401) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.href = `/static/bridge-login.html?next=${next}`;
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) {
+    let m = 'Request failed';
+    try { m = (await res.clone().json()).detail || m; }
+    catch { m = await res.text() || m; }
+    toast(m); throw new Error(m);
+  }
+  return res;
+}
 
-      if (res.status === 401) { const next = encodeURIComponent(location.pathname + location.search); location.href = `/static/bridge-login.html?next=${next}`; throw new Error('Unauthorized'); }
-      if (!res.ok) { let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ m=await res.text()||m; } toast(m); throw new Error(m); }
-      return res;
-    }
-    window.addEventListener('DOMContentLoaded', async ()=>{
-      try{
-        let ok=false;
-        try { ok = (await api('/healthz')).ok; } catch {}
-        if (!ok) { try { ok = (await api('/health')).ok; } catch {} }
-        if (ok) { const b=document.querySelector('[data-health-badge]'); if(b){ b.textContent='● Live'; b.setAttribute('data-ok','1'); } }
-      } catch {}
-    });
+onReady(async () => {
+  try {
+    // sets XSRF-TOKEN cookie for the SPA
+    await fetch('/health', { credentials:'include' });
+    const b = document.querySelector('[data-health-badge]');
+    if (b) { b.textContent='● Live'; b.setAttribute('data-ok','1'); }
+  } catch {}
+});
 
     const accentColor = '#3498db';
     // ---- Timezone toggle (UTC vs local) ----
@@ -452,7 +473,7 @@ async function api(path, opts={}) {
         _renderTZHintSeller();
       };
     }
-    document.addEventListener('DOMContentLoaded', _renderTZHintSeller);
+    onReady(_renderTZHintSeller);
 // ---- /Timezone toggle ----
 
     document.querySelectorAll('.section-title').forEach(el => { el.style.borderColor = accentColor; el.style.color = accentColor; });
@@ -462,7 +483,7 @@ async function api(path, opts={}) {
     let finishedGoodsChartLabels = [], finishedGoodsChartData = [];
     let kpiChartLabels = [], kpiChartData = [];
 
-            document.addEventListener('DOMContentLoaded', () => {
+            onReady(() => {
       // ensure buttons are wired:
       try { wireSellerUI(); } catch {}
 
@@ -510,7 +531,7 @@ async function api(path, opts={}) {
     });
 
     // Pricing widget
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       const btn = document.getElementById('btnQuote');
       if (!btn) return;
       btn.onclick = async () => {
@@ -827,7 +848,7 @@ async function api(path, opts={}) {
       refreshFinishedFromInputs();
     }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        onReady(() => {
       const userEl = document.getElementById("current-user");
       const sellerEl = document.getElementById("sellerName");
       if (userEl && sellerEl) {
@@ -850,7 +871,11 @@ async function api(path, opts={}) {
 
     // Login modal + focus restore
     let loginTriggerBtn = null;
-    function showLoginModal() {
+    async function showLoginModal() {
+      if (!(window.bootstrap && bootstrap.Modal)) {
+        // allow deferred bootstrap bundle to finish if user clicks instantly
+        await new Promise(r => setTimeout(r, 0));
+      }
       loginTriggerBtn = document.activeElement;
       const modalEl = document.getElementById('loginModal');
       const modal = new bootstrap.Modal(modalEl, { focus:true, backdrop:'static', keyboard:false });
@@ -878,7 +903,7 @@ async function api(path, opts={}) {
 
   </script>
   <script nonce="{{NONCE}}">
-    document.addEventListener('DOMContentLoaded', ()=>{
+    onReady(() => {
       const btn = document.getElementById('rfqGo');
       if(!btn) return;
       btn.onclick = async ()=>{

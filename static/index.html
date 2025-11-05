@@ -852,7 +852,7 @@ async function closeContract(contractId) {
       alert('Creating FUTURES contract for ' + material + ' (' + contractName + ')');
     }
     
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
@@ -1345,7 +1345,7 @@ async function closeContract(contractId) {
     let kpiChartData = [];
   
     // Initialize charts once DOM is loaded
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       // Active Contracts Chart
       const activeContractsCanvas = document.getElementById('activeContractsChart');
       if(activeContractsCanvas) {
@@ -1515,7 +1515,7 @@ async function closeContract(contractId) {
       // Roll: prompt for a new expiration date and update the contract row.
     }
     
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       populateTradeMaterialDropdown();
       updateTradeOptions();
       updateGroupedComputedMaterialsInventory();
@@ -1525,7 +1525,7 @@ async function closeContract(contractId) {
   
   <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       // Update Greenspark inventory every 5 minutes (300000 ms)
       setInterval(updateInventoryIncrementally, 300000);
       
@@ -1694,7 +1694,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   
     // Call fetchAnalytics when the DOM is fully loaded
-    document.addEventListener('DOMContentLoaded', () => {
+    onReady(() => {
       fetchAnalytics();
     });
   </script>
