@@ -1893,6 +1893,33 @@ async def _ensure_qbo_oauth_events_table():
 
 # -------- Static HTML --------
 app.mount("/static", StaticFiles(directory="static"), name="static")
+from pathlib import Path
+STATIC_DIR = Path(__file__).parent.resolve() / "static"
+
+def _static_or_placeholder(filename: str, title: str):
+    p = STATIC_DIR / filename
+    if not p.exists():
+        return HTMLResponse(
+            f"<h1>{title}</h1><p>Upload <code>/static/{filename}</code> to replace this placeholder.</p>"
+        )
+    return FileResponse(str(p))
+# Ferrous
+@app.get("/static/spec-ferrous", include_in_schema=False)
+@app.get("/static/spec-ferrous.html", include_in_schema=False)
+async def _spec_ferrous():
+    return _static_or_placeholder("spec-ferrous.html", "Ferrous Spec Sheet")
+
+# Nonferrous
+@app.get("/static/spec-nonferrous", include_in_schema=False)
+@app.get("/static/spec-nonferrous.html", include_in_schema=False)
+async def _spec_nonferrous():
+    return _static_or_placeholder("spec-nonferrous.html", "Nonferrous Spec Sheet")
+
+# Contract specs
+@app.get("/static/contract-specs", include_in_schema=False)
+@app.get("/static/contract-specs.html", include_in_schema=False)
+async def _contract_specs():
+    return _static_or_placeholder("contract-specs.html", "Contract Specifications")
 
 @app.get("/", include_in_schema=False)
 async def root(request: Request):
@@ -2014,18 +2041,6 @@ async def yard_alias_slash():
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
-
-@app.get("/static/spec-ferrous", include_in_schema=False)
-async def _spec_ferrous_alias():
-    return FileResponse("static/spec-ferrous.html")
-
-@app.get("/static/spec-nonferrous", include_in_schema=False)
-async def _spec_nonferrous_alias():
-    return FileResponse("static/spec-nonferrous.html")
-
-@app.get("/static/contract-specs", include_in_schema=False)
-async def _contract_specs_alias():
-    return FileResponse("static/contract-specs.html")
 
 # -------- Risk controls (kill switch, price bands, entitlements) --------
 @app.on_event("startup")
@@ -3322,16 +3337,11 @@ async def compliance_member_set(username: str, kyc: bool=False, aml: bool=False,
     return {"ok": True, "user": username}
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
 
-# ======= fee schedule ========================      
-@app.get("/fees", tags=["Legal"], summary="BRidge Fee Schedule")
-async def fees_doc():
-    pdf_path = Path("static/legal/bridge_fee_schedule.pdf")
-    html_path = Path("static/legal/bridge_fee_schedule.html")
-    if pdf_path.exists():
-        return FileResponse(str(pdf_path))
-    if html_path.exists():
-        return FileResponse(str(html_path))
-    return HTMLResponse("<h1>BRidge Fee Schedule</h1><p>Document not yet published.</p>")
+# # ======= fee schedule ========================      
+@app.get("/legal/fees", tags=["Legal"], summary="BRidge Fee Schedule")
+async def fees_doc_alias():
+    # Use the shared static-or-placeholder helper to serve the fees page
+    return _static_or_placeholder("legal/fees.html", "BRidge Fee Schedule")
 # ======= fee schedule ========================
 
 # ======= Member plan ========================
