@@ -68,7 +68,7 @@
     localStorage.removeItem('bridgeUser');
     location.href='/static/bridge-login.html';
   }
-  Object.assign(window, { doLogout, showLoginModal });
+  Object.assign(window, { doLogout });
 
   onReady(() => {
     document.getElementById('btnLogin')?.addEventListener('click', (e)=>{ e.preventDefault(); showLoginModal(); });
@@ -390,6 +390,7 @@
 
   <script
     defer
+    nonce="{{NONCE}}"
     src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
     integrity="sha384-ENjdO4Dr2bkBIFxQpeoTz1HIcje39Wm4jDKdf19U8Y5nUj0v+0U5r2Xq5PW9KSkP"
     crossorigin="anonymous"
