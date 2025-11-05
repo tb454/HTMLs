@@ -91,7 +91,9 @@
     </ul>
 
     <h2>5. Payment</h2>
-    <p>Billing is processed via Stripe (ACH & cards). Invoices are generated at the start of each billing cycle and due within 5 calendar days.</p>
+    <p>Billing is processed via Stripe (ACH & cards).
+    <strong>Subscriptions:</strong> plans renew automatically each cycle and the default payment method on file is charged.
+    <strong>Manual invoicing (if enabled):</strong> invoices are emailed at cycle start and due within 5 calendar days.</p>  
 
     <p class="muted">© Atlas IP Holdings LLC · BRidge™</p>
   </div>
@@ -120,14 +122,6 @@
           }
         });
 
-        document.querySelectorAll('[data-meter]').forEach(tr=>{
-          const ev = tr.getAttribute('data-meter');
-          const rate = data?.meters?.[ev];
-          if(rate!=null){
-            const cell = tr.querySelector('td:nth-child(2)');
-            if(cell) cell.textContent = fmt.format(Number(rate));
-          }
-        });
       }catch(e){ /* silent fallback */ }
     })();
   </script>

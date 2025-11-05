@@ -2015,6 +2015,18 @@ async def yard_alias_slash():
 async def favicon():
     return Response(status_code=204)
 
+@app.get("/static/spec-ferrous", include_in_schema=False)
+async def _spec_ferrous_alias():
+    return FileResponse("static/spec-ferrous.html")
+
+@app.get("/static/spec-nonferrous", include_in_schema=False)
+async def _spec_nonferrous_alias():
+    return FileResponse("static/spec-nonferrous.html")
+
+@app.get("/static/contract-specs", include_in_schema=False)
+async def _contract_specs_alias():
+    return FileResponse("static/contract-specs.html")
+
 # -------- Risk controls (kill switch, price bands, entitlements) --------
 @app.on_event("startup")
 async def _ensure_risk_schema():
