@@ -580,82 +580,44 @@ async def csrf_protect(
         raise HTTPException(status_code=401, detail="bad csrf")
 # ---- CSRF helpers ----
 
+# ---- Security headers ----
 @app.middleware("http")
 async def nonce_mint_mw(request: Request, call_next):
     # Per-request CSP nonce used for <script nonce> and (optionally) <style nonce>
     request.state.csp_nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     return await call_next(request)
-# ---- Nonce injector (HTML) ----
-import re
-from starlette.responses import Response
 
-# precompile once
-_RE_SCRIPT_MISSING_NONCE = re.compile(r'<script(?![^>]*\bnonce=)', re.IGNORECASE)
-
-@app.middleware("http")
-async def inject_nonce_attr(request: Request, call_next):
-    """
-    For text/html responses:
-      1) Replace {{NONCE}} with request.state.csp_nonce
-      2) Add nonce="..." to any <script> tag missing it (inline or external)
-    """
-    resp = await call_next(request)
-
-    ctype = resp.headers.get("content-type", "")
-    # only touch small-ish HTML responses (skip JSON, files, etc.)
-    if "text/html" not in ctype.lower():
-        return resp
-
-    # Pull the full body (works for FileResponse/StreamingResponse too)
-    body_bytes = b""
-    async for chunk in resp.body_iterator:
-        body_bytes += chunk
-
-    try:
-        html = body_bytes.decode(resp.charset or "utf-8", errors="ignore")
-    except Exception:
-        # If decoding fails, send original
-        return Response(content=body_bytes, status_code=resp.status_code, headers=dict(resp.headers), media_type=resp.media_type)
-
-    nonce = getattr(request.state, "csp_nonce", "")
-    if nonce:
-        # 1) Replace template placeholders if present
-        if "{{NONCE}}" in html:
-            html = html.replace("{{NONCE}}", nonce)
-
-        # 2) Inject nonce on any <script> missing it
-        #    <script …>  ->  <script nonce="…"
-        html = _RE_SCRIPT_MISSING_NONCE.sub(f'<script nonce="{nonce}"', html)
-
-    # Rebuild response (preserve headers minus stale content-length)
-    headers = dict(resp.headers)
-    headers.pop("content-length", None)
-    return Response(content=html, status_code=resp.status_code, headers=headers, media_type=resp.media_type)
-# ---- /Nonce injector ----
-
-# ===== Security headers =====
 async def security_headers_mw(request, call_next):
     resp: Response = await call_next(request)
-    resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    resp.headers["Cross-Origin-Embedder-Policy"] = "credentialless"
-    resp.headers["X-Permitted-Cross-Domain-Policies"] = "none"
-    resp.headers["X-Download-Options"] = "noopen"
-    resp.headers["Permissions-Policy"] = "geolocation=()"
-    resp.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "img-src 'self' data: blob: https://*.stripe.com; "
-        "font-src 'self' https://fonts.gstatic.com data:; "
-        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}'; "
-        "style-src-attr 'none'; "
-        "script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
-        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
-    ).format(nonce=getattr(request.state, "csp_nonce", ""))
+
+    # Safe defaults
+    h = resp.headers
+    h["X-Content-Type-Options"] = "nosniff"
+    h["X-Frame-Options"] = "DENY"
+    h["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    h["Cross-Origin-Opener-Policy"] = "same-origin"
+    h["Cross-Origin-Embedder-Policy"] = "credentialless"
+    h["X-Permitted-Cross-Domain-Policies"] = "none"
+    h["X-Download-Options"] = "noopen"
+    h["Permissions-Policy"] = "geolocation=()"
+
+    # Only set CSP here if the route didn't set one explicitly
+    if "Content-Security-Policy" not in h:
+        nonce = getattr(request.state, "csp_nonce", "")
+        h["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "img-src 'self' data: blob: https://*.stripe.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
+            "style-src-attr 'self'; "
+            f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
+            "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+            "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
+        )
+
     return resp
+
 
 app.middleware("http")(security_headers_mw)
 
@@ -1969,13 +1931,14 @@ async def buyer_page_dynamic(request: Request):
         "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
-        "style-src-attr 'none'; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
+        "style-src-attr 'self'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
         "form-action 'self'"
     )
+
     resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     # optional client hint (non-authoritative)
@@ -1995,8 +1958,8 @@ async def admin_page(request: Request):
         "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
-        "style-src-attr 'none'; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
+        "style-src-attr 'self'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
@@ -2019,8 +1982,8 @@ async def seller_page(request: Request):
         "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-" + nonce + "'; "
-        "style-src-attr 'none'; "
+        "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
+        "style-src-attr 'self'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
