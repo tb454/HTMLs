@@ -1892,7 +1892,6 @@ async def _ensure_qbo_oauth_events_table():
 # === QBO OAuth Relay • Table ===
 
 # -------- Static HTML --------
-app.mount("/static", StaticFiles(directory="static"), name="static")
 from pathlib import Path
 STATIC_DIR = Path(__file__).parent.resolve() / "static"
 
@@ -1920,14 +1919,8 @@ async def _spec_nonferrous():
 @app.get("/static/contract-specs.html", include_in_schema=False)
 async def _contract_specs():
     return _static_or_placeholder("contract-specs.html", "Contract Specifications")
-
-@app.get("/__diag/static", include_in_schema=False)
-async def __diag_static():
-    try:
-        files = sorted(p.name for p in (STATIC_DIR).iterdir())
-    except Exception as e:
-        return JSONResponse({"static_dir": str(STATIC_DIR), "error": str(e)}, status_code=500)
-    return {"static_dir": str(STATIC_DIR), "files": files}
+app.mount("/static", StaticFiles(directory="static"), name="static")
+# -------- /Static HTML --------
 
 @app.get("/", include_in_schema=False)
 async def root(request: Request):
