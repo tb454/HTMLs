@@ -2297,6 +2297,68 @@ async def _fetch_base(symbol: str):
 
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
+@router_prices.post("/ingest_csv/copper", summary="Ingest historical COMEX copper from CSV (one-time)")
+async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Data(in).csv"):
+    """
+    Expects columns like: Date, Price, Open, High, Low, Vol., Change %
+    Writes into BRidge-compatible reference_prices:
+      - symbol: 'COMEX_Cu'
+      - source: 'CSV'
+      - price:  numeric
+      - ts_market: midnight UTC for that Date
+    """
+    import pandas as pd
+    from sqlalchemy import text as _t
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        raise HTTPException(400, f"could not read CSV: {e}")
+
+    # normalize columns
+    if "Date" not in df.columns or "Price" not in df.columns:
+        raise HTTPException(400, "CSV must include Date and Price columns")
+
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    for col in ("Price", "Open", "High", "Low"):
+        if col in df.columns:
+            df[col] = (df[col].astype(str)
+                               .str.replace(",", "", regex=False)
+                               .str.replace("$", "", regex=False)
+                               .str.strip())
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    rows = []
+    for _, r in df.iterrows():
+        if pd.isna(r["Date"]) or pd.isna(r["Price"]):
+            continue
+        # store the market date as a UTC timestamp at 00:00:00 for compatibility
+        ts_market = r["Date"].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        rows.append({
+            "symbol": "COMEX_Cu",
+            "source": "CSV",
+            "price": float(r["Price"]),
+            "ts_market": ts_market,
+            "raw_snippet": None,
+        })
+
+    if not rows:
+        return {"ok": True, "inserted": 0}
+
+    # Upsert semantics: keep most recent for a given (symbol, ts_market)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);
+        """)
+        conn.execute(_t("""
+            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+            VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+              SET price = EXCLUDED.price,
+                  source = EXCLUDED.source
+        """), rows)
+
+    return {"ok": True, "inserted_or_updated": len(rows), "symbol": "COMEX_Cu"}
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
 router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
 router_idx = APIRouter(prefix="/indices", tags=["Indices"])
@@ -2398,6 +2460,29 @@ app.include_router(router_idx)
 app.include_router(router_fc)
 app.include_router(router_prices)
 app.include_router(router_pricing)
+
+@router_idx.post("/seed_copper_indices", summary="Seed copper factor indices into bridge_index_definitions (idempotent)")
+async def seed_copper_indices():
+    rows = [
+        # symbol,      method,        factor, base_symbol, notes
+        ("BR-CU-BB",    "FACTOR_ON_BASE", 0.94, "COMEX_Cu", "Bare Bright"),
+        ("BR-CU-#1",    "FACTOR_ON_BASE", 0.91, "COMEX_Cu", "#1 Copper (Berry & Candy)"),
+        ("BR-CU-#2",    "FACTOR_ON_BASE", 0.85, "COMEX_Cu", "#2 Copper (Birch & Cliff)"),
+        ("BR-CU-SHEET", "FACTOR_ON_BASE", 0.83, "COMEX_Cu", "Sheet Copper"),
+    ]
+    q = """
+    INSERT INTO bridge_index_definitions(symbol, method, factor, base_symbol, notes, enabled)
+    VALUES (:s, :m, :f, :b, :n, TRUE)
+    ON CONFLICT (symbol) DO UPDATE
+       SET method = EXCLUDED.method,
+           factor = EXCLUDED.factor,
+           base_symbol = EXCLUDED.base_symbol,
+           notes = EXCLUDED.notes,
+           enabled = TRUE
+    """
+    vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
+    await database.execute_many(q, vals)
+    return {"ok": True, "seeded": [r[0] for r in rows]}
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
