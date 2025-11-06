@@ -40,6 +40,10 @@ def delete_raw(path,**kw):  return S.delete(f"{BASE}{path}",timeout=30, **kw)
 RESULTS = []  # ("PASS"/"FAIL"/"SKIP", label, msg)
 RUN_LOG = []  # [{'method': 'GET', 'path': '/contracts', 'status': 200, 'ok': True, 'snippet': '...'}]
 
+# ---- Connection counters (for summary + artifact) ----
+REQUESTS_TOTAL = 0
+REQUESTS_BY_METHOD = {"GET": 0, "POST": 0, "PUT": 0, "PATCH": 0, "DELETE": 0}
+
 # Optional: save 5xx bodies to disk for debugging
 SAVE_ERR_DIR = os.environ.get("SAVE_ERR_DIR", "")
 
@@ -155,17 +159,26 @@ def _instrument_session(session):
                 if not rel.startswith("/"):
                     rel = "/" + rel
                 _record(method, rel)
+            resp = orig_request(method, url, *args, **kwargs)  # make the request
+            # count every connection (even ones not wrapped by ok()/skip())
+            try:
+                m = method.upper()
+                REQUESTS_BY_METHOD[m] = REQUESTS_BY_METHOD.get(m, 0) + 1
+            except Exception:
+                pass
+            globals()["REQUESTS_TOTAL"] = globals().get("REQUESTS_TOTAL", 0) + 1
+            return resp
         except Exception:
-            pass
-        return orig_request(method, url, *args, **kwargs)
+            # still fall back if anything goes weird
+            return orig_request(method, url, *args, **kwargs)
     session.request = req
 
 _instrument_session(S)
 
 # Wrap the helper verbs to record too (covers get("/x") style)
 def post(path, **kw):   _record("POST", path);   return post_raw(path, **kw)
-def get(path,  **kw):   _record("GET", path);    return get_raw(path, **kw)
-def put(path,  **kw):   _record("PUT", path);    return put_raw(path, **kw)
+def get(path,  **kw):   _record("GET", path);    return get_raw(path,  **kw)
+def put(path,  **kw):   _record("PUT", path);    return put_raw(path,  **kw)
 def patch(path,**kw):   _record("PATCH", path);  return patch_raw(path, **kw)
 def delete(path,**kw):  _record("DELETE", path); return delete_raw(path, **kw)
 
@@ -242,12 +255,32 @@ def main():
     ok("GET /eula",  get("/eula"))
     ok("GET /privacy", get("/privacy"))
 
+    # HTML pages + XSRF cookie (cheap wins)
+    ok("GET /health", get("/health"))            # alias that also sets XSRF cookie
+    ok("GET /",       get("/"))                  # login page + XSRF
+    ok("GET /buyer",  get("/buyer"))             # dynamic nonce CSP
+    ok("GET /seller", get("/seller"))
+    ok("GET /admin",  get("/admin"))
+
+    # --------- AUTH / SESSION ---------
+    r = get("/me")
+    ok("GET /me", r, cond=r.status_code in (200, 401))
+
     # --------- LEGAL (site policy pages) ---------
     for p in [
         "/legal/cookies","/legal/subprocessors","/legal/dpa","/legal/sla",
         "/legal/security","/legal/privacy-appendix","/legal/rulebook","/legal/rulebook/versions"
     ]:
         ok(f"GET {p}", get(p))
+
+    # Minor legal endpoints
+    ok("GET /legal/terms",   get("/legal/terms"))
+    ok("GET /legal/eula",    get("/legal/eula"))
+    ok("GET /legal/privacy", get("/legal/privacy"))
+
+    # --------- LEGAL (extra pages) ---------
+    ok("GET /legal/fees", get("/legal/fees"))
+    ok("GET /legal/aup",  get("/legal/aup"))
 
     # --------- PRICES / FX ---------
     ok("GET /prices/copper_last", get("/prices/copper_last"))
@@ -269,6 +302,13 @@ def main():
 
     # `GET /admin/export_all` (alias in some builds)
     ok("GET /admin/export_all", get("/admin/export_all"))
+
+    # Admin bootstrap helpers
+    ok("POST /admin/create_user",
+       post("/admin/create_user",
+            json={"email":"ops@example.com","password":"Admin123!","role":"admin"},
+            headers={"X-Setup-Token": SETUP_TOKEN} if SETUP_TOKEN else {}))
+    ok("POST /admin/plans/seed_mode_a", post("/admin/plans/seed_mode_a"))
 
     # Audit chain (append → seal → verify)
     if ENV == "production" and not (ADMIN_EMAIL and ADMIN_PASSWORD):
@@ -307,6 +347,43 @@ def main():
         except Exception:
             pass
 
+    # --------- BILLING (admin & customer-facing, non-Stripe webhook paths) ---------
+    ok("POST /admin/billing_contact/upsert",
+       post("/admin/billing_contact/upsert", params={"member":"Acme Yard","email":"billing@example.com"}))
+    ok("GET /billing/pm/status",   get("/billing/pm/status",   params={"member":"Acme Yard"}))
+    ok("POST /billing/prefs/upsert",
+       post("/billing/prefs/upsert", json={"member":"Acme Yard","billing_day":15,"timezone":"America/Phoenix","auto_charge":False}))
+    ok("GET /billing/pm/details",  get("/billing/pm/details",  params={"member":"Acme Yard"}))
+    ok("GET /billing/subscribe/finalize_from_session",
+       get("/billing/subscribe/finalize_from_session", params={"sess":"fake"}))
+
+    # Billing: subscribe/checkout & PM setup/change (accept 400 if no Stripe)
+    ok("POST /billing/subscribe/checkout",
+       post("/billing/subscribe/checkout", params={"member":"Acme Yard","plan":"starter","email":"billing@example.com"}))
+    ok("POST /billing/pm/setup_session",
+       post("/billing/pm/setup_session", params={"member":"Acme Yard","email":"billing@example.com"}))
+    ok("POST /billing/pm/change_session",
+       post("/billing/pm/change_session", json={"member":"Acme Yard"}))
+    # Payment endpoints (404 on bogus invoice_id is fine)
+    ok("POST /billing/pay/checkout",
+       post("/billing/pay/checkout", json={"invoice_id":"00000000-0000-0000-0000-000000000000"}))
+    ok("GET  /billing/pay/finalize_from_session",
+       get("/billing/pay/finalize_from_session", params={"sess":"fake"}))
+    ok("POST /billing/pay/card",
+       post("/billing/pay/card", json={"invoice_id":"00000000-0000-0000-0000-000000000000"}))
+    ok("POST /billing/pay/ach",
+       post("/billing/pay/ach",  json={"invoice_id":"00000000-0000-0000-0000-000000000000"}))
+    ok("POST /billing/pay/charge_now",
+       post("/billing/pay/charge_now", json={"invoice_id":"00000000-0000-0000-0000-000000000000"}))
+
+    # --------- PLANS & MEMBERSHIP (admin) ---------
+    ok("POST /admin/member/plan/set",
+       post("/admin/member/plan/set", params={"member":"Acme Yard","plan_code":"starter"}))
+    ok("GET /billing/preview",
+       get("/billing/preview", params={"member":"Acme Yard","month": str(date.today())[:7]}))
+    ok("POST /billing/run",
+       post("/billing/run", params={"member":"Acme Yard","month": str(date.today())[:7], "force":"1"}))
+
     # --------- REFERENCE PRICES & INDICES ---------
     try:
         post("/reference_prices/pull_home")
@@ -322,6 +399,13 @@ def main():
     else:
         ok("GET /indices/latest", r)
 
+    # Indices builder endpoints
+    ok("POST /indices/run",        post("/indices/run"))  # nightly builder trigger
+    ok("POST /indices/backfill",   post("/indices/backfill", params={"start": str(date.today()), "end": str(date.today())}))
+    ok("POST /indices/generate_snapshot",
+       post("/indices/generate_snapshot", params={"snapshot_date": str(date.today())}))
+    ok("POST /indices/seed_copper_indices", post("/indices/seed_copper_indices"))
+
     # --------- INVENTORY SEED for contract create ---------
     seller = "Acme Yard"
     sku    = "CU-SHRED-1M"
@@ -333,11 +417,42 @@ def main():
     ok("GET /inventory/movements/list", get("/inventory/movements/list"))
     ok("GET /inventory/finished_goods", get("/inventory/finished_goods", params={"seller": seller}))
     ok("GET /inventory/template.csv", get("/inventory/template.csv"))
-    # CSV/XLSX import (tiny inline)
+    # CSV import (tiny inline)
     csv_body = "seller,sku,qty_on_hand,uom,location,description\nAcme Yard,CU-SHRED-1M,5,ton,YARD-A,imported\n"
     ok("POST /inventory/import/csv", post("/inventory/import/csv",
        files={"file": ("inventory.csv", csv_body, "text/csv")}))
-    # (XLSX is optional; often needs a real xlsx—skipping to avoid tool deps)
+
+    # --------- INVENTORY BULK API ---------
+    bulk_payload = {
+        "source":"test","seller":"Acme Yard",
+        "items":[{"sku":"CU-SHRED-1M","qty_on_hand":111,"uom":"ton","location":"YARD-A","description":"bulk"}]
+    }
+    r = post("/inventory/bulk_upsert", json=bulk_payload)
+    if r.status_code in (200,201,204):
+        ok("POST /inventory/bulk_upsert", r)
+    elif ENV == "production" and r.status_code in (401,403):
+        ok("POST /inventory/bulk_upsert")  # gated as expected
+    else:
+        ok("POST /inventory/bulk_upsert", r)
+
+    # --------- INVENTORY EXCEL IMPORT (expect 400 with CSV bytes/xlsx mime) ---------
+    _has_xlsx = True
+    try:
+        import pandas  # noqa
+        import openpyxl  # noqa
+    except Exception:
+        _has_xlsx = False
+
+    if not _has_xlsx:
+        skip("POST /inventory/import/excel", "pandas/openpyxl not installed")
+    else:
+        r = post("/inventory/import/excel",
+                 files={"file": ("inv.xlsx", b"sku,qty_on_hand\nX,1\n",
+                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+        if r.status_code == 400:
+            ok("POST /inventory/import/excel")  # exercised error path
+        else:
+            ok("POST /inventory/import/excel", r)
 
     # --------- CONTRACTS (create → list → get → export) ---------
     contract = {
@@ -371,6 +486,10 @@ def main():
             skip("POST /contracts/{id}/cancel", "not in Pending")
         else:
             ok("POST /contracts/{id}/cancel", r)
+
+        # Contracts sign + admin close-through
+        ok("POST /contracts/{id}/sign", post(f"/contracts/{cid}/sign"))
+        ok("POST /admin/close_through", post("/admin/close_through", params={"cutoff": str(date.today())}))
 
     # Import normalized contracts CSV (data)
     csv_body2 = "buyer,seller,material,weight_tons,price_per_ton\nB,S,TestMat,1.0,123.0\n"
@@ -417,6 +536,19 @@ def main():
     if rid:
         ok("POST /receipts/{id}/consume", post(f"/receipts/{rid}/consume"))
 
+    # --------- WARRANTS (requires an existing receipt) ---------
+    if 'rid' in locals() and rid:
+        r = post("/warrants/mint", json={"receipt_id": rid, "holder":"Buyer Inc"})
+        ok("POST /warrants/mint", r)
+        try:
+            wid = r.json().get("warrant_id")
+            if wid:
+                ok("POST /warrants/transfer", post("/warrants/transfer", params={"warrant_id": wid, "new_holder":"Bank A"}))
+                ok("POST /warrants/pledge",   post("/warrants/pledge",   params={"warrant_id": wid, "lender":"Lender X"}))
+                ok("POST /warrants/release",  post("/warrants/release",  params={"warrant_id": wid}))
+        except Exception:
+            pass
+
     today = str(date.today())
     ok("POST /stocks/snapshot", post("/stocks/snapshot", params={"as_of": today}))
     ok("GET /stocks", get("/stocks", params={"as_of": today}))
@@ -430,6 +562,9 @@ def main():
     ok("GET /analytics/price_band_estimates", get("/analytics/price_band_estimates", params={"material": sku}))
     ok("GET /analytics/delta_anomalies", get("/analytics/delta_anomalies", params={"material": sku}))
     ok("GET /indices", get("/indices"))
+
+    # --------- BUYER POSITIONS ---------
+    ok("GET /buyer_positions", get("/buyer_positions", params={"buyer":"Buyer Inc"}))
 
     # --------- FORECASTS (best effort) ---------
     post("/forecasts/run")
@@ -575,6 +710,18 @@ def main():
 
     ok("GET /ticker", get("/ticker"))
 
+    # --------- RULEBOOK ADMIN ---------
+    r = post("/admin/legal/rulebook/upsert",
+             params={"version":"v1","effective_date":str(date.today()),"file_path":"static/legal/rulebook.html"})
+    ok("POST /admin/legal/rulebook/upsert", r,
+       cond=(r.status_code in (200,201,204) or (ENV == "production" and r.status_code in (401,403))))
+
+    # --------- QBO OAUTH RELAY (dev sanity) ---------
+    ok("GET /qbo/callback",
+       get("/qbo/callback", params={"code":"abc","state":"01234567state","realmId":"12345"}))
+    ok("GET /admin/qbo/peek",
+       get("/admin/qbo/peek", params={"state":"01234567state"}))
+
     payload = {"example":"ice-hook"}
     if ICE_SECRET:
         import hmac, hashlib
@@ -589,6 +736,23 @@ def main():
             skip("POST /ice/webhook", f"status={r.status_code}")
 
     ok("POST /ice-digital-trade", post("/ice-digital-trade", json={"event":"ping"}))
+
+    # --------- STRIPE WEBHOOK (bad sig → expect 400) ---------
+    r = post("/stripe/webhook", headers={"Stripe-Signature":"bad"}, data=b'{}')
+    if r.status_code == 400:
+        ok("POST /stripe/webhook")
+    else:
+        ok("POST /stripe/webhook", r)
+
+    # --------- PUBLIC APPLICATION (may 402 without PM; accept as exercised) ---------
+    r = post("/public/apply", json={
+      "entity_type":"yard","role":"buyer","org_name":"Acme Yard","contact_name":"Alice",
+      "email":"alice@example.com","plan":"starter"
+    })
+    if r.status_code in (200,201,202,204,402):
+        ok("POST /public/apply")
+    else:
+        ok("POST /public/apply", r)
 
     # ---- Exercise the rest of the surface (soft asserts) ----
     try:
@@ -629,6 +793,14 @@ def main():
             if len(buckets[st]) > 10:
                 print(f"    ... (+{len(buckets[st])-10} more)")
 
+    # HTTP connection counters
+    print(f"\nHTTP connections (all): {REQUESTS_TOTAL}  "
+          f"[GET={REQUESTS_BY_METHOD.get('GET',0)}, "
+          f"POST={REQUESTS_BY_METHOD.get('POST',0)}, "
+          f"PUT={REQUESTS_BY_METHOD.get('PUT',0)}, "
+          f"PATCH={REQUESTS_BY_METHOD.get('PATCH',0)}, "
+          f"DELETE={REQUESTS_BY_METHOD.get('DELETE',0)}]")
+
     if missing:
         print(f"\nMissing endpoints (from OpenAPI): {len(missing)}")
 
@@ -641,6 +813,8 @@ def main():
         "skipped": skipped,
         "missing": missing,
         "run_log": RUN_LOG,
+        "requests_total": REQUESTS_TOTAL,
+        "requests_by_method": REQUESTS_BY_METHOD,
     }
     try:
         os.makedirs("tests/_reports", exist_ok=True)
