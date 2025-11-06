@@ -4,6 +4,7 @@
 import os, sys, time, json, uuid
 from datetime import date, datetime, timedelta, timezone
 import requests
+import re
 
 BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
 
@@ -28,15 +29,60 @@ def hdr(extra=None):
 def h_snapshot():
     return {"x-auth": H_SNAPSHOT_ENV} if H_SNAPSHOT_ENV else {}
 
-def post(path, **kw):   return S.post(f"{BASE}{path}", timeout=30, **kw)
-def get(path,  **kw):   return S.get(f"{BASE}{path}",  timeout=30, **kw)
-def put(path,  **kw):   return S.put(f"{BASE}{path}",  timeout=30, **kw)
-def patch(path,**kw):   return S.patch(f"{BASE}{path}",timeout=30, **kw)
-def delete(path,**kw):  return S.delete(f"{BASE}{path}",timeout=30, **kw)
+# ---------- HTTP helpers (raw) ----------
+def post_raw(path, **kw):   return S.post(f"{BASE}{path}", timeout=30, **kw)
+def get_raw(path,  **kw):   return S.get(f"{BASE}{path}",  timeout=30, **kw)
+def put_raw(path,  **kw):   return S.put(f"{BASE}{path}",  timeout=30, **kw)
+def patch_raw(path,**kw):   return S.patch(f"{BASE}{path}",timeout=30, **kw)
+def delete_raw(path,**kw):  return S.delete(f"{BASE}{path}",timeout=30, **kw)
 
-# Pretty printer
-RESULTS = []
+# ---------- Pretty printer + run log ----------
+RESULTS = []  # ("PASS"/"FAIL"/"SKIP", label, msg)
+RUN_LOG = []  # [{'method': 'GET', 'path': '/contracts', 'status': 200, 'ok': True, 'snippet': '...'}]
+
+# Optional: save 5xx bodies to disk for debugging
+SAVE_ERR_DIR = os.environ.get("SAVE_ERR_DIR", "")
+
+def _save_err_body(name, resp):
+    if not (SAVE_ERR_DIR and resp is not None and getattr(resp, "status_code", 0) >= 500):
+        return
+    os.makedirs(SAVE_ERR_DIR, exist_ok=True)
+    method, path = _parse_name(name)
+    safe = (path or "/").strip("/").replace("/", "_") or "root"
+    p = os.path.join(SAVE_ERR_DIR, f"{method}_{safe}_{resp.status_code}.txt")
+    try:
+        with open(p, "w", encoding="utf-8") as f:
+            try:
+                f.write(json.dumps(resp.json(), indent=2))
+            except Exception:
+                f.write(resp.text or "")
+    except Exception:
+        pass
+
+# Exit behavior (set envs to '1' to enable):
+FAIL_ON_MISSING = os.environ.get("FAIL_ON_MISSING", "0") in ("1","true","yes")
+FAIL_ON_FAIL    = os.environ.get("FAIL_ON_FAIL", "1") in ("1","true","yes")  # default: fail on HTTP fails
+
+def _parse_name(name: str):
+    m = re.search(r'^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)', name)
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+def _append_run_log(name: str, resp=None, ok=True):
+    method, path = _parse_name(name)
+    status = getattr(resp, "status_code", None) if resp is not None else None
+    snippet = ""
+    if resp is not None:
+        try:
+            snippet = json.dumps(resp.json())[:180]
+        except Exception:
+            try:
+                snippet = (resp.text or "")[:180]
+            except Exception:
+                snippet = ""
+    RUN_LOG.append({"method": method, "path": path, "status": status, "ok": bool(ok), "snippet": snippet})
+
 def ok(name, resp=None, cond=True, msg=""):
+    """Record PASS/FAIL, always log, capture status + response snippet."""
     if resp is not None and (resp.status_code >= 400 or not cond):
         body = ""
         try:
@@ -44,16 +90,21 @@ def ok(name, resp=None, cond=True, msg=""):
         except Exception:
             body = (resp.text or "")[:300]
         RESULTS.append(("FAIL", name, f"HTTP {resp.status_code} {msg} :: {body}"))
+        _append_run_log(name, resp, ok=False)
+        _save_err_body(name, resp)
         print(f"❌ {name} :: HTTP {resp.status_code} {msg}")
     elif not cond:
         RESULTS.append(("FAIL", name, msg))
+        _append_run_log(name, None, ok=False)
         print(f"❌ {name} :: {msg}")
     else:
         RESULTS.append(("PASS", name, ""))
+        _append_run_log(name, resp, ok=True)
         print(f"✅ {name}")
 
 def skip(name, why):
     RESULTS.append(("SKIP", name, why))
+    _append_run_log(name, None, ok=True)
     print(f"⚠️  SKIP {name} :: {why}")
 
 def must_json(r):
@@ -79,7 +130,108 @@ def maybe_login_admin():
     ok("POST /login (admin)", r)  # will print a FAIL with details
     return False
 
+# ===== Coverage tracking (auto) =====
+TESTED: set[tuple[str, str]] = set()
+MISSING_ENDPOINTS = []
+
+def _record(method: str, path: str):
+    """Record a call like ('GET','/contracts/123'). Path must be relative (starts with '/')."""
+    try:
+        if not path.startswith("/"):
+            from urllib.parse import urlparse
+            p = urlparse(path).path
+            path = p if p else path
+        TESTED.add((method.upper(), path))
+    except Exception:
+        pass
+
+def _instrument_session(session):
+    """Wrap session.request so even direct S.post(BASE+...) get recorded."""
+    orig_request = session.request
+    def req(method, url, *args, **kwargs):
+        try:
+            if url.startswith(BASE):
+                rel = url[len(BASE):]
+                if not rel.startswith("/"):
+                    rel = "/" + rel
+                _record(method, rel)
+        except Exception:
+            pass
+        return orig_request(method, url, *args, **kwargs)
+    session.request = req
+
+_instrument_session(S)
+
+# Wrap the helper verbs to record too (covers get("/x") style)
+def post(path, **kw):   _record("POST", path);   return post_raw(path, **kw)
+def get(path,  **kw):   _record("GET", path);    return get_raw(path, **kw)
+def put(path,  **kw):   _record("PUT", path);    return put_raw(path, **kw)
+def patch(path,**kw):   _record("PATCH", path);  return patch_raw(path, **kw)
+def delete(path,**kw):  _record("DELETE", path); return delete_raw(path, **kw)
+
+def _tmpl_to_regex(tmpl: str) -> re.Pattern:
+    """
+    Convert an OpenAPI path template like '/contracts/{id}' to a regex that matches
+    any single path segment for each '{...}' placeholder.
+    """
+    rx = re.sub(r"\{[^/}]+\}", r"[^/]+", tmpl)
+    return re.compile(r"^" + rx + r"$")
+
+def _coverage_report():
+    global MISSING_ENDPOINTS
+    try:
+        spec = S.get(f"{BASE}/openapi.json", timeout=30)
+        print("\n======= API COVERAGE =======")
+        if spec.status_code != 200:
+            print("Could not fetch /openapi.json (status", spec.status_code, ")")
+            MISSING_ENDPOINTS = []
+            return []
+        api = spec.json()
+        declared, tags_by_ep = set(), {}
+        for path, methods in (api.get("paths") or {}).items():
+            for method, meta in methods.items():
+                m = method.upper()
+                if m in ("GET","POST","PUT","PATCH","DELETE"):
+                    declared.add((m, path))
+                    tags_by_ep[(m, path)] = list(meta.get("tags") or [])
+        rx_cache = {}
+        covered = set()
+        for (dm, dp) in declared:
+            rx = rx_cache.get(dp)
+            if not rx:
+                rx = _tmpl_to_regex(dp); rx_cache[dp] = rx
+            if any(tm == dm and rx.match(tp) for (tm, tp) in TESTED):
+                covered.add((dm, dp))
+        missing = sorted(list(declared - covered))
+        MISSING_ENDPOINTS = missing
+        print(f"Declared: {len(declared)}  Tested: {len(covered)}  Missing: {len(missing)}")
+        per_tag_counts = {}
+        for ep in declared:
+            for t in tags_by_ep.get(ep, []) or ["(untagged)"]:
+                per_tag_counts.setdefault(t, {"decl":0,"cov":0})
+                per_tag_counts[t]["decl"] += 1
+                if ep in covered:
+                    per_tag_counts[t]["cov"] += 1
+        if per_tag_counts:
+            print("\nBy Tag:")
+            for t, c in sorted(per_tag_counts.items(), key=lambda kv: (kv[1]["cov"]/max(1,kv[1]["decl"]), kv[0])):
+                print(f"  - {t}: {c['cov']}/{c['decl']}")
+        if missing:
+            print("\nMissing endpoints:")
+            for i, (m, p) in enumerate(missing[:120], 1):
+                print(f"  {i:>3}. {m} {p}")
+            if len(missing) > 120:
+                print(f"  ... (+{len(missing)-120} more)")
+        return missing
+    except Exception as e:
+        print("\n======= API COVERAGE =======")
+        print("Coverage computation failed:", type(e).__name__, str(e))
+        MISSING_ENDPOINTS = []
+        return []
+# ===== /Coverage tracking =====
+
 def main():
+    today = str(date.today())
     # --------- BASIC PAGES / HEALTH ---------
     ok("GET /docs", get("/docs"))
     ok("GET /healthz", get("/healthz"))
@@ -330,7 +482,6 @@ def main():
         try:
             listing_id = r.json()[0]["id"]
         except Exception:
-            # Try GET if POST didn't return ids
             rg = get("/admin/futures/series", params={"product_id": product_id})
             if rg.status_code == 200:
                 arr = rg.json()
@@ -344,7 +495,6 @@ def main():
                post(f"/admin/futures/series/{listing_id}/trading_status", json={"trading_status":"Trading"}))
             ok("GET /admin/futures/marks", get("/admin/futures/marks"))
             ok("GET /admin/futures/series", get("/admin/futures/series"))
-            # lifecycle edges:
             ok("POST /admin/futures/series/{id}/expire", post(f"/admin/futures/series/{listing_id}/expire"))
             ok("POST /admin/futures/series/{id}/finalize", post(f"/admin/futures/series/{listing_id}/finalize"))
 
@@ -356,7 +506,6 @@ def main():
     post("/risk/luld/CU-SHRED-1M", params={"down_pct": 0.20, "up_pct": 0.20})
     post("/risk/limits", params={"member":"anon","symbol":"CU-SHRED-1M","limit_lots": 200})
 
-    # Place book order (CLOB simple path)
     r = post("/clob/orders", json={"symbol":"CU-SHRED-1M", "side":"buy", "price":250, "qty_lots":1, "tif":"day"})
     clob_oid = None
     if r.status_code == 200:
@@ -374,7 +523,6 @@ def main():
     ok("POST /fix/order", post("/fix/order", json=fix))
     ok("POST /fix/dropcopy", post("/fix/dropcopy", json={"msg":"EXEC_REPORT"}))
 
-    # RFQ with tz-aware expiry
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     rfq_id = None
     r = post("/rfq", json={"symbol":"CU-SHRED-1M","side":"buy","quantity_lots":"1","price_limit":"260","expires_at": expires_at})
@@ -415,22 +563,18 @@ def main():
     ok("POST /clearing/guaranty/deposit", post("/clearing/guaranty/deposit", json={"member_id":"m1","amount":1000.0}))
     ok("POST /clearing/waterfall/apply", post("/clearing/waterfall/apply", json={"as_of": str(date.today())}))
 
-    # Risk calc endpoints
     ok("POST /risk/margin/calc", post("/risk/margin/calc", json={"account_id":"acct1"}))
     ok("POST /risk/portfolio_margin", post("/risk/portfolio_margin", json={"account_id":"acct1"}))
     ok("POST /risk/kill_switch/{member_id}", post("/risk/kill_switch/m1"))
 
-    # Surveillance family
     ok("GET /surveil/alerts", get("/surveil/alerts"))
     ok("POST /surveil/alert", post("/surveil/alert", json={"type":"test","severity":"low"}))
     ok("POST /ml/anomaly", post("/ml/anomaly", json={"window":"1d"}))
     ok("POST /surveil/case/open", post("/surveil/case/open", json={"alert_id":"demo"}))
     ok("POST /surveil/rules/run", post("/surveil/rules/run", json={}))
 
-    # Market misc
     ok("GET /ticker", get("/ticker"))
 
-    # ICE webhook
     payload = {"example":"ice-hook"}
     if ICE_SECRET:
         import hmac, hashlib
@@ -444,7 +588,6 @@ def main():
         else:
             skip("POST /ice/webhook", f"status={r.status_code}")
 
-    # ICE Digital Trade stub
     ok("POST /ice-digital-trade", post("/ice-digital-trade", json={"event":"ping"}))
 
     # ---- Exercise the rest of the surface (soft asserts) ----
@@ -453,19 +596,78 @@ def main():
     except Exception as e:
         skip("run_additional()", f"{type(e).__name__}: {e}")
 
-    # --------- SUMMARY ---------
-    print("\n======= SUMMARY =======")
+    # --------- COVERAGE REPORT ---------
+    missing = _coverage_report()
+
+    # --------- DETAILED SUMMARY ---------
+    print("\n======= DETAILED SUMMARY =======")
     total = len(RESULTS)
     passed = len([x for x in RESULTS if x[0]=="PASS"])
     failed = len([x for x in RESULTS if x[0]=="FAIL"])
     skipped= len([x for x in RESULTS if x[0]=="SKIP"])
+    print(f"Good: {passed}   Fail: {failed}   Skip: {skipped}   Total checks: {total}")
+
+    # Failures by status code
+    fails = []
+    for kind, name, msg in RESULTS:
+        if kind == "FAIL":
+            status = None
+            m = re.search(r"HTTP\s+(\d{3})", msg or "")
+            if m: status = int(m.group(1))
+            fails.append((status, name, msg))
+    if fails:
+        print("\nFailures by status:")
+        from collections import defaultdict
+        buckets = defaultdict(list)
+        for st, nm, ms in fails:
+            buckets[st].append((nm, ms))
+        for st in sorted(buckets.keys(), key=lambda x: (x is None, x)):
+            label = str(st) if st is not None else "unknown"
+            print(f"  {label}: {len(buckets[st])}")
+            for nm, ms in buckets[st][:10]:
+                print(f"    - {nm} :: {ms[:140]}{'...' if len(ms)>140 else ''}")
+            if len(buckets[st]) > 10:
+                print(f"    ... (+{len(buckets[st])-10} more)")
+
+    if missing:
+        print(f"\nMissing endpoints (from OpenAPI): {len(missing)}")
+
+    # Write machine-readable artifact
+    artifact = {
+        "base": BASE,
+        "env": ENV,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "missing": missing,
+        "run_log": RUN_LOG,
+    }
+    try:
+        os.makedirs("tests/_reports", exist_ok=True)
+        with open("tests/_reports/last_run_report.json", "w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+        print('Saved report → tests/_reports/last_run_report.json')
+    except Exception as _e:
+        print("Could not write report:", _e)
+
+    # --------- SUMMARY + EXIT CODE ---------
+    print("\n======= SUMMARY =======")
     print(f"Total: {total}  PASS: {passed}  FAIL: {failed}  SKIP: {skipped}")
+
+    exit_code = 0
+    if FAIL_ON_FAIL and failed:
+        exit_code = 1
+    if FAIL_ON_MISSING and len(missing) > 0:
+        exit_code = max(exit_code, 2)
+
     if failed:
         print("\nFailures:")
         for kind, name, msg in RESULTS:
             if kind=="FAIL":
                 print(f"- {name}: {msg}")
-        sys.exit(1)
+
+    if exit_code:
+        sys.exit(exit_code)
 
 # ======== ADDITIVE SMOKE: exercise the rest of the surface (dev-friendly) ========
 
@@ -591,7 +793,7 @@ def run_additional(listing_id=None):
         if qid:
             _ok("POST /rfq/{id}/award", S.post(f"{BASE}/rfq/{rfq_id}/award", params={"quote_id": qid}))
 
-    # --- 6) Trading (futures) minimal: deposit margin so matching logic can proceed ---
+    # --- 6) Trading (futures) minimal ---
     _ok("POST /clearing/deposit", S.post(f"{BASE}/clearing/deposit", json={"account_id":"acct1","amount": 100000.0}))
     if listing_id:
         od = {"account_id":"acct1","listing_id":listing_id,"side":"BUY","price":250.0,"qty":1.0,"order_type":"LIMIT","tif":"GTC"}
@@ -599,7 +801,6 @@ def run_additional(listing_id=None):
         _ok("POST /trade/orders", ro)
         tr_order_id = _json(ro, {}).get("order_id")
         _ok("GET /trade/book", S.get(f"{BASE}/trade/book", params={"listing_id": listing_id, "depth": 5}))
-        # try modify/cancel
         if tr_order_id:
             _ok("PATCH /trade/orders/{id}", S.patch(f"{BASE}/trade/orders/{tr_order_id}", json={"price": 251.0}))
             _ok("DELETE /trade/orders/{id}", S.delete(f"{BASE}/trade/orders/{tr_order_id}"))
