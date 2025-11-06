@@ -1,8 +1,6 @@
 from __future__ import annotations
-# --- ensure sibling modules are importable in CI/pytest ---
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent.resolve()))
-# ----------------------------------------------------------
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1772,15 +1770,32 @@ async def _ensure_runtime_risk_tables():
 async def terms_page():
     return FileResponse("static/legal/terms.html")
 
+@app.get("/legal/terms.html", include_in_schema=False)
+async def terms_page_alias():
+    return FileResponse("static/legal/terms.html")
+
 @app.get("/legal/eula", include_in_schema=True, tags=["Legal"], summary="End User License Agreement")
 async def eula_page():
+    return FileResponse("static/legal/eula.html")
+
+@app.get("/legal/eula.html", include_in_schema=False)
+async def eula_page_alias():
     return FileResponse("static/legal/eula.html")
 
 @app.get("/legal/privacy", include_in_schema=True, tags=["Legal"], summary="Privacy Policy")
 async def privacy_page():
     return FileResponse("static/legal/privacy.html")
+
+@app.get("/legal/privacy.html", include_in_schema=False)
+async def privacy_page_alias():
+    return FileResponse("static/legal/privacy.html")
+
 @app.get("/legal/aup", include_in_schema=True, tags=["Legal"], summary="Acceptable Use Policy")
 async def aup_page():
+    return FileResponse("static/legal/aup.html")
+
+@app.get("/legal/aup.html", include_in_schema=False)
+async def aup_page_alias():
     return FileResponse("static/legal/aup.html")
 
 # Cookie Notice (alias: /legal/cookies and /cookies)
@@ -2076,6 +2091,25 @@ async def _ensure_entitlements_table():
     rows = await database.fetch_all("SELECT username, feature FROM runtime_entitlements")
     for r in rows:
         _ENTITLEMENTS[r["username"]].add(r["feature"])
+
+@app.on_event("startup")
+async def _seed_demo_entitlements():
+    try:
+        # grant to a demo user or wildcard member you use
+        demo_user = os.getenv("DEMO_BUYER_USER", "").strip()
+        if demo_user:
+            await database.execute("""
+              INSERT INTO runtime_entitlements(username,feature)
+              VALUES (:u,'rfq.post')
+              ON CONFLICT (username,feature) DO NOTHING
+            """, {"u": demo_user})
+            await database.execute("""
+              INSERT INTO runtime_entitlements(username,feature)
+              VALUES (:u,'rfq.quote')
+              ON CONFLICT (username,feature) DO NOTHING
+            """, {"u": demo_user})
+    except Exception:
+        pass
 
 # Persist whenever we grant
 @app.post("/admin/entitlements/grant", tags=["Admin"], summary="Grant feature to user/member")
@@ -4104,6 +4138,29 @@ async def _ensure_receivables_schema():
         logger.warn("receivables_bootstrap_failed", err=str(e))
 # ===== Receivables schema bootstrap (idempotent) =====
 
+# ===== Buyer positions schema bootstrap =====
+@app.on_event("startup")
+async def _ensure_buyer_positions_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS buyer_positions (
+      position_id      UUID PRIMARY KEY,
+      contract_id      UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+      buyer            TEXT NOT NULL,
+      seller           TEXT NOT NULL,
+      material         TEXT NOT NULL,
+      weight_tons      NUMERIC NOT NULL,
+      price_per_ton    NUMERIC NOT NULL,
+      currency         TEXT NOT NULL DEFAULT 'USD',
+      status           TEXT NOT NULL DEFAULT 'Open',    -- Open | Closed | Cancelled
+      purchased_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at       TIMESTAMPTZ,                     -- optional (add later if you model expiries)
+      notes            TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_buyer_positions_buyer_status ON buyer_positions(buyer, status);
+    CREATE INDEX IF NOT EXISTS idx_buyer_positions_contract ON buyer_positions(contract_id);
+    """)
+# ===== /Buyer positions schema bootstrap =====
+
 # ---------- Inventory helpers (role check, unit conversion, upsert core) ----------
 def _is_admin_or_seller(request: Request) -> bool:
     try:
@@ -4317,6 +4374,32 @@ async def list_movements(
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
+
+# ---- Buyer Positions: list by buyer/status ----
+class BuyerPositionRow(BaseModel):
+    position_id: str
+    contract_id: str
+    buyer: str
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_ton: float
+    currency: str
+    status: str
+    purchased_at: datetime
+    expires_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+@app.get("/buyer_positions", tags=["Contracts"], summary="List buyer positions", response_model=List[BuyerPositionRow])
+async def buyer_positions(buyer: str, status: Optional[str] = Query(None, description="Open|Closed|Cancelled")):
+    q = "SELECT * FROM buyer_positions WHERE buyer = :b"
+    vals = {"b": buyer}
+    if status:
+        q += " AND status = :s"; vals["s"] = status
+    q += " ORDER BY purchased_at DESC"
+    rows = await database.fetch_all(q, vals)
+    return [BuyerPositionRow(**dict(r)) for r in rows]
+# -------- Buyer Positions: list by buyer/status ----
 
 # -------- Inventory: Finished Goods snapshot (for seller.html) --------
 class FinishedRow(BaseModel):
@@ -5190,6 +5273,41 @@ async def _idem_guard(request: Request, key: Optional[str], resp: dict):
     return resp
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 
+# ------ Admin close_through ------
+@app.post("/admin/close_through", tags=["Admin"], summary="Mark contracts/BOLs closed through a date")
+async def close_through(cutoff: _date, request: Request):
+    _require_admin(request)  # gate in prod
+
+    # Contracts → Fulfilled
+    await database.execute("""
+      UPDATE contracts
+         SET status='Fulfilled'
+       WHERE created_at::date <= :d
+         AND status IN ('Pending','Signed','Dispatched')
+    """, {"d": cutoff})
+
+    # BOLs → Delivered
+    await database.execute("""
+      UPDATE bols
+         SET status='Delivered',
+             delivery_time = COALESCE(delivery_time, NOW())
+       WHERE COALESCE(pickup_time, delivery_time)::date <= :d
+         AND status IN ('Scheduled','In Transit')
+    """, {"d": cutoff})
+
+    # Buyer positions → Closed for those now-fulfilled contracts
+    await database.execute("""
+      UPDATE buyer_positions bp
+         SET status='Closed'
+       WHERE bp.contract_id IN (
+           SELECT id FROM contracts
+            WHERE created_at::date <= :d AND status='Fulfilled'
+       )
+    """, {"d": cutoff})
+
+    return {"ok": True, "through": str(cutoff)}
+# ------ Admin close_through ------
+
 # ===== Admin export helpers =====
 # --- helpers (for CSV/ZIP safety) ---
 def _safe(v):
@@ -5811,6 +5929,7 @@ async def get_all_bols_pg(
     end: Optional[datetime] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    response: Response = None,
 ):
     q = "SELECT * FROM bols"
     cond, vals = [], {}
@@ -5832,6 +5951,18 @@ async def get_all_bols_pg(
 
     if cond:
         q += " WHERE " + " AND ".join(cond)
+
+    # total count header
+    count_sql = "SELECT COUNT(*) AS c FROM bols"
+    if cond:
+        count_sql += " WHERE " + " AND ".join(cond)
+    row_count = await database.fetch_one(count_sql, vals)
+    try:
+        if response is not None:
+            response.headers["X-Total-Count"] = str(int(row_count["c"] or 0))
+    except Exception:
+        pass
+
     q += " ORDER BY pickup_time DESC NULLS LAST, bol_id DESC LIMIT :limit OFFSET :offset"
     vals["limit"], vals["offset"] = limit, offset
 
@@ -6226,14 +6357,38 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         seller = row["seller"].strip()
         sku = row["material"].strip()
 
+        # Pull full inventory row under lock and compute availability
         inv = await database.fetch_one("""
-            SELECT qty_reserved FROM inventory_items
+            SELECT qty_on_hand, qty_reserved, qty_committed
+            FROM inventory_items
             WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
             FOR UPDATE
-        """, {"seller": seller, "sku": sku})
-        reserved = float(inv["qty_reserved"]) if inv else 0.0
-        if reserved < qty:
-            raise HTTPException(status_code=409, detail="Reserved inventory insufficient to commit.")
+        """, {"s": seller, "k": sku})
+
+        on_hand   = float(inv["qty_on_hand"]   if inv and inv["qty_on_hand"]   is not None else 0.0)
+        reserved  = float(inv["qty_reserved"]  if inv and inv["qty_reserved"]  is not None else 0.0)
+        committed = float(inv["qty_committed"] if inv and inv["qty_committed"] is not None else 0.0)
+        available = max(0.0, on_hand - reserved - committed)
+
+        # If reserved is short, top-up from available on-hand (in the same transaction)
+        short = max(0.0, qty - reserved)
+        if short > 0:
+            if available >= short:
+                await database.execute("""
+                    UPDATE inventory_items
+                    SET qty_reserved = qty_reserved + :short,
+                        updated_at = NOW()
+                    WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                """, {"short": short, "s": seller, "k": sku})
+                await database.execute("""
+                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                    VALUES (:s,:k,'reserve',:q,:cid,:m)
+                """, {"s": seller, "k": sku, "q": short, "cid": contract_id,
+                    "m": json.dumps({"reason":"auto_topup_for_purchase"})})
+                reserved += short
+                available -= short
+            else:
+                raise HTTPException(status_code=409, detail="Reserved/available inventory insufficient to commit.")
 
         await database.execute("""
             UPDATE inventory_items
@@ -6279,6 +6434,28 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             "ps_b64": None, "ps_time": None,
             "pickup_time": utcnow()
         })
+
+        # Record buyer position (ownership record; buyer “has” the material post-trade)
+        try:
+            await database.execute("""
+            INSERT INTO buyer_positions(
+                position_id, contract_id, buyer, seller, material,
+                weight_tons, price_per_ton, currency, status, purchased_at
+            )
+            VALUES (:id, :cid, :b, :s, :m, :wt, :ppt, COALESCE(:ccy,'USD'), 'Open', NOW())
+            """, {
+                "id": str(uuid.uuid4()),
+                "cid": contract_id,
+                "b": row["buyer"],
+                "s": row["seller"],
+                "m": row["material"],
+                "wt": qty,
+                "ppt": float(row["price_per_ton"]),
+                "ccy": (row.get("currency") if isinstance(row, dict) else None) or "USD",
+            })
+        except Exception:
+            # best-effort — never break purchase on a positions write
+            pass
 
     resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
     return await _idem_guard(request, key, resp)
