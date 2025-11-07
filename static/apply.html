@@ -133,7 +133,7 @@
     }
   </style>
 
-   <script nonce="{{NONCE}}"
+   <script nonce="{{NONCE}}">
     // Unified API base
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
@@ -375,7 +375,7 @@
     </footer>
   </div>
 
-  <script nonce="{{NONCE}}"
+  <script nonce="{{NONCE}}">
 
     // Health badge
   (async ()=>{
@@ -429,7 +429,7 @@
       }catch{}
     })();    
     </script>
-  <script nonce="{{NONCE}}"
+  <script nonce="{{NONCE}}">
     
   // ---- Payment Method flow (Stripe Checkout in setup mode) ----    
   async function pmStatus(member){
@@ -497,7 +497,7 @@
   });
   
   // Hook up the Add PM button
-    document.getElementById('addPmBtn').addEventListener('click', async ()=>{    
+      document.getElementById('addPmBtn')?.addEventListener('click', async ()=>{    
       const member = memberKeyFromForm();
       const email  = (document.getElementById('email').value || '').trim();
       if(!member || !email){
@@ -641,5 +641,10 @@ async function startSubscription(member, plan) {
 });
 
 </script>
+
+<script nonce="{{NONCE}}">
+  window.addEventListener('pageshow', () => { try { refreshPmBadge(); } catch {} });
+</script>
+
 </body>
 </html>

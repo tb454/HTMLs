@@ -30,7 +30,6 @@ import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter
-from urllib.parse import quote
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
 def _admin_dep(request: _FastAPIRequest):
@@ -57,6 +56,8 @@ from fastapi import Header, HTTPException
 import gzip
 from decimal import InvalidOperation
 from pricing_engine import compute_material_price
+from price_sources import pull_comexlive_once, latest_price
+from price_sources import pull_comex_home_once
 from forecast_job import run_all as _forecast_run_all
 from indices_builder import run_indices_builder
 from price_sources import pull_comexlive_once, pull_lme_once, pull_comex_home_once, latest_price
@@ -64,6 +65,7 @@ import smtplib
 from email.message import EmailMessage
 import secrets
 from typing import Annotated
+
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -178,28 +180,6 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app)
-
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- Startup logic ---
-    if USE_STRIPE and stripe and STRIPE_API_KEY:
-        try:
-            for p in stripe.Price.list(active=True, limit=100).auto_paging_iter():
-                lk = getattr(p, "lookup_key", None)
-                if lk:
-                    _price_lookup_cache.setdefault(lk, p["id"])
-            print(f"✅ Stripe price cache primed: {len(_price_lookup_cache)} keys")
-        except Exception as e:
-            print(f"⚠️ Stripe cache warm-up failed: {e}")
-
-    yield  # --- Application runs here ---
-
-    # --- Shutdown logic (optional) ---
-    # e.g., close DB pool, flush logs, etc.
-    print("🛑 App shutting down cleanly.")
-app = FastAPI(lifespan=lifespan)
 
 # Move docs under /api/v1 but keep existing endpoints 
 app.docs_url = "/docs"
@@ -1046,6 +1026,12 @@ async def _ensure_payment_profiles():
     );
     """)
 
+import stripe, os
+STRIPE_API_KEY = os.getenv("STRIPE_SECRET", "")
+if STRIPE_API_KEY:
+    stripe.api_key = STRIPE_API_KEY
+STRIPE_RETURN_BASE = os.getenv("BILLING_PUBLIC_URL", "https://bridge.scrapfutures.com")
+
 # === Self-serve subscription via hosted Checkout (Stripe handles billing) ===
 # Base plan lookup keys must match your Stripe dashboard:
 BASE_PLAN_LOOKUP = {
@@ -1080,24 +1066,12 @@ PLAN_LOOKUP_TO_ADDON_KEYS = {
     ],
 }
 
-# memo cache for Stripe price lookup_key -> price_id
-_price_lookup_cache: Dict[str, str] = {}
-
 def _price_id_for_lookup(lookup_key: str) -> str:
-    # Fast path: memoized
-    if lookup_key in _price_lookup_cache:
-        return _price_lookup_cache[lookup_key]
-
-    # Slow path: walk Prices once, then memoize the hit
     prices = stripe.Price.list(active=True, limit=100)
     for p in prices.auto_paging_iter():
         if getattr(p, "lookup_key", None) == lookup_key:
-            _price_lookup_cache[lookup_key] = p["id"]
             return p["id"]
-
-    # If we got here, the lookup_key isn't present in your Stripe dashboard
     raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
-
 
 @app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
 async def start_subscription_checkout(member: str, plan: str, email: Optional[str] = None, _=Depends(csrf_protect)):
@@ -1141,7 +1115,7 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
         line_items=line_items,
         allow_promotion_codes=True,
         subscription_data={"metadata": {"member": member, "plan": plan}},
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
         cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
         metadata={"member": member, "email": (email or row["email"] if row else "")},
     )
@@ -1273,7 +1247,7 @@ async def pm_setup_session(member: str, email: str, _=Depends(csrf_protect)):
         mode="setup",
         customer=cust_id,
         payment_method_types=["card", "us_bank_account"],
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
+        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={stripe.util.utf8(member)}",
         cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
         metadata={"member": member, "email": email},
     )
@@ -1315,9 +1289,6 @@ try:
     import stripe
 except ModuleNotFoundError:
     stripe = None
-# single canonical init
-if USE_STRIPE and stripe and STRIPE_API_KEY:
-    stripe.api_key = STRIPE_API_KEY
 
 # which lookup keys you want to expose
 PRICE_LOOKUPS = [
@@ -1347,6 +1318,8 @@ def _fetch_prices_from_stripe():
     # fallback if disabled or stripe is missing
     if not (USE_STRIPE and stripe and STRIPE_API_KEY):
         return None
+
+    stripe.api_key = STRIPE_API_KEY
 
     # fetch all prices with those lookup_keys (active only)
     out = {}
@@ -1401,18 +1374,9 @@ def _get_pricing_snapshot():
     return snapshot
 
 # ----- Stripe billing -----
-@app.lifespan("startup")
-async def _prime_stripe_price_cache():
-    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
-        return
-    try:
-        for p in stripe.Price.list(active=True, limit=100).auto_paging_iter():
-            lk = getattr(p, "lookup_key", None)
-            if lk: _price_lookup_cache.setdefault(lk, p["id"])
-    except Exception:
-        # best-effort only; skip on any Stripe/network hiccup
-        pass
-
+STRIPE_API_KEY = os.getenv("STRIPE_SECRET", "")
+if STRIPE_API_KEY:
+    stripe.api_key = STRIPE_API_KEY
 STRIPE_RETURN_BASE = os.getenv("BILLING_PUBLIC_URL", "https://bridge.scrapfutures.com")
 SUCCESS_URL = f"{STRIPE_RETURN_BASE}/static/payment_success.html?session={{CHECKOUT_SESSION_ID}}"
 CANCEL_URL  = f"{STRIPE_RETURN_BASE}/static/payment_canceled.html"
@@ -1823,10 +1787,6 @@ async def _ensure_runtime_risk_tables():
 # -------- Legal pages --------
 from fastapi.responses import RedirectResponse
 
-@app.get("/fees", include_in_schema=False)
-async def _fees_alias():
-    return RedirectResponse("/legal/fees", status_code=307)
-
 @app.get("/terms", include_in_schema=False)
 async def _terms_alias(): return RedirectResponse("/legal/terms", status_code=307)
 
@@ -1835,14 +1795,6 @@ async def _eula_alias():  return RedirectResponse("/legal/eula", status_code=307
 
 @app.get("/privacy", include_in_schema=False)
 async def _privacy_alias(): return RedirectResponse("/legal/privacy", status_code=307)
-
-@app.get("/privacy/appendix", include_in_schema=False)
-async def privacy_appendix_alias():
-    return RedirectResponse("/legal/privacy-appendix", status_code=307)
-
-@app.get("/cookies", include_in_schema=False)
-async def cookies_alias():
-    return RedirectResponse("/legal/cookies", status_code=307)
 
 @app.get("/legal/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Service")
 async def terms_page():
@@ -2329,6 +2281,14 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import create_engine
 import databases  
 
+# Your modules
+from pricing_engine import compute_material_price
+from price_sources import (
+    pull_comexlive_once,
+    pull_lme_once,
+    pull_comex_home_once,  
+    latest_price,
+)
 # Nightly index builder
 from indices_builder import run_indices_builder as indices_generate_snapshot
 # -----------------------------------------------------------------------------
@@ -2572,6 +2532,8 @@ async def seed_copper_indices():
     vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
     await database.execute_many(q, vals)
     return {"ok": True, "seeded": [r[0] for r in rows]}
+# Re-mount to ensure /indices/seed_copper_indices is registered even if defined after first include
+app.include_router(router_idx)
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
@@ -3406,8 +3368,8 @@ async def pm_change_session(member: str = Body(..., embed=True)):
         mode="setup",
         customer=cust_id,
         payment_method_types=["card", "us_bank_account"],
-        success_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=ok&member={quote(member, safe='')}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=cancel&member={quote(member, safe='')}",
+        success_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=ok&member={stripe.util.utf8(member)}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/static/settings.html?pm=cancel&member={stripe.util.utf8(member)}",
         metadata={"member": member, "email": email}
     )
     return {"url": session.url}
@@ -5272,7 +5234,8 @@ ALLOWED_ORIGINS = [
     "https://scrapfutures.com",
     "https://www.scrapfutures.com",
     "https://bridge.scrapfutures.com",
-    "https://bridge-buyer.onrender.com",   
+    "https://bridge-buyer.onrender.com",
+    "https://indices.scrapfutures.com",
     "https://indices.scrapfutures.com",
 ]
 app.add_middleware(
@@ -5936,68 +5899,61 @@ class ReceiptCreateOut(BaseModel):
 
 @app.post("/receipts", tags=["Receipts"], summary="Create/mint a live receipt")
 async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCreateOut:
-    try:
-        key = _idem_key(request)
-        hit = None
-        if key:
-            hit = await idem_get(key)
-        if hit:
-            return hit
+    key = _idem_key(request)
+    hit = None
+    if key:
+        hit = await idem_get(key)
+    if hit: return hit
 
-        """
-        Populates symbol, lot_size, qty_lots, location at write time.
-        """
-        # pick a symbol (default to SKU if caller didn’t supply a separate tradable symbol)
-        symbol = (body.symbol or body.sku).strip()
 
-        # look up lot_size from your in-memory registry (falls back to 1.0 if missing)
-        lot_size = _lot_size(symbol)
+    """
+    Populates symbol, lot_size, qty_lots, location at write time.
+    """
+    # pick a symbol (default to SKU if caller didn’t supply a separate tradable symbol)
+    symbol = (body.symbol or body.sku).strip()
 
-        # compute qty_lots
-        qty_lots = float(body.qty_tons) / float(lot_size) if lot_size > 0 else None
+    # look up lot_size from your in-memory registry (falls back to 1.0 if missing)
+    lot_size = _lot_size(symbol)  # <-- you already have this helper defined above
 
-        receipt_id = str(uuid.uuid4())
-        status = "created"
+    # compute qty_lots
+    qty_lots = float(body.qty_tons) / float(lot_size) if lot_size > 0 else None
 
-        await database.execute("""
-            INSERT INTO public.receipts(
-                receipt_id, seller, sku, qty_tons, status,
-                symbol, location, qty_lots, lot_size, created_at, updated_at
-            ) VALUES (
-                :id, :seller, :sku, :qty_tons, :status,
-                :symbol, :location, :qty_lots, :lot_size, NOW(), NOW()
-            )
-        """, {
-            "id": receipt_id,
-            "seller": body.seller.strip(),
-            "sku": body.sku.strip(),
-            "qty_tons": float(body.qty_tons),
-            "status": status,
-            "symbol": symbol,
-            "location": (body.location or "UNKNOWN").strip(),
-            "qty_lots": qty_lots,
-            "lot_size": lot_size,
-        })
+    receipt_id = str(uuid.uuid4())
+    status = "created"
 
-        resp = ReceiptCreateOut(
-            receipt_id=receipt_id,
-            seller=body.seller.strip(),
-            sku=body.sku.strip(),
-            qty_tons=float(body.qty_tons),
-            symbol=symbol,
-            location=(body.location or "UNKNOWN").strip(),
-            lot_size=float(lot_size),
-            qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
-            status=status,
+    await database.execute("""
+        INSERT INTO public.receipts(
+            receipt_id, seller, sku, qty_tons, status,
+            symbol, location, qty_lots, lot_size, created_at, updated_at
+        ) VALUES (
+            :id, :seller, :sku, :qty_tons, :status,
+            :symbol, :location, :qty_lots, :lot_size, NOW(), NOW()
         )
-        return await _idem_guard(request, key, resp)
-    except HTTPException:
-        raise
-    except Exception as e:
-        try: logger.warn("receipt_create_failed", err=str(e))
-        except: pass
-        raise HTTPException(400, "invalid receipt payload or schema not initialized")
-#-------- Receipts lifecycle --------
+    """, {
+        "id": receipt_id,
+        "seller": body.seller.strip(),
+        "sku": body.sku.strip(),
+        "qty_tons": float(body.qty_tons),
+        "status": status,
+        "symbol": symbol,
+        "location": (body.location or "UNKNOWN").strip(),
+        "qty_lots": qty_lots,
+        "lot_size": lot_size,
+    })
+
+    resp = ReceiptCreateOut(
+         receipt_id=receipt_id,
+         seller=body.seller.strip(),
+         sku=body.sku.strip(),
+         qty_tons=float(body.qty_tons),
+         symbol=symbol,
+         location=(body.location or "UNKNOWN").strip(),
+         lot_size=float(lot_size),
+         qty_lots=float(qty_lots) if qty_lots is not None else 0.0,
+         status=status,
+     )
+    return await _idem_guard(request, key, resp)
+
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
@@ -6397,6 +6353,107 @@ async def update_contract(
         if cur:
             return cur
         raise HTTPException(status_code=500, detail="contract update failed")
+    
+@app.post("/contracts/{id}/cancel", tags=["Contracts"], summary="Cancel Pending contract (unreserve inventory)")
+@app.post("/contracts/{id}/cancel", tags=["Contracts"], summary="Cancel Pending contract (unreserve inventory)")
+async def contract_cancel(id: str):
+    try:
+        # lock the contract
+        row = await database.fetch_one(
+            "SELECT * FROM contracts WHERE id = :id FOR UPDATE",
+            {"id": id}
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="contract not found")
+
+        status = str(row["status"] if not isinstance(row, dict) else row.get("status") or "")
+        # idempotent OK
+        if status == "Cancelled":
+            return {"ok": True, "contract_id": id, "status": "Cancelled"}
+
+        # only Pending can be cancelled
+        if status in ("Signed", "Dispatched", "Fulfilled"):
+            raise HTTPException(status_code=409, detail=f"cannot cancel contract in state {status}")
+        if status != "Pending":
+            raise HTTPException(status_code=409, detail=f"only Pending contracts can be cancelled (got {status})")
+
+        qty    = float(row["weight_tons"] or 0.0)
+        seller = (row["seller"] or "").strip()
+        sku    = (row["material"] or "").strip()
+
+        async with database.transaction():
+            # reduce reserved qty
+            await database.execute("""
+                UPDATE inventory_items
+                   SET qty_reserved = GREATEST(qty_reserved - :q, 0),
+                       updated_at   = NOW()
+                 WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+            """, {"q": qty, "s": seller, "k": sku})
+
+            # movement log (best-effort)
+            try:
+                await database.execute("""
+                  INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                  VALUES (:s,:k,'unreserve',:q,:cid,:m)
+                """, {"s": seller, "k": sku, "q": qty, "cid": id,
+                      "m": json.dumps({"reason":"cancel"})})
+            except Exception:
+                pass
+
+            # flip contract
+            await database.execute(
+                "UPDATE contracts SET status='Cancelled', updated_at=NOW() WHERE id=:id",
+                {"id": id}
+            )
+
+        out = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": id})
+        return dict(out)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try: logger.warn("contract_cancel_failed", err=str(e))
+        except: pass
+        raise HTTPException(409, "cancel failed")
+
+    # Idempotent
+    if status == "Cancelled":
+        return {"ok": True, "contract_id": id, "status": "Cancelled"}
+
+    # Only allow cancel from Pending. Block once Signed/Dispatched/Fulfilled.
+    if status in ("Signed", "Dispatched", "Fulfilled"):
+        raise HTTPException(status_code=409, detail=f"cannot cancel contract in state {status}")
+    if status != "Pending":
+        raise HTTPException(status_code=409, detail=f"only Pending contracts can be cancelled (got {status})")
+
+    # Unreserve the inventory that was reserved at create time
+    qty = float(row["weight_tons"] or 0.0)
+    seller = (row["seller"] or "").strip()
+    sku    = (row["material"] or "").strip()
+
+    async with database.transaction():        
+        await database.execute("""
+            UPDATE inventory_items
+               SET qty_reserved = GREATEST(qty_reserved - :q, 0),
+                   updated_at   = NOW()
+             WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+        """, {"q": qty, "s": seller, "k": sku})
+
+        try:
+            await database.execute("""
+              INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+              VALUES (:s,:k,'unreserve',:q,:cid,:m)
+            """, {"s": seller, "k": sku, "q": qty, "cid": id, "m": json.dumps({"reason":"cancel"})})
+        except Exception:            
+            pass
+
+        await database.execute(
+            "UPDATE contracts SET status='Cancelled', updated_at=NOW() WHERE id=:id",
+            {"id": id}
+        )
+
+    out = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": id})
+    return dict(out)
 # ------- Contract ID--------       
 
 #-------- Export Contracts as CSV --------
@@ -6670,7 +6727,31 @@ async def rolling_bands(material: str, days: int = 365):
     rows = await database.fetch_all(q, {"m": material, "days": days})
     return [dict(r) for r in rows]
 
-# --- DAILY INDEX SNAPSHOTS ---
+@router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
+async def run_indices_now():
+    try:
+        await run_indices_builder()
+        return {"ok": True}
+    except Exception as e:
+        try: logger.warn("indices_run_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True, "note": "no data yet"}
+
+@router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    try:
+        day = start
+        n = 0
+        while day <= end:
+            await indices_generate_snapshot(snapshot_date=day)
+            day += timedelta(days=1)
+            n += 1
+        return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+    except Exception as e:
+        try: logger.warn("indices_backfill_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True}
+
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
     try:
@@ -6700,57 +6781,40 @@ async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
         except: pass
         return {"ok": False, "skipped": True}
 
+@app.post("/indices/backfill", tags=["Analytics"], summary="Backfill indices for a date range (inclusive)")
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    day = start; n = 0
+    while day <= end:
+        await indices_generate_snapshot(snapshot_date=day)
+        day += timedelta(days=1); n += 1
+    return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+
 @app.get("/public/indices/daily.json", tags=["Analytics"], summary="Public daily index JSON")
 async def public_indices_json(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
-    try:
-        q = """
-        SELECT as_of_date, region, material, avg_price, volume_tons
-          FROM indices_daily
-         WHERE as_of_date >= CURRENT_DATE - (:days || ' days')::interval
-        """
-        vals = {"days": days}
-        if region:
-            q += " AND region = :region";   vals["region"] = region.lower()
-        if material:
-            q += " AND material = :material"; vals["material"] = material
-        q += " ORDER BY as_of_date DESC, region, material"
-        rows = await database.fetch_all(q, vals)
-        out = []
-        for r in rows:
-            ap = r["avg_price"]; vt = r["volume_tons"]
-            out.append({
-                "as_of_date": r["as_of_date"].isoformat(),
-                "region": r["region"],
-                "material": r["material"],
-                "avg_price": (float(ap) if ap is not None else None),
-                "volume_tons": (float(vt) if vt is not None else None),
-            })
-        return out
-    except Exception as e:
-        try: logger.warn("public_indices_json_failed", err=str(e))
-        except: pass
-        return []
+    q = """
+    SELECT as_of_date, region, material, avg_price, volume_tons
+      FROM indices_daily
+     WHERE as_of_date >= CURRENT_DATE - (:days || ' days')::interval
+    """
+    vals = {"days": days}
+    if region:   q += " AND region = :region";   vals["region"] = region.lower()
+    if material: q += " AND material = :material"; vals["material"] = material
+    q += " ORDER BY as_of_date DESC, region, material"
+    rows = await database.fetch_all(q, vals)
+    return [{"as_of_date": r["as_of_date"].isoformat(),
+             "region": r["region"], "material": r["material"],
+             "avg_price": float(r["avg_price"]), "volume_tons": float(r["volume_tons"])} for r in rows]
 
 @app.get("/public/indices/daily.csv", tags=["Analytics"], summary="Public daily index CSV")
 async def public_indices_csv(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
-    try:
-        data = await public_indices_json(days=days, region=region, material=material)
-        out = io.StringIO(); w = csv.writer(out)
-        w.writerow(["as_of_date","region","material","avg_price","volume_tons"])
-        for r in data:
-            w.writerow([r["as_of_date"], r["region"], r["material"],
-                        ("" if r["avg_price"] is None else r["avg_price"]),
-                        ("" if r["volume_tons"] is None else r["volume_tons"])])
-        out.seek(0)
-        return StreamingResponse(iter([out.read()]), media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
-    except Exception as e:
-        try: logger.warn("public_indices_csv_failed", err=str(e))
-        except: pass
-        return StreamingResponse(iter(["as_of_date,region,material,avg_price,volume_tons\n"]),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
-# --------- Daily index snapshot ---------
+    data = await public_indices_json(days=days, region=region, material=material)
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["as_of_date","region","material","avg_price","volume_tons"])
+    for r in data:
+        w.writerow([r["as_of_date"], r["region"], r["material"], r["avg_price"], r["volume_tons"]])
+    out.seek(0)
+    return StreamingResponse(iter([out.read()]), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
 @app.get(
@@ -7083,34 +7147,18 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
 async def products_add(p: ProductIn):
-    try:
-        quality_json = json.dumps(p.quality or {}, separators=(",", ":"), ensure_ascii=False)
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS public.products (
-            symbol TEXT PRIMARY KEY,
-            description TEXT NOT NULL,
-            unit TEXT NOT NULL,
-            quality JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        """)
-        await database.execute("""
-          INSERT INTO public.products(symbol, description, unit, quality)
-          VALUES (:s, :d, :u, :q::jsonb)
-          ON CONFLICT (symbol) DO UPDATE
-            SET description = EXCLUDED.description,
-                unit        = EXCLUDED.unit,
-                quality     = EXCLUDED.quality,
-                updated_at  = NOW()
-        """, {"s": p.symbol, "d": p.description, "u": p.unit, "q": quality_json})
+    quality_json = json.dumps(p.quality or {}, separators=(",", ":"), ensure_ascii=False)
+    await database.execute("""
+      INSERT INTO public.products(symbol, description, unit, quality)
+      VALUES (:s, :d, :u, :q::jsonb)
+      ON CONFLICT (symbol) DO UPDATE
+        SET description = EXCLUDED.description,
+            unit        = EXCLUDED.unit,
+            quality     = EXCLUDED.quality
+    """, {"s": p.symbol, "d": p.description, "u": p.unit, "q": quality_json})
 
-        _INSTRUMENTS[p.symbol] = {"lot": 1.0, "tick": 0.01, "desc": p.description}
-        return {"symbol": p.symbol, "tradable": True}
-    except Exception as e:
-        try: logger.warn("products_add_failed", err=str(e))
-        except: pass
-        raise HTTPException(400, "invalid product payload or schema not initialized")
+    _INSTRUMENTS[p.symbol] = {"lot": 1.0, "tick": 0.01, "desc": p.description}
+    return {"symbol": p.symbol, "tradable": True}
 #-------- Products --------
 
 # ------- Signed Contract -------
@@ -7266,7 +7314,7 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
             message="Application already received. We'll reach out shortly.",
         )
 
-    # Best-effort email (reuses the earlier helper)
+        # Best-effort email (reuses the earlier helper)
     try:
         # Build the simple ApplyRequest the email helper expects
         shim = ApplyRequest(
@@ -7328,7 +7376,6 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
         pass
 
     return ApplicationOut(application_id=application_id, status="pending", message="Application received.")
-# --- Public endpoint (replaces /public/yard_signup) ---
 
 # --- Admin listings/approve/export ---
 class ApplicationRow(BaseModel):
@@ -7525,9 +7572,11 @@ async def bols_mark_delivered(
         pass
 
     return {"bol_id": bol_id, "status": "Delivered", "receipts_consumed": receipt_ids or []}
+
 # -------- BOLs (with PDF generation) --------
 
-# =============== Admin Exports (core tables) ===============   
+# =============== Admin Exports (core tables) ===============
+   
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
@@ -7598,9 +7647,9 @@ def export_all_zip_admin():
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
 app.include_router(admin_exports)
-# =============== Admin Exports (core tables) ===============
- 
-# ---------------- Cancel Pending Contract ----------------
+
+# === /INSERT ===
+
 @app.post(
     "/contracts/{contract_id}/cancel",
     tags=["Contracts"],
@@ -7609,48 +7658,41 @@ app.include_router(admin_exports)
     status_code=200
 )
 async def cancel_contract(contract_id: str):
-    try:
-        async with database.transaction():
-            row = await database.fetch_one("""
-                UPDATE contracts
-                SET status='Cancelled'
-                WHERE id=:id AND status='Pending'
-                RETURNING seller, material, weight_tons
-            """, {"id": contract_id})
-            if not row:
-                raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
+    async with database.transaction():
+        row = await database.fetch_one("""
+            UPDATE contracts
+            SET status='Cancelled'
+            WHERE id=:id AND status='Pending'
+            RETURNING seller, material, weight_tons
+        """, {"id": contract_id})
+        if not row:
+            raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
 
-            qty = float(row["weight_tons"])
-            seller = row["seller"].strip()
-            sku = row["material"].strip()
+        qty = float(row["weight_tons"])
+        seller = row["seller"].strip()
+        sku = row["material"].strip()
 
-            _ = await database.fetch_one("""
-                SELECT qty_reserved FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                FOR UPDATE
-            """, {"s": seller, "k": sku})
+        _ = await database.fetch_one("""
+            SELECT qty_reserved FROM inventory_items
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+            FOR UPDATE
+        """, {"s": seller, "k": sku})
 
-            await database.execute("""
-                UPDATE inventory_items
-                SET qty_reserved = GREATEST(0, qty_reserved - :q),
-                    updated_at = NOW()
-                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-            """, {"q": qty, "s": seller, "k": sku})
+        await database.execute("""
+            UPDATE inventory_items
+            SET qty_reserved = GREATEST(0, qty_reserved - :q),
+                updated_at = NOW()
+            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+        """, {"q": qty, "s": seller, "k": sku})
 
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller, :sku, 'unreserve', :q, :ref_contract, :meta)
-            """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
-                  "meta": json.dumps({"reason": "cancel"})})
+        await database.execute("""
+            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+            VALUES (:seller, :sku, 'unreserve', :q, :ref_contract, :meta)
+        """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
+              "meta": json.dumps({"reason": "cancel"})})
 
-        return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        try: logger.warn("contract_cancel_failed", err=str(e))
-        except: pass
-        raise HTTPException(409, "cancel failed")
-# ------------- Cancel Pending Contract -------------------
+    return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
+
 
 # =============== FUTURES (Admin) ===============
 futures_router = APIRouter(
@@ -8266,27 +8308,12 @@ async def surveil_list(limit:int=100):
 
 @app.post("/surveil/alert", tags=["Surveillance"], summary="Create alert")
 async def surveil_create(a: AlertIn):
-    try:
-        aid = str(uuid.uuid4())
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS surveil_alerts (
-            alert_id UUID PRIMARY KEY,
-            rule TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            data JSONB NOT NULL,
-            severity TEXT NOT NULL CHECK (severity IN ('info','warn','high')),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        """)
-        await database.execute("""
-          INSERT INTO surveil_alerts(alert_id, rule, subject, data, severity)
-          VALUES (:id,:r,:s,:d::jsonb,:sev)
-        """, {"id": aid, "r": a.rule, "s": a.subject, "d": json.dumps(a.data), "sev": a.severity})
-        return {"alert_id": aid}
-    except Exception as e:
-        try: logger.warn("surveil_create_failed", err=str(e))
-        except: pass
-        raise HTTPException(400, "alert insert failed")
+    aid = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO surveil_alerts(alert_id, rule, subject, data, severity)
+      VALUES (:id,:r,:s,:d::jsonb,:sev)
+    """, {"id": aid, "r": a.rule, "s": a.subject, "d": json.dumps(a.data), "sev": a.severity})
+    return {"alert_id": aid}
 
 # Example: lightweight spoofing detector you can call on trade/order events
 async def surveil_spoof_check(symbol: str, owner: str, side: str, placed: float, canceled: float, window_s:int=5):
@@ -8308,39 +8335,21 @@ class AnomIn(BaseModel):
 
 @app.post("/ml/anomaly", tags=["Surveillance"])
 async def ml_anomaly(a: AnomIn):
-    try:
-        score = min(1.0, max(0.0, (a.features.get("cancel_rate", 0)*0.6 + a.features.get("gps_var", 0)*0.4)))
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS public.anomaly_scores (
-            member  TEXT NOT NULL,
-            symbol  TEXT NOT NULL,
-            as_of   DATE NOT NULL,
-            score   NUMERIC NOT NULL,
-            features JSONB NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (member, symbol, as_of)
-          );
-        """)
-        await database.execute("""
-          INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
-          VALUES (:m, :s, :d, :sc, :f::jsonb)
-        """, {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)})
+    # Placeholder: simple z-score style
+    score = min(1.0, max(0.0, (a.features.get("cancel_rate", 0)*0.6 + a.features.get("gps_var", 0)*0.4)))
+    await database.execute("""
+      INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
+      VALUES (:m, :s, :d, :sc, :f::jsonb)
+    """, {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)})
 
-        if score > 0.85:
-            try:
-                await surveil_create(AlertIn(
-                    rule="ml_anomaly_high",
-                    subject=a.member,
-                    data={"symbol": a.symbol, "score": score, "features": a.features},
-                    severity="high"
-                ))
-            except Exception:
-                pass
-        return {"score": score}
-    except Exception as e:
-        try: logger.warn("ml_anomaly_failed", err=str(e))
-        except: pass
-        raise HTTPException(400, "ml anomaly failed")
+    if score > 0.85:
+        await surveil_create(AlertIn(
+            rule="ml_anomaly_high",
+            subject=a.member,
+            data={"symbol": a.symbol, "score": score, "features": a.features},
+            severity="high"
+        ))
+    return {"score": score}
 # ===== Surveillance / Alerts =====
 
 # -------- Surveillance: case management + rules --------
@@ -9744,16 +9753,11 @@ async def get_margin(account_id: str):
 
 @clearing_router.post("/deposit", summary="Credit margin account (testing/funding)")
 async def deposit(dep: DepositIn):
-    try:
-        if dep.amount == 0:
-            return {"ok": True, "note": "no-op"}
-        await _ensure_margin_account(dep.account_id)
-        await _adjust_margin(dep.account_id, dep.amount, "deposit", None)
-        return {"ok": True}
-    except Exception as e:
-        try: logger.warn("clearing_deposit_failed", err=str(e))
-        except: pass
-        raise HTTPException(400, "deposit failed (account missing or DB)")
+    if dep.amount == 0:
+        return {"ok": True, "note": "no-op"}
+    await _ensure_margin_account(dep.account_id)
+    await _adjust_margin(dep.account_id, dep.amount, "deposit", None)
+    return {"ok": True}
 
 class VariationRunIn(BaseModel):
     mark_date: Optional[date] = None
