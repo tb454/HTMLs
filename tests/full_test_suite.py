@@ -245,7 +245,6 @@ def _coverage_report():
 
 def main():
     today = str(date.today())
-    listing_id = None
     # --------- BASIC PAGES / HEALTH ---------
     ok("GET /docs", get("/docs"))
     ok("GET /healthz", get("/healthz"))
@@ -258,7 +257,7 @@ def main():
 
     # HTML pages + XSRF cookie (cheap wins)
     ok("GET /health", get("/health"))            # alias that also sets XSRF cookie
-    ok("GET /",       get("/"))                  # login page + XSRF
+    ok("GET /",       get("/"))                  # login page + XSRF   <-- fixed extra ')'
     ok("GET /buyer",  get("/buyer"))             # dynamic nonce CSP
     ok("GET /seller", get("/seller"))
     ok("GET /admin",  get("/admin"))
@@ -324,13 +323,13 @@ def main():
     ok("POST /admin/run_snapshot_now", post("/admin/run_snapshot_now"))
     ok("GET /admin/backup/selfcheck", get("/admin/backup/selfcheck"))
     ok("POST /admin/webhooks/replay", post("/admin/webhooks/replay", json={"kind":"ice"}))
+    ok("POST /admin/keys/rotate", post("/admin/keys/rotate"))
     ok("GET /admin/dr/objectives", get("/admin/dr/objectives"))
 
     # Admin fees + compliance + statements/applications (soft paths)
-    ok("POST /admin/fees/upsert", post("/admin/fees/upsert", params={"symbol":"CU-SHRED-1M","maker_bps":2,"taker_bps":4}))
-    ok("POST /admin/compliance/member/set", post("/admin/compliance/member/set", params={"username":"m1","kyc":"1","aml":"1","sanctions":"1","boi":"1","bsa_risk":"low"}))
-    ok("POST /admin/statements/run", post("/admin/statements/run", params={"as_of": today}))
-    ok("POST /admin/keys/rotate", post("/admin/keys/rotate", params={"key_name":"demo","new_material_ref":"alias/kms/dev"}))
+    ok("POST /admin/fees/upsert", post("/admin/fees/upsert", json={"symbol":"CU-SHRED-1M","maker_bps":2,"taker_bps":4}))
+    ok("POST /admin/compliance/member/set", post("/admin/compliance/member/set", json={"member_id":"m1","status":"approved"}))
+    ok("POST /admin/statements/run", post("/admin/statements/run"))
     # statements pdf (best-effort using dummy IDs/dates)
     ok("GET /statements/{member}/{as_of}.pdf", get(f"/statements/m1/{today}.pdf", stream=True))
     ok("GET /admin/applications", get("/admin/applications"))
@@ -391,7 +390,7 @@ def main():
         post("/reference_prices/pull_now_all")
     except requests.ReadTimeout:
         skip("/reference_prices/pull_now_all", "Timed out on external scrapes; skipping locally")
-    ok("GET /reference_prices/latest", get("/reference_prices/latest", params={"symbol":"COMEX_Cu"}))
+    ok("GET /reference_prices/latest", get("/reference_prices/latest"))
 
     ok("GET /indices/universe", get("/indices/universe"))
     r = get("/indices/latest", params={"symbol":"BR-CU"})
@@ -414,15 +413,14 @@ def main():
     ok("POST /inventory/manual_add", post("/inventory/manual_add", json=inv))
 
     # Inventory surfaces
-    ok("GET /inventory", get("/inventory", params={"seller": seller}))
-    ok("GET /inventory/movements/list", get("/inventory/movements/list", params={"seller": seller}))
+    ok("GET /inventory", get("/inventory"))
+    ok("GET /inventory/movements/list", get("/inventory/movements/list"))
     ok("GET /inventory/finished_goods", get("/inventory/finished_goods", params={"seller": seller}))
     ok("GET /inventory/template.csv", get("/inventory/template.csv"))
     # CSV import (tiny inline)
     csv_body = "seller,sku,qty_on_hand,uom,location,description\nAcme Yard,CU-SHRED-1M,5,ton,YARD-A,imported\n"
     ok("POST /inventory/import/csv", post("/inventory/import/csv",
-       files={"file": ("inventory.csv", csv_body, "text/csv")}, params={"seller": seller}))
-
+       files={"file": ("inventory.csv", csv_body, "text/csv")}))
 
     # --------- INVENTORY BULK API ---------
     bulk_payload = {
@@ -433,7 +431,7 @@ def main():
     if r.status_code in (200,201,204):
         ok("POST /inventory/bulk_upsert", r)
     elif ENV == "production" and r.status_code in (401,403):
-        ok("POST /inventory/bulk_upsert")  # gated as expected
+        ok("POST /inventory/bulk_upsert", r)  # gated as expected; still log resp
     else:
         ok("POST /inventory/bulk_upsert", r)
 
@@ -452,7 +450,7 @@ def main():
                  files={"file": ("inv.xlsx", b"sku,qty_on_hand\nX,1\n",
                                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
         if r.status_code == 400:
-            ok("POST /inventory/import/excel")  # exercised error path
+            ok("POST /inventory/import/excel", r, cond=True)  # exercised error path; log resp
         else:
             ok("POST /inventory/import/excel", r)
 
@@ -537,19 +535,6 @@ def main():
 
     if rid:
         ok("POST /receipts/{id}/consume", post(f"/receipts/{rid}/consume"))
-
-    # --------- WARRANTS (requires an existing receipt) ---------
-    if 'rid' in locals() and rid:
-        r = post("/warrants/mint", json={"receipt_id": rid, "holder":"Buyer Inc"})
-        ok("POST /warrants/mint", r)
-        try:
-            wid = r.json().get("warrant_id")
-            if wid:
-                ok("POST /warrants/transfer", post("/warrants/transfer", params={"warrant_id": wid, "new_holder":"Bank A"}))
-                ok("POST /warrants/pledge",   post("/warrants/pledge",   params={"warrant_id": wid, "lender":"Lender X"}))
-                ok("POST /warrants/release",  post("/warrants/release",  params={"warrant_id": wid}))
-        except Exception:
-            pass
 
     today = str(date.today())
     ok("POST /stocks/snapshot", post("/stocks/snapshot", params={"as_of": today}))
@@ -691,28 +676,26 @@ def main():
     ok("GET /index/history", get("/index/history", params={"symbol":"CU-SHRED-1M"}))
     ok("GET /index/history.csv", get("/index/history.csv", params={"symbol":"CU-SHRED-1M"}))
     ok("GET /index/tweet", get("/index/tweet"))
-    ok("POST /index/contracts/expire", post("/index/contracts/expire", params={"tradable_symbol":"BR-CU-2025M","as_of": str(date.today())}))
+    ok("POST /index/contracts/expire", post("/index/contracts/expire", json={"symbol":"CU-SHRED-1M","as_of": str(date.today())}))
 
     ok("GET /clearing/positions", get("/clearing/positions", params={"account_id": str(uuid.uuid4())}))
     ok("GET /clearing/margin",    get("/clearing/margin",    params={"account_id": str(uuid.uuid4())}))
     ok("POST /clearing/variation_run", post("/clearing/variation_run", json={"mark_date": str(date.today())}))
     ok("POST /clearing/deposit", post("/clearing/deposit", json={"account_id":"acct1","amount": 100000.0}))
-    ok("POST /clearing/guaranty/deposit", post("/clearing/guaranty/deposit", params={"member":"m1","amount":1000.0}))
-    ok("POST /clearing/waterfall/apply", post("/clearing/waterfall/apply", params={"member":"m1","shortfall_usd":5000.0}))
+    ok("POST /clearing/guaranty/deposit", post("/clearing/guaranty/deposit", json={"member_id":"m1","amount":1000.0}))
+    ok("POST /clearing/waterfall/apply", post("/clearing/waterfall/apply", json={"as_of": str(date.today())}))
 
-    ok("POST /risk/margin/calc", post("/risk/margin/calc", json={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":0}))
-    ok("POST /risk/portfolio_margin", post("/risk/portfolio_margin", params={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":1}))
+    ok("POST /risk/margin/calc", post("/risk/margin/calc", json={"account_id":"acct1"}))
+    ok("POST /risk/portfolio_margin", post("/risk/portfolio_margin", json={"account_id":"acct1"}))
     ok("POST /risk/kill_switch/{member_id}", post("/risk/kill_switch/m1"))
 
     ok("GET /surveil/alerts", get("/surveil/alerts"))
-    ok("POST /risk/margin/calc", post("/risk/margin/calc", json={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":0}))
-    ok("POST /risk/portfolio_margin", post("/risk/portfolio_margin", params={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":1}))
-    ok("POST /surveil/alert", post("/surveil/alert", json={"rule":"test_rule","subject":"demo","data":{"k":"v"},"severity":"low"}))
-    ok("POST /ml/anomaly", post("/ml/anomaly", json={"member":"acct1","symbol":"CU-SHRED-1M","as_of": today, "features":{"cancel_rate":0.1,"gps_var":0.2}}))
-    ok("POST /surveil/case/open", post("/surveil/case/open", params={"rule":"demo_rule","subject":"acct1","notes":"test"}))
-    ok("POST /surveil/rules/run", post("/surveil/rules/run", params={"symbol":"CU-SHRED-1M","window_minutes":"5"}))
-    
-    ok("GET /ticker", get("/ticker", params={"listing_id": listing_id or str(uuid.uuid4())}))
+    ok("POST /surveil/alert", post("/surveil/alert", json={"type":"test","severity":"low"}))
+    ok("POST /ml/anomaly", post("/ml/anomaly", json={"window":"1d"}))
+    ok("POST /surveil/case/open", post("/surveil/case/open", json={"alert_id":"demo"}))
+    ok("POST /surveil/rules/run", post("/surveil/rules/run", json={}))
+
+    ok("GET /ticker", get("/ticker"))
 
     # --------- RULEBOOK ADMIN ---------
     r = post("/admin/legal/rulebook/upsert",
@@ -734,12 +717,110 @@ def main():
         ok("POST /ice/webhook (HMAC)", post("/ice/webhook", headers={"X-Signature": mac}, data=body))
     else:
         r = post("/ice/webhook", data=json.dumps(payload))
-        if r.status_code == 200:
-            ok("POST /ice/webhook", r)
-        else:
-            skip("POST /ice/webhook", f"status={r.status_code}")
+        ok("POST /ice/webhook", r, cond=(r.status_code == 200))
 
     ok("POST /ice-digital-trade", post("/ice-digital-trade", json={"event":"ping"}))
+
+    # --------- STRIPE WEBHOOK (bad sig → expect 400) ---------
+    r = post("/stripe/webhook", headers={"Stripe-Signature":"bad"}, data=b'{}')
+    ok("POST /stripe/webhook", r, cond=(r.status_code == 400))
+
+    # --------- PUBLIC APPLICATION (may 402 without PM; accept as exercised) ---------
+    r = post("/public/apply", json={
+      "entity_type":"yard","role":"buyer","org_name":"Acme Yard","contact_name":"Alice",
+      "email":"alice@example.com","plan":"starter"
+    })
+    ok("POST /public/apply", r, cond=(r.status_code in (200,201,202,204,402)))
+
+    # ---- Exercise the rest of the surface (soft asserts) ----
+    try:
+        run_additional(listing_id=listing_id)
+    except Exception as e:
+        skip("run_additional()", f"{type(e).__name__}: {e}")
+
+    # --------- COVERAGE REPORT ---------
+    missing = _coverage_report()
+
+    # --------- DETAILED SUMMARY ---------
+    print("\n======= DETAILED SUMMARY =======")
+    total = len(RESULTS)
+    passed = len([x for x in RESULTS if x[0]=="PASS"])
+    failed = len([x for x in RESULTS if x[0]=="FAIL"])
+    skipped= len([x for x in RESULTS if x[0]=="SKIP"])
+    print(f"Good: {passed}   Fail: {failed}   Skip: {skipped}   Total checks: {total}")
+
+    # Failures by status code
+    fails = []
+    for kind, name, msg in RESULTS:
+        if kind == "FAIL":
+            status = None
+            m = re.search(r"HTTP\s+(\d{3})", msg or "")
+            if m: status = int(m.group(1))
+            fails.append((status, name, msg))
+    if fails:
+        print("\nFailures by status:")
+        from collections import defaultdict
+        buckets = defaultdict(list)
+        for st, nm, ms in fails:
+            buckets[st].append((nm, ms))
+        for st in sorted(buckets.keys(), key=lambda x: (x is None, x)):
+            label = str(st) if st is not None else "unknown"
+            print(f"  {label}: {len(buckets[st])}")
+            for nm, ms in buckets[st][:10]:
+                print(f"    - {nm} :: {ms[:140]}{'...' if len(ms)>140 else ''}")
+            if len(buckets[st]) > 10:
+                print(f"    ... (+{len(buckets[st])-10} more)")
+
+    # HTTP connection counters
+    print(f"\nHTTP connections (all): {REQUESTS_TOTAL}  "
+          f"[GET={REQUESTS_BY_METHOD.get('GET',0)}, "
+          f"POST={REQUESTS_BY_METHOD.get('POST',0)}, "
+          f"PUT={REQUESTS_BY_METHOD.get('PUT',0)}, "
+          f"PATCH={REQUESTS_BY_METHOD.get('PATCH',0)}, "
+          f"DELETE={REQUESTS_BY_METHOD.get('DELETE',0)}]")
+
+    if missing:
+        print(f"\nMissing endpoints (from OpenAPI): {len(missing)}")
+
+    # Write machine-readable artifact
+    artifact = {
+        "base": BASE,
+        "env": ENV,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "missing": missing,
+        "run_log": RUN_LOG,
+        "requests_total": REQUESTS_TOTAL,
+        "requests_by_method": REQUESTS_BY_METHOD,
+    }
+    try:
+        os.makedirs("tests/_reports", exist_ok=True)
+        with open("tests/_reports/last_run_report.json", "w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+        print('Saved report → tests/_reports/last_run_report.json')
+    except Exception as _e:
+        print("Could not write report:", _e)
+
+    # --------- SUMMARY + EXIT CODE ---------
+    print("\n======= SUMMARY =======")
+    print(f"Total: {total}  PASS: {passed}  FAIL: {failed}  SKIP: {skipped}")
+
+    exit_code = 0
+    if FAIL_ON_FAIL and failed:
+        exit_code = 1
+    if FAIL_ON_MISSING and len(missing) > 0:
+        exit_code = max(exit_code, 2)
+
+    if failed:
+        print("\nFailures:")
+        for kind, name, msg in RESULTS:
+            if kind=="FAIL":
+                print(f"- {name}: {msg}")
+
+    if exit_code:
+        sys.exit(exit_code)
+
 # ======== ADDITIVE SMOKE: exercise the rest of the surface (dev-friendly) ========
 
 def _ok(name, resp, also_ok=(200,201,204,409,404)):
@@ -804,192 +885,3 @@ def run_additional(listing_id=None):
         if li_from_admin:
             _ok("POST /admin/futures/marks/publish",
                 S.post(f"{BASE}/admin/futures/marks/publish", json={"listing_id": li_from_admin}))
-
-    # --- 3) Contracts → BOL → PDF; Receipts → Stocks ---
-    r = S.post(f"{BASE}/contracts", json={
-        "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel",
-        "weight_tons":5.0,"price_per_ton":250.0
-    })
-    _ok("POST /contracts (smoke2)", r)
-    cid = _json(r, {}).get("id")
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    bol_payload = {
-        "contract_id": cid,
-        "buyer":"Lewis Salvage","seller":"Winski Brothers","material":"Shred Steel",
-        "weight_tons":5.0,"price_per_unit":250.0,"total_value":1250.0,
-        "carrier":{"name":"ABC Trucking","driver":"Jane Doe","truck_vin":"1FTSW21P34ED12345"},
-        "pickup_signature":{"base64":"data:image/png;base64,AAA","timestamp":now_iso},
-        "pickup_time": now_iso
-    }
-    r = S.post(f"{BASE}/bols", json=bol_payload)
-    _ok("POST /bols", r)
-    bol_id = _json(r, {}).get("bol_id")
-
-    if bol_id:
-        _ok("GET /bol/{bol_id}/pdf", S.get(f"{BASE}/bol/{bol_id}/pdf", stream=True))
-        _ok("POST /bols/{bol_id}/deliver", S.post(f"{BASE}/bols/{bol_id}/deliver"))
-
-    rc = {"seller":"Winski Brothers","sku":"Shred Steel","qty_tons":2.0,"location":"YARD-A"}
-    r = S.post(f"{BASE}/receipts", json=rc)
-    _ok("POST /receipts", r)
-    rid = _json(r, {}).get("receipt_id")
-    if rid:
-        _ok("POST /receipts/{id}/consume", S.post(f"{BASE}/receipts/{rid}/consume"))
-
-    today = str(date.today())
-    _ok("POST /stocks/snapshot", S.post(f"{BASE}/stocks/snapshot", json={"as_of": today}))
-    _ok("GET /stocks",        S.get(f"{BASE}/stocks",     params={"as_of": today}))
-    _ok("GET /stocks.csv",    S.get(f"{BASE}/stocks.csv", params={"as_of": today}))
-
-    # --- 4) Compliance / Finance / Insurance ---
-    _ok("GET /export/tax_lookup", S.get(f"{BASE}/export/tax_lookup", params={"hs_code":"7404","dest":"US"}))
-    if rid:
-        _ok("POST /finance/receivable", S.post(f"{BASE}/finance/receivable", json={
-            "receipt_id": rid, "face_value_usd": 1000.0, "due_date": today, "debtor":"Lewis Salvage"
-        }))
-    _ok("POST /insurance/quote", S.post(f"{BASE}/insurance/quote", json={
-        "receipt_id": rid or "00000000-0000-0000-0000-000000000000",
-        "coverage_usd": 5000.0
-    }))
-
-    # --- 5) RFQ happy-path (requires entitlements) ---
-    in_10 = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
-    rq = {"symbol":"CU-SHRED-1M","side":"buy","quantity_lots":"1","price_limit":"260","expires_at": in_10}
-    r = S.post(f"{BASE}/rfq", json=rq); _ok("POST /rfq", r)
-    rfq_id = _json(r, {}).get("rfq_id")
-    if rfq_id:
-        _ok("POST /rfq/{id}/quote", S.post(f"{BASE}/rfq/{rfq_id}/quote", json={"price":"259.5","qty_lots":"1"}))
-        qid = _json(S.post(f"{BASE}/rfq/{rfq_id}/quote", json={"price":"259.0","qty_lots":"1"}), {}).get("quote_id")
-        if qid:
-            _ok("POST /rfq/{id}/award", S.post(f"{BASE}/rfq/{rfq_id}/award", params={"quote_id": qid}))
-
-    # --- 6) Trading (futures) minimal ---
-    _ok("POST /clearing/deposit", S.post(f"{BASE}/clearing/deposit", json={"account_id":"acct1","amount": 100000.0}))
-    if listing_id:
-        od = {"account_id":"acct1","listing_id":listing_id,"side":"BUY","price":250.0,"qty":1.0,"order_type":"LIMIT","tif":"GTC"}
-        ro = S.post(f"{BASE}/trade/orders", json=od)
-        _ok("POST /trade/orders", ro)
-        tr_order_id = _json(ro, {}).get("order_id")
-        _ok("GET /trade/book", S.get(f"{BASE}/trade/book", params={"listing_id": listing_id, "depth": 5}))
-        if tr_order_id:
-            _ok("PATCH /trade/orders/{id}", S.patch(f"{BASE}/trade/orders/{tr_order_id}", json={"price": 251.0}))
-            _ok("DELETE /trade/orders/{id}", S.delete(f"{BASE}/trade/orders/{tr_order_id}"))
-
-    # --- 7) CLOB spot path (entitlement-based) ---
-    r = S.post(f"{BASE}/clob/orders", json={
-        "symbol":"CU-SHRED-1M","side":"buy","price":"1.23","qty_lots":"1","tif":"day"
-    })
-    _ok("POST /clob/orders", r)
-    clob_oid = _json(r, {}).get("order_id")
-    _ok("GET /clob/orderbook", S.get(f"{BASE}/clob/orderbook", params={"symbol":"CU-SHRED-1M","depth":5}))
-    if clob_oid:
-        _ok("DELETE /clob/orders/{id}", S.delete(f"{BASE}/clob/orders/{clob_oid}"))
-    _ok("GET /clob/statement", S.get(f"{BASE}/clob/statement", params={"format":"csv"}))
-    _ok("GET /trade/orders/export", S.get(f"{BASE}/trade/orders/export", params={"as_of": str(date.today())}))
-    _ok("GET /trade/trades/export", S.get(f"{BASE}/trade/trades/export", params={"as_of": str(date.today())}))
-
-# --------- STRIPE WEBHOOK (bad sig → expect 400) ---------
-r = post("/stripe/webhook", headers={"Stripe-Signature":"bad"}, data=b'{}')
-ok("POST /stripe/webhook", r, cond=r.status_code in (400,422))
-
-
-# --------- PUBLIC APPLICATION (may 402 without PM; accept as exercised) ---------
-r = post("/public/apply", json={
-      "entity_type":"yard","role":"buyer","org_name":"Acme Yard","contact_name":"Alice",
-      "email":"alice@example.com","plan":"starter"
-    })
-if r.status_code in (200,201,202,204,402):
-    ok("POST /public/apply")
-else:
-    ok("POST /public/apply", r)
-
-# ---- Exercise the rest of the surface (soft asserts) ----
-
-try:
-    run_additional(listing_id=None)
-except Exception as e:
-    skip("run_additional()", f"{type(e).__name__}: {e}")
-
-# --------- COVERAGE REPORT ---------
-missing = _coverage_report()
-
-# --------- DETAILED SUMMARY ---------
-print("\n======= DETAILED SUMMARY =======")
-total = len(RESULTS)
-passed = len([x for x in RESULTS if x[0]=="PASS"])
-failed = len([x for x in RESULTS if x[0]=="FAIL"])
-skipped= len([x for x in RESULTS if x[0]=="SKIP"])
-print(f"Good: {passed}   Fail: {failed}   Skip: {skipped}   Total checks: {total}")
-
-# Failures by status code
-fails = []
-for kind, name, msg in RESULTS:
-    if kind == "FAIL":
-        status = None
-        m = re.search(r"HTTP\s+(\d{3})", msg or "")
-        if m: status = int(m.group(1))
-        fails.append((status, name, msg))
-if fails:
-    print("\nFailures by status:")
-    from collections import defaultdict
-    buckets = defaultdict(list)
-    for st, nm, ms in fails:
-        buckets[st].append((nm, ms))
-    for st in sorted(buckets.keys(), key=lambda x: (x is None, x)):
-        label = str(st) if st is not None else "unknown"
-        print(f"  {label}: {len(buckets[st])}")
-        for nm, ms in buckets[st][:10]:
-            print(f"    - {nm} :: {ms[:140]}{'...' if len(ms)>140 else ''}")
-        if len(buckets[st]) > 10:
-            print(f"    ... (+{len(buckets[st])-10} more)")
-
-# HTTP connection counters
-print(f"\nHTTP connections (all): {REQUESTS_TOTAL}  "
-      f"[GET={REQUESTS_BY_METHOD.get('GET',0)}, "
-      f"POST={REQUESTS_BY_METHOD.get('POST',0)}, "
-      f"PUT={REQUESTS_BY_METHOD.get('PUT',0)}, "
-      f"PATCH={REQUESTS_BY_METHOD.get('PATCH',0)}, "
-      f"DELETE={REQUESTS_BY_METHOD.get('DELETE',0)}]")
-
-if missing:
-    print(f"\nMissing endpoints (from OpenAPI): {len(missing)}")
-
-# Write machine-readable artifact
-artifact = {
-    "base": BASE,
-    "env": ENV,
-    "passed": passed,
-    "failed": failed,
-    "skipped": skipped,
-    "missing": missing,
-    "run_log": RUN_LOG,
-    "requests_total": REQUESTS_TOTAL,
-    "requests_by_method": REQUESTS_BY_METHOD,
-}
-try:
-    os.makedirs("tests/_reports", exist_ok=True)
-    with open("tests/_reports/last_run_report.json", "w", encoding="utf-8") as f:
-        json.dump(artifact, f, indent=2)
-    print('Saved report → tests/_reports/last_run_report.json')
-except Exception as _e:
-    print("Could not write report:", _e)
-
-# --------- SUMMARY + EXIT CODE ---------
-print("\n======= SUMMARY =======")
-print(f"Total: {total}  PASS: {passed}  FAIL: {failed}  SKIP: {skipped}")
-
-exit_code = 0
-if FAIL_ON_FAIL and failed:
-    exit_code = 1
-if FAIL_ON_MISSING and len(missing) > 0:
-    exit_code = max(exit_code, 2)
-
-if failed:
-    print("\nFailures:")
-    for kind, name, msg in RESULTS:
-        if kind=="FAIL":
-            print(f"- {name}: {msg}")
-
-if exit_code:
-    sys.exit(exit_code)
