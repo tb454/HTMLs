@@ -328,8 +328,10 @@ def main():
 
     # Admin fees + compliance + statements/applications (soft paths)
     ok("POST /admin/fees/upsert", post("/admin/fees/upsert", json={"symbol":"CU-SHRED-1M","maker_bps":2,"taker_bps":4}))
-    ok("POST /admin/compliance/member/set", post("/admin/compliance/member/set", json={"member_id":"m1","status":"approved"}))
-    ok("POST /admin/statements/run", post("/admin/statements/run"))
+    ok("POST /admin/compliance/member/set",
+       post("/admin/compliance/member/set", 
+            json={"username":"m1","kyc":True,"aml":True,"sanctions":True,"boi":True,"bsa_risk":"low"}))
+    ok("POST /admin/statements/run", post("/admin/statements/run", params={"as_of": today}))
     # statements pdf (best-effort using dummy IDs/dates)
     ok("GET /statements/{member}/{as_of}.pdf", get(f"/statements/m1/{today}.pdf", stream=True))
     ok("GET /admin/applications", get("/admin/applications"))
@@ -390,7 +392,7 @@ def main():
         post("/reference_prices/pull_now_all")
     except requests.ReadTimeout:
         skip("/reference_prices/pull_now_all", "Timed out on external scrapes; skipping locally")
-    ok("GET /reference_prices/latest", get("/reference_prices/latest"))
+    ok("GET /reference_prices/latest", get("/reference_prices/latest", params={"symbol":"COMEX_Cu"}))
 
     ok("GET /indices/universe", get("/indices/universe"))
     r = get("/indices/latest", params={"symbol":"BR-CU"})
@@ -413,8 +415,8 @@ def main():
     ok("POST /inventory/manual_add", post("/inventory/manual_add", json=inv))
 
     # Inventory surfaces
-    ok("GET /inventory", get("/inventory"))
-    ok("GET /inventory/movements/list", get("/inventory/movements/list"))
+    ok("GET /inventory", get("/inventory", params={"seller": seller}))
+    ok("GET /inventory/movements/list", get("/inventory/movements/list", params={"seller": seller}))
     ok("GET /inventory/finished_goods", get("/inventory/finished_goods", params={"seller": seller}))
     ok("GET /inventory/template.csv", get("/inventory/template.csv"))
     # CSV import (tiny inline)
@@ -676,26 +678,37 @@ def main():
     ok("GET /index/history", get("/index/history", params={"symbol":"CU-SHRED-1M"}))
     ok("GET /index/history.csv", get("/index/history.csv", params={"symbol":"CU-SHRED-1M"}))
     ok("GET /index/tweet", get("/index/tweet"))
-    ok("POST /index/contracts/expire", post("/index/contracts/expire", json={"symbol":"CU-SHRED-1M","as_of": str(date.today())}))
+    ok("POST /index/contracts/expire", 
+       post("/index/contracts/expire", json={"tradable_symbol":"CU-SHRED-1M","as_of": today}))
 
     ok("GET /clearing/positions", get("/clearing/positions", params={"account_id": str(uuid.uuid4())}))
     ok("GET /clearing/margin",    get("/clearing/margin",    params={"account_id": str(uuid.uuid4())}))
     ok("POST /clearing/variation_run", post("/clearing/variation_run", json={"mark_date": str(date.today())}))
     ok("POST /clearing/deposit", post("/clearing/deposit", json={"account_id":"acct1","amount": 100000.0}))
-    ok("POST /clearing/guaranty/deposit", post("/clearing/guaranty/deposit", json={"member_id":"m1","amount":1000.0}))
-    ok("POST /clearing/waterfall/apply", post("/clearing/waterfall/apply", json={"as_of": str(date.today())}))
+    ok("POST /clearing/guaranty/deposit", post("/clearing/guaranty/deposit", json={"member":"m1","amount":1000.0}))
+    ok("POST /clearing/waterfall/apply", 
+       post("/clearing/waterfall/apply", json={"member":"m1","shortfall_usd":5000.0}))
 
-    ok("POST /risk/margin/calc", post("/risk/margin/calc", json={"account_id":"acct1"}))
-    ok("POST /risk/portfolio_margin", post("/risk/portfolio_margin", json={"account_id":"acct1"}))
+    ok("POST /risk/margin/calc", 
+       post("/risk/margin/calc", json={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":2}))
+    ok("POST /risk/portfolio_margin", 
+       post("/risk/portfolio_margin", params={"member":"acct1","symbol":"CU-SHRED-1M","price":250.0,"net_lots":2}))
     ok("POST /risk/kill_switch/{member_id}", post("/risk/kill_switch/m1"))
 
     ok("GET /surveil/alerts", get("/surveil/alerts"))
-    ok("POST /surveil/alert", post("/surveil/alert", json={"type":"test","severity":"low"}))
-    ok("POST /ml/anomaly", post("/ml/anomaly", json={"window":"1d"}))
-    ok("POST /surveil/case/open", post("/surveil/case/open", json={"alert_id":"demo"}))
-    ok("POST /surveil/rules/run", post("/surveil/rules/run", json={}))
+    ok("POST /surveil/alert", 
+       post("/surveil/alert", json={"rule":"test_rule","subject":"demo","data":{"k":"v"},"severity":"info"}))
+    ok("POST /ml/anomaly", 
+       post("/ml/anomaly", json={"member":"Acme Yard","symbol":"CU-SHRED-1M","as_of": today,"features":{"cancel_rate":0.1,"gps_var":0.2}}))
+    ok("POST /surveil/case/open", 
+       post("/surveil/case/open", params={"rule":"test_rule","subject":"demo","notes":"smoke"}))
+    ok("POST /surveil/rules/run", 
+       post("/surveil/rules/run", params={"symbol":"CU-SHRED-1M","window_minutes":5}))
 
-    ok("GET /ticker", get("/ticker"))
+    if listing_id:
+        ok("GET /ticker", get("/ticker", params={"listing_id": listing_id}))
+    else:
+        skip("GET /ticker", "no listing_id available")
 
     # --------- RULEBOOK ADMIN ---------
     r = post("/admin/legal/rulebook/upsert",
@@ -707,7 +720,9 @@ def main():
     ok("GET /qbo/callback",
        get("/qbo/callback", params={"code":"abc","state":"01234567state","realmId":"12345"}))
     ok("GET /admin/qbo/peek",
-       get("/admin/qbo/peek", params={"state":"01234567state"}))
+       get("/admin/qbo/peek", 
+           params={"state":"01234567state"}),
+           headers={"X-Relay-Auth": os.environ.get("QBO_RELAY_AUTH","")})
 
     payload = {"example":"ice-hook"}
     if ICE_SECRET:
@@ -737,6 +752,49 @@ def main():
         run_additional(listing_id=listing_id)
     except Exception as e:
         skip("run_additional()", f"{type(e).__name__}: {e}")
+
+    # --- Quick adds to lift coverage for trading/warrants/insurance ---
+    # 1) Futures trading surface
+    acct = str(uuid.uuid4())
+    ok("POST /clearing/deposit", post("/clearing/deposit", json={"account_id": acct, "amount": 1_000_000}))
+    # Need a listing_id to trade; get first available
+    try:
+        r_ls = get("/admin/futures/series")
+        li = (r_ls.json()[0]["id"] if r_ls.status_code==200 and r_ls.json() else None)
+    except Exception:
+        li = None
+    if li:
+        # place → modify → book → cancel
+        r = post("/trade/orders", json={"account_id": acct,"listing_id": li,"side":"BUY","price":250,"qty":1,"order_type":"LIMIT","tif":"GTC"}); ok("POST /trade/orders", r)
+        try: oid = r.json().get("order_id")
+        except Exception: oid = None
+        if oid:
+            ok("PATCH /trade/orders/{id}", patch(f"/trade/orders/{oid}", json={"price":251,"qty":1}))
+            ok("GET /trade/book", get("/trade/book", params={"listing_id": li, "depth": 5}))
+            ok("DELETE /trade/orders/{id}", delete(f"/trade/orders/{oid}"))
+    # 2) CLOB cancel path (exercise DELETE)
+    r = post("/clob/orders", json={"symbol":"CU-SHRED-1M","side":"sell","price":260,"qty_lots":1,"tif":"day"}); 
+    try: clob_id = r.json().get("order_id")
+    except Exception: clob_id = None
+    if clob_id:
+        ok("DELETE /clob/orders/{id}", delete(f"/clob/orders/{clob_id}"))
+
+    # 3) Warrants lifecycle
+    # mint a receipt if there isn't one yet
+    rrec = post("/receipts", json={"seller":"Acme Yard","sku":"CU-SHRED-1M","qty_tons":2.0})
+    try: rec_id = rrec.json().get("receipt_id")
+    except Exception: rec_id = None
+    if rec_id:
+        r_w = post("/warrants/mint", json={"receipt_id": rec_id, "holder":"Acme Yard"}); ok("POST /warrants/mint", r_w)
+        try: wid = r_w.json().get("warrant_id")
+        except Exception: wid = None
+        if wid:
+            ok("POST /warrants/transfer", post("/warrants/transfer", params={"warrant_id": wid, "new_holder":"BankCo"}))
+            ok("POST /warrants/pledge",   post("/warrants/pledge",   params={"warrant_id": wid, "lender":"BankCo"}))
+            ok("POST /warrants/release",  post("/warrants/release",  params={"warrant_id": wid}))
+
+    # 4) Insurance quote
+    ok("POST /insurance/quote", post("/insurance/quote", json={"receipt_id": rec_id or str(uuid.uuid4()), "coverage_usd": 10000}))
 
     # --------- COVERAGE REPORT ---------
     missing = _coverage_report()
