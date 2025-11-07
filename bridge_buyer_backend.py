@@ -161,11 +161,12 @@ async def _run_callable(fn):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # run startup hooks
-    for fn in _STARTUPS:
-        await _run_callable(fn)
     # background task registry
     app.state._bg_tasks = getattr(app.state, "_bg_tasks", [])
+    
+    # run startup hooks
+    for fn in _STARTUPS:
+        await _run_callable(fn)    
     try:
         yield
     finally:
