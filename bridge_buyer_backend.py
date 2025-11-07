@@ -159,29 +159,38 @@ def shutdown(fn):
 async def _run_callable(fn):
     return await fn() if inspect.iscoroutinefunction(fn) else fn()
 
+from contextlib import suppress
+import asyncio
+
+async def _run_callable(fn):
+    return await fn() if inspect.iscoroutinefunction(fn) else fn()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # background task registry
+    # ensure the registry exists before any startup hook can append to it
     app.state._bg_tasks = getattr(app.state, "_bg_tasks", [])
-    
-    # run startup hooks
+    # 1) startup hooks
     for fn in _STARTUPS:
-        await _run_callable(fn)    
+        await _run_callable(fn)
     try:
         yield
     finally:
-        # run shutdown hooks
+        # 2) shutdown hooks (best-effort)
         for fn in _SHUTDOWNS:
             try:
                 await _run_callable(fn)
             except Exception:
                 pass
-        # cancel background tasks
-        for t in getattr(app.state, "_bg_tasks", []):
-            t.cancel()
+        # 3) cancel + await background tasks without leaking CancelledError
+        for t in list(getattr(app.state, "_bg_tasks", [])):
             try:
-                await t
+                # only cancel/await proper asyncio tasks
+                if isinstance(t, asyncio.Task):
+                    t.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await t
             except Exception:
+                # swallow any other teardown noise
                 pass
 
 BLOCK_HARVESTER = os.getenv("BLOCK_HARVESTER", "").lower() in ("1","true","yes")
