@@ -1766,6 +1766,17 @@ async def _ensure_runtime_risk_tables():
 # -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
+from fastapi.responses import RedirectResponse
+
+@app.get("/terms", include_in_schema=False)
+async def _terms_alias(): return RedirectResponse("/legal/terms", status_code=307)
+
+@app.get("/eula", include_in_schema=False)
+async def _eula_alias():  return RedirectResponse("/legal/eula", status_code=307)
+
+@app.get("/privacy", include_in_schema=False)
+async def _privacy_alias(): return RedirectResponse("/legal/privacy", status_code=307)
+
 @app.get("/legal/terms", include_in_schema=True, tags=["Legal"], summary="Terms of Service")
 async def terms_page():
     return FileResponse("static/legal/terms.html")
@@ -1844,7 +1855,7 @@ async def security_page():
          description="View region-specific privacy disclosures for APAC & Canada.", status_code=200)
 @app.get("/legal/privacy-appendix.html", include_in_schema=False)
 async def privacy_appendix_page():
-    return FileResponse("static/legal/privacy-appendix.html")
+    return _static_or_placeholder("legal/privacy-appendix.html", "Privacy Appendix")
 # -------- Legal pages --------
 
 # -------- Regulatory: Rulebook & Policies (versioned) --------
@@ -1870,8 +1881,12 @@ async def rulebook_latest():
     row = await database.fetch_one(
         "SELECT url FROM rulebook_versions ORDER BY effective_date DESC LIMIT 1"
     )
-    if not row: return FileResponse("static/legal/rulebook.html")
-    return FileResponse(row["url"])
+    if not row:
+        return _static_or_placeholder("legal/rulebook.html", "Rulebook (placeholder)")
+    try:
+        return FileResponse(row["url"])
+    except Exception:
+        return _static_or_placeholder("legal/rulebook.html", "Rulebook (placeholder)")
 
 @app.get("/legal/rulebook/versions", tags=["Legal"])
 async def rulebook_versions():
@@ -2483,6 +2498,8 @@ async def seed_copper_indices():
     vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
     await database.execute_many(q, vals)
     return {"ok": True, "seeded": [r[0] for r in rows]}
+# Re-mount to ensure /indices/seed_copper_indices is registered even if defined after first include
+app.include_router(router_idx)
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
@@ -2775,6 +2792,9 @@ async def create_user(
 
 @app.post("/admin/plans/seed_mode_a", tags=["Admin"])
 async def seed_mode_a_plans(request: Request=None):
+    await _ensure_plans_tables()
+    await _ensure_plan_caps_and_limits()
+    await _ensure_billing_schema()
     _require_admin(request)
     plans = [
       {"plan_code":"starter",    "name":"Starter",    "price_usd":1000.00, "desc":"Contracts & BOLs"},
@@ -3649,12 +3669,17 @@ def admin_export_all():
         mem = io.BytesIO()
         with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for fname, sql in exports.items():
-                rows = conn.execute(_sqltext(sql)).fetchall()
+                try:
+                    rows = conn.execute(_sqltext(sql)).fetchall()
+                except Exception:
+                    rows = []  # table may not exist yet
+
                 cols = rows[0].keys() if rows else []
                 s = io.StringIO()
                 w = csv.writer(s)
-                if cols: w.writerow(cols)
-                for r in rows:                    
+                if cols:
+                    w.writerow(cols)
+                for r in rows:
                     if hasattr(r, "keys"):
                         w.writerow([r[c] for c in cols])
                     else:
@@ -4977,16 +5002,14 @@ async def _ensure_dead_letters():
 @limiter.limit("30/minute")
 @app.post("/admin/webhooks/replay", tags=["Admin"])
 async def webhook_replay(request: Request, limit: int = 100):
-    _require_admin(request)  # gate in production
-    rows = await database.fetch_all(
-        """
-        SELECT id, event, payload
-        FROM webhook_dead_letters
-        ORDER BY created_at ASC
-        LIMIT :l
-        """,
-        {"l": limit},
-    )
+    _require_admin(request)
+    try:
+        rows = await database.fetch_all("""
+            SELECT id, event, payload FROM webhook_dead_letters
+            ORDER BY created_at ASC LIMIT :l
+        """, {"l": limit})
+    except Exception:
+        return {"replayed_ok": 0, "failed": 0, "note": "dlq table not present"}
     ok = fail = 0
     for r in rows:
         res = await emit_event(r["event"], dict(r["payload"]))
