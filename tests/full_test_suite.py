@@ -720,7 +720,7 @@ def main():
     ok("GET /qbo/callback",
        get("/qbo/callback", params={"code":"abc","state":"01234567state","realmId":"12345"}))
     ok("GET /admin/qbo/peek",
-       get("/admin/qbo/peek", 
+       get("/admin/qbo/peek",
            params={"state":"01234567state"}),
            headers={"X-Relay-Auth": os.environ.get("QBO_RELAY_AUTH","")})
 
