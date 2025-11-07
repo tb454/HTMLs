@@ -943,3 +943,6 @@ def run_additional(listing_id=None):
         if li_from_admin:
             _ok("POST /admin/futures/marks/publish",
                 S.post(f"{BASE}/admin/futures/marks/publish", json={"listing_id": li_from_admin}))
+
+if __name__ == "__main__":
+    main()
