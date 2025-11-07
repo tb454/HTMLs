@@ -1,8 +1,8 @@
 {
   "base": "http://127.0.0.1:8000",
   "env": "development",
-  "passed": 95,
-  "failed": 45,
+  "passed": 102,
+  "failed": 38,
   "skipped": 6,
   "missing": [],
   "run_log": [
@@ -25,7 +25,7 @@
       "path": "/time/sync",
       "status": 200,
       "ok": true,
-      "snippet": "{\"utc\": \"2025-11-07T04:15:57.373653+00:00\", \"mono_ns\": 1762488957373653200}"
+      "snippet": "{\"utc\": \"2025-11-07T05:23:28.380960+00:00\", \"mono_ns\": 1762493008380960000}"
     },
     {
       "method": "GET",
@@ -142,9 +142,9 @@
     {
       "method": "GET",
       "path": "/legal/rulebook",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "<h1>Rulebook (placeholder)</h1><p>Upload <code>/static/legal/rulebook.html</code> to replace this placeholder.</p>"
     },
     {
       "method": "GET",
@@ -193,7 +193,7 @@
       "path": "/prices/copper_last",
       "status": 200,
       "ok": true,
-      "snippet": "{\"last\": 4.19, \"base_minus_025\": 3.94, \"note\": \"fallback: ReadTimeout\"}"
+      "snippet": "{\"last\": 4.9785, \"base_minus_025\": 4.7285}"
     },
     {
       "method": "GET",
@@ -214,21 +214,21 @@
       "path": "/admin/exports/all.zip",
       "status": 200,
       "ok": true,
-      "snippet": "PK\u0003\u0004\u0014\u0000\u0000\u0000\b\u0000\u0003\ufffdf[\ufffd\r\ufffd\u007f\ufffd\u0002\u0000G\ufffd\t\u0000\r\u0000\u0000\u0000contracts.csv\u033d\u0652\u001dG\ufffd$\ufffd>\"\ufffd\u000f)\ufffd\ufffd-\ufffd\ufffd\ufffdC\u07d7z#AL\ufffd\ufffd \ufffd\u0002\ufffd\ufffd\ufffdy)\ufffdL)\u0010\ufffd$\ufffd\ufffd\ufffd\ufffd_\ufffd8K\u001c\ufffd\ufffd\u0011\ufffd\u000bx\ufffd\ufffd\u0010\ufffd<\ufffd\u0000,<\ufffd\ufffdT\ufffd\ufffd\u052e\ufffde\ufffd\ufffd[\ufffd\ufffd|\ufffd_\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd?>\\\ufffd\ufffd_\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u007f\ufffd\ufffd\ufffd\ufffd\ufffdW\ufffd\ufffd\ufffd\ufffd~\ufffd//\u07ff}\ufffd_\ufffd\ufffd?\ufffd\ufffd\u000f\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u00fb\ufffd\ufffd"
+      "snippet": "PK\u0003\u0004\u0014\u0000\u0000\u0000\b\u0000\ufffdf[Q\u02a0\ufffd\u0014\ufffd\u0002\u0000\f\ufffd\t\u0000\r\u0000\u0000\u0000contracts.csv\u033d\u06d2\u001d\u01d1%\ufffd>f\ufffd\u000fe\ufffd\ufffdm\ufffd\ufffd\ufffd\u0378_\ufffdFB\u0018\ufffd\ufffd E\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd*\ufffd\t\u0004h\u0005\ufffd\ufffd\ufffd\ufffd\ufffdV\ufffdKn\ufffdU\ufffdY7\ufffd3=\ufffdP\ufffd\n\ufffdgd\ufffd\ufffdZ\u001e\ufffd\u02ef\ufffde\ufffd\ufffdk\ufffd\ufffd\ufffd\ufffd\u07fe\ufffd\ufffd\ufffd\ufffd?\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd?]\ufffd\ufffd_\ufffd\ufffd\ufffd\ufffd\u007f\ufffd\ufffd\ufffd\u0747\ufffd_\ufffd\ufffdj\ufffd\ufffd/\ufffd\ufffd_^~|\ufffd1\ufffd\ufffd\ufffd\u007f\u6ddf\ufffd\u51cf\ufffd\ufffd\u000f\ufffd\ufffd\ufffd\ufffd\ufffd\u05f9~"
     },
     {
       "method": "GET",
       "path": "/admin/exports/contracts.csv",
       "status": 200,
       "ok": true,
-      "snippet": "id,buyer,seller,material,sku,weight_tons,price_per_ton,total_value,status,contract_date,pickup_time,delivery_time,currency\r\n75faedd7-efd5-49a3-a867-b3983f6ca820,Buyer Inc,Acme Yard"
+      "snippet": "id,buyer,seller,material,sku,weight_tons,price_per_ton,total_value,status,contract_date,pickup_time,delivery_time,currency\r\n1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec,Buyer Inc,Acme Yard"
     },
     {
       "method": "GET",
       "path": "/admin/export_all",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "PK\u0005\u0006\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
     },
     {
       "method": "POST",
@@ -277,7 +277,7 @@
       "path": "/admin/backup/selfcheck",
       "status": 200,
       "ok": true,
-      "snippet": "{\"ok\": true, \"table_counts\": {\"contracts\": 3690, \"bols\": 14, \"inventory_items\": 17, \"orders\": 0, \"trades\": 0, \"audit_events\": 0, \"settlements\": 2}}"
+      "snippet": "{\"ok\": true, \"table_counts\": {\"contracts\": 3691, \"bols\": 15, \"inventory_items\": 17, \"orders\": 0, \"trades\": 0, \"audit_events\": 0, \"settlements\": 2}}"
     },
     {
       "method": "POST",
@@ -331,9 +331,9 @@
     {
       "method": "GET",
       "path": "/admin/applications",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "[]"
     },
     {
       "method": "GET",
@@ -359,9 +359,9 @@
     {
       "method": "POST",
       "path": "/billing/prefs/upsert",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "{\"ok\": true}"
     },
     {
       "method": "GET",
@@ -375,7 +375,7 @@
       "path": "/billing/subscribe/finalize_from_session",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"subscription finalize failed: Request req_xTRmMaLCmGk5k2: No such checkout.session: fake\"}"
+      "snippet": "{\"detail\": \"subscription finalize failed: Request req_KmWCb3DsX19xrw: No such checkout.session: fake\"}"
     },
     {
       "method": "POST",
@@ -410,7 +410,7 @@
       "path": "/billing/pay/finalize_from_session",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"finalize from session failed: Request req_3UAKMuQz3cjkFS: No such checkout.session: fake\"}"
+      "snippet": "{\"detail\": \"finalize from session failed: Request req_jrcVGmqlDhwtmx: No such checkout.session: fake\"}"
     },
     {
       "method": "POST",
@@ -452,7 +452,7 @@
       "path": "/billing/run",
       "status": 200,
       "ok": true,
-      "snippet": "{\"ok\": true, \"invoice_id\": \"02de7476-f9fd-4090-8027-d7b9367a83b4\", \"member\": \"Acme Yard\", \"period_start\": \"2025-11-01\", \"period_end\": \"2025-12-01\", \"total\": 1000.0}"
+      "snippet": "{\"ok\": true, \"invoice_id\": \"210e6765-8f4d-4522-b7e1-252b53e0b72c\", \"member\": \"Acme Yard\", \"period_start\": \"2025-11-01\", \"period_end\": \"2025-12-01\", \"total\": 1000.0}"
     },
     {
       "method": "GET",
@@ -478,23 +478,23 @@
     {
       "method": "POST",
       "path": "/indices/run",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "{\"ok\": false, \"skipped\": true, \"note\": \"no data yet\"}"
     },
     {
       "method": "POST",
       "path": "/indices/backfill",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "{\"ok\": true, \"days_processed\": 1, \"from\": \"2025-11-06\", \"to\": \"2025-11-06\"}"
     },
     {
       "method": "POST",
       "path": "/indices/generate_snapshot",
-      "status": 500,
-      "ok": false,
-      "snippet": "Internal Server Error"
+      "status": 200,
+      "ok": true,
+      "snippet": "{\"ok\": false, \"skipped\": true}"
     },
     {
       "method": "POST",
@@ -522,7 +522,7 @@
       "path": "/inventory/movements/list",
       "status": 200,
       "ok": true,
-      "snippet": "[{\"id\": \"bce19d6f-0e91-4949-b6e8-4f48aa89f0f8\", \"seller\": \"Acme Yard\", \"sku\": \"CU-SHRED-1M\", \"movement_type\": \"upsert\", \"qty\": -11, \"ref_contract\": null, \"meta\": \"{\\\"to\\\": 100.0, \\"
+      "snippet": "[{\"id\": \"491fea56-ff29-4c33-b5da-cc04abe0515e\", \"seller\": \"Acme Yard\", \"sku\": \"CU-SHRED-1M\", \"movement_type\": \"upsert\", \"qty\": -11, \"ref_contract\": null, \"meta\": \"{\\\"to\\\": 100.0, \\"
     },
     {
       "method": "GET",
@@ -564,28 +564,28 @@
       "path": "/contracts",
       "status": 201,
       "ok": true,
-      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\", \"status\": \"Pendi"
+      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\", \"status\": \"Pendi"
     },
     {
       "method": "GET",
       "path": "/contracts",
       "status": 200,
       "ok": true,
-      "snippet": "[{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\", \"status\": \"Pend"
+      "snippet": "[{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\", \"status\": \"Pend"
     },
     {
       "method": "GET",
       "path": "/contracts/{id}",
       "status": 200,
       "ok": true,
-      "snippet": "{\"id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"status\": \"Pendi"
+      "snippet": "{\"id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"status\": \"Pendi"
     },
     {
       "method": "PUT",
       "path": "/contracts/{id}",
       "status": 200,
       "ok": true,
-      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\", \"status\": \"Pendi"
+      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\", \"status\": \"Pendi"
     },
     {
       "method": "GET",
@@ -613,7 +613,7 @@
       "path": "/contracts/{id}/sign",
       "status": 200,
       "ok": true,
-      "snippet": "{\"status\": \"ok\", \"contract_id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\"}"
+      "snippet": "{\"status\": \"ok\", \"contract_id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\"}"
     },
     {
       "method": "POST",
@@ -634,7 +634,7 @@
       "path": "/bols",
       "status": 201,
       "ok": true,
-      "snippet": "{\"contract_id\": \"1cc13cfc-2eb2-49eb-91c7-e2d7ae4712ec\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 10.0, \"price_per_unit\": 250.0, \"total"
+      "snippet": "{\"contract_id\": \"f6e28ba5-4462-4e99-ae12-a7f978f5e768\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 10.0, \"price_per_unit\": 250.0, \"total"
     },
     {
       "method": "GET",
@@ -648,7 +648,7 @@
       "path": "/bols/{id}/deliver",
       "status": 200,
       "ok": true,
-      "snippet": "{\"bol_id\": \"476e3cb3-092e-4007-b46d-b49253d76fc0\", \"status\": \"Delivered\", \"receipts_consumed\": []}"
+      "snippet": "{\"bol_id\": \"b1aa4eda-1c8d-446a-8640-bb87ae830276\", \"status\": \"Delivered\", \"receipts_consumed\": []}"
     },
     {
       "method": "GET",
@@ -772,9 +772,9 @@
     {
       "method": "POST",
       "path": "/admin/futures/products",
-      "status": 500,
+      "status": 422,
       "ok": false,
-      "snippet": "Internal Server Error"
+      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"request\"], \"msg\": \"Field required\", \"input\": null}]}"
     },
     {
       "method": "POST",
@@ -809,7 +809,7 @@
       "path": "/rfq",
       "status": 200,
       "ok": true,
-      "snippet": "{\"rfq_id\": \"8bc202e1-6353-4b4a-b76c-0275fc9a7ce5\", \"status\": \"open\"}"
+      "snippet": "{\"rfq_id\": \"d747c44b-dd0b-4b9c-afc2-cad18d0305f1\", \"status\": \"open\"}"
     },
     {
       "method": "POST",
@@ -949,7 +949,7 @@
       "path": "/surveil/case/open",
       "status": 200,
       "ok": true,
-      "snippet": "{\"case_id\": \"f4fffa20-2822-4a64-a1cb-1d9efad0cfba\", \"status\": \"open\"}"
+      "snippet": "{\"case_id\": \"11f01252-be91-4485-ac0e-3362c8f8959f\", \"status\": \"open\"}"
     },
     {
       "method": "POST",
@@ -1029,10 +1029,10 @@
       "snippet": "{\"premium_usd\": 15.0, \"rate_bps\": 15.0}"
     }
   ],
-  "requests_total": 145,
+  "requests_total": 155,
   "requests_by_method": {
-    "GET": 74,
-    "POST": 70,
+    "GET": 77,
+    "POST": 77,
     "PUT": 1,
     "PATCH": 0,
     "DELETE": 0
