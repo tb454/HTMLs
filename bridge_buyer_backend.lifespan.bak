@@ -656,7 +656,7 @@ async def request_id_logging(request: Request, call_next):
 # ------ ID Logging ------
 
 # =====  Database (async + sync) =====
-@app.on_event("startup")
+@startup
 async def _connect_db_first():
     if not database.is_connected:
         await database.connect()
@@ -666,7 +666,7 @@ async def _connect_db_first():
 # ----- database (async + sync) -----
 
 # ----- idem key cache -----
-@app.on_event("startup")
+@startup
 async def _ensure_http_idem_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS http_idempotency (
@@ -679,7 +679,7 @@ async def _ensure_http_idem_table():
 # ----- idem key cache -----
 
 # =====  Prometheus metrics + optional Sentry =====
-@app.on_event("startup")
+@startup
 async def _metrics_and_sentry():
     instrumentator.expose(app, include_in_schema=False)
 
@@ -709,7 +709,7 @@ async def time_sync():
 # =====  Prometheus metrics + optional Sentry =====
 
 # =====  account - user ownership =====
-@app.on_event("startup")
+@startup
 async def _ensure_account_user_map():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS account_users(
@@ -720,7 +720,7 @@ async def _ensure_account_user_map():
 # =====  account - user ownership =====
 
 # ----- Uniq ref guard -----
-@app.on_event("startup")
+@startup
 async def _uniq_ref_guard():
     try:
         await database.execute("""
@@ -732,7 +732,7 @@ async def _uniq_ref_guard():
 # ----- Uniq ref guard -----
 
 # ----- Extra indexes -----
-@app.on_event("startup")
+@startup
 async def _ensure_more_indexes():
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_settlements_symbol_asof ON public.settlements(symbol, as_of DESC)",
@@ -749,7 +749,7 @@ async def _ensure_more_indexes():
 # ===== Billing core (fees ledger + preview/run) =====
 fees_router = APIRouter(prefix="/billing", tags=["Billing"])
 
-@app.on_event("startup")
+@startup
 async def _ensure_billing_core():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS fees_ledger(
@@ -886,7 +886,7 @@ app.include_router(fees_router)
 # ===== /Billing core =====
 
 # ----- billing contacts and email logs -----
-@app.on_event("startup")
+@startup
 async def _ensure_billing_contacts_and_email_logs():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_contacts (
@@ -1013,7 +1013,7 @@ async def notify_humans(event: str, *, member: str, subject: str, html: str,
         await _send_email(ADMIN_EMAIL, f"[{event}] " + subject, html, ref_type, ref_id)
 # ----- billing contacts and email logs -----
 
-@app.on_event("startup")
+@startup
 async def _ensure_payment_profiles():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_payment_profiles(
@@ -1389,7 +1389,7 @@ async def _fetch_invoice(invoice_id: str):
 # ----- Stripe billing -----
 
 # ----- billing prefs -----
-@app.on_event("startup")
+@startup
 async def _ensure_billing_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_preferences (
@@ -1417,7 +1417,7 @@ async def _ensure_billing_schema():
 
 # ---- billing cron -----
 import pytz
-@app.on_event("startup")
+@startup
 async def _billing_cron():
     # BILL_MODE=subscriptions → Stripe Subscriptions + Meters bill everything; skip internal cron
     if os.getenv("BILL_MODE", "subscriptions").lower() == "subscriptions":
@@ -1455,12 +1455,15 @@ async def _billing_cron():
             except Exception:
                 pass
             await asyncio.sleep(3600)
-    asyncio.create_task(_runner())
+    t = t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 
 # ----- billing cron -----
 
 # ---- ws meter flush -----
-@app.on_event("startup")
+@startup
 async def _ws_meter_flush():
     """
     Hourly: sum new WS message counts from data_msg_counters and emit to Stripe as raw counts.
@@ -1485,11 +1488,13 @@ async def _ws_meter_flush():
             except Exception:
                 pass
             await asyncio.sleep(3600)  # hourly
-    asyncio.create_task(_run())
+    t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 # ----- ws meter flush -----
 
 # ----- plans tables -----
-@app.on_event("startup")
+@startup
 async def _ensure_plans_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_plans (
@@ -1512,7 +1517,7 @@ async def _ensure_plans_tables():
 # ----- plans tables -----
 
 # ----- plan caps and limits -----
-@app.on_event("startup")
+@startup
 async def _ensure_plan_caps_and_limits():
     await run_ddl_multi("""
     -- Plan catalog (already created earlier, kept here for clarity)
@@ -1570,7 +1575,7 @@ async def _ensure_plan_caps_and_limits():
 # ----- plan caps and limits -----
 
 # ----- Products -----
-@app.on_event("startup")
+@startup
 async def _ensure_products_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.products (
@@ -1593,7 +1598,7 @@ async def _ensure_products_schema():
 # ----- Products -----
 
 # ----- Anomaly scores -----
-@app.on_event("startup")
+@startup
 async def _ensure_anomaly_scores_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.anomaly_scores (
@@ -1614,7 +1619,7 @@ async def _ensure_anomaly_scores_schema():
 # ----- Anomaly scores -----
 
 # ----- Index contracts -----
-@app.on_event("startup")
+@startup
 async def _ensure_index_contracts_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.index_contracts (
@@ -1634,7 +1639,7 @@ async def _ensure_index_contracts_schema():
 # ----- Index contracts -----
 
 #----- Fee schedule ----
-@app.on_event("startup")
+@startup
 async def _ensure_fee_schedule_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS fee_schedule (
@@ -1652,7 +1657,7 @@ async def _ensure_fee_schedule_schema():
 # ---- Fee schedule ----
 
 # ---- Settlement Publishing ---- 
-@app.on_event("startup")
+@startup
 async def _ensure_settlements_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS settlements (
@@ -1671,7 +1676,7 @@ async def _ensure_settlements_schema():
 # ---- Settlement Publishing ----
 
 # ---- Indices (daily + snapshots) bootstrap ----
-@app.on_event("startup")
+@startup
 async def _ensure_indices_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS indices_daily (
@@ -1693,7 +1698,7 @@ async def _ensure_indices_tables():
 # ---- /Indices (daily + snapshots) bootstrap ----
 
 # #------ Surveillance / Alerts ------
-@app.on_event("startup")
+@startup
 async def _ensure_surveillance_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS surveil_alerts (
@@ -1712,7 +1717,7 @@ async def _ensure_surveillance_schema():
 #------ Surveillance / Alerts ------
 
 # ----- rehydrate sequencer queue -----
-@app.on_event("startup")
+@startup
 async def _rehydrate_queue():
     try:
         rows = await database.fetch_all(
@@ -1725,7 +1730,7 @@ async def _rehydrate_queue():
 # ----- rehydrate sequencer queue -----
 
 # ----- Total cleanup job -----
-@app.on_event("startup")
+@startup
 async def _http_idem_ttl_job():
     async def _run():
         while True:
@@ -1734,11 +1739,13 @@ async def _http_idem_ttl_job():
             except Exception:
                 pass
             await asyncio.sleep(24*3600)
-    asyncio.create_task(_run())
+    t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 # ===== Total cleanup job =====
 
 # ===== Retention cron =====
-@app.on_event("startup")
+@startup
 async def _retention_cron():
     async def _run():
         while True:
@@ -1751,11 +1758,13 @@ async def _retention_cron():
             except Exception:
                 pass
             await asyncio.sleep(24*3600)
-    asyncio.create_task(_run())
+    t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 # ===== Retention cron =====
 
 # -------- DDL and hydrate ----------
-@app.on_event("startup")
+@startup
 async def _ensure_runtime_risk_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_price_bands(
@@ -1878,7 +1887,7 @@ async def privacy_appendix_page():
 # -------- Legal pages --------
 
 # -------- Regulatory: Rulebook & Policies (versioned) --------
-@app.on_event("startup")
+@startup
 async def _ensure_rulebook_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS rulebook_versions(
@@ -1931,7 +1940,7 @@ async def rulebook_upsert(version: str, effective_date: date, file_path: str, re
 # -------- /Regulatory --------
 
 # === QBO OAuth Relay • Table  ===
-@app.on_event("startup")
+@startup
 async def _ensure_qbo_oauth_events_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS qbo_oauth_events (
@@ -2099,7 +2108,7 @@ async def favicon():
     return Response(status_code=204)
 
 # -------- Risk controls (kill switch, price bands, entitlements) --------
-@app.on_event("startup")
+@startup
 async def _ensure_risk_schema():
     ddl = [
         """
@@ -2117,7 +2126,7 @@ async def _ensure_risk_schema():
         except Exception as e:
             logger.warn("risk_schema_bootstrap_failed", err=str(e), sql=s[:120])
 
-@app.on_event("startup")
+@startup
 async def _ensure_entitlements_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_entitlements(
@@ -2131,7 +2140,7 @@ async def _ensure_entitlements_table():
     for r in rows:
         _ENTITLEMENTS[r["username"]].add(r["feature"])
 
-@app.on_event("startup")
+@startup
 async def _seed_demo_entitlements():
     try:
         # grant to a demo user or wildcard member you use
@@ -2167,7 +2176,7 @@ async def grant_entitlement(user: str, feature: str, request: Request):
 #----- Risk controls (kill switch, price bands, entitlements) -----
 
 # -------- Ensure public.users has id/email/username/is_active --------
-@app.on_event("startup")
+@startup
 async def _ensure_users_columns():
     # Make sure gen_random_uuid() is available
     try:
@@ -2323,7 +2332,7 @@ try:
 except Exception:
     pass
 
-@app.on_event("startup")
+@startup
 async def _startup_prices():
     # asyncpg pool uses the async DSN (no +psycopg)
     if not hasattr(app.state, "db_pool"):
@@ -2546,12 +2555,13 @@ async def _price_refresher():
             pass
         await asyncio.sleep(180)  # every 3 minutes
 
-@app.on_event("startup")
+@startup
 async def _kickoff_refresher():
-    asyncio.create_task(_price_refresher())
+    t = asyncio.create_task(_price_refresher())
+app.state._bg_tasks.append(t)
 
 # Nightly index close snapshot at ~01:00 UTC
-@app.on_event("startup")
+@startup
 async def _nightly_index_cron():
     async def _runner():
         while True:
@@ -2564,7 +2574,10 @@ async def _nightly_index_cron():
                 await indices_generate_snapshot()
             except Exception:                
                 pass
-    asyncio.create_task(_runner())
+    t = t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 
 async def _daily_indices_job():
     while True:
@@ -2578,9 +2591,10 @@ async def _daily_indices_job():
         next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
         await asyncio.sleep((next_run - now).total_seconds())
 
-@app.on_event("startup")
+@startup
 async def _start_daily_indices():
-    asyncio.create_task(_daily_indices_job())
+    t = asyncio.create_task(_daily_indices_job())
+app.state._bg_tasks.append(t)
 
 # Optional bootstrap for CI/staging/local: create minimal schema if missing
 def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
@@ -2646,7 +2660,7 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
         );
         """)
 
-@app.on_event("startup")
+@startup
 async def startup_bootstrap_and_connect():
     env = os.getenv("ENV", "").lower()
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
@@ -3417,7 +3431,7 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
     headers = {"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'}
     return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
-@app.on_event("shutdown")
+@shutdown
 async def shutdown_disconnect():
     try:
         await database.disconnect()
@@ -3485,7 +3499,7 @@ async def me(request: Request):
     }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
-@app.on_event("startup")
+@startup
 async def _ensure_compliance_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS compliance_members(
@@ -3766,7 +3780,7 @@ def _require_hmac_in_this_env() -> bool:
 # ======================================================================
 
 # ===== FUTURES schema bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_futures_schema():
     ddl = [
         """
@@ -3863,7 +3877,7 @@ async def _ensure_futures_tables_if_missing():
 # ===== /FUTURES schema bootstrap =====
 
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_trading_schema():
     try:
         await database.execute("DROP MATERIALIZED VIEW IF EXISTS v_latest_settle")
@@ -3949,7 +3963,7 @@ async def _ensure_trading_schema():
         except Exception as e:
             logger.warn("trading_schema_bootstrap_failed", err=str(e), sql=stmt[:90])
 
-@app.on_event("startup")
+@startup
 async def _ensure_eventlog_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS matching_events(
@@ -3963,7 +3977,7 @@ async def _ensure_eventlog_schema():
     """)
 
 # ===== TRADING HARDENING: risk limits, audit, trading status =====
-@app.on_event("startup")
+@startup
 async def _ensure_trading_hardening():
     # 1) columns / tables (safe to run every boot)
     ddl = [
@@ -4004,7 +4018,7 @@ async def _ensure_trading_hardening():
 
 
 # ===== INVENTORY schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_inventory_schema():
     ddl = [
         """
@@ -4072,7 +4086,7 @@ async def _ensure_inventory_schema():
 # ===== INVENTORY schema bootstrap (idempotent) =====
 
 # ------ RECEIPTS schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_receipts_schema():
     ddl = """
 CREATE TABLE IF NOT EXISTS public.receipts (
@@ -4106,7 +4120,7 @@ CREATE OR REPLACE VIEW public.receipts_live AS
 # ===== RECEIPTS schema bootstrap (idempotent) =====
 
 
-@app.on_event("startup")
+@startup
 async def _receipts_backfill_once():
     try:
         # set symbol from sku where missing
@@ -4130,7 +4144,7 @@ async def _receipts_backfill_once():
     except Exception as e:
         logger.warn("receipts_backfill_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _receipts_backfill_columns():
     """
     Idempotent backfill for receipts so /stocks/snapshot can aggregate.
@@ -4184,7 +4198,7 @@ async def _receipts_backfill_columns():
         logger.warn("receipts_backfill_failed", err=str(e))
 
 
-@app.on_event("startup")
+@startup
 async def _ensure_stocks_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.locations(
@@ -4210,7 +4224,7 @@ async def _ensure_stocks_schema():
         logger.warn("stocks_schema", err=str(e))
 
 # -------- Warranting & Chain of Title --------
-@app.on_event("startup")
+@startup
 async def _ensure_warrant_schema():
     # 1) Create table without FK (order-safe)
     await run_ddl_multi("""
@@ -4280,7 +4294,7 @@ async def warrant_release(warrant_id: str):
 
 
 # ------ RECEIVABLES schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_receivables_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.receivables (
@@ -4301,7 +4315,7 @@ async def _ensure_receivables_schema():
 # ===== Receivables schema bootstrap (idempotent) =====
 
 # ===== Buyer positions schema bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_buyer_positions_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS buyer_positions (
@@ -4611,7 +4625,7 @@ async def finished_goods(seller: str = Query(..., description="Seller (yard) nam
     ]
 
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_contracts_bols_schema():
     ddl = [
         # contracts (base shape)
@@ -4685,7 +4699,7 @@ async def _ensure_contracts_bols_schema():
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
-@app.on_event("startup")
+@startup
 async def _ensure_audit_log_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_log (
@@ -4704,7 +4718,7 @@ async def _ensure_audit_log_schema():
 # ----------- /schema bootstrap -----------
 
 # ===== AUDIT CHAIN schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_audit_chain_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_events (
@@ -4727,7 +4741,7 @@ async def _ensure_audit_chain_schema():
     except Exception as e:
         logger.warn("audit_chain_bootstrap_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _ensure_audit_seal_schema():
     ddl = [
         "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
@@ -4984,14 +4998,14 @@ async def inventory_import_excel(
     return {"ok": True, "upserted": upserted, "errors": errors}
 
 # ----------- Startup tasks -----------
-@app.on_event("startup")
+@startup
 async def _ensure_pgcrypto():
     try:
         await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     except Exception as e:
         logger.warn("pgcrypto_ext_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _ensure_perf_indexes():
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_contracts_mat_status ON contracts(material, created_at DESC, status)",
@@ -5008,7 +5022,7 @@ async def _ensure_perf_indexes():
             logger.warn('index_bootstrap_failed', sql=s[:80], err=str(e))
 
 # DB safety checks (non-negative inventory quantities)
-@app.on_event("startup")
+@startup
 async def _ensure_inventory_constraints():
     try:
         await database.execute(
@@ -5032,7 +5046,7 @@ async def _ensure_inventory_constraints():
         pass  # already exists
 
 #-------- Dead Letter Startup --------
-@app.on_event("startup")
+@startup
 async def _ensure_dead_letters():
     try:
         await run_ddl_multi("""
@@ -5077,7 +5091,7 @@ async def webhook_replay(request: Request, limit: int = 100):
 
 
 #------- Dossier HR Sync -------
-@app.on_event("startup")
+@startup
 async def _nightly_dossier_sync():
     if os.getenv("DOSSIER_SYNC", "").lower() not in ("1","true","yes"):
         return
@@ -5094,11 +5108,14 @@ async def _nightly_dossier_sync():
                 pass
             except Exception:
                 pass
-    asyncio.create_task(_runner())
+    t = t = t = asyncio.create_task(_runner())
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
+app.state._bg_tasks.append(t)
 # ------- Dossier HR Sync -------
 
 #------- RFQs -------
-@app.on_event("startup")
+@startup
 async def _ensure_rfq_schema():
     ddl = [
         """
@@ -5146,7 +5163,7 @@ async def _ensure_rfq_schema():
 #------- RFQs -------
 
 # ------ Contracts refs index ------
-@app.on_event("startup")
+@startup
 async def _idx_refs():
     try:
         await database.execute("CREATE INDEX IF NOT EXISTS idx_contracts_ref ON contracts(reference_source, reference_symbol)")
@@ -5155,7 +5172,7 @@ async def _idx_refs():
 # ------ Contracts refs index ------
 
 # ------ Statements router ------
-@app.on_event("startup")
+@startup
 async def _ensure_statements_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS statement_runs (
@@ -5172,7 +5189,7 @@ async def _ensure_statements_schema():
 # ------ Statements router ------
 
 # ------ CLOB router ------
-@app.on_event("startup")
+@startup
 async def _ensure_clob_schema():
     ddl = [
         # simple symbol-level order book (separate from futures_* tables)
@@ -5763,7 +5780,7 @@ async def qbo_peek(state: str = Query(...), request: Request = None):
 # === QBO OAuth Relay • Endpoints ===
 
 # -------- Security: key registry & rotation (scaffold) --------
-@app.on_event("startup")
+@startup
 async def _ensure_key_registry():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS key_registry(
@@ -7251,7 +7268,7 @@ class ApplicationOut(BaseModel):
     status: str
     message: str
 
-@app.on_event("startup")
+@startup
 async def _ensure_tenant_applications_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS tenant_applications (
@@ -8353,7 +8370,7 @@ async def ml_anomaly(a: AnomIn):
 # ===== Surveillance / Alerts =====
 
 # -------- Surveillance: case management + rules --------
-@app.on_event("startup")
+@startup
 async def _ensure_surv_cases():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS surveil_cases(
@@ -8800,11 +8817,12 @@ async def _sequencer_worker():
             _event_queue.task_done()
 
 
-@app.on_event("startup")
+@startup
 async def _start_sequencer():
     global _SEQUENCER_STARTED
     if not _SEQUENCER_STARTED:
-        asyncio.create_task(_sequencer_worker())
+        t = asyncio.create_task(_sequencer_worker())
+app.state._bg_tasks.append(t)
         _SEQUENCER_STARTED = True
 
 # ===== Futures matching handlers (sequenced) =====
@@ -9881,7 +9899,7 @@ async def run_variation(body: VariationRunIn):
 # --- maintenance margin check / block-unblock logic (state-change emits) ---
 
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
-@app.on_event("startup")
+@startup
 async def _ensure_ccp_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS guaranty_fund(

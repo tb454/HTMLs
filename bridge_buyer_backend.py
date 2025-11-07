@@ -29,7 +29,7 @@ import re, time as _t
 import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from urllib.parse import quote
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
@@ -45,6 +45,8 @@ from statistics import mean, stdev
 from collections import defaultdict
 from typing import Optional
 from fastapi import HTTPException
+from fastapi import Response, Query
+import uuid
 import io, os, csv, zipfile
 from typing import Dict, Any, List
 import httpx
@@ -64,6 +66,8 @@ import smtplib
 from email.message import EmailMessage
 import secrets
 from typing import Annotated
+import inspect, asyncio
+from contextlib import asynccontextmanager
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -140,7 +144,45 @@ def _round2(x: float) -> float:
 
 load_dotenv()
 
-# ---- Harvester hard block (set BLOCK_HARVESTER=1 to disable any inbound dumping) ----
+# ---- Unified lifespan + startup/shutdown hook system (moved earlier to avoid NameError) ----
+_STARTUPS: list = []
+_SHUTDOWNS: list = []
+
+def startup(fn):
+    _STARTUPS.append(fn)
+    return fn
+
+def shutdown(fn):
+    _SHUTDOWNS.append(fn)
+    return fn
+
+async def _run_callable(fn):
+    return await fn() if inspect.iscoroutinefunction(fn) else fn()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # run startup hooks
+    for fn in _STARTUPS:
+        await _run_callable(fn)
+    # background task registry
+    app.state._bg_tasks = getattr(app.state, "_bg_tasks", [])
+    try:
+        yield
+    finally:
+        # run shutdown hooks
+        for fn in _SHUTDOWNS:
+            try:
+                await _run_callable(fn)
+            except Exception:
+                pass
+        # cancel background tasks
+        for t in getattr(app.state, "_bg_tasks", []):
+            t.cancel()
+            try:
+                await t
+            except Exception:
+                pass
+
 BLOCK_HARVESTER = os.getenv("BLOCK_HARVESTER", "").lower() in ("1","true","yes")
 
 def _harvester_guard():
@@ -163,48 +205,18 @@ async def _check_contract_quota():
 # -------------------------------------
 
 app = FastAPI(
+    lifespan=lifespan,
     title="BRidge API",
     description="A secure, auditable contract and logistics platform for real-world commodity trading. Built for ICE, Nasdaq, and global counterparties.",
     version="1.0.0",
-    contact={
-        "name": "Atlas IP Holdings",
-        "url": "https://scrapfutures.com",
-        "email": "info@atlasipholdingsllc.com",
-    },
-    license_info={
-        "name": "Proprietary — Atlas IP Holdings",
-        "url": "https://scrapfutures.com/legal",
-    },
+    docs_url="/docs",
+    redoc_url=None,
+    openapi_url="/openapi.json",
+    contact={"name":"Atlas IP Holdings","url":"https://scrapfutures.com","email":"info@atlasipholdingsllc.com"},
+    license_info={"name":"Proprietary — Atlas IP Holdings","url":"https://scrapfutures.com/legal"},
 )
 instrumentator = Instrumentator()
-instrumentator.instrument(app)
-
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- Startup logic ---
-    if USE_STRIPE and stripe and STRIPE_API_KEY:
-        try:
-            for p in stripe.Price.list(active=True, limit=100).auto_paging_iter():
-                lk = getattr(p, "lookup_key", None)
-                if lk:
-                    _price_lookup_cache.setdefault(lk, p["id"])
-            print(f"✅ Stripe price cache primed: {len(_price_lookup_cache)} keys")
-        except Exception as e:
-            print(f"⚠️ Stripe cache warm-up failed: {e}")
-
-    yield  # --- Application runs here ---
-
-    # --- Shutdown logic (optional) ---
-    # e.g., close DB pool, flush logs, etc.
-    print("🛑 App shutting down cleanly.")
-app = FastAPI(lifespan=lifespan)
-
-# Move docs under /api/v1 but keep existing endpoints 
-app.docs_url = "/docs"
-app.redoc_url = None
-app.openapi_url = "/openapi.json"
+instrumentator.instrument(app).expose(app, include_in_schema=False)
 
 # === QBO OAuth Relay • Config ===
 QBO_RELAY_AUTH = os.getenv("QBO_RELAY_AUTH", "").strip()  # shared secret for /admin/qbo/peek
@@ -675,8 +687,24 @@ async def request_id_logging(request: Request, call_next):
     return response
 # ------ ID Logging ------
 
+# ===== Startup DB connect + bootstrap =====
+@startup
+async def startup_bootstrap_and_connect():
+    env = os.getenv("ENV", "").lower()
+    init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
+    if env in {"ci", "test", "staging"} or init_flag:
+        try:
+            _bootstrap_prices_indices_schema_if_needed(engine)
+        except Exception as e:
+            print(f"[bootstrap] non-fatal init error: {e}")
+    try:
+        await database.connect() 
+    except Exception as e:
+        print(f"[startup] database connect failed: {e}")
+# ===== Startup DB connect + bootstrap =====
+
 # =====  Database (async + sync) =====
-@app.on_event("startup")
+@startup
 async def _connect_db_first():
     if not database.is_connected:
         await database.connect()
@@ -685,8 +713,16 @@ async def _connect_db_first():
         app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 # ----- database (async + sync) -----
 
+# ----- Startup prices pool -----
+@startup
+async def _startup_prices():
+    import asyncpg
+    if not hasattr(app.state, "db_pool"):
+        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
+# ----- Startup prices pool -----
+
 # ----- idem key cache -----
-@app.on_event("startup")
+@startup
 async def _ensure_http_idem_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS http_idempotency (
@@ -698,10 +734,7 @@ async def _ensure_http_idem_table():
     """)
 # ----- idem key cache -----
 
-# =====  Prometheus metrics + optional Sentry =====
-@app.on_event("startup")
-async def _metrics_and_sentry():
-    instrumentator.expose(app, include_in_schema=False)
+# =====  Sentry =====
 
 dsn = (os.getenv("SENTRY_DSN") or "").strip()
 if dsn.startswith("http"):  # only init if it looks like a real DSN
@@ -726,10 +759,10 @@ async def _sla_timer(request: Request, call_next):
 @app.get("/time/sync", tags=["Health"], summary="Server time sync (UTC + monotonic)")
 async def time_sync():
     return {"utc": utcnow().isoformat(), "mono_ns": time.time_ns()}
-# =====  Prometheus metrics + optional Sentry =====
+# ===== Sentry =====
 
 # =====  account - user ownership =====
-@app.on_event("startup")
+@startup
 async def _ensure_account_user_map():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS account_users(
@@ -740,7 +773,7 @@ async def _ensure_account_user_map():
 # =====  account - user ownership =====
 
 # ----- Uniq ref guard -----
-@app.on_event("startup")
+@startup
 async def _uniq_ref_guard():
     try:
         await database.execute("""
@@ -752,7 +785,7 @@ async def _uniq_ref_guard():
 # ----- Uniq ref guard -----
 
 # ----- Extra indexes -----
-@app.on_event("startup")
+@startup
 async def _ensure_more_indexes():
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_settlements_symbol_asof ON public.settlements(symbol, as_of DESC)",
@@ -769,7 +802,7 @@ async def _ensure_more_indexes():
 # ===== Billing core (fees ledger + preview/run) =====
 fees_router = APIRouter(prefix="/billing", tags=["Billing"])
 
-@app.on_event("startup")
+@startup
 async def _ensure_billing_core():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS fees_ledger(
@@ -906,7 +939,7 @@ app.include_router(fees_router)
 # ===== /Billing core =====
 
 # ----- billing contacts and email logs -----
-@app.on_event("startup")
+@startup
 async def _ensure_billing_contacts_and_email_logs():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_contacts (
@@ -1033,7 +1066,123 @@ async def notify_humans(event: str, *, member: str, subject: str, html: str,
         await _send_email(ADMIN_EMAIL, f"[{event}] " + subject, html, ref_type, ref_id)
 # ----- billing contacts and email logs -----
 
-@app.on_event("startup")
+# --- Auto-Provisioning on first successful payment / subscription ---
+async def _provision_member(member: str, *, email: str | None, plan: str | None) -> dict:
+    """
+    Idempotently:
+      1) Approve tenant application for org (member)
+      2) Ensure a user exists (email as username), role from latest application (fallback 'buyer')
+      3) Assign plan in member_plans
+      4) Grant runtime entitlements based on billing_plan_caps for the plan
+    """
+    member_norm = (member or "").strip()
+    if not member_norm:
+        return {"ok": False, "reason": "no member key"}
+    email = (email or "").strip().lower()
+
+    # 1) Approve the most recent application for this org (if any)
+    try:
+        app = await database.fetch_one("""
+            SELECT application_id, role
+              FROM tenant_applications
+             WHERE org_name = :m
+             ORDER BY created_at DESC LIMIT 1
+        """, {"m": member_norm})
+        if app:
+            await database.execute("""
+              UPDATE tenant_applications SET status='approved' WHERE application_id=:id
+            """, {"id": app["application_id"]})
+        desired_role = (app["role"] if app and app["role"] else "buyer").lower()
+        if desired_role not in ("buyer","seller","both"):
+            desired_role = "buyer"
+    except Exception:
+        desired_role = "buyer"
+
+    # 2) Ensure user exists (idempotent). If 'both', create a 'buyer' user and grant seller entitlement later.
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+    # lookup
+    u = await database.fetch_one("SELECT email, role FROM public.users WHERE lower(email)=:e", {"e": email}) if email else None
+    if not u:
+        # generate a temp password (user can change later)
+        import secrets as _sec
+        tmp_pw = "SetMe!" + _sec.token_hex(4)
+        base_username = (email.split("@",1)[0] if email else member_norm)[:64]
+        username = base_username
+        # try a few usernames to avoid unique conflicts
+        for i in range(6):
+            try_user = username if i==0 else (base_username[:58] + f"-{i}")
+            try:
+                await database.execute("""
+                    INSERT INTO public.users (email, username, password_hash, role, is_active)
+                    VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role, TRUE)
+                """, {"email": email or f"{member_norm}@pending.local",
+                      "username": try_user,
+                      "pwd": tmp_pw,
+                      "role": ("buyer" if desired_role=="both" else desired_role)})
+                break
+            except Exception:
+                continue
+    # 3) Plan assignment (idempotent)
+    if plan:
+        await database.execute("""
+          INSERT INTO member_plans(member, plan_code, effective_date, updated_at)
+          VALUES (:m,:p,CURRENT_DATE,NOW())
+          ON CONFLICT (member) DO UPDATE SET plan_code=:p, updated_at=NOW()
+        """, {"m": member_norm, "p": plan})
+
+    # 4) Entitlements: map billing_plan_caps to runtime_entitlements
+    try:
+        caps = await database.fetch_one(
+            "SELECT * FROM billing_plan_caps WHERE plan_code=:p", {"p": plan}
+        ) if plan else None
+        if caps:
+            # build feature list
+            feats = []
+            if caps["can_contracts"]:  feats += ["contracts.use"]
+            if caps["can_bols"]:       feats += ["bols.use"]
+            if caps["can_inventory"]:  feats += ["inventory.use"]
+            if caps["can_receipts"]:   feats += ["receipts.use"]
+            if caps["can_warrants"]:   feats += ["warrants.use"]
+            if caps["can_rfq"]:        feats += ["rfq.post","rfq.quote","rfq.award"]
+            if caps["can_clob"]:       feats += ["clob.trade","trade.place","trade.modify"]
+            if caps["can_futures"]:    feats += ["futures.trade"]
+            if caps["can_market_data"]:feats += ["md.read"]
+
+            # For 'both' role, also grant a seller feature
+            if desired_role == "both":
+                feats += ["seller.portal"]
+
+            # store features against member key (username space works the same in your table)
+            for f in set(feats):
+                try:
+                    await database.execute("""
+                      INSERT INTO runtime_entitlements(username,feature)
+                      VALUES (:u,:f)
+                      ON CONFLICT (username,feature) DO NOTHING
+                    """, {"u": email or member_norm, "f": f})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # optional notify
+    try:
+        await notify_humans("account.provisioned",
+            member=member_norm,
+            subject=f"Access Granted — {member_norm}",
+            html=f"<div style='font-family:system-ui'>Member <b>{member_norm}</b> is provisioned on plan <b>{plan or '(n/a)'}</b>.</div>",
+            cc_admin=True, ref_type="member", ref_id=member_norm)
+    except Exception:
+        pass
+
+    return {"ok": True, "member": member_norm, "plan": plan, "role": desired_role}
+# ===== Auto-Provisioning on first successful payment / subscription  =====
+
+# =====  Billing payment profiles (Stripe customers + payment methods) =====
+@startup
 async def _ensure_payment_profiles():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_payment_profiles(
@@ -1047,14 +1196,14 @@ async def _ensure_payment_profiles():
     """)
 
 # === Self-serve subscription via hosted Checkout (Stripe handles billing) ===
-# Base plan lookup keys must match your Stripe dashboard:
+# Base plan lookup keys must match Stripe dashboard:
 BASE_PLAN_LOOKUP = {
     "starter": "bridge_starter_monthly",
     "standard": "bridge_standard_monthly",
     "enterprise": "bridge_enterprise_monthly",
 }
 
-# Add-on metered price lookup keys (you already created these):
+# Add-on metered price lookup keys:
 PLAN_LOOKUP_TO_ADDON_KEYS = {
     "starter": [
         "bol_overage_starter",
@@ -1095,7 +1244,7 @@ def _price_id_for_lookup(lookup_key: str) -> str:
             _price_lookup_cache[lookup_key] = p["id"]
             return p["id"]
 
-    # If we got here, the lookup_key isn't present in your Stripe dashboard
+    # If we got here, the lookup_key isn't present in Stripe dashboard
     raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
 
 
@@ -1200,7 +1349,15 @@ async def finalize_subscription_from_session(sess: str, member: Optional[str] = 
               ON CONFLICT (member) DO UPDATE
                 SET stripe_customer_id=:c, updated_at=NOW()
             """, {"m": m, "c": cust_id})
-
+         # auto-provision on successful subscription
+        try:
+            await _provision_member(
+                m,
+                email=(cust.get("email") if isinstance(cust, dict) else None),
+                plan=plan
+            )
+        except Exception:
+            pass
         return {"ok": True, "member": m, "plan": plan, "subscription_id": sub_id}
     except Exception as e:
         raise HTTPException(400, f"subscription finalize failed: {e}")
@@ -1401,7 +1558,7 @@ def _get_pricing_snapshot():
     return snapshot
 
 # ----- Stripe billing -----
-@app.lifespan("startup")
+@startup
 async def _prime_stripe_price_cache():
     if not (USE_STRIPE and stripe and STRIPE_API_KEY):
         return
@@ -1425,7 +1582,7 @@ async def _fetch_invoice(invoice_id: str):
 # ----- Stripe billing -----
 
 # ----- billing prefs -----
-@app.on_event("startup")
+@startup
 async def _ensure_billing_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_preferences (
@@ -1453,7 +1610,7 @@ async def _ensure_billing_schema():
 
 # ---- billing cron -----
 import pytz
-@app.on_event("startup")
+@startup
 async def _billing_cron():
     # BILL_MODE=subscriptions → Stripe Subscriptions + Meters bill everything; skip internal cron
     if os.getenv("BILL_MODE", "subscriptions").lower() == "subscriptions":
@@ -1491,12 +1648,12 @@ async def _billing_cron():
             except Exception:
                 pass
             await asyncio.sleep(3600)
-    asyncio.create_task(_runner())
-
+    t = asyncio.create_task(_runner())
+    app.state._bg_tasks.append(t)
 # ----- billing cron -----
 
 # ---- ws meter flush -----
-@app.on_event("startup")
+@startup
 async def _ws_meter_flush():
     """
     Hourly: sum new WS message counts from data_msg_counters and emit to Stripe as raw counts.
@@ -1521,11 +1678,12 @@ async def _ws_meter_flush():
             except Exception:
                 pass
             await asyncio.sleep(3600)  # hourly
-    asyncio.create_task(_run())
+    t = asyncio.create_task(_run())
+    app.state._bg_tasks.append(t)
 # ----- ws meter flush -----
 
 # ----- plans tables -----
-@app.on_event("startup")
+@startup
 async def _ensure_plans_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_plans (
@@ -1548,7 +1706,7 @@ async def _ensure_plans_tables():
 # ----- plans tables -----
 
 # ----- plan caps and limits -----
-@app.on_event("startup")
+@startup
 async def _ensure_plan_caps_and_limits():
     await run_ddl_multi("""
     -- Plan catalog (already created earlier, kept here for clarity)
@@ -1606,7 +1764,7 @@ async def _ensure_plan_caps_and_limits():
 # ----- plan caps and limits -----
 
 # ----- Products -----
-@app.on_event("startup")
+@startup
 async def _ensure_products_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.products (
@@ -1629,7 +1787,7 @@ async def _ensure_products_schema():
 # ----- Products -----
 
 # ----- Anomaly scores -----
-@app.on_event("startup")
+@startup
 async def _ensure_anomaly_scores_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.anomaly_scores (
@@ -1650,7 +1808,7 @@ async def _ensure_anomaly_scores_schema():
 # ----- Anomaly scores -----
 
 # ----- Index contracts -----
-@app.on_event("startup")
+@startup
 async def _ensure_index_contracts_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.index_contracts (
@@ -1670,7 +1828,7 @@ async def _ensure_index_contracts_schema():
 # ----- Index contracts -----
 
 #----- Fee schedule ----
-@app.on_event("startup")
+@startup
 async def _ensure_fee_schedule_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS fee_schedule (
@@ -1688,7 +1846,7 @@ async def _ensure_fee_schedule_schema():
 # ---- Fee schedule ----
 
 # ---- Settlement Publishing ---- 
-@app.on_event("startup")
+@startup
 async def _ensure_settlements_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS settlements (
@@ -1707,7 +1865,7 @@ async def _ensure_settlements_schema():
 # ---- Settlement Publishing ----
 
 # ---- Indices (daily + snapshots) bootstrap ----
-@app.on_event("startup")
+@startup
 async def _ensure_indices_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS indices_daily (
@@ -1729,7 +1887,7 @@ async def _ensure_indices_tables():
 # ---- /Indices (daily + snapshots) bootstrap ----
 
 # #------ Surveillance / Alerts ------
-@app.on_event("startup")
+@startup
 async def _ensure_surveillance_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS surveil_alerts (
@@ -1748,7 +1906,7 @@ async def _ensure_surveillance_schema():
 #------ Surveillance / Alerts ------
 
 # ----- rehydrate sequencer queue -----
-@app.on_event("startup")
+@startup
 async def _rehydrate_queue():
     try:
         rows = await database.fetch_all(
@@ -1761,7 +1919,7 @@ async def _rehydrate_queue():
 # ----- rehydrate sequencer queue -----
 
 # ----- Total cleanup job -----
-@app.on_event("startup")
+@startup
 async def _http_idem_ttl_job():
     async def _run():
         while True:
@@ -1770,11 +1928,12 @@ async def _http_idem_ttl_job():
             except Exception:
                 pass
             await asyncio.sleep(24*3600)
-    asyncio.create_task(_run())
+    t = asyncio.create_task(_run())
+    app.state._bg_tasks.append(t)
 # ===== Total cleanup job =====
 
 # ===== Retention cron =====
-@app.on_event("startup")
+@startup
 async def _retention_cron():
     async def _run():
         while True:
@@ -1787,11 +1946,12 @@ async def _retention_cron():
             except Exception:
                 pass
             await asyncio.sleep(24*3600)
-    asyncio.create_task(_run())
+    t = asyncio.create_task(_run())
+    app.state._bg_tasks.append(t)
 # ===== Retention cron =====
 
 # -------- DDL and hydrate ----------
-@app.on_event("startup")
+@startup
 async def _ensure_runtime_risk_tables():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_price_bands(
@@ -1926,7 +2086,7 @@ async def privacy_appendix_page():
 # -------- Legal pages --------
 
 # -------- Regulatory: Rulebook & Policies (versioned) --------
-@app.on_event("startup")
+@startup
 async def _ensure_rulebook_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS rulebook_versions(
@@ -1979,7 +2139,7 @@ async def rulebook_upsert(version: str, effective_date: date, file_path: str, re
 # -------- /Regulatory --------
 
 # === QBO OAuth Relay • Table  ===
-@app.on_event("startup")
+@startup
 async def _ensure_qbo_oauth_events_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS qbo_oauth_events (
@@ -2147,7 +2307,7 @@ async def favicon():
     return Response(status_code=204)
 
 # -------- Risk controls (kill switch, price bands, entitlements) --------
-@app.on_event("startup")
+@startup
 async def _ensure_risk_schema():
     ddl = [
         """
@@ -2165,7 +2325,7 @@ async def _ensure_risk_schema():
         except Exception as e:
             logger.warn("risk_schema_bootstrap_failed", err=str(e), sql=s[:120])
 
-@app.on_event("startup")
+@startup
 async def _ensure_entitlements_table():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_entitlements(
@@ -2179,7 +2339,7 @@ async def _ensure_entitlements_table():
     for r in rows:
         _ENTITLEMENTS[r["username"]].add(r["feature"])
 
-@app.on_event("startup")
+@startup
 async def _seed_demo_entitlements():
     try:
         # grant to a demo user or wildcard member you use
@@ -2215,7 +2375,7 @@ async def grant_entitlement(user: str, feature: str, request: Request):
 #----- Risk controls (kill switch, price bands, entitlements) -----
 
 # -------- Ensure public.users has id/email/username/is_active --------
-@app.on_event("startup")
+@startup
 async def _ensure_users_columns():
     # Make sure gen_random_uuid() is available
     try:
@@ -2325,7 +2485,6 @@ async def readiness():
 import os, asyncio
 from datetime import datetime, timedelta
 import asyncpg
-from fastapi import APIRouter, HTTPException
 from sqlalchemy import create_engine
 import databases  
 
@@ -2362,12 +2521,6 @@ try:
     print(f"[DB] sync={_sync_tail}  async={_async_tail}")
 except Exception:
     pass
-
-@app.on_event("startup")
-async def _startup_prices():
-    # asyncpg pool uses the async DSN (no +psycopg)
-    if not hasattr(app.state, "db_pool"):
-        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 # -------------------------------------------------------------------
 
 # -------- Pricing & Indices Routers (drop-in) -------------------------
@@ -2584,12 +2737,13 @@ async def _price_refresher():
             pass
         await asyncio.sleep(180)  # every 3 minutes
 
-@app.on_event("startup")
+@startup
 async def _kickoff_refresher():
-    asyncio.create_task(_price_refresher())
+    t = asyncio.create_task(_price_refresher())
+    app.state._bg_tasks.append(t)
 
 # Nightly index close snapshot at ~01:00 UTC
-@app.on_event("startup")
+@startup
 async def _nightly_index_cron():
     async def _runner():
         while True:
@@ -2602,7 +2756,8 @@ async def _nightly_index_cron():
                 await indices_generate_snapshot()
             except Exception:                
                 pass
-    asyncio.create_task(_runner())
+    t = asyncio.create_task(_runner())
+    app.state._bg_tasks.append(t)
 
 async def _daily_indices_job():
     while True:
@@ -2616,9 +2771,10 @@ async def _daily_indices_job():
         next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
         await asyncio.sleep((next_run - now).total_seconds())
 
-@app.on_event("startup")
+@startup
 async def _start_daily_indices():
-    asyncio.create_task(_daily_indices_job())
+    t = asyncio.create_task(_daily_indices_job())
+    app.state._bg_tasks.append(t)
 
 # Optional bootstrap for CI/staging/local: create minimal schema if missing
 def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
@@ -2683,20 +2839,6 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
             UNIQUE(symbol, horizon_days, forecast_date, model_name)
         );
         """)
-
-@app.on_event("startup")
-async def startup_bootstrap_and_connect():
-    env = os.getenv("ENV", "").lower()
-    init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
-    if env in {"ci", "test", "staging"} or init_flag:
-        try:
-            _bootstrap_prices_indices_schema_if_needed(engine)
-        except Exception as e:
-            print(f"[bootstrap] non-fatal init error: {e}")
-    try:
-        await database.connect() 
-    except Exception as e:
-        print(f"[startup] database connect failed: {e}")
 # ---------------------------------------------------------------------------
 
 
@@ -3130,15 +3272,50 @@ async def stripe_webhook(payload: bytes = Body(...), stripe_signature: str = Hea
         member = (inv.get("metadata") or {}).get("member")
         my_invoice_id = (inv.get("metadata") or {}).get("bridge_invoice_id")
         total = inv.get("amount_paid", 0) / 100.0
-        if my_invoice_id:
-            await database.execute("UPDATE billing_invoices SET status='paid' WHERE invoice_id=:i", {"i": my_invoice_id})
-        await notify_humans("payment.confirmed", member=member,
-                            subject=f"Payment Succeeded — {member}",
-                            html=f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> paid. Amount: ${total:,.2f}.</div>",
-                            cc_admin=True, ref_type="stripe_invoice", ref_id=inv["id"])
-        return {"ok": True}
 
-    return {"ignored": et}
+        # mark BRidge internal invoice paid if present
+        if my_invoice_id:
+            await database.execute(
+                "UPDATE billing_invoices SET status='paid' WHERE invoice_id=:i",
+                {"i": my_invoice_id}
+            )
+
+        # derive plan + email and auto-provision (idempotent)
+        try:
+            sub_id = inv.get("subscription")
+            plan_code = None
+            cust_email = (inv.get("customer_email") or None)
+
+            if sub_id:
+                sub = stripe.Subscription.retrieve(sub_id)
+                plan_code = (sub.get("metadata") or {}).get("plan") or plan_code
+                if not cust_email:
+                    try:
+                        cust_id = sub.get("customer")
+                        if cust_id:
+                            cust = stripe.Customer.retrieve(cust_id)
+                            cust_email = cust.get("email")
+                    except Exception:
+                        pass
+
+            # fallback to invoice metadata
+            plan_code = plan_code or (inv.get("metadata") or {}).get("plan")
+
+            await _provision_member(member or "", email=cust_email, plan=plan_code)
+        except Exception:
+            pass
+
+        # human notify (scoped to this event only)
+        await notify_humans(
+            "payment.confirmed",
+            member=member or "",
+            subject=f"Payment Succeeded — {member}",
+            html=f"<div style='font-family:system-ui'>Stripe invoice <b>{inv['id']}</b> paid. Amount: ${total:,.2f}.</div>",
+            cc_admin=True,
+            ref_type="stripe_invoice",
+            ref_id=inv["id"]
+        )
+        return {"ok": True}
     
 async def _bind_pm(member: str | None, customer_id: str | None, pm_id: str | None):
     # (optional) email “PM added”
@@ -3455,7 +3632,7 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
     headers = {"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'}
     return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
-@app.on_event("shutdown")
+@shutdown
 async def shutdown_disconnect():
     try:
         await database.disconnect()
@@ -3523,7 +3700,7 @@ async def me(request: Request):
     }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
-@app.on_event("startup")
+@startup
 async def _ensure_compliance_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS compliance_members(
@@ -3804,7 +3981,7 @@ def _require_hmac_in_this_env() -> bool:
 # ======================================================================
 
 # ===== FUTURES schema bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_futures_schema():
     ddl = [
         """
@@ -3901,7 +4078,7 @@ async def _ensure_futures_tables_if_missing():
 # ===== /FUTURES schema bootstrap =====
 
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_trading_schema():
     try:
         await database.execute("DROP MATERIALIZED VIEW IF EXISTS v_latest_settle")
@@ -3987,7 +4164,7 @@ async def _ensure_trading_schema():
         except Exception as e:
             logger.warn("trading_schema_bootstrap_failed", err=str(e), sql=stmt[:90])
 
-@app.on_event("startup")
+@startup
 async def _ensure_eventlog_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS matching_events(
@@ -4001,7 +4178,7 @@ async def _ensure_eventlog_schema():
     """)
 
 # ===== TRADING HARDENING: risk limits, audit, trading status =====
-@app.on_event("startup")
+@startup
 async def _ensure_trading_hardening():
     # 1) columns / tables (safe to run every boot)
     ddl = [
@@ -4042,7 +4219,7 @@ async def _ensure_trading_hardening():
 
 
 # ===== INVENTORY schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_inventory_schema():
     ddl = [
         """
@@ -4110,7 +4287,7 @@ async def _ensure_inventory_schema():
 # ===== INVENTORY schema bootstrap (idempotent) =====
 
 # ------ RECEIPTS schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_receipts_schema():
     ddl = """
 CREATE TABLE IF NOT EXISTS public.receipts (
@@ -4144,7 +4321,7 @@ CREATE OR REPLACE VIEW public.receipts_live AS
 # ===== RECEIPTS schema bootstrap (idempotent) =====
 
 
-@app.on_event("startup")
+@startup
 async def _receipts_backfill_once():
     try:
         # set symbol from sku where missing
@@ -4168,7 +4345,7 @@ async def _receipts_backfill_once():
     except Exception as e:
         logger.warn("receipts_backfill_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _receipts_backfill_columns():
     """
     Idempotent backfill for receipts so /stocks/snapshot can aggregate.
@@ -4222,7 +4399,7 @@ async def _receipts_backfill_columns():
         logger.warn("receipts_backfill_failed", err=str(e))
 
 
-@app.on_event("startup")
+@startup
 async def _ensure_stocks_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.locations(
@@ -4248,7 +4425,7 @@ async def _ensure_stocks_schema():
         logger.warn("stocks_schema", err=str(e))
 
 # -------- Warranting & Chain of Title --------
-@app.on_event("startup")
+@startup
 async def _ensure_warrant_schema():
     # 1) Create table without FK (order-safe)
     await run_ddl_multi("""
@@ -4318,7 +4495,7 @@ async def warrant_release(warrant_id: str):
 
 
 # ------ RECEIVABLES schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_receivables_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS public.receivables (
@@ -4339,7 +4516,7 @@ async def _ensure_receivables_schema():
 # ===== Receivables schema bootstrap (idempotent) =====
 
 # ===== Buyer positions schema bootstrap =====
-@app.on_event("startup")
+@startup
 async def _ensure_buyer_positions_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS buyer_positions (
@@ -4649,7 +4826,7 @@ async def finished_goods(seller: str = Query(..., description="Seller (yard) nam
     ]
 
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_contracts_bols_schema():
     ddl = [
         # contracts (base shape)
@@ -4723,7 +4900,7 @@ async def _ensure_contracts_bols_schema():
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
-@app.on_event("startup")
+@startup
 async def _ensure_audit_log_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_log (
@@ -4742,7 +4919,7 @@ async def _ensure_audit_log_schema():
 # ----------- /schema bootstrap -----------
 
 # ===== AUDIT CHAIN schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_audit_chain_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_events (
@@ -4765,7 +4942,7 @@ async def _ensure_audit_chain_schema():
     except Exception as e:
         logger.warn("audit_chain_bootstrap_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _ensure_audit_seal_schema():
     ddl = [
         "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
@@ -5022,14 +5199,14 @@ async def inventory_import_excel(
     return {"ok": True, "upserted": upserted, "errors": errors}
 
 # ----------- Startup tasks -----------
-@app.on_event("startup")
+@startup
 async def _ensure_pgcrypto():
     try:
         await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     except Exception as e:
         logger.warn("pgcrypto_ext_failed", err=str(e))
 
-@app.on_event("startup")
+@startup
 async def _ensure_perf_indexes():
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_contracts_mat_status ON contracts(material, created_at DESC, status)",
@@ -5046,7 +5223,7 @@ async def _ensure_perf_indexes():
             logger.warn('index_bootstrap_failed', sql=s[:80], err=str(e))
 
 # DB safety checks (non-negative inventory quantities)
-@app.on_event("startup")
+@startup
 async def _ensure_inventory_constraints():
     try:
         await database.execute(
@@ -5070,7 +5247,7 @@ async def _ensure_inventory_constraints():
         pass  # already exists
 
 #-------- Dead Letter Startup --------
-@app.on_event("startup")
+@startup
 async def _ensure_dead_letters():
     try:
         await run_ddl_multi("""
@@ -5115,7 +5292,7 @@ async def webhook_replay(request: Request, limit: int = 100):
 
 
 #------- Dossier HR Sync -------
-@app.on_event("startup")
+@startup
 async def _nightly_dossier_sync():
     if os.getenv("DOSSIER_SYNC", "").lower() not in ("1","true","yes"):
         return
@@ -5132,11 +5309,12 @@ async def _nightly_dossier_sync():
                 pass
             except Exception:
                 pass
-    asyncio.create_task(_runner())
+    t = asyncio.create_task(_runner())
+    app.state._bg_tasks.append(t)
 # ------- Dossier HR Sync -------
 
 #------- RFQs -------
-@app.on_event("startup")
+@startup
 async def _ensure_rfq_schema():
     ddl = [
         """
@@ -5184,7 +5362,7 @@ async def _ensure_rfq_schema():
 #------- RFQs -------
 
 # ------ Contracts refs index ------
-@app.on_event("startup")
+@startup
 async def _idx_refs():
     try:
         await database.execute("CREATE INDEX IF NOT EXISTS idx_contracts_ref ON contracts(reference_source, reference_symbol)")
@@ -5193,7 +5371,7 @@ async def _idx_refs():
 # ------ Contracts refs index ------
 
 # ------ Statements router ------
-@app.on_event("startup")
+@startup
 async def _ensure_statements_schema():
     ddl = """
     CREATE TABLE IF NOT EXISTS statement_runs (
@@ -5210,7 +5388,7 @@ async def _ensure_statements_schema():
 # ------ Statements router ------
 
 # ------ CLOB router ------
-@app.on_event("startup")
+@startup
 async def _ensure_clob_schema():
     ddl = [
         # simple symbol-level order book (separate from futures_* tables)
@@ -5800,7 +5978,7 @@ async def qbo_peek(state: str = Query(...), request: Request = None):
 # === QBO OAuth Relay • Endpoints ===
 
 # -------- Security: key registry & rotation (scaffold) --------
-@app.on_event("startup")
+@startup
 async def _ensure_key_registry():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS key_registry(
@@ -6239,10 +6417,6 @@ async def public_ticker(listing_id: str):
     }
 
 # -------- Contracts (with Inventory linkage) --------
-from fastapi import Response, Query
-from typing import Optional
-from datetime import datetime
-
 @app.get(
     "/contracts",
     response_model=List[ContractOut],
@@ -6400,23 +6574,6 @@ async def update_contract(
 # ------- Contract ID--------       
 
 #-------- Export Contracts as CSV --------
-from fastapi import Response
-import uuid
-
-def _normalize(v):
-    # keep this near the top of the file so it's used by export_contracts_csv
-    from datetime import date, datetime as _dt
-    if isinstance(v, (date, _dt)):
-        return v.isoformat()
-    if isinstance(v, Decimal):
-        return float(v)
-    if isinstance(v, uuid.UUID):
-        return str(v)
-    if isinstance(v, (dict, list)):
-        return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
-    # let csv write str(value) for everything else
-    return v
-
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
     try:
@@ -6612,9 +6769,6 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
 # ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
 
 # --- MATERIAL PRICE HISTORY (by day, avg) ---
-from typing import Optional
-from fastapi import HTTPException
-
 @app.get(
     "/analytics/material_price_history",
     tags=["Analytics"],
@@ -7203,7 +7357,7 @@ class ApplicationOut(BaseModel):
     status: str
     message: str
 
-@app.on_event("startup")
+@startup
 async def _ensure_tenant_applications_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS tenant_applications (
@@ -7528,7 +7682,6 @@ async def bols_mark_delivered(
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============   
-from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, RedirectResponse
 from sqlalchemy import text as _sqltext
 import io, csv, zipfile
@@ -8344,7 +8497,7 @@ async def ml_anomaly(a: AnomIn):
 # ===== Surveillance / Alerts =====
 
 # -------- Surveillance: case management + rules --------
-@app.on_event("startup")
+@startup
 async def _ensure_surv_cases():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS surveil_cases(
@@ -8574,7 +8727,6 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     return await _idem_guard(request, key, resp)
 
 # ===================== CLOB (Symbol-level order book) =====================
-from fastapi import APIRouter
 clob_router = APIRouter(prefix="/clob", tags=["CLOB"])
 
 # -- CLOB helpers (positions & limits) --
@@ -8791,11 +8943,12 @@ async def _sequencer_worker():
             _event_queue.task_done()
 
 
-@app.on_event("startup")
+@startup
 async def _start_sequencer():
     global _SEQUENCER_STARTED
     if not _SEQUENCER_STARTED:
-        asyncio.create_task(_sequencer_worker())
+        t = asyncio.create_task(_sequencer_worker())
+        app.state._bg_tasks.append(t)
         _SEQUENCER_STARTED = True
 
 # ===== Futures matching handlers (sequenced) =====
@@ -9877,7 +10030,7 @@ async def run_variation(body: VariationRunIn):
 # --- maintenance margin check / block-unblock logic (state-change emits) ---
 
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
-@app.on_event("startup")
+@startup
 async def _ensure_ccp_schema():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS guaranty_fund(
