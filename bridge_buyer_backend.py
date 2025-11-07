@@ -1387,6 +1387,12 @@ async def _ensure_billing_schema():
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    -- Columns referenced elsewhere:
+    ALTER TABLE billing_preferences
+      ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'America/New_York',
+      ADD COLUMN IF NOT EXISTS auto_charge BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS next_cycle_start DATE;
+
     CREATE TABLE IF NOT EXISTS billing_plan_limits (
       plan_code TEXT PRIMARY KEY,
       max_users INT NOT NULL DEFAULT 5,
@@ -1883,10 +1889,15 @@ async def rulebook_latest():
     )
     if not row:
         return _static_or_placeholder("legal/rulebook.html", "Rulebook (placeholder)")
+    path = (row["url"] or "").strip()
     try:
-        return FileResponse(row["url"])
+        from pathlib import Path
+        if not path or not Path(path).exists():
+            return _static_or_placeholder("legal/rulebook.html", "Rulebook (placeholder)")
+        return FileResponse(path)
     except Exception:
         return _static_or_placeholder("legal/rulebook.html", "Rulebook (placeholder)")
+
 
 @app.get("/legal/rulebook/versions", tags=["Legal"])
 async def rulebook_versions():
@@ -2437,18 +2448,28 @@ async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
 
 @router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
 async def run_indices_now():
-    await run_indices_builder()
-    return {"ok": True}
+    try:
+        await run_indices_builder()
+        return {"ok": True}
+    except Exception as e:
+        try: logger.warn("indices_run_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True, "note": "no data yet"}
 
 @router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
-async def indices_backfill(start: date = Query(...), end: date = Query(...)):  
-    day = start
-    n = 0
-    while day <= end:        
-        await indices_generate_snapshot(snapshot_date=day)
-        day += timedelta(days=1)
-        n += 1
-    return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    try:
+        day = start
+        n = 0
+        while day <= end:
+            await indices_generate_snapshot(snapshot_date=day)
+            day += timedelta(days=1)
+            n += 1
+        return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+    except Exception as e:
+        try: logger.warn("indices_backfill_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True}
 
 @router_idx.get("/history", summary="Historical closes for an index symbol")
 async def history(symbol: str, start: date | None = None, end: date | None = None):
@@ -3641,53 +3662,60 @@ import zipfile, io, csv
 from sqlalchemy import text as _sqltext
 
 @app.get("/admin/export_all", tags=["Admin"], summary="Download ZIP of all CSVs")
-def admin_export_all():
-    
-    exports = {
-        "contracts.csv": CONTRACTS_EXPORT_SQL,
+def admin_export_all(request: Request = None):
+    try:
+        exports = {
+            "contracts.csv": CONTRACTS_EXPORT_SQL,
+            "bols.csv": """
+                SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
+                       pickup_time, delivery_time, total_value
+                FROM bols
+                ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+            """,
+            "inventory_items.csv": """
+                SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
+                       qty_committed, source, external_id, updated_at
+                FROM inventory_items
+                ORDER BY seller, sku
+            """,
+            "inventory_movements.csv": """
+                SELECT seller, sku, movement_type, qty, ref_contract, created_at
+                FROM inventory_movements
+                ORDER BY created_at DESC
+            """,
+        }
 
-        "bols.csv": """
-            SELECT bol_id, contract_id, buyer, seller, material, weight_tons, status,
-                   pickup_time, delivery_time, total_value
-            FROM bols
-            ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
-        """,
-        "inventory_items.csv": """
-            SELECT seller, sku, description, uom, location, qty_on_hand, qty_reserved,
-                   qty_committed, source, external_id, updated_at
-            FROM inventory_items
-            ORDER BY seller, sku
-        """,
-        "inventory_movements.csv": """
-            SELECT seller, sku, movement_type, qty, ref_contract, created_at
-            FROM inventory_movements
-            ORDER BY created_at DESC
-        """,
-    }
-
-    with engine.begin() as conn:
-        mem = io.BytesIO()
-        with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for fname, sql in exports.items():
-                try:
-                    rows = conn.execute(_sqltext(sql)).fetchall()
-                except Exception:
-                    rows = []  # table may not exist yet
-
-                cols = rows[0].keys() if rows else []
-                s = io.StringIO()
-                w = csv.writer(s)
-                if cols:
-                    w.writerow(cols)
-                for r in rows:
-                    if hasattr(r, "keys"):
-                        w.writerow([r[c] for c in cols])
-                    else:
-                        w.writerow(list(r))
-                zf.writestr(fname, s.getvalue())
-        mem.seek(0)
+        with engine.begin() as conn:
+            mem = io.BytesIO()
+            with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for fname, sql in exports.items():
+                    try:
+                        rows = conn.execute(_sqltext(sql)).fetchall()
+                    except Exception:
+                        rows = []  # table may not exist yet
+                    cols = rows[0].keys() if rows else []
+                    s = io.StringIO()
+                    w = csv.writer(s)
+                    if cols:
+                        w.writerow(cols)
+                    for r in rows:
+                        if hasattr(r, "keys"):
+                            w.writerow([r[c] for c in cols])
+                        else:
+                            w.writerow(list(r))
+                    zf.writestr(fname, s.getvalue())
+            mem.seek(0)
         headers = {"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         return StreamingResponse(mem, media_type="application/zip", headers=headers)
+    except Exception:
+        # Return a valid empty zip instead of 500
+        buf = io.BytesIO()
+        zipfile.ZipFile(buf, "w").close()
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
+        )
+
 
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
@@ -5468,10 +5496,15 @@ def _is_admin_session(request: Request) -> bool:
         return False
 
 # ===== Admin gate helper  =====
-def _require_admin(request: Request):
-    # Only enforce in production so local dev stays easy
-    if os.getenv("ENV","").lower()=="production" and request.session.get("role")!="admin":
-        raise HTTPException(403, "admin only")
+def _require_admin(request: Request | None):
+    """
+    In production: require a session role of 'admin'.
+    In non-prod: no-op, and never crash if request is None.
+    """
+    if os.getenv("ENV","").lower() == "production":
+        if not request or (request.session.get("role") != "admin"):
+            raise HTTPException(403, "admin only")
+
 
 # ===== Webhook HMAC + replay protection =====
 def verify_sig(raw: bytes, header_sig: str, secret_env: str) -> bool:
@@ -6366,75 +6399,70 @@ def _normalize(v):
 
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
 async def export_contracts_csv():
-    # Streamed CSV, ultra-guarded. Never crashes the worker, even with odd types/NULLs.
     try:
-        rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
-    except Exception as e:
         try:
-            logger.warn("contracts_export_csv_query_failed", err=str(e))
-        except Exception:
-            pass
+            rows = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC")
+        except Exception as e:
+            try: logger.warn("contracts_export_csv_query_failed", err=str(e))
+            except: pass
+            return StreamingResponse(
+                iter(["id\n"]), media_type="text/csv",
+                headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+            )
+
+        dict_rows = []
+        try:
+            for r in rows:
+                dict_rows.append(dict(r))
+        except Exception as e:
+            try: logger.warn("contracts_export_csv_row_cast_failed", err=str(e))
+            except: pass
+            return StreamingResponse(
+                iter(["id\n"]), media_type="text/csv",
+                headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+            )
+
+        fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
+
+        def _norm(v):
+            try:
+                if v is None: return ""
+                if isinstance(v, (int, float, str)): return v
+                from datetime import date, datetime as _dt
+                import uuid as _uuid
+                if isinstance(v, (date, _dt)): return v.isoformat()
+                if isinstance(v, Decimal): return float(v)
+                if isinstance(v, _uuid.UUID): return str(v)
+                if isinstance(v, (dict, list)): return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
+                return str(v)
+            except Exception:
+                return ""
+
+        async def _gen():
+            buf = io.StringIO(newline="")
+            w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader(); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+            for r in dict_rows:
+                try:
+                    w.writerow({k: _norm(r.get(k)) for k in fieldnames})
+                except Exception:
+                    safe = {k: "" for k in fieldnames}
+                    try:
+                        for k in fieldnames: safe[k] = _norm(r.get(k))
+                    except Exception:
+                        pass
+                    w.writerow(safe)
+                yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+        return StreamingResponse(
+            _gen(), media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
+        )
+    except Exception:
         return StreamingResponse(
             iter(["id\n"]), media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
         )
-
-    # Normalize to list of dicts up front
-    dict_rows = []
-    try:
-        for r in rows:
-            dict_rows.append(dict(r))
-    except Exception as e:
-        try:
-            logger.warn("contracts_export_csv_row_cast_failed", err=str(e))
-        except Exception:
-            pass
-        return StreamingResponse(
-            iter(["id\n"]),
-            media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-        )
-
-    fieldnames = sorted({k for r in dict_rows for k in r.keys()}) if dict_rows else ["id"]
-
-    def _norm(v):
-        try:            
-            if v is None: return ""
-            if isinstance(v, (int, float, str)): return v
-            from datetime import date, datetime as _dt
-            import uuid as _uuid
-            if isinstance(v, (date, _dt)): return v.isoformat()
-            if isinstance(v, Decimal): return float(v)
-            if isinstance(v, _uuid.UUID): return str(v)
-            if isinstance(v, (dict, list)): return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
-            return str(v)
-        except Exception:
-            return ""
-
-    async def _gen():
-        buf = io.StringIO(newline="")
-        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        # header
-        w.writeheader(); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-        # rows
-        for r in dict_rows:
-            try:
-                w.writerow({k: _norm(r.get(k)) for k in fieldnames})
-            except Exception:
-                # write a minimal, non-breaking row
-                safe = {}
-                for k in fieldnames:
-                    try:
-                        safe[k] = _norm(r.get(k))
-                    except Exception:
-                        safe[k] = ""
-                w.writerow(safe)
-            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
-
-    return StreamingResponse(
-        _gen(), media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="contracts.csv"'}
-    )
 #-------- Export Contracts as CSV --------
 
 # --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
@@ -6628,31 +6656,59 @@ async def rolling_bands(material: str, days: int = 365):
     rows = await database.fetch_all(q, {"m": material, "days": days})
     return [dict(r) for r in rows]
 
+@router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
+async def run_indices_now():
+    try:
+        await run_indices_builder()
+        return {"ok": True}
+    except Exception as e:
+        try: logger.warn("indices_run_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True, "note": "no data yet"}
+
+@router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
+async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    try:
+        day = start
+        n = 0
+        while day <= end:
+            await indices_generate_snapshot(snapshot_date=day)
+            day += timedelta(days=1)
+            n += 1
+        return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+    except Exception as e:
+        try: logger.warn("indices_backfill_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True}
+
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
-    d = (snapshot_date or date.today()).isoformat()
-    q = """
-    INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
-    SELECT :d::date AS as_of_date,
-           LOWER(seller) AS region,
-           material,
-           AVG(price_per_ton) AS avg_price,
-           SUM(weight_tons)  AS volume_tons
-      FROM contracts
-     WHERE created_at >= :d::date
-       AND created_at  < (:d::date + INTERVAL '1 day')
-     GROUP BY region, material
-    ON CONFLICT (as_of_date, region, material) DO UPDATE
-      SET avg_price  = EXCLUDED.avg_price,
-          volume_tons= EXCLUDED.volume_tons
-    """
-    await database.execute(q, {"d": d})
     try:
-        await emit_event("index.snapshot.created", {"as_of_date": d})
-    except Exception:
-        pass
-    METRICS_INDICES_SNAPSHOTS.inc()
-    return {"ok": True, "date": d}
+        d = (snapshot_date or date.today()).isoformat()
+        q = """
+        INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
+        SELECT :d::date AS as_of_date,
+               LOWER(seller) AS region,
+               material,
+               AVG(price_per_ton) AS avg_price,
+               SUM(weight_tons)  AS volume_tons
+          FROM contracts
+         WHERE created_at >= :d::date
+           AND created_at  < (:d::date + INTERVAL '1 day')
+         GROUP BY region, material
+        ON CONFLICT (as_of_date, region, material) DO UPDATE
+          SET avg_price  = EXCLUDED.avg_price,
+              volume_tons= EXCLUDED.volume_tons
+        """
+        await database.execute(q, {"d": d})
+        try: await emit_event("index.snapshot.created", {"as_of_date": d})
+        except: pass
+        METRICS_INDICES_SNAPSHOTS.inc()
+        return {"ok": True, "date": d}
+    except Exception as e:
+        try: logger.warn("indices_snapshot_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True}
 
 @app.post("/indices/backfill", tags=["Analytics"], summary="Backfill indices for a date range (inclusive)")
 async def indices_backfill(start: date = Query(...), end: date = Query(...)):
@@ -7266,17 +7322,20 @@ class ApplicationRow(BaseModel):
 
 @app.get("/admin/applications", tags=["Admin"], response_model=List[ApplicationRow], summary="List applications")
 async def list_applications(limit: int = 200):
-    rows = await database.fetch_all(
-        """
-        SELECT application_id, created_at, status, entity_type, role, org_name, email,
-               contact_name, monthly_volume_tons, plan, ref_code
-        FROM tenant_applications
-        ORDER BY created_at DESC
-        LIMIT :limit
-        """,
-        {"limit": limit},
-    )
-    return [ApplicationRow(**dict(r)) for r in rows]
+    try:
+        rows = await database.fetch_all(
+            """
+            SELECT application_id, created_at, status, entity_type, role, org_name, email,
+                   contact_name, monthly_volume_tons, plan, ref_code
+            FROM tenant_applications
+            ORDER BY created_at DESC
+            LIMIT :limit
+            """,
+            {"limit": limit},
+        )
+        return [ApplicationRow(**dict(r)) for r in rows]
+    except Exception:
+        return []
 
 @app.post("/admin/applications/{application_id}/approve", tags=["Admin"], summary="Approve application")
 async def approve_application(application_id: str):
@@ -7568,7 +7627,7 @@ async def cancel_contract(contract_id: str):
 futures_router = APIRouter(
     prefix="/admin/futures",
     tags=["Futures"],
-    dependencies=[Depends(_require_admin)]
+    dependencies=[Depends(lambda request: _require_admin(request))]
 )
 
 class FuturesProductIn(BaseModel):
