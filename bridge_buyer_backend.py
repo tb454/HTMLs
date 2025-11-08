@@ -2827,10 +2827,10 @@ app.include_router(router_pricing)
 async def seed_copper_indices():
     rows = [
         # symbol,      method,        factor, base_symbol, notes
-        ("BR-CU-BB",    "FACTOR_ON_BASE", 0.94, "COMEX_Cu", "Bare Bright"),
-        ("BR-CU-#1",    "FACTOR_ON_BASE", 0.91, "COMEX_Cu", "#1 Copper (Berry & Candy)"),
-        ("BR-CU-#2",    "FACTOR_ON_BASE", 0.85, "COMEX_Cu", "#2 Copper (Birch & Cliff)"),
-        ("BR-CU-SHEET", "FACTOR_ON_BASE", 0.83, "COMEX_Cu", "Sheet Copper"),
+        ("BR-CU-BB",    "FACTOR_ON_BASE", 0.94, "COMEX_CU", "Bare Bright"),
+        ("BR-CU-#1",    "FACTOR_ON_BASE", 0.91, "COMEX_CU", "#1 Copper (Berry & Candy)"),
+        ("BR-CU-#2",    "FACTOR_ON_BASE", 0.85, "COMEX_CU", "#2 Copper (Birch & Cliff)"),
+        ("BR-CU-SHEET", "FACTOR_ON_BASE", 0.83, "COMEX_CU", "Sheet Copper"),
     ]
     q = """
     INSERT INTO bridge_index_definitions(symbol, method, factor, base_symbol, notes, enabled)
