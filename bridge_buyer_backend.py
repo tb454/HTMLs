@@ -2735,6 +2735,7 @@ async def seed_copper_indices():
     vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
     await database.execute_many(q, vals)
     return {"ok": True, "seeded": [r[0] for r in rows]}
+app.include_router(router_idx)
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
