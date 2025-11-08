@@ -2710,7 +2710,117 @@ async def universe():
 
 app.include_router(router_idx)
 app.include_router(router_fc)
+# --- Generic reference price ingesters (CSV / Excel) ------------------
+@router_prices.post("/ingest_csv/generic", summary="Ingest a CSV time series into reference_prices")
+async def ingest_csv_generic(
+    symbol: str,
+    path: str,
+    date_col: str = "Date",
+    price_col: str = "Price"
+):
+    import pandas as pd
+    from sqlalchemy import text as _t
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        raise HTTPException(400, f"could not read CSV: {e}")
+
+    if date_col not in df.columns or price_col not in df.columns:
+        raise HTTPException(400, f"CSV must include columns '{date_col}' and '{price_col}'")
+
+    # normalize
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    s = df[price_col].astype(str).str.replace(",", "", regex=False).str.replace("$", "", regex=False).str.strip()
+    df[price_col] = pd.to_numeric(s, errors="coerce")
+
+    rows = []
+    for _, r in df.iterrows():
+        if pd.isna(r[date_col]) or pd.isna(r[price_col]): 
+            continue
+        ts_market = r[date_col].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        rows.append({
+            "symbol": symbol,
+            "source": "CSV",
+            "price": float(r[price_col]),
+            "ts_market": ts_market,
+            "raw_snippet": None,
+        })
+
+    if not rows:
+        return {"ok": True, "inserted": 0}
+
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+        conn.execute(_t("""
+            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+            VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+              SET price = EXCLUDED.price,
+                  source = EXCLUDED.source
+        """), rows)
+
+    return {"ok": True, "inserted_or_updated": len(rows), "symbol": symbol}
+
+
+@router_prices.post("/ingest_excel/generic", summary="Ingest an Excel time series into reference_prices")
+async def ingest_excel_generic(
+    symbol: str,
+    path: str,
+    sheet_name: str | int | None = None,
+    date_col: str = "Date",
+    price_col: str = "Price"
+):
+    import pandas as pd
+    from sqlalchemy import text as _t
+
+    try:
+        df = pd.read_excel(path, sheet_name=sheet_name)
+    except Exception as e:
+        raise HTTPException(400, f"could not read Excel: {e}")
+
+    if date_col not in df.columns or price_col not in df.columns:
+        # Try a heuristic: first date-like col + first numeric col
+        dtcands = [c for c in df.columns if "date" in str(c).lower()]
+        pcands  = [c for c in df.columns if str(df[c].dtype).startswith(("float", "int"))]
+        if dtcands and pcands:
+            date_col, price_col = dtcands[0], pcands[0]
+        else:
+            raise HTTPException(400, f"Excel must include '{date_col}' and '{price_col}' (or at least one date column and one numeric column)")
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    s = df[price_col].astype(str).str.replace(",", "", regex=False).str.replace("$", "", regex=False).str.strip()
+    df[price_col] = pd.to_numeric(s, errors="coerce")
+
+    rows = []
+    for _, r in df.iterrows():
+        if pd.isna(r[date_col]) or pd.isna(r[price_col]): 
+            continue
+        ts_market = r[date_col].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        rows.append({
+            "symbol": symbol,
+            "source": "XLSX",
+            "price": float(r[price_col]),
+            "ts_market": ts_market,
+            "raw_snippet": None,
+        })
+
+    if not rows:
+        return {"ok": True, "inserted": 0}
+
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+        conn.execute(_t("""
+            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+            VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+              SET price = EXCLUDED.price,
+                  source = EXCLUDED.source
+        """), rows)
+
+    return {"ok": True, "inserted_or_updated": len(rows), "symbol": symbol}
 app.include_router(router_prices)
+# -----------------------------------------------------------------------
 app.include_router(router_pricing)
 
 @router_idx.post("/seed_copper_indices", summary="Seed copper factor indices into bridge_index_definitions (idempotent)")
