@@ -40,6 +40,8 @@ services:
       <<: *default-env
       # Gunicorn binds inside container; map externally below
       GUNICORN_CMD_ARGS: "--timeout 90"
+      ALLOW_LOCALHOST_IN_PROD: "1"   # allow 127.0.0.1/localhost Host header in PROD
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
     command: >
       gunicorn bridge_buyer_backend:app
       -k uvicorn.workers.UvicornWorker
@@ -69,6 +71,8 @@ services:
     env_file: .env
     environment:
       <<: *default-env
+    ALLOW_LOCALHOST_IN_PROD: "1"
+    DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"  
     command: ["python","-u","worker.py"]
 
   # Optional nginx if you want TLS termination / SPA hosting here
