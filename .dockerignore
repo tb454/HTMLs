@@ -1,0 +1,27 @@
+# .dockerignore
+.git
+.gitignore
+node_modules
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.zip
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+dist
+build
+coverage
+.pytest_cache
+cypress
+.qbo_out
+BRidge Downlaods
+Vendor Quotes
+*.xlsx
+*.csv
+prometheus
