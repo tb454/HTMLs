@@ -2600,7 +2600,7 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
                   source = EXCLUDED.source
         """), rows)
 
-    return {"ok": True, "inserted_or_updated": len(rows), "symbol": "COMEX_Cu"}
+    return {"ok": True, "inserted_or_updated": len(rows), "symbol": "COMEX_CU"}
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
 router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
 router_idx = APIRouter(prefix="/indices", tags=["Indices"])
@@ -2819,6 +2819,67 @@ async def ingest_excel_generic(
         """), rows)
 
     return {"ok": True, "inserted_or_updated": len(rows), "symbol": symbol}
+# ---------- ADMIN: reference_prices maintenance (Windows-friendly) ----------
+from datetime import date as _date
+from sqlalchemy import text as _t
+
+@router_prices.post("/ensure_unique_index", summary="Create unique index on (symbol, ts_market)")
+async def rp_ensure_unique_index():
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
+            ON reference_prices(symbol, ts_market);
+        """)
+    return {"ok": True}
+
+@router_prices.post("/override_close", summary="Upsert official close for a specific trading date")
+async def rp_override_close(symbol: str, d: _date, price: float, source: str = "manual"):
+    # normalize to UTC midnight for that trading date
+    ts_market = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
+            ON reference_prices(symbol, ts_market);
+        """)
+        conn.execute(_t("""
+            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+            VALUES (:s, :src, :p, :ts, NOW(), NULL)
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+              SET price  = EXCLUDED.price,
+                  source = EXCLUDED.source,
+                  ts_server = NOW()
+        """), {"s": symbol.upper(), "src": source, "p": float(price), "ts": ts_market})
+    return {"ok": True, "symbol": symbol.upper(), "date": str(d), "price": float(price)}
+
+@router_prices.post("/dedupe_day", summary="Keep newest ts_server for (symbol, day), delete older dups")
+async def rp_dedupe_day(symbol: str, d: _date):
+    with engine.begin() as conn:
+        # rank all rows for that (symbol, date), keep rn=1 (newest by ts_server), delete the rest
+        conn.execute(_t("""
+            WITH ranked AS (
+              SELECT ctid, ROW_NUMBER() OVER (ORDER BY ts_server DESC) AS rn
+              FROM reference_prices
+              WHERE symbol = :s AND ts_market::date = :d
+            )
+            DELETE FROM reference_prices rp
+            USING ranked r
+            WHERE rp.ctid = r.ctid AND r.rn > 1
+        """), {"s": symbol.upper(), "d": d})
+    return {"ok": True, "symbol": symbol.upper(), "date": str(d)}
+
+@router_prices.get("/debug/day", summary="List rows for (symbol, day) — debug only")
+async def rp_debug_day(symbol: str, d: _date):
+    rows = []
+    with engine.begin() as conn:
+        rs = conn.execute(_t("""
+            SELECT symbol, price, ts_market, ts_server, source
+            FROM reference_prices
+            WHERE symbol = :s AND ts_market::date = :d
+            ORDER BY ts_market DESC, ts_server DESC
+        """), {"s": symbol.upper(), "d": d}).mappings().all()
+        rows = [dict(r) for r in rs]
+    return rows
+
 app.include_router(router_prices)
 # -----------------------------------------------------------------------
 app.include_router(router_pricing)
@@ -2960,6 +3021,8 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
             UNIQUE(symbol, horizon_days, forecast_date, model_name)
         );
         """)
+router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
+router_idx = APIRouter(prefix="/indices", tags=["Indices"])
 # ---------------------------------------------------------------------------
 
 
