@@ -1,0 +1,85 @@
+seller,category,material,qty1_lbs,qty2_lbs,price_per_lb_usd,total_value_usd
+Winski Brothers,Aluminun,NEW BARE EXTRUSION PREPARED,-1870.0,5135.0,0.735,2399.93
+Winski Brothers,Aluminun,3003 Clip,320969.0,0.0,1.13,362694.97
+Winski Brothers,Aluminun,4017,83470.0,0.0,0.71,59263.7
+Winski Brothers,Aluminun,5052 Clip,49986.0,0.0,1.13,56484.18
+Winski Brothers,Aluminun,"6061 Clip, Plate",430.0,1165.0,0.4007,639.1
+Winski Brothers,Aluminun,ACSR & Ins Alum wire,1116.0,627.0,0.3509,611.6
+Winski Brothers,Aluminun,ALUM BREAKAGE,28698.0,8972.0,0.1003,3776.52
+Winski Brothers,Aluminun,Aluminum car wheels,11418.0,8498.0,0.7987,15907.77
+Winski Brothers,Aluminun,Baled UBC,25789.0,5321.0,0.7,21777.0
+Winski Brothers,Aluminun,CANS,3958.0,6512.0,0.3032,3174.38
+Winski Brothers,Aluminun,CLIP/PLATE/PIPE PREPARED,618.0,0.0,0.5016,310.0
+Winski Brothers,Aluminun,MIX LOW COPPER SHEET/PLATE/CLIP SOLID PREPARED,1393.0,0.0,0.4521,629.8
+Winski Brothers,Aluminun,Old Cast,-294.0,2647.0,0.425,1000.0
+Winski Brothers,Aluminun,OLD EXTRUSION PREPARED,695.0,0.0,0.7098,493.28
+Winski Brothers,Aluminun,Old sheet Aluminum,58372.0,0.0,0.4248,24796.6
+Winski Brothers,Aluminun,Painted Extrusion,-6410.0,8265.0,34.3857,63785.39
+Winski Brothers,Aluminun,SECONDARY PREPARED,35.0,0.0,0.5,17.5
+Winski Brothers,Aluminun,Thermal Break,1020.0,1105.0,0.472,1003.09
+Winski Brothers,electric motors,"BIG, BUT LESS THAN 1000 POUNDS",30.0,0.0,0.2,6.0
+Winski Brothers,electric motors,Electric motor - Misc,6887.0,23121.0,0.2662,7988.58
+Winski Brothers,electric motors,LARGE,804.0,0.0,0.2164,174.02
+Winski Brothers,electric motors,MEDIUM (MORE THAN 200LBS),231.0,0.0,0.2766,63.9
+Winski Brothers,electric motors,"NO PUMPS, POWER TOOLS, CEILING FANS.",20.0,0.0,0.3,6.0
+Winski Brothers,Insulated copper wire,"#1 Ins ROMEX 65%, NO WEATHER PROOF.",1413.0,0.0,1.9823,2801.0
+Winski Brothers,Insulated copper wire,#1 Ins THHN80%,109.0,0.0,2.2477,245.0
+Winski Brothers,Insulated copper wire,#1 Insulated copper,3633.0,3085.0,1.9706,13238.6
+Winski Brothers,Insulated copper wire,#2 Harness wire,35211.0,28636.0,1.297,82811.76
+Winski Brothers,Insulated copper wire,#2 Ins Cat 5/ Cat 6 wire,1403.0,0.0,1.0449,1466.0
+Winski Brothers,Insulated copper wire,#2 Insulated wire,51561.0,9186.0,1.1075,67276.3
+Winski Brothers,Insulated copper wire,#3 Ins EXT. CORDS 35% UP,1254.0,523.0,0.9587,1703.69
+Winski Brothers,Insulated copper wire,Al BX wire,149.0,0.0,1.1581,172.55
+Winski Brothers,Insulated copper wire,CHRISTMAS LIGHTS,-1020.0,565.0,0.2426,-110.4
+Winski Brothers,Insulated copper wire,COMPUTER WIRE 25%,212.0,0.0,0.25,53.0
+Winski Brothers,Insulated copper wire,Fe BX wire,152.0,0.0,0.2549,38.75
+Winski Brothers,Insulated copper wire,"HELIAX 57%, OPEN EYE",2120.0,0.0,1.417,3004.0
+Winski Brothers,Lead,Auto BATTERY,-169.0,29431.0,0.1709,5001.81
+Winski Brothers,Lead,BATTERY - STEEL CASE INDUSTRIAL,4950.0,1033.0,0.1117,668.46
+Winski Brothers,Lead,RANGE LEAD INDOOR,9339.0,1385.0,0.6478,6947.41
+Winski Brothers,Lead,Soft lead,184.0,0.0,0.4,73.6
+Winski Brothers,Lead,WHEEL WEIGHT,-326.0,545.0,0.1297,28.4
+Winski Brothers,Steel,5' HMS,274684.0,0.0,0.0858,23571.32
+Winski Brothers,Steel,5' P&S,37360.0,0.0,1.1262,42076.09
+Winski Brothers,Steel,AUTO CAST,10340.0,0.0,0.0996,1029.4
+Winski Brothers,Steel,BUSHELING,-55215.0,0.0,-33.0977,1827491.19
+Winski Brothers,Steel,CLEAN SHEET IRON (NO NF OR NON-METALLICS),35980.0,0.0,0.0839,3017.43
+Winski Brothers,Steel,CLIPS,29279.0,0.0,7.7077,225672.95
+Winski Brothers,Steel,COUNTERWEIGHTS,12320.0,0.0,0.0393,484.6
+Winski Brothers,Steel,ROTORS / DRUMS,-10249.0,0.0,0.1084,-1111.35
+Winski Brothers,Steel,SHRED,932908.0,0.0,0.079,73738.84
+Winski Brothers,Steel,Unprepared Rail,0.0,0.0,0.0,0.0
+Winski Brothers,Steel,UNPREPARED/UNP PIPE/WIRE,65396.0,0.0,0.1289,8428.11
+Winski Brothers,Radiators,AC Rad ENDS,261.0,531.0,0.8694,688.55
+Winski Brothers,Radiators,Clean AC Radiators,4234.0,4094.0,1.3792,11486.06
+Winski Brothers,Radiators,"CLEAN, Copper/brass RADIATOR",265.0,0.0,2.0045,531.2
+Winski Brothers,Radiators,DIRTY AC Radiators,1031.0,0.0,1.1154,1150.0
+Winski Brothers,Radiators,Dirty Copper/Brass Rads,289.0,0.0,1.1329,327.4
+Winski Brothers,Copper,#1 Bare Bright Copper,19762.0,2760.0,3.3322,75048.55
+Winski Brothers,Copper,#1 BB chops,-2450.0,3261.0,-10.3931,-8428.8
+Winski Brothers,Copper,#1 Copper,5434.0,2552.0,3.0466,24330.31
+Winski Brothers,Copper,#2 Copper,23035.0,3686.0,3.0303,80972.57
+Winski Brothers,Copper,Copper Breakage,-908.0,1133.0,0.5952,133.93
+Winski Brothers,Copper,SHEET COPPER,1251.0,490.0,2.6198,4561.0
+Winski Brothers,Brass,Brass Shells,3079.0,0.0,2.5175,7751.4
+Winski Brothers,Brass,"BRASS YELLOW SHAVING, C/D",52.0,0.0,1.5,78.0
+Winski Brothers,Brass,Dirty Brass,2148.0,1610.0,1.0477,3937.4
+Winski Brothers,Brass,Misc Brass,86.0,0.0,0.8,68.8
+Winski Brothers,Brass,Red Brass,235.0,0.0,2.5,587.5
+Winski Brothers,Brass,Yellow Brass,890.0,1505.0,1.9987,4786.8
+Winski Brothers,Misc,BALLAST - Electronic,1728.0,2404.0,0.1058,437.24
+Winski Brothers,Misc,Ballast - regular,-1186.0,2370.0,0.1,118.4
+Winski Brothers,Misc,Carbide,1096.0,2856.0,9.0773,35873.6
+Winski Brothers,Misc,D2 Tool Steel,-512.0,512.0,0.0,0.0
+Winski Brothers,Misc,Diesel Cat dust,325.0,0.0,1.0,325.0
+Winski Brothers,Misc,"SEALED UNIT BOXED, NO CAST IRON CASE",5952.0,4778.0,0.2,2146.43
+Winski Brothers,Misc,Titanium solids,-104.0,104.0,0.0,0.0
+Winski Brothers,Misc,Titanium Turnings,220.0,0.0,0.4477,98.5
+Winski Brothers,Misc,Transformer - AL/CU,-2083.0,2708.0,0.1,62.5
+Winski Brothers,Misc,Transformer - CU SMALL (PALM SIZE),448.0,0.0,0.7,313.6
+Winski Brothers,Misc,ZINC/DIE CAST,59.0,0.0,0.4,23.6
+Winski Brothers,Stainless,301 Stainless,-1051.0,0.0,-0.0084,8.8
+Winski Brothers,Stainless,304 Stainless,-2972.0,1617.0,0.6012,-814.65
+Winski Brothers,Stainless,316 Stainless,763.0,0.0,0.5573,425.25
+Winski Brothers,Stainless,SS BREAKAGE,4452.0,0.0,0.1286,572.61
+Winski Brothers,Stainless,Stainless Turnings,1344.0,3464.0,0.15,721.2
