@@ -1,5 +1,7 @@
 from __future__ import annotations
 import sys, pathlib
+
+import stripe
 sys.path.insert(0, str(pathlib.Path(__file__).parent.resolve()))
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,7 +46,6 @@ from typing import Iterable
 from statistics import mean, stdev
 from collections import defaultdict
 from typing import Optional
-from fastapi import HTTPException
 from fastapi import Response, Query
 import uuid
 import io, os, csv, zipfile
@@ -66,7 +67,6 @@ import smtplib
 from email.message import EmailMessage
 import secrets
 from typing import Annotated
-import inspect, asyncio
 from contextlib import asynccontextmanager
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
@@ -155,9 +155,6 @@ def startup(fn):
 def shutdown(fn):
     _SHUTDOWNS.append(fn)
     return fn
-
-async def _run_callable(fn):
-    return await fn() if inspect.iscoroutinefunction(fn) else fn()
 
 from contextlib import suppress
 import asyncio
@@ -718,18 +715,10 @@ async def startup_bootstrap_and_connect():
 async def _connect_db_first():
     if not database.is_connected:
         await database.connect()
-    if not hasattr(app.state, "db_pool"):
+    if getattr(app.state, "db_pool", None) is None:
         import asyncpg
         app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
 # ----- database (async + sync) -----
-
-# ----- Startup prices pool -----
-@startup
-async def _startup_prices():
-    import asyncpg
-    if not hasattr(app.state, "db_pool"):
-        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
-# ----- Startup prices pool -----
 
 # ----- idem key cache -----
 @startup
@@ -1308,6 +1297,8 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
 
 @app.get("/billing/subscribe/finalize_from_session", tags=["Billing"], summary="Finalize plan after Checkout success (no webhook)")
 async def finalize_subscription_from_session(sess: str, member: Optional[str] = None):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     try:
         s = stripe.checkout.Session.retrieve(sess, expand=["subscription", "customer"])
         sub = s.get("subscription")
@@ -1401,6 +1392,8 @@ def _ws_meter_event_name(plan: str) -> str:
     }.get(plan, "ws_messages_per_1m_starter")
 
 def emit_ws_usage(member: str, raw_count: int) -> None:
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        return
     if raw_count <= 0:
         return
     cust = _get_customer_id_sync(member)
@@ -1448,6 +1441,9 @@ async def pm_setup_session(member: str, email: str, _=Depends(csrf_protect)):
 
 @app.get("/billing/pm/finalize_from_session", tags=["Billing"], summary="Finalize default payment method from Checkout Session (no webhook)")
 async def pm_finalize_from_session(sess: str, member: Optional[str] = None):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
+
     """
     Use this when you don't have webhooks: call from your success page with the "sess" query param.
     It fetches the Checkout Session, extracts the SetupIntent → PaymentMethod, and binds as default.
@@ -2906,7 +2902,6 @@ async def seed_copper_indices():
     vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
     await database.execute_many(q, vals)
     return {"ok": True, "seeded": [r[0] for r in rows]}
-app.include_router(router_idx)
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
@@ -3021,8 +3016,6 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
             UNIQUE(symbol, horizon_days, forecast_date, model_name)
         );
         """)
-router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
-router_idx = APIRouter(prefix="/indices", tags=["Indices"])
 # ---------------------------------------------------------------------------
 
 
@@ -3282,6 +3275,9 @@ from fastapi import Body
 
 @app.post("/billing/pay/checkout", tags=["Billing"], summary="Create Stripe Checkout Session for an invoice")
 async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
+
     inv = await _fetch_invoice(invoice_id)
     if not inv:
         raise HTTPException(404, "invoice not found")
@@ -3293,7 +3289,7 @@ async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
 
     session = stripe.checkout.Session.create(
         mode="payment",
-        payment_method_types=["card", "us_bank_account"],   # cards + ACH debit
+        payment_method_types=["card", "us_bank_account"],
         success_url=SUCCESS_URL,
         cancel_url=CANCEL_URL,
         line_items=[{
@@ -3308,8 +3304,11 @@ async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
     )
     return {"checkout_url": session.url, "session_id": session.id}
 
+
 @app.get("/billing/pay/finalize_from_session", tags=["Billing"], summary="Finalize internal invoice after Checkout success (no webhook)")
 async def finalize_from_session(sess: str):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     """
     Called by your /static/payment_success.html with ?session=sessid.
     Retrieves the Checkout Session → PaymentIntent → metadata.invoice_id, and marks your invoice paid.
@@ -3380,6 +3379,8 @@ def _cycle_bounds(today_local: _dt, billing_day: int):
 
 @app.post("/billing/pay/card", tags=["Billing"], summary="Create PaymentIntent (card)")
 async def create_pi_card(invoice_id: str = Body(..., embed=True)):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     inv = await _fetch_invoice(invoice_id)
     if not inv: raise HTTPException(404, "invoice not found")
     if str(inv["status"]).lower() == "paid": return {"already_paid": True}
@@ -3394,6 +3395,8 @@ async def create_pi_card(invoice_id: str = Body(..., embed=True)):
 
 @app.post("/billing/pay/ach", tags=["Billing"], summary="Create PaymentIntent (ACH debit via US bank)")
 async def create_pi_ach(invoice_id: str = Body(..., embed=True)):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     inv = await _fetch_invoice(invoice_id)
     if not inv: raise HTTPException(404, "invoice not found")
     if str(inv["status"]).lower() == "paid": return {"already_paid": True}
@@ -3411,6 +3414,8 @@ from fastapi import Header
 
 @app.post("/stripe/webhook", include_in_schema=False)
 async def stripe_webhook(payload: bytes = Body(...), stripe_signature: str = Header(None, alias="Stripe-Signature")):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     endpoint_secret = os.environ["STRIPE_WEBHOOK_SECRET"]
     try:
         event = stripe.Webhook.construct_event(payload, stripe_signature, endpoint_secret)
@@ -3695,6 +3700,8 @@ async def _stripe_invoice_for_member(member: str, start: date, end: date, invoic
 
 @app.post("/billing/pay/charge_now", tags=["Billing"], summary="Charge stored PM for an invoice (off-session)")
 async def billing_charge_now(invoice_id: str = Body(..., embed=True)):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     inv = await _fetch_invoice(invoice_id)
     if not inv:
         raise HTTPException(404, "invoice not found")
@@ -3775,6 +3782,8 @@ async def pm_change_session(member: str = Body(..., embed=True)):
 
 @app.get("/billing/pm/details", tags=["Billing"])
 async def pm_details(member: str):
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise HTTPException(501, "Stripe is disabled in this environment")
     row = await database.fetch_one("SELECT stripe_customer_id, default_payment_method, has_default FROM billing_payment_profiles WHERE member=:m", {"m": member})
     if not (row and row["has_default"] and row["default_payment_method"]):
         return {"member": member, "has_default": False}
@@ -6122,8 +6131,6 @@ async def ice_webhook(request: Request, x_signature: str = Header(None, alias="X
 # ---------- Ice webhook signature verifier -----
 
 # === QBO OAuth Relay • Endpoints  ===
-from fastapi import Query
-
 @app.get("/qbo/callback", include_in_schema=False)
 async def qbo_callback(code: str = Query(...), state: str = Query(...), realmId: str = Query(...)):
     """
