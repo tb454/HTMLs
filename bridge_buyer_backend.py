@@ -1,8 +1,6 @@
 from __future__ import annotations
 import sys, pathlib
 
-import stripe
-sys.path.insert(0, str(pathlib.Path(__file__).parent.resolve()))
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -224,6 +222,7 @@ app = FastAPI(
 )
 instrumentator = Instrumentator()
 instrumentator.instrument(app).expose(app, include_in_schema=False)
+instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
 
 # === QBO OAuth Relay • Config ===
 QBO_RELAY_AUTH = os.getenv("QBO_RELAY_AUTH", "").strip()  # shared secret for /admin/qbo/peek

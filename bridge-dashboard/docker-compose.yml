@@ -1,28 +1,87 @@
+version: "3.9"
+
+x-env: &default-env
+  ENV: "production"
+  PYTHONUNBUFFERED: "1"
+  UVICORN_WORKERS: "4"
+  # Load all secrets from .env
+  # NOTE: compose will read .env automatically, but we keep env_file for clarity
+  # and to ensure all services get the same file.
 services:
-  backend:
-    build: ./HTMLs/bridge-dashboard/backend
-    ports:
-      - "8100:8000"
-    environment:
-      - ENV=sandbox
-    volumes:
-      - ./HTMLs/data/demo-data:/app/data
-
-  frontend:
-    build: ./HTMLs/bridge-dashboard/frontend
-    ports:
-      - "3100:80"
-    environment:
-      - API_URL=http://localhost:8100
-
   db:
-    image: postgres
+    image: postgres:15
+    container_name: bridge_db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: demo
-      POSTGRES_PASSWORD: demo
-      POSTGRES_DB: scrap_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     volumes:
-      - demo_db:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # optional: expose locally
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bridge_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      <<: *default-env
+      # Gunicorn binds inside container; map externally below
+      GUNICORN_CMD_ARGS: "--timeout 90"
+    command: >
+      gunicorn bridge_buyer_backend:app
+      -k uvicorn.workers.UvicornWorker
+      -w ${API_WORKERS:-4}
+      --timeout 90
+      --bind 0.0.0.0:8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./static:/app/static:ro   # serve your HTMLs
+      - ./tests:/app/tests:ro     # optional for local runs
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bridge_worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      <<: *default-env
+    command: ["python","-u","worker.py"]
+
+  # Optional nginx if you want TLS termination / SPA hosting here
+  # proxy:
+  #   image: nginx:1.27
+  #   volumes:
+  #     - ./ops/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./static:/usr/share/nginx/html:ro
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   depends_on:
+  #     - api
 
 volumes:
-  demo_db:
+  db_data:
