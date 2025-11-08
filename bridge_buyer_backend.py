@@ -2544,7 +2544,7 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
     """
     Expects columns like: Date, Price, Open, High, Low, Vol., Change %
     Writes into BRidge-compatible reference_prices:
-      - symbol: 'COMEX_Cu'
+      - symbol: 'COMEX_CU'
       - source: 'CSV'
       - price:  numeric
       - ts_market: midnight UTC for that Date
