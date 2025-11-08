@@ -59,21 +59,22 @@ services:
       - ./static:/app/static:ro   # serve your HTMLs
       - ./tests:/app/tests:ro     # optional for local runs
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: bridge_worker
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      <<: *default-env
-    ALLOW_LOCALHOST_IN_PROD: "1"
-    DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"  
-    command: ["python","-u","worker.py"]
+    worker:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: bridge_worker
+      restart: unless-stopped
+      depends_on:
+        db:
+          condition: service_healthy
+      env_file: .env
+      environment:
+        <<: *default-env
+        ALLOW_LOCALHOST_IN_PROD: "1"
+        DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
+      command: ["python","-u","worker.py"]
+
 
   # Optional nginx if you want TLS termination / SPA hosting here
   # proxy:
