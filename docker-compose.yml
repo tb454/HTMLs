@@ -41,6 +41,7 @@ services:
       # inside the network, hostname is "db"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
       GUNICORN_CMD_ARGS: "--timeout 90"
+      INIT_DB: "1"
     command: >
       gunicorn bridge_buyer_backend:app
       -k uvicorn.workers.UvicornWorker
