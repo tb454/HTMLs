@@ -2619,19 +2619,6 @@ async def get_latest(symbol: str):
         raise HTTPException(status_code=404, detail="No price yet for symbol")
     return row
 
-@router_prices.get("/latest_strict", summary="Latest by ts_market desc (debug)")
-async def latest_strict(symbol: str):
-    row = await app.state.db_pool.fetchrow("""
-        SELECT symbol, price, ts_market, ts_server, source
-        FROM reference_prices
-        WHERE symbol = $1
-        ORDER BY ts_market DESC NULLS LAST, ts_server DESC
-        LIMIT 1
-    """, symbol)
-    if not row:
-        raise HTTPException(404, "No price yet for symbol")
-    return dict(row)
-
 @router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
 async def pull_home():
     await pull_comex_home_once(app.state.db_pool)
