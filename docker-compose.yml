@@ -1,12 +1,10 @@
-#version: "3.9"
+# docker-compose.yml (BRidge — api + worker + db)
 
 x-env: &default-env
   ENV: "production"
   PYTHONUNBUFFERED: "1"
   UVICORN_WORKERS: "4"
-  # Load all secrets from .env
-  # NOTE: compose will read .env automatically, but we keep env_file for clarity
-  # and to ensure all services get the same file.
+
 services:
   db:
     image: postgres:15
@@ -24,7 +22,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"   # optional: expose locally
+      - "5433:5432"
 
   api:
     build:
@@ -38,10 +36,11 @@ services:
     env_file: .env
     environment:
       <<: *default-env
-      # Gunicorn binds inside container; map externally below
-      GUNICORN_CMD_ARGS: "--timeout 90"
-      ALLOW_LOCALHOST_IN_PROD: "1"   # allow 127.0.0.1/localhost Host header in PROD
+      # allow localhost Host header while ENV=production
+      ALLOW_LOCALHOST_IN_PROD: "1"
+      # inside the network, hostname is "db"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
+      GUNICORN_CMD_ARGS: "--timeout 90"
     command: >
       gunicorn bridge_buyer_backend:app
       -k uvicorn.workers.UvicornWorker
@@ -56,37 +55,24 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - ./static:/app/static:ro   # serve your HTMLs
-      - ./tests:/app/tests:ro     # optional for local runs
+      - ./static:/app/static:ro
+      - ./tests:/app/tests:ro
 
-    worker:
-      build:
-        context: .
-        dockerfile: Dockerfile
-      container_name: bridge_worker
-      restart: unless-stopped
-      depends_on:
-        db:
-          condition: service_healthy
-      env_file: .env
-      environment:
-        <<: *default-env
-        ALLOW_LOCALHOST_IN_PROD: "1"
-        DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
-      command: ["python","-u","worker.py"]
-
-
-  # Optional nginx if you want TLS termination / SPA hosting here
-  # proxy:
-  #   image: nginx:1.27
-  #   volumes:
-  #     - ./ops/nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./static:/usr/share/nginx/html:ro
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   depends_on:
-  #     - api
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bridge_worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      <<: *default-env
+      ALLOW_LOCALHOST_IN_PROD: "1"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
+    command: ["python","-u","worker.py"]
 
 volumes:
   db_data:
