@@ -1,13 +1,49 @@
 // endpoint + toast + fetch helper + small utils
 window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 function toast(msg, ms=2800){ const el = document.getElementById('toast'); if(!el){alert(msg);return;} el.textContent = msg; el.setAttribute('data-show','1'); setTimeout(()=>el.removeAttribute('data-show'), ms); }
-async function api(path, opts={}) {
+function _cookie(name){
+  return document.cookie.split('; ').reduce((acc, c) => {
+    const [k, ...v] = c.split('=');
+    return k === name ? decodeURIComponent(v.join('=')) : acc;
+  }, null);
+}
+
+async function api(path, opts = {}) {
   const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
-  const res = await fetch(url, { ...opts, headers: { Accept:'application/json', ...(opts.headers||{}) }});
-  if (res.status === 401) { const next = encodeURIComponent(location.pathname + location.search); location.href = `/static/bridge-login.html?next=${next}`; throw new Error('Unauthorized'); }
-  if (!res.ok) { let m='Request failed'; try{ m=(await res.clone().json()).detail||m; }catch{ m=await res.text()||m; } toast(m); throw new Error(m); }
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = {
+    Accept: 'application/json',
+    ...(opts.headers || {})
+  };
+
+  // Attach CSRF for unsafe methods (matches backend’s expectations)
+  if (!['GET','HEAD','OPTIONS'].includes(method)) {
+    const tok = _cookie('XSRF-TOKEN');
+    if (tok) headers['X-CSRF'] = tok;
+  }
+
+  const res = await fetch(url, {
+    credentials: 'same-origin',
+    ...opts,
+    headers
+  });
+
+  if (res.status === 401) {
+    // Same behavior you had before
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.href = `/static/bridge-login.html?next=${next}`;
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) {
+    let m = 'Request failed';
+    try { m = (await res.clone().json()).detail || m; }
+    catch { m = await res.text() || m; }
+    toast(m);
+    throw new Error(m);
+  }
   return res;
 }
+
 const $ = sel => document.querySelector(sel);
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 function csvDownload(filename, rows){
