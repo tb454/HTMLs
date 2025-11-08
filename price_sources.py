@@ -2,10 +2,26 @@ import asyncio
 import re, time
 import asyncpg
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 def _norm_symbol(s: str) -> str:
     return (s or "").upper()
+
+ET = ZoneInfo("America/New_York")
+
+def _et_trading_date(now_utc: datetime | None = None) -> datetime:
+    """
+    Map current time to the trading 'date' in New York.
+    Use 17:00 ET close: if now < 17:00 ET -> use previous calendar day; else today.
+    Returns a UTC datetime at 00:00 of that NY date.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    now_et  = now_utc.astimezone(ET)
+    close   = now_et.replace(hour=17, minute=0, second=0, microsecond=0)
+    d_et    = (now_et.date() if now_et >= close else (now_et - timedelta(days=1)).date())
+    # normalize to 00:00 UTC for ts_market
+    return datetime(d_et.year, d_et.month, d_et.day, tzinfo=timezone.utc)
 
 USER_AGENT = "BRidgeBot/1.0 (+scrapfutures.com) contact: admin@scrapfutures.com"
 HEADERS = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
@@ -86,13 +102,13 @@ async def pull_comex_home_once(pool):
 # ---------- DB insert ----------
 async def _insert_ref_price(pool, symbol, source, price, ts_market, snippet):
     symbol = _norm_symbol(symbol)
-    if ts_market is None:
-        # fallback: use today @ 00:00 UTC so “today” exists for factor indices
-        ts_market = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # ignore page timestamp; use ET trading date instead
+    ts_market = _et_trading_date()
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO reference_prices (symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES ($1, $2, $3, $4, now(), $5)
+            ON CONFLICT DO NOTHING
         """, symbol, source, price, ts_market, (snippet or "")[:2000])
 
 # ---------- Generic extractors ----------
