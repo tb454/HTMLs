@@ -2577,7 +2577,7 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
         # store the market date as a UTC timestamp at 00:00:00 for compatibility
         ts_market = r["Date"].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         rows.append({
-            "symbol": "COMEX_Cu",
+            "symbol": "COMEX_CU",
             "source": "CSV",
             "price": float(r["Price"]),
             "ts_market": ts_market,
@@ -2618,6 +2618,19 @@ async def get_latest(symbol: str):
     if not row:
         raise HTTPException(status_code=404, detail="No price yet for symbol")
     return row
+
+@router_prices.get("/latest_strict", summary="Latest by ts_market desc (debug)")
+async def latest_strict(symbol: str):
+    row = await app.state.db_pool.fetchrow("""
+        SELECT symbol, price, ts_market, ts_server, source
+        FROM reference_prices
+        WHERE symbol = $1
+        ORDER BY ts_market DESC NULLS LAST, ts_server DESC
+        LIMIT 1
+    """, symbol)
+    if not row:
+        raise HTTPException(404, "No price yet for symbol")
+    return dict(row)
 
 @router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
 async def pull_home():

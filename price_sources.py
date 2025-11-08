@@ -1,7 +1,11 @@
+import asyncio
 import re, time
 import asyncpg
 import httpx
 from datetime import datetime, timezone
+
+def _norm_symbol(s: str) -> str:
+    return (s or "").upper()
 
 USER_AGENT = "BRidgeBot/1.0 (+scrapfutures.com) contact: admin@scrapfutures.com"
 HEADERS = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
@@ -81,6 +85,10 @@ async def pull_comex_home_once(pool):
 
 # ---------- DB insert ----------
 async def _insert_ref_price(pool, symbol, source, price, ts_market, snippet):
+    symbol = _norm_symbol(symbol)
+    if ts_market is None:
+        # fallback: use today @ 00:00 UTC so “today” exists for factor indices
+        ts_market = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO reference_prices (symbol, source, price, ts_market, ts_server, raw_snippet)
@@ -145,7 +153,7 @@ async def pull_comexlive_once(pool):
     async with httpx.AsyncClient(timeout=10.0, headers=HEADERS, follow_redirects=True) as client:
         for sym, url in COMEXLIVE.items():
             await _pull_one(client, pool, sym, url, anchors_map.get(sym))
-            time.sleep(1.2)
+            await asyncio.sleep(1.2)
 
 async def pull_lme_once(pool):
     anchors_map = {
@@ -156,15 +164,16 @@ async def pull_lme_once(pool):
     async with httpx.AsyncClient(timeout=12.0, headers=HEADERS, follow_redirects=True) as client:
         for sym, url in LME.items():
             await _pull_one(client, pool, sym, url, anchors_map.get(sym))
-            time.sleep(1.2)
+            await asyncio.sleep(1.2)
 
 # ---------- API helpers ----------
 async def latest_price(pool, symbol: str):
+    symbol = _norm_symbol(symbol)
     q = """
       SELECT price, ts_market, ts_server, source
       FROM reference_prices
       WHERE symbol = $1
-      ORDER BY ts_server DESC
+      ORDER BY ts_market DESC NULLS LAST, ts_server DESC
       LIMIT 1
     """
     async with pool.acquire() as conn:
@@ -178,3 +187,4 @@ async def latest_price(pool, symbol: str):
         "ts_server": row["ts_server"].isoformat(),
         "source": row["source"]
     }
+
