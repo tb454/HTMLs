@@ -949,14 +949,67 @@ async def _ensure_users_minimal_for_tests():
             pass
 # =====  users minimal for tests =====  
 
+# ---------- Create database (dev/test/CI)------------
+async def _create_db_if_missing_async(db_url: str) -> None:
+    """
+    If DATABASE_URL points at a non-existent DB, connect to the server's 'postgres' DB
+    and CREATE DATABASE <name>. Best-effort; never raise.
+    """
+    try:
+        from urllib.parse import urlparse, urlunparse
+        import asyncpg
+
+        if not db_url:
+            return
+
+        # normalize
+        dsn = (db_url
+               .replace("postgres://", "postgresql://")
+               .replace("postgresql+psycopg://", "postgresql://")
+               .replace("postgresql+asyncpg://", "postgresql://"))
+
+        u = urlparse(dsn)
+        target_db = (u.path or "/").lstrip("/")
+        if not target_db:
+            return
+
+        admin = urlunparse((u.scheme, u.netloc, "/postgres", "", u.query, ""))
+        conn = await asyncpg.connect(dsn=admin)
+        try:
+            exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", target_db)
+            if not exists:
+                await conn.execute(f'CREATE DATABASE "{target_db}"')
+        finally:
+            await conn.close()
+    except Exception:
+        # best-effort only
+        pass
+# ---------- Create database (dev/test/CI)------------
+
 # =====  Database (async + sync) =====
 @startup
 async def _connect_db_first():
-    if not database.is_connected:
-        await database.connect()
-    if getattr(app.state, "db_pool", None) is None:
-        import asyncpg
-        app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
+    env = os.getenv("ENV", "").lower()
+
+    async def _do_connect():
+        if not database.is_connected:
+            await database.connect()
+        if getattr(app.state, "db_pool", None) is None:
+            import asyncpg
+            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
+
+    try:
+        await _do_connect()
+    except Exception as e:
+        msg = (str(e) or "").lower()
+        # Handle: asyncpg.exceptions.InvalidCatalogNameError: database "... " does not exist
+        if env in {"ci", "test", "testing", "development"} and ("does not exist" in msg and "database" in msg):
+            # create DB using same host/user/pass but with admin 'postgres'
+            await _create_db_if_missing_async(BASE_DATABASE_URL or ASYNC_DATABASE_URL or SYNC_DATABASE_URL)
+            # retry once
+            await _do_connect()
+        else:
+            raise
 # ----- database (async + sync) -----
 
 # ----- idem key cache -----
