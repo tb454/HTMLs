@@ -2674,7 +2674,14 @@ if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 # Instantiate clients
-engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, future=True)
+engine = create_engine(
+    SYNC_DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
+)
+
 database = databases.Database(ASYNC_DATABASE_URL)
 
 # Optional one-time sanity log 
@@ -5628,6 +5635,46 @@ async def _ensure_inventory_constraints():
         )
     except Exception:
         pass  # already exists
+# -------- Inventory safety constraints --------
+     
+# -------- Contract enums and FKs --------
+@startup
+async def _ensure_contract_enums_and_fks():
+    # Create enum once (idempotent)
+    await run_ddl_multi("""
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'contract_status') THEN
+        CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
+      END IF;
+    END$$;
+    """)
+    # Migrate contracts.status -> enum (safe cast if values match)
+    try:
+        await database.execute("""
+          ALTER TABLE contracts
+          ALTER COLUMN status TYPE contract_status
+          USING status::contract_status
+        """)
+    except Exception:
+        pass  # already converted or legacy values present
+
+    # Tighten BOLs.status to text domain (optional) or leave as text.
+
+    # Ensure FK contracts -> bols already exists; add ON DELETE CASCADE if missing
+    try:
+        await database.execute("""
+          ALTER TABLE bols
+          DROP CONSTRAINT IF EXISTS bols_contract_id_fkey;
+        """)
+        await database.execute("""
+          ALTER TABLE bols
+          ADD CONSTRAINT bols_contract_id_fkey
+          FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE;
+        """)
+    except Exception:
+        pass
+# -------- Contract enums and FKs --------
 
 #-------- Dead Letter Startup --------
 @startup
