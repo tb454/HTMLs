@@ -23,7 +23,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
       SESSION_SECRET: test-secret
       JWT_SECRET: test-jwt
-      STRIPE_SECRET: ${{ secrets.STRIPE_SECRET }}
+      STRIPE_SECRET: ""
 
     steps:
       - uses: actions/checkout@v4
