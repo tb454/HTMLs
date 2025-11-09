@@ -66,6 +66,13 @@ from email.message import EmailMessage
 import secrets
 from typing import Annotated
 from contextlib import asynccontextmanager
+from i18n import t as _t, strings_for as _strings_for, SUPPORTED_LANGS as _I18N_LANGS
+from zoneinfo import ZoneInfo as _ZoneInfo
+try:
+    from babel.dates import format_datetime as _fmt_dt
+except Exception:
+    _fmt_dt = None
+
 # ===== middleware & observability deps =====
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -387,6 +394,15 @@ async def get_pricing():
     }
 # === Prices endpoint ===
 
+# --- ICE status probe for UI banner ---
+@app.get("/integrations/ice/status", tags=["Integrations"], summary="ICE connection status (for UI banner)")
+async def ice_status():
+    s = (os.getenv("ICE_STATUS","") or "").lower()
+    base = (os.getenv("ICE_API_BASE","") or "").lower()
+    live = (s == "live") or ("sandbox" not in base and s != "sandbox")
+    return {"status": "live" if live else "sandbox"}
+# --- ICE status probe ---
+
 # ===== DB bootstrap for CI/staging =====
 import sqlalchemy
 from sqlalchemy import text as _sqltext
@@ -621,6 +637,44 @@ async def csrf_protect(
         raise HTTPException(status_code=401, detail="bad csrf")
 # ---- CSRF helpers ----
 
+# ===== tz + lang helpers =====
+def _norm_lang(v: str | None) -> str:
+    v = (v or "").lower().split("-", 1)[0].strip()
+    return v if v in _I18N_LANGS else "en"
+
+def _lang_from_request(request: Request) -> str:
+    # priority: ?lang=  →  LANG cookie  →  Accept-Language  → 'en'
+    q = request.query_params.get("lang")
+    if q:
+        return _norm_lang(q)
+    c = request.cookies.get("LANG")
+    if c:
+        return _norm_lang(c)
+    al = (request.headers.get("Accept-Language") or "").split(",")[0]
+    return _norm_lang(al)
+
+async def _tz_from_request(request: Request) -> str:
+    """
+    priority: ?tz=  →  TZ cookie  →  member billing preference  →  ENV default  →  UTC
+    """
+    q = request.query_params.get("tz")
+    if q:
+        return q
+    c = request.cookies.get("TZ")
+    if c:
+        return c
+    # try member billing prefs if we can infer a member/org name
+    try:
+        member = request.query_params.get("member") or (request.session.get("username") if hasattr(request, "session") else None)
+        if member:
+            row = await database.fetch_one("SELECT timezone FROM billing_preferences WHERE member=:m", {"m": member})
+            if row and row["timezone"]:
+                return row["timezone"]
+    except Exception:
+        pass
+    return os.getenv("DEFAULT_TZ", "UTC")
+# ===== /tz + lang helpers =====
+
 # ---- Security headers ----
 @app.middleware("http")
 async def nonce_mint_mw(request: Request, call_next):
@@ -641,7 +695,20 @@ async def security_headers_mw(request, call_next):
     h["X-Permitted-Cross-Domain-Policies"] = "none"
     h["X-Download-Options"] = "noopen"
     h["Permissions-Policy"] = "geolocation=()"
-
+    path = request.url.path or "/"
+    # Swagger UI needs a tiny inline init script; allow it ONLY on /docs
+    if path.startswith("/docs"):
+        h["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "img-src 'self' data:; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline'; "
+            "style-src-attr 'self'; "
+            "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "connect-src 'self'"
+        )
+        return resp
     # Only set CSP here if the route didn't set one explicitly
     if "Content-Security-Policy" not in h:
         nonce = getattr(request.state, "csp_nonce", "")
@@ -692,6 +759,33 @@ async def request_id_logging(request: Request, call_next):
     logger.info("req", id=rid, path=str(request.url.path), method=request.method, status=response.status_code, ms=elapsed)
     return response
 # ------ ID Logging ------
+
+# ------ Language + TZ middleware ------
+@app.middleware("http")
+async def locale_middleware(request: Request, call_next):
+    try:
+        lang = _lang_from_request(request)
+        tzname = await _tz_from_request(request)
+        request.state.lang = lang
+        request.state.tzname = tzname
+        # validate tz; if bad, fall back without exploding the request
+        try:
+            request.state.tz = _ZoneInfo(tzname)
+        except Exception:
+            request.state.tz = _ZoneInfo("UTC")
+            request.state.tzname = "UTC"
+        resp: Response = await call_next(request)
+        # persist if explicitly provided in query (?lang= / ?tz=); otherwise leave cookies alone
+        prod = os.getenv("ENV","").lower() == "production"
+        if "lang" in request.query_params:
+            resp.set_cookie("LANG", lang, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
+        if "tz" in request.query_params:
+            resp.set_cookie("TZ", request.state.tzname, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
+        return resp
+    except Exception:
+        # Never break the request path on locale issues
+        return await call_next(request)
+# ------ Language + TZ middleware ------
 
 # ===== Startup DB connect + bootstrap =====
 @startup
@@ -754,9 +848,28 @@ async def _sla_timer(request: Request, call_next):
     resp.headers["X-Perf-ms"] = f"{dt:.2f}"
     return resp
 
-@app.get("/time/sync", tags=["Health"], summary="Server time sync (UTC + monotonic)")
-async def time_sync():
-    return {"utc": utcnow().isoformat(), "mono_ns": time.time_ns()}
+@app.get("/time/sync", tags=["Health"], summary="Server time sync (UTC, local, monotonic)")
+async def time_sync(request: Request):
+    utc = utcnow()
+    tzname = getattr(request.state, "tzname", "UTC")
+    local_iso = None
+    display = None
+    try:
+        tz = getattr(request.state, "tz", _ZoneInfo("UTC"))
+        local_dt = utc.astimezone(tz)
+        local_iso = local_dt.isoformat()
+        if _fmt_dt:
+            # locale-aware human format using request.state.lang when available
+            display = _fmt_dt(local_dt, format="medium", locale=getattr(request.state, "lang", "en"))
+    except Exception:
+        pass
+    return {
+        "utc": utc.isoformat(),
+        "local": local_iso,
+        "tz": tzname,
+        "local_display": display,   # e.g., "Nov 8, 2025, 2:14:03 PM"
+        "mono_ns": time.time_ns()
+    }
 # ===== Sentry =====
 
 # =====  account - user ownership =====
@@ -2041,10 +2154,15 @@ async def aup_page():
 async def aup_page_alias():
     return FileResponse("static/legal/aup.html")
 
+@app.get("/legal/export-control", response_class=HTMLResponse, tags=["Legal"])
+def legal_export(): return FileResponse("static/legal/export-control.html")
+
+@app.get("/legal/country-restrictions", response_class=HTMLResponse, tags=["Legal"])
+def legal_country_restrictions(): return FileResponse("static/legal/country-restrictions.html")
+
 # Cookie Notice (alias: /legal/cookies and /cookies)
 @app.get("/legal/cookies", include_in_schema=True, tags=["Legal"],
-         summary="Cookie Notice",
-         description="View the BRidge Cookie Notice.", status_code=200)
+         summary="Cookie Notice", description="View the BRidge Cookie Notice.", status_code=200)
 @app.get("/legal/cookies.html", include_in_schema=False)
 async def cookies_page():
     return FileResponse("static/legal/cookies.html")
@@ -2464,7 +2582,7 @@ async def health_alias(request: Request):
         path="/"
     )
     return resp
-    
+
 @app.get("/__diag/users_count", tags=["Health"])
 async def diag_users_count():
     try:
@@ -2484,7 +2602,47 @@ async def readiness():
         return {"db":"ok", "queue_depth": qdepth, "sequencer_running": bool(_SEQUENCER_STARTED)}
     except Exception as e:
         return JSONResponse(status_code=503, content={"db":"error","error":str(e)})
+    
+@app.get("/ops/dependencies", tags=["Ops"], summary="Build/dep versions")
+def ops_deps():
+    import platform, sys
+    import pkg_resources
+    return {
+      "python": sys.version,
+      "platform": platform.platform(),
+      "packages": {d.project_name: d.version for d in pkg_resources.working_set}
+    }
+
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_json():
+    return app.openapi()
 # -------- Health --------
+
+# -------- Global --------
+@app.get("/i18n/strings", tags=["Global"], summary="Current language strings for UI")
+async def i18n_strings(request: Request):
+    lang = getattr(request.state, "lang", "en")
+    return {"lang": lang, "strings": _strings_for(lang)}
+
+class LocalePrefs(BaseModel):
+    lang: Optional[str] = None  # 'en'|'es'|'zh'
+    tz: Optional[str] = None    # IANA tz, e.g. 'America/Phoenix'
+
+@app.post("/prefs/locale", tags=["Global"], summary="Set preferred language/timezone")
+async def set_locale_prefs(p: LocalePrefs, request: Request):
+    lang = _norm_lang(p.lang or getattr(request.state, "lang", "en"))
+    tz = p.tz or getattr(request.state, "tzname", "UTC")
+    # validate tz once
+    try:
+        _ZoneInfo(tz)
+    except Exception:
+        tz = "UTC"
+    prod = os.getenv("ENV","").lower() == "production"
+    resp = JSONResponse({"ok": True, "lang": lang, "tz": tz})
+    resp.set_cookie("LANG", lang, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
+    resp.set_cookie("TZ", tz, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
+    return resp
+# -------- Global --------
 
 # --- Pricing & Indices wiring (drop-in) --------------------------------------
 import os, asyncio
@@ -4114,11 +4272,32 @@ def admin_export_all(request: Request = None):
                 FROM inventory_movements
                 ORDER BY created_at DESC
             """,
+            "users.csv": """
+                SELECT id, email, COALESCE(username,'') AS username, role, created_at
+                FROM public.users
+                ORDER BY created_at DESC
+            """,
+            "index_snapshots.csv": """
+                SELECT id, region, sku, avg_price, snapshot_date
+                FROM index_snapshots
+                ORDER BY snapshot_date DESC
+            """,
+            "audit_log.csv": """
+                SELECT id, actor, action, entity_id, details, created_at
+                FROM audit_log
+                ORDER BY created_at DESC
+            """,
+            "audit_events.csv": """
+                SELECT chain_date, seq, actor, action, entity_type, entity_id, payload, prev_hash, event_hash, created_at, sealed
+                FROM audit_events
+                ORDER BY chain_date DESC, seq DESC
+            """,
         }
 
         with engine.begin() as conn:
             mem = io.BytesIO()
             with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                # write CSV files
                 for fname, sql in exports.items():
                     try:
                         rows = conn.execute(_sqltext(sql)).fetchall()
@@ -4135,18 +4314,30 @@ def admin_export_all(request: Request = None):
                         else:
                             w.writerow(list(r))
                     zf.writestr(fname, s.getvalue())
+                # write retention note INSIDE the zip context
+                zf.writestr(
+                    "README_retention.txt",
+                    "DATA RETENTION\n"
+                    "- Contracts & BOLs retained ≥7 years.\n"
+                    "- Daily DB snapshots recommended.\n"
+                    "- Timestamps are UTC ISO8601.\n"
+                )
             mem.seek(0)
+
         headers = {"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         return StreamingResponse(mem, media_type="application/zip", headers=headers)
+
     except Exception:
         # Return a valid empty zip instead of 500
         buf = io.BytesIO()
         zipfile.ZipFile(buf, "w").close()
         buf.seek(0)
-        return StreamingResponse(buf, media_type="application/zip",
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
-
+# --- ZIP export (all core data) ---
 
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
@@ -4902,7 +5093,7 @@ class InventoryRowOut(BaseModel):
 async def list_inventory(
     seller: str = Query(..., description="Seller name"),
     sku: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0)
 ):
     q = "SELECT * FROM inventory_available WHERE LOWER(seller) = LOWER(:seller)"
@@ -4927,7 +5118,7 @@ async def list_movements(
     movement_type: Optional[str] = Query(None, description="upsert, adjust, reserve, unreserve, commit, ship, cancel, reconcile"),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     q = "SELECT * FROM inventory_movements WHERE LOWER(seller)=LOWER(:seller)"
@@ -6504,7 +6695,7 @@ async def get_all_bols_pg(
     contract_id: Optional[str] = Query(None),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     response: Response = None,
 ):
@@ -6628,7 +6819,7 @@ async def get_all_contracts(
         None,
         description="created_at_desc|price_per_ton_asc|price_per_ton_desc|weight_tons_desc"
     ),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     response: Response = None,   # lets us set X-Total-Count
 ):
@@ -6991,6 +7182,77 @@ async def material_price_history(material: str, seller: Optional[str] = None):
         rows = await database.fetch_all(q, {"material": material})
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
+
+# === Analytics: implement missing endpoints ===
+from datetime import timedelta as _td
+
+def _parse_window_to_days(window: str) -> int:
+    w = (window or "1M").strip().upper()
+    if w.endswith("D"): return max(1, int(w[:-1]))
+    if w.endswith("W"): return max(1, int(w[:-1]) * 7)
+    if w.endswith("M"): return max(1, int(w[:-1]) * 30)
+    if w.endswith("Y"): return max(1, int(w[:-1]) * 365)
+    return 30  # default 1M
+
+@app.get("/analytics/contracts_by_region", tags=["Analytics"], summary="Count & value grouped by seller (region proxy)")
+async def analytics_contracts_by_region(region: str | None = None, start: str | None = None, end: str | None = None, limit: int = 100):
+    # We don't have a formal region column; use LOWER(seller) as a stable proxy
+    cond, vals = [], {}
+    if region:
+        cond.append("LOWER(seller) = LOWER(:r)"); vals["r"] = region
+    if start:
+        cond.append("created_at >= :s"); vals["s"] = start
+    if end:
+        cond.append("created_at <= :e"); vals["e"] = end
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    q = f"""
+      SELECT LOWER(seller) AS region,
+             COUNT(*)            AS contract_count,
+             COALESCE(SUM(price_per_ton * weight_tons), 0) AS total_value_usd
+        FROM contracts
+        {where}
+    GROUP BY region
+    ORDER BY total_value_usd DESC
+       LIMIT :lim
+    """
+    vals["lim"] = limit
+    rows = await database.fetch_all(q, vals)
+    return [dict(r) for r in rows]
+
+@app.get("/analytics/prices_over_time", tags=["Analytics"], summary="Daily avg prices & volume for a material")
+async def analytics_prices_over_time(material: str, window: str = "1M"):
+    days = _parse_window_to_days(window)
+    q = """
+      SELECT (created_at AT TIME ZONE 'utc')::date AS d,
+             ROUND(AVG(price_per_ton)::numeric, 2) AS avg_price,
+             ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS volume_tons
+        FROM contracts
+       WHERE material = :m
+         AND created_at >= NOW() - make_interval(days => :days)
+         AND price_per_ton IS NOT NULL
+    GROUP BY d
+    ORDER BY d
+    """
+    rows = await database.fetch_all(q, {"m": material, "days": days})
+    return [{"date": str(r["d"]), "avg_price": float(r["avg_price"]), "volume": float(r["volume_tons"])} for r in rows]
+
+@app.post("/indices/run", tags=["Indices"], summary="Run BR-Index builder")
+async def indices_run():
+    try:
+        await run_indices_builder()
+        METRICS_INDICES_SNAPSHOTS.inc()
+        return {"ok": True}
+    except Exception as e:
+        try: logger.warn("indices_run_failed", err=str(e))
+        except: pass
+        return {"ok": False, "skipped": True}
+
+def flag_outliers(prices, z=3.0):
+    import statistics
+    if len(prices) < 10: return []
+    mu = statistics.mean(prices)
+    sd = statistics.pstdev(prices) or 1
+    return [i for i,p in enumerate(prices) if abs((p-mu)/sd) >= z]
 
 @app.get("/analytics/rolling_bands", tags=["Analytics"], summary="Rolling 7/30/90d bands per material")
 async def rolling_bands(material: str, days: int = 365):
@@ -8685,6 +8947,16 @@ async def ml_anomaly(a: AnomIn):
         except: pass
         raise HTTPException(400, "ml anomaly failed")
 # ===== Surveillance / Alerts =====
+
+# =============== CONTRACTS & BOLs ===============
+@startup
+async def _ensure_requested_indexes_and_fx():
+    await run_ddl_multi("""
+      CREATE INDEX IF NOT EXISTS idx_contracts_status_date ON contracts (status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_bols_contract_id_status ON bols (contract_id, status);
+      ALTER TABLE contracts ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(12,6) DEFAULT 1.000000;
+    """)
+# =============== /CONTRACTS & BOLs ===============
 
 # -------- Surveillance: case management + rules --------
 @startup

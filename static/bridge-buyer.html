@@ -34,8 +34,26 @@
   <script id="boot" nonce="{{NONCE}}">
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
   </script>
+  <script src="/static/js/locale.js" defer></script>
 </head>
 <body>
+  <!-- Locale strip -->
+  <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap">
+  <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
+  <select id="lang-select" class="form-select form-select-sm" style="width:auto">
+    <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
+  </select>
+  <label class="form-label m-0 ms-2" for="tz-select" data-i18n="timezone">Timezone</label>
+  <input id="tz-select" class="form-control form-control-sm" list="tz-list" placeholder="America/Phoenix" style="width:220px" data-i18n-ph="timezone"/>
+  <datalist id="tz-list">
+    <option value="America/Phoenix"></option><option value="America/New_York"></option>
+    <option value="America/Chicago"></option><option value="America/Los_Angeles"></option>
+    <option value="UTC"></option><option value="Europe/London"></option><option value="Asia/Shanghai"></option>
+  </datalist>
+  <button class="btn btn-outline-secondary btn-sm ms-1" onclick="BRIDGE_LOCALE.save()"><span data-i18n="save">Save</span></button>
+  <small class="text-muted ms-auto" id="local-time"></small>
+</div>
+ 
   <a href="#list" class="visually-hidden visually-hidden-focusable">Skip to content</a>
 
   <!-- Toast (live region) -->
@@ -47,7 +65,7 @@
 
   <div class="container">
     <div class="d-flex align-items-center justify-content-between">
-      <h2 class="mb-3">🛒 BRidge Buyer Portal</h2>
+      <h2 class="mb-3" data-i18n="buyer_portal">🛒 BRidge Buyer Portal</h2>
       <span class="health-badge" data-health-badge>● Checking…</span>
     </div>
 

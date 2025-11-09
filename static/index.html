@@ -986,7 +986,17 @@ async function closeContract(contractId) {
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
   </script>
-</head>
+  <script src="/static/js/locale.js" defer></script>
+  <script nonce="{{NONCE}}">
+    function onReady(fn){
+      if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', fn);
+      } else {
+        try{ fn(); } catch(e){ console.error(e); }
+      }
+    }
+  </script>
+  </head>
 <body>
   <div class="container">
     <!-- Header -->
@@ -994,8 +1004,8 @@ async function closeContract(contractId) {
       <h1>BRidge Dashboard</h1>
       <div class="user-info">
         <span id="current-user">User: Guest</span>
-        <button onclick="showLoginModal()">Login</button>
-        <button onclick="showLoginmodal()">Logout</button>
+        <button onclick="login()">Login</button>
+        <button onclick="logout()">Logout</button>
         <button onclick="window.location.href='Spec-ferrous.html'">Spec Sheet Ferrous</button>
         <button onclick="window.location.href='Spec-nonferrous.html'">Spec Sheet Nonferrous</button>
         <button onclick="window.location.href='Shipping terms.html'">Shipping Terms</button>
@@ -1037,9 +1047,7 @@ async function closeContract(contractId) {
           <div id="price-StainlessSteel">Stainless Steel: $1,600.00</div>
         </div>
       </div>
-</section>
-      </div>
-    </section>
+</section>      
     
     <!-- Finished Goods Inventory -->
     <section class="section">
@@ -1467,8 +1475,7 @@ async function closeContract(contractId) {
         }
       }
     }
-    
-    // Trade Log, Active Contracts & Inventory Update Functions (repeat)
+ // Trade Log, Active Contracts & Inventory Update Functions (repeat)
     function appendTradeLogEntry(material, quantity, price, totalCost, location) {
       const tableBody = document.getElementById('trade-log-table').querySelector('tbody');
       const tradeTime = new Date().toLocaleTimeString();
@@ -1523,120 +1530,6 @@ async function closeContract(contractId) {
     });
   </script>
   
-  <!-- New Script: Automated Updates for Inventory, Pricing, and Metals Market Overview -->
-  <script>
-    onReady(() => {
-      // Update Greenspark inventory every 5 minutes (300000 ms)
-      setInterval(updateInventoryIncrementally, 300000);
-      
-      // Update pricing fluctuations every 5 seconds (5000 ms)
-      setInterval(simulatePricingFluctuations, 5000);
-      
-      // Update Metals Market Overview every 5 seconds (5000 ms)
-      setInterval(updateMetalsMarketOverview, 5000);
-      
-      // Also update simulated trade options when pricing changes
-      setInterval(updateTradeOptions, 5000);
-    });
-    
-    function updateInventoryIncrementally() {
-      const rows = document.querySelectorAll('#greenspark-table tbody tr:not(.group-header)');
-      rows.forEach(row => {
-        if (Math.random() < 0.4) { // update ~40% of rows
-          let finished = parseFloat(row.cells[2].textContent.replace(/,/g, '')) || 0;
-          let changePercent = Math.random() * 0.05; // up to 5% increase
-          finished += finished * changePercent;
-          row.cells[2].textContent = finished.toLocaleString();
-          
-          let wip = parseFloat(row.cells[1].textContent.replace(/,/g, '')) || 0;
-          let total = wip + finished;
-          row.cells[3].textContent = total.toLocaleString();
-        }
-      });
-      updatePurchaseValues();
-    }
-    // Function to fetch live scrap-metal data from the backend API
-async function updateInventoryFromAPI() {
-  try {
-    const token = localStorage.getItem("access_token"); // if authentication is required
-    const response = await fetch("http://localhost:8000/scrap-metal", {
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": token ? `Bearer ${token}` : ""
-      }
-    });
-    if (!response.ok) {
-      throw new Error("Failed to fetch live inventory data.");
-    }
-    const liveData = await response.json();
-    // Update the table with live data without necessarily removing your static content.
-    // For example, clear and repopulate the table (if you decide to fully replace static data):
-    const tableBody = document.getElementById("greenspark-table").querySelector("tbody");
-    tableBody.innerHTML = ""; // Remove existing rows
-    liveData.forEach(item => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${item.metal_type}</td>
-        <td>${item.quantity.toLocaleString()}</td>
-        <td>${item.quality}</td>
-        <td>${item.location}</td>
-        <td>$${item.price}</td>
-      `;
-      tableBody.appendChild(row);
-    });
-  } catch (error) {
-    console.error("Error fetching live inventory data:", error);
-    // If the API call fails, you can keep or re-display your static data.
-  }
-}
-
-// Optionally call this function periodically or on demand
-document.addEventListener("DOMContentLoaded", () => {
-  // For example, update live inventory every 60 seconds:
-  updateInventoryFromAPI();
-  setInterval(updateInventoryFromAPI, 60000);
-});
-
-    function simulatePricingFluctuations() {
-      const pricingElements = document.querySelectorAll('[id^="price-"]');
-      pricingElements.forEach(elem => {
-        let text = elem.textContent;
-        let parts = text.split(':');
-        if (parts.length >= 2) {
-          let commodity = parts[0].trim();
-          let priceStr = parts[1].replace('$','').replace(/,/g, '').trim();
-          let currentPrice = parseFloat(priceStr);
-          if (!isNaN(currentPrice)) {
-            let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
-            let newPrice = currentPrice + fluctuation;
-            elem.textContent = `${commodity}: $${newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-          }
-        }
-      });
-    }
-    
-    // New function to update Metals Market Overview table
-    function updateMetalsMarketOverview() {
-      const table = document.getElementById('metals-market-table');
-      const rows = table.querySelectorAll('tbody tr');
-      rows.forEach(row => {
-        // Update "Last" price (column index 2) with ±5% fluctuation
-        let lastPriceStr = row.cells[2].textContent.replace(/,/g, '');
-        let currentPrice = parseFloat(lastPriceStr);
-        if (!isNaN(currentPrice)) {
-          let fluctuation = currentPrice * ((Math.random() * 0.1) - 0.05);
-          let newPrice = currentPrice + fluctuation;
-          // Calculate change (newPrice - oldPrice) and format with sign
-          let changeVal = newPrice - currentPrice;
-          let changeText = (changeVal >= 0 ? '+' : '') + changeVal.toFixed(2);
-          row.cells[2].textContent = newPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          // Update the "Change" column (column index 3)
-          row.cells[3].textContent = changeText;
-        }
-      });
-    }
-  </script>
-  
   <!-- Hidden Scrap Material Codes Reference and Updated Ticker Generator (Repeated) -->
   <script>
     function normalizeString(str) {
@@ -1673,62 +1566,8 @@ document.addEventListener("DOMContentLoaded", () => {
       
       return baseMaterial.slice(0, 3).toUpperCase() + Math.floor(Math.random() * 100);
     }
-  </script>
-  <script>
-    async function fetchAnalytics() {
-      try {
-        // Call your analytics endpoint on your backend
-        const response = await fetch("http://localhost:8000/analytics");
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        console.log("Analytics Data:", data);
-        // Update a specific element to display this data
-        // For example, if you have a div with id "analyticsDisplay":
-        document.getElementById("analyticsDisplay").innerText = JSON.stringify(data, null, 2);
-      } catch (error) {
-        console.error("Error fetching analytics:", error);
-        document.getElementById("analyticsDisplay").innerText = "Error loading analytics.";
-      }
-    }
-  
-    // Call fetchAnalytics when the DOM is fully loaded
-    onReady(() => {
-      fetchAnalytics();
-    });
-  </script>
- <script>
-  // Establish a WebSocket connection to the FastAPI backend.
-  const socket = new WebSocket("ws://localhost:8000/ws/futures");
-
-  socket.onopen = function() {
-    console.log("WebSocket connection established.");
-    // Optionally send an initial message.
-    socket.send("Hello from Bridge!");
-  };
-
-  socket.onmessage = function(event) {
-    // Parse and handle incoming WebSocket messages.
-    try {
-      const message = JSON.parse(event.data);
-      console.log("WebSocket message received:", message);
-      // Update an element on your dashboard with this real-time data.
-      document.getElementById("realtimeData").innerText = JSON.stringify(message, null, 2);
-    } catch (e) {
-      console.error("Error parsing WebSocket message:", e);
-    }
-  };
-
-  socket.onerror = function(error) {
-    console.error("WebSocket error:", error);
-  };
-
-  socket.onclose = function(event) {
-    console.log("WebSocket connection closed:", event);
-    // Optionally implement reconnection logic here.
-  };
-</script>
+  </script>  
+ 
 <script>
   // Helper function to set up headers for authenticated requests
   function getAuthHeaders() {
@@ -2032,7 +1871,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchAdminHealth();
   }, 30000); // 30,000 milliseconds = 30 seconds
 });
-</script>
+
 <!-- Login Modal (using Bootstrap) -->
 <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
   <div class="modal-dialog">
@@ -2061,9 +1900,6 @@ document.addEventListener("DOMContentLoaded", () => {
     </div>
   </div>
 </div>
-<!-- In your <head> -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </script>
 <script>
   // Function to show the login modal (using Bootstrap)

@@ -15,7 +15,7 @@
   <!-- Styles -->
   <link rel="stylesheet" href="/static/app.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  
+  <script src="/static/js/locale.js" defer></script>
 </head>
 <body>
 
@@ -27,6 +27,22 @@
     <h1>BRidge Scrap Indices™</h1>
   </div>
   <div class="muted">USD/lb • daily closes & forecast overlay · <span class="health-badge" data-health-badge>● Checking…</span></div>
+</div>
+
+<div class="d-flex align-items-center gap-2 mb-2" style="padding:0 12px; flex-wrap:wrap">
+  <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
+  <select id="lang-select" class="form-select form-select-sm" style="width:auto">
+    <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
+  </select>
+  <label class="form-label m-0 ms-2" for="tz-select" data-i18n="timezone">Timezone</label>
+  <input id="tz-select" class="form-control form-control-sm" list="tz-list" placeholder="America/Phoenix" style="width:220px" data-i18n-ph="timezone"/>
+  <datalist id="tz-list">
+    <option value="America/Phoenix"></option><option value="America/New_York"></option>
+    <option value="America/Chicago"></option><option value="America/Los_Angeles"></option>
+    <option value="UTC"></option><option value="Europe/London"></option><option value="Asia/Shanghai"></option>
+  </datalist>
+  <button class="btn btn-outline-secondary btn-sm ms-1" onclick="BRIDGE_LOCALE.save()"><span data-i18n="save">Save</span></button>
+  <small class="text-muted ms-auto" id="local-time"></small>
 </div>
 
 <div class="grid">
