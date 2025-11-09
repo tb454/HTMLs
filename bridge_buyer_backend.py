@@ -449,10 +449,13 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     CREATE TABLE IF NOT EXISTS public.users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email TEXT UNIQUE NOT NULL,
+        username TEXT,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN ('admin','buyer','seller')),
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
     """
     with engine.begin() as conn:
         conn.exec_driver_sql(ddl)
@@ -471,6 +474,21 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
         except Exception:
             pass
 
+                # seed a test user for CI/rate-limit tests
+        try:
+            conn.execute(
+                _sqltext(
+                    "INSERT INTO public.users (email, username, password_hash, role, is_active) "
+                    "VALUES (:e, :u, crypt(:pwd, gen_salt('bf')), 'buyer', TRUE) "
+                    "ON CONFLICT (email) DO NOTHING"
+                ),
+                {"e": "test@example.com", "u": "test", "pwd": "test"},
+            )
+        except Exception:
+            pass
+# ===== /DB bootstrap =====
+
+# ------ Apply email helper ------
 def send_application_email(payload: ApplyRequest, app_id: str):
     host = os.environ.get("SMTP_HOST", "")
     port = int(os.environ.get("SMTP_PORT", "587"))
@@ -562,6 +580,7 @@ applications = Table(
     Column("utm_medium", String),
     Column("is_reviewed", Boolean, nullable=False, default=False),
 )
+# ------ Apply email helper ------
 
 # --- Pydantic payload ---
 class ApplyRequest(BaseModel):
@@ -832,11 +851,57 @@ async def startup_bootstrap_and_connect():
             _bootstrap_prices_indices_schema_if_needed(engine)
         except Exception as e:
             print(f"[bootstrap] non-fatal init error: {e}")
+    # Ensure target DB exists (local/CI)
     try:
-        await database.connect() 
+        _ensure_database_exists(SYNC_DATABASE_URL.replace("+psycopg", ""))  # psycopg-friendly DSN
+    except Exception:
+        pass
+
+    try:
+        await database.connect()
     except Exception as e:
         print(f"[startup] database connect failed: {e}")
+
+
 # ===== Startup DB connect + bootstrap =====
+
+# ------- DB ensure-database-exists (for local/CI) -------
+def _ensure_database_exists(dsn: str):
+    """
+    If the target database in DATABASE_URL doesn't exist (e.g., test_db),
+    connect to the 'postgres' admin DB and CREATE DATABASE <name>.
+    Safe to call repeatedly; it will no-op if the DB already exists or if
+    we don't have permissions.
+    """
+    try:
+        from sqlalchemy.engine.url import make_url
+        import psycopg  # psycopg3
+
+        url = make_url(dsn)
+        if not str(url).startswith("postgresql"):
+            return  # only relevant for Postgres
+
+        target_db = url.database or ""
+        if not target_db:
+            return
+
+        # connect to admin DB on same host as the DSN
+        admin_url = url.set(database="postgres")
+        admin_dsn = admin_url.render_as_string(hide_password=False)
+
+        with psycopg.connect(admin_dsn) as conn:
+            conn.execute("SET statement_timeout = 5000")
+            # Try create; swallow DuplicateDatabase
+            try:
+                conn.execute(f'CREATE DATABASE "{target_db}"')
+            except psycopg.errors.DuplicateDatabase:
+                pass
+            # commit not strictly required with autocommit but harmless
+            conn.commit()
+    except Exception:
+        # Never block the process on auto-create errors; startup will show a clear failure later if still missing
+        pass
+# ------- /DB ensure-database-exists -------
 
 # =====  users minimal for tests =====
 @startup
@@ -5727,17 +5792,33 @@ async def _ensure_inventory_constraints():
 # -------- Contract enums and FKs --------
 @startup
 async def _ensure_contract_enums_and_fks():
-    # Create enum once (idempotent)
-    await run_ddl_multi("""
-    DO $$
-    BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'contract_status') THEN
-        CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
-    END IF;
-    END
-    $$ LANGUAGE plpgsql;
-    """)
-    # Migrate contracts.status -> enum (safe cast if values match)
+    # Safe enum creation (idempotent)
+    try:
+        await database.execute("""
+        DO $bridge$
+        BEGIN
+          PERFORM 1 FROM pg_type WHERE typname = 'contract_status';
+          IF NOT FOUND THEN
+            CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
+          END IF;
+        END
+        $bridge$;
+        """)
+    except Exception:
+        # Fallback path for older PG or drivers splitting DO body
+        await database.execute("""
+        DO $bridge$
+        BEGIN
+          BEGIN
+            CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
+          EXCEPTION WHEN duplicate_object THEN
+            NULL;
+          END;
+        END
+        $bridge$;
+        """)
+
+    # Cast the column to the enum if the table exists (no-throw)
     try:
         await database.execute("""
           ALTER TABLE contracts
@@ -5745,20 +5826,15 @@ async def _ensure_contract_enums_and_fks():
           USING status::contract_status
         """)
     except Exception:
-        pass  # already converted or legacy values present
+        pass
 
-    # Tighten BOLs.status to text domain (optional) or leave as text.
-
-    # Ensure FK contracts -> bols already exists; add ON DELETE CASCADE if missing
+    # Re-assert CASCADE FK for bols → contracts (no-throw)
     try:
-        await database.execute("""
-          ALTER TABLE bols
-          DROP CONSTRAINT IF EXISTS bols_contract_id_fkey;
-        """)
+        await database.execute("ALTER TABLE bols DROP CONSTRAINT IF EXISTS bols_contract_id_fkey;")
         await database.execute("""
           ALTER TABLE bols
           ADD CONSTRAINT bols_contract_id_fkey
-          FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE;
+          FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
         """)
     except Exception:
         pass
@@ -8272,6 +8348,7 @@ async def create_bol_alias(request: Request):
 
     # 2) Build permissive BOL insert with defaults
     bol_id = str(uuid.uuid4())
+
     buyer = body.get("buyer") or "Test Buyer"
     seller = body.get("seller") or "Test Seller"
     material = body.get("material") or "Test Material"
