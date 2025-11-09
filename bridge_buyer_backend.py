@@ -264,13 +264,24 @@ if prod:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 
 # =====  rate limiting =====
-limiter = Limiter(key_func=get_remote_address)
+ENV = os.getenv("ENV", "development").lower()
+ENFORCE_RL = (
+    os.getenv("ENFORCE_RATE_LIMIT", "1") in ("1", "true", "yes")
+    or ENV in {"production", "prod", "test", "testing", "ci"}
+)
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    headers_enabled=True,
+    enabled=ENFORCE_RL,
+)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
     return PlainTextResponse("Too Many Requests", status_code=429)
+
 
 SNAPSHOT_AUTH = os.getenv("SNAPSHOT_AUTH", "")
 
@@ -5696,10 +5707,11 @@ async def _ensure_contract_enums_and_fks():
     await run_ddl_multi("""
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'contract_status') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'contract_status') THEN
         CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
-      END IF;
-    END$$;
+    END IF;
+    END
+    $$ LANGUAGE plpgsql;
     """)
     # Migrate contracts.status -> enum (safe cast if values match)
     try:
@@ -6503,7 +6515,7 @@ import tempfile
 
 @app.get("/bol/{bol_id}/pdf", tags=["Documents"], summary="Download BOL as PDF", status_code=200)
 async def generate_bol_pdf(bol_id: str):
-    row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :bol_id", {"bol_id": bol_id})
+    row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :bol_id", {"bol_id": bol_id})    
     if not row:
         raise HTTPException(status_code=404, detail="BOL not found")
 
@@ -8140,7 +8152,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if row is None:
         row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :id", {"id": bol_id_str})
     row= dict(row)
-    
+
     # Auto-mint a receipt ONLY on first creation
     if we_created:
         try:
