@@ -803,6 +803,50 @@ async def startup_bootstrap_and_connect():
         print(f"[startup] database connect failed: {e}")
 # ===== Startup DB connect + bootstrap =====
 
+# =====  users minimal for tests =====
+@startup
+async def _ensure_users_minimal_for_tests():
+    """
+    Ensure public.users exists for CI/test runs and seed a 'test' user.
+    We also enable pgcrypto so crypt() works in the login query.
+    """
+    env = os.getenv("ENV", "").lower()
+    init = os.getenv("INIT_DB", "0").lower() in ("1","true","yes")
+    if env in {"ci", "test"} or init:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
+
+        # Minimal users table compatible with your login SELECT
+        await run_ddl_multi("""
+        CREATE TABLE IF NOT EXISTS public.users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email TEXT,
+          username TEXT,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'buyer',
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        -- Helpful unique indices (nullable-safe)
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_lower
+          ON public.users ((lower(username))) WHERE username IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower
+          ON public.users ((lower(email))) WHERE email IS NOT NULL;
+        """)
+
+        # Seed a test user: username 'test', password 'test'
+        try:
+            await database.execute("""
+              INSERT INTO public.users (email, username, password_hash, role, is_active)
+              VALUES ('test@example.com','test', crypt('test', gen_salt('bf')), 'buyer', TRUE)
+              ON CONFLICT (username) DO NOTHING
+            """)
+        except Exception:
+            pass
+# =====  users minimal for tests =====  
+
 # =====  Database (async + sync) =====
 @startup
 async def _connect_db_first():
@@ -8181,6 +8225,10 @@ async def bols_mark_delivered(
         pass
 
     return {"bol_id": bol_id, "status": "Delivered", "receipts_consumed": receipt_ids or []}
+
+@app.post("/bol", include_in_schema=False)
+async def create_bol_alias(bol: BOLIn, request: Request):    
+    return await create_bol_pg(bol, request)
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============   
