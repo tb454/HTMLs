@@ -7327,30 +7327,33 @@ async def rolling_bands(material: str, days: int = 365):
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
     try:
-        d = (snapshot_date or date.today()).isoformat()
+        asof = (snapshot_date or date.today()).isoformat()
         q = """
         INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
-        SELECT :d::date AS as_of_date,
-               LOWER(seller) AS region,
+        SELECT :asof::date AS as_of_date,
+               LOWER(seller)       AS region,
                material,
-               AVG(price_per_ton) AS avg_price,
-               SUM(weight_tons)  AS volume_tons
+               AVG(price_per_ton)  AS avg_price,
+               SUM(weight_tons)    AS volume_tons
           FROM contracts
-         WHERE created_at >= :d::date
-           AND created_at  < (:d::date + INTERVAL '1 day')
+         WHERE created_at::date = :asof::date
          GROUP BY region, material
         ON CONFLICT (as_of_date, region, material) DO UPDATE
-          SET avg_price  = EXCLUDED.avg_price,
-              volume_tons= EXCLUDED.volume_tons
+          SET avg_price   = EXCLUDED.avg_price,
+              volume_tons = EXCLUDED.volume_tons
         """
-        await database.execute(q, {"d": d})
-        try: await emit_event("index.snapshot.created", {"as_of_date": d})
-        except: pass
+        await database.execute(q, {"asof": asof})
+        try:
+            await emit_event("index.snapshot.created", {"as_of_date": asof})
+        except:
+            pass
         METRICS_INDICES_SNAPSHOTS.inc()
-        return {"ok": True, "date": d}
+        return {"ok": True, "date": asof}
     except Exception as e:
-        try: logger.warn("indices_snapshot_failed", err=str(e))
-        except: pass
+        try:
+            logger.warn("indices_snapshot_failed", err=str(e))
+        except:
+            pass
         return {"ok": False, "skipped": True}
 
 @app.get("/public/indices/daily.json", tags=["Analytics"], summary="Public daily index JSON")
