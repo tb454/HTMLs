@@ -1871,6 +1871,7 @@ async function closeContract(contractId) {
     fetchAdminHealth();
   }, 30000); // 30,000 milliseconds = 30 seconds
 });
+</script>
 
 <!-- Login Modal (using Bootstrap) -->
 <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
@@ -1884,11 +1885,11 @@ async function closeContract(contractId) {
         <div class="modal-body">
           <div class="mb-3">
             <label for="username" class="form-label">Username:</label>
-            <input type="text" id="username" name="username" class="form-control" required>
+            <input type="text" id="username" name="username" class="form-control" required />
           </div>
           <div class="mb-3">
             <label for="password" class="form-label">Password:</label>
-            <input type="password" id="password" name="password" class="form-control" required>
+            <input type="password" id="password" name="password" class="form-control" required />
           </div>
           <div id="login-error" style="color: red;"></div>
         </div>
@@ -1900,7 +1901,6 @@ async function closeContract(contractId) {
     </div>
   </div>
 </div>
-</script>
 <script>
   // Function to show the login modal (using Bootstrap)
   function showLoginModal() {
