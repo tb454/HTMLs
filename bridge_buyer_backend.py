@@ -4052,7 +4052,7 @@ class LoginOut(BaseModel):
     redirect: str | None = None
 
 @app.post("/login", tags=["Auth"], response_model=LoginOut, summary="Login with email or username")
-@limiter.limit("100/minute")
+@limiter.limit("10/minute")
 async def login(request: Request):
     # Accept JSON or classic HTML form
     try:
@@ -8139,7 +8139,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     we_created = row is not None
     if row is None:
         row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :id", {"id": bol_id_str})
-
+    row= dict(row)
+    
     # Auto-mint a receipt ONLY on first creation
     if we_created:
         try:
