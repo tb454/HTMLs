@@ -7862,30 +7862,30 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 committed = float(inv["qty_committed"]) if inv else 0.0
                 available = on_hand - reserved - committed
                 if available < qty:
-                # In non-prod (ci/test/dev), auto-top-up so tests and local runs don’t 409.
-                _env = os.getenv("ENV", "").lower()
-                if _env in {"ci", "test", "testing", "development", "dev"}:
-                    short = qty - available
-                    # bump on_hand by the shortfall
-                    await database.execute("""
-                        UPDATE inventory_items
-                        SET qty_on_hand = qty_on_hand + :short,
-                            updated_at = NOW()
-                        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                    """, {"short": short, "s": seller, "k": sku})
-                    # log a movement for traceability (reason: auto_topup_for_tests)
-                    try:
+                    # In non-prod (ci/test/dev), auto-top-up so tests and local runs don’t 409.
+                    _env = os.getenv("ENV", "").lower()
+                    if _env in {"ci", "test", "testing", "development", "dev"}:
+                        short = qty - available
+                        # bump on_hand by the shortfall
                         await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                        VALUES (:s,:k,'upsert',:q,NULL,:m)
-                        """, {"s": seller, "k": sku, "q": short,
-                            "m": json.dumps({"reason":"auto_topup_for_tests"})})
-                    except Exception:
-                        pass
-                    # recompute available
-                    available = on_hand + short - reserved - committed
-                else:
-                    raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+                            UPDATE inventory_items
+                            SET qty_on_hand = qty_on_hand + :short,
+                                updated_at = NOW()
+                            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                        """, {"short": short, "s": seller, "k": sku})
+                        # log a movement for traceability (reason: auto_topup_for_tests)
+                        try:
+                            await database.execute("""
+                            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                            VALUES (:s,:k,'upsert',:q,NULL,:m)
+                            """, {"s": seller, "k": sku, "q": short,
+                                "m": json.dumps({"reason":"auto_topup_for_tests"})})
+                        except Exception:
+                            pass
+                        # recompute available
+                        available = on_hand + short - reserved - committed
+                    else:
+                        raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
 
                 await database.execute("""
                     UPDATE inventory_items
