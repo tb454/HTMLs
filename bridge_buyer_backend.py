@@ -8344,6 +8344,7 @@ async def create_bol_alias(request: Request):
     # Mirror the shape expected by tests: return at least bol_id + 201
     payload = {
         "bol_id": row["bol_id"],
+        "id": row["bol_id"],
         "contract_id": row["contract_id"],
         "buyer": row.get("buyer") or buyer,
         "seller": row.get("seller") or seller,
