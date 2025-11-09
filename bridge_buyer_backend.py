@@ -272,7 +272,7 @@ ENFORCE_RL = (
 
 limiter = Limiter(
     key_func=get_remote_address,
-    headers_enabled=True,
+    headers_enabled=False,
     enabled=ENFORCE_RL,
 )
 app.state.limiter = limiter
