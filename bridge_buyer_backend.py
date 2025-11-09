@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, par
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, EmailStr, Field 
 from typing import List, Optional, Literal
@@ -8317,7 +8318,7 @@ async def create_bol_alias(request: Request):
             :pickup_sig_b64, :pickup_sig_time,
             :pickup_time, 'Scheduled',
             :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct
-        )
+        )                              
         RETURNING *
     """, {
         "bol_id": bol_id,
@@ -8331,7 +8332,8 @@ async def create_bol_alias(request: Request):
         "origin_country": origin_country, "destination_country": destination_country,
         "port_code": port_code, "hs_code": hs_code, "duty_usd": duty_usd, "tax_pct": tax_pct,
     })
-    row=dict(row)
+    if row is not None:
+        row = dict(row)
 
     # Best-effort metric/audit (don’t block the test)
     try:
@@ -8340,32 +8342,30 @@ async def create_bol_alias(request: Request):
         pass
 
     # Mirror the shape expected by tests: return at least bol_id + 201
-    return JSONResponse(
-        status_code=201,
-        content={
-            "bol_id": row["bol_id"],
-            "contract_id": row["contract_id"],
-            "buyer": row.get("buyer") or buyer,
-            "seller": row.get("seller") or seller,
-            "material": row.get("material") or material,
-            "weight_tons": float(row.get("weight_tons") or weight_tons),
-            "price_per_unit": float(row.get("price_per_unit") or ppu),
-            "total_value": float(row.get("total_value") or total_value),
-            "carrier": {
-                "name": row.get("carrier_name") or carrier_name,
-                "driver": row.get("carrier_driver") or carrier_driver,
-                "truck_vin": row.get("carrier_truck_vin") or carrier_truck_vin,
-            },
-            "pickup_signature": {
-                "base64": row.get("pickup_signature_base64") or pickup_sig_b64,
-                "timestamp": (row.get("pickup_signature_time") or pickup_sig_time or pickup_time),
-            },
-            "pickup_time": (row.get("pickup_time") or pickup_time),
-            "delivery_signature": None,
-            "delivery_time": None,
-            "status": row.get("status") or "Scheduled",
-        }
-    )
+    payload = {
+        "bol_id": row["bol_id"],
+        "contract_id": row["contract_id"],
+        "buyer": row.get("buyer") or buyer,
+        "seller": row.get("seller") or seller,
+        "material": row.get("material") or material,
+        "weight_tons": float(row.get("weight_tons") or weight_tons),
+        "price_per_unit": float(row.get("price_per_unit") or ppu),
+        "total_value": float(row.get("total_value") or total_value),
+        "carrier": {
+            "name": row.get("carrier_name") or carrier_name,
+            "driver": row.get("carrier_driver") or carrier_driver,
+            "truck_vin": row.get("carrier_truck_vin") or carrier_truck_vin,
+        },
+        "pickup_signature": {
+            "base64": row.get("pickup_signature_base64") or pickup_sig_b64,
+            "timestamp": (row.get("pickup_signature_time") or pickup_sig_time or pickup_time),
+        },
+        "pickup_time": (row.get("pickup_time") or pickup_time),
+        "delivery_signature": None,
+        "delivery_time": None,
+        "status": row.get("status") or "Scheduled",
+    }
+    return JSONResponse(status_code=201, content=jsonable_encoder(payload))
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============   
