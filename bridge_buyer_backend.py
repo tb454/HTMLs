@@ -145,7 +145,18 @@ def _lot_size(symbol: str) -> float:
         return 1.0
 
 def _round2(x: float) -> float:
+    from decimal import Decimal, ROUND_HALF_UP
     return float(Decimal(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+def quantize_money(value: Decimal | float | str) -> Decimal:
+    try:
+        if isinstance(value, Decimal):
+            amt = value
+        else:
+            amt = Decimal(str(value))
+        return amt.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0.00")
 
 def _rget(row, key, default=None):
     """
@@ -3419,7 +3430,7 @@ def _rows_from_csv_bytes(raw_bytes: bytes):
 
             yield {
                 "seller": seller, "buyer": buyer, "material": material,
-                "price_per_ton": price_per_ton, "weight_tons": weight_tons,
+                "price_per_ton": quantize_money(price_per_ton), "weight_tons": weight_tons,
                 "created_at": created_at, "dedupe_key": dedupe_key
             }
         except (KeyError, InvalidOperation, ValueError):
@@ -7542,6 +7553,20 @@ async def rolling_bands(material: str, days: int = 365):
     rows = await database.fetch_all(q, {"m": material, "days": days})
     return [dict(r) for r in rows]
 
+@app.get("/analytics/tons_by_yard_this_month", tags=["Analytics"], summary="Tons this calendar month by yard (seller)")
+async def tons_by_yard_this_month(limit: int = 50):
+    q = """
+    SELECT seller AS yard_id,
+           ROUND(COALESCE(SUM(weight_tons),0)::numeric, 2) AS tons_month
+      FROM contracts
+     WHERE created_at >= date_trunc('month', NOW())
+     GROUP BY seller
+     ORDER BY tons_month DESC
+     LIMIT :lim
+    """
+    rows = await database.fetch_all(q, {"lim": limit})
+    return [dict(r) for r in rows]
+
 # --- DAILY INDEX SNAPSHOTS ---
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
@@ -7803,7 +7828,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "id": cid,
                 "buyer": contract.buyer, "seller": contract.seller,
                 "material": contract.material, "weight_tons": contract.weight_tons,
-                "price_per_ton": contract.price_per_ton, "status": "Signed",
+                "price_per_ton": quantize_money(contract.price_per_ton), "status": "Signed",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -7903,7 +7928,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     "id": cid,
                     "buyer": contract.buyer, "seller": contract.seller,
                     "material": contract.material, "weight_tons": contract.weight_tons,
-                    "price_per_ton": contract.price_per_ton, "status": "Pending",
+                    "price_per_ton": quantize_money(contract.price_per_ton), "status": "Pending",
                     "pricing_formula": contract.pricing_formula,
                     "reference_symbol": contract.reference_symbol,
                     "reference_price": contract.reference_price,
@@ -7966,7 +7991,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 ON CONFLICT (id) DO NOTHING
             """, {"id": cid, "buyer": contract.buyer, "seller": contract.seller,
                   "material": contract.material, "wt": contract.weight_tons,
-                  "ppt": contract.price_per_ton, "ccy": contract.currency})
+                  "ppt": quantize_money(contract.price_per_ton), "ccy": contract.currency})
             row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
             return await _idem_guard(request, key, row if row else {"id": cid, "status": "Pending"})
         except Exception as e2:

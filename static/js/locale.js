@@ -32,16 +32,39 @@
     const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
     return m ? decodeURIComponent(m[1]) : null;
   }
+  // i18n sticky + safe t()
+  (function initTranslator(){
+    const langCookie = document.cookie.match(/(?:^|; )LANG=([^;]+)/)?.[1];
+    const _currentLang = (langCookie || 'en').split('-')[0];
 
+    // expose a safe translator that prefers page bundle → english → key/def
+    if (!window.t) {
+      window.t = (k, def) => (window.STRINGS?.[_currentLang]?.[k]
+                          ?? window.STRINGS?.en?.[k]
+                          ?? def ?? k);
+    }
+  })();  
+  
   async function hydrateLocale() {
     // 1) pull current strings
     const { lang, strings } = await getJSON("/i18n/strings");
+    // keep a global copy for window.t()
+    window.STRINGS = window.STRINGS || {};
+    window.STRINGS[lang] = strings;
+    if (!window.STRINGS.en && lang !== 'en') {
+      // opportunistic: fallback will still work even if en is absent
+      try { const en = await getJSON("/i18n/strings?lang=en"); window.STRINGS.en = en.strings; } catch {}
+    }
     applyI18n(strings);
 
     // 2) set selectors if present
     const langSel = $("#lang-select");
     if (langSel) {
       langSel.value = (langSel.value || lang);
+      if (!langSel.__wired) {
+        langSel.addEventListener("change", () => BRIDGE_LOCALE.save());
+        langSel.__wired = true;
+      }
     }
 
     const tzSel = $("#tz-select");
