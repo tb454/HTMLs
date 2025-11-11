@@ -32,6 +32,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
 from fastapi import APIRouter, HTTPException
 from urllib.parse import quote
+import html as _html
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
 def _admin_dep(request: _FastAPIRequest):
@@ -642,7 +643,7 @@ def _csrf_get_or_create(request: Request) -> str:
 # --- Smart CSRF toggles ---
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_EXEMPT_PATHS = {
-    "/login", "/signup", "/logout",
+    "/login", "/signup", "/register", "/logout",
     "/stripe/webhook", "/ice/webhook", "/qbo/callback", "/admin/qbo/peek"
 }
 
@@ -1092,6 +1093,21 @@ async def _ensure_account_user_map():
     );
     """)
 # =====  account - user ownership =====
+
+# =====  invites log =====
+@startup
+async def _ensure_invites_log():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS invites_log(
+      invite_id UUID PRIMARY KEY,
+      email     TEXT NOT NULL,
+      member    TEXT NOT NULL,
+      role_req  TEXT NOT NULL,    -- admin|manager|employee
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      accepted_at TIMESTAMPTZ
+    );
+    """)
+# =====  invites log =====
 
 # ----- Uniq ref guard -----
 @startup
@@ -2685,6 +2701,32 @@ async def _ensure_entitlements_table():
         _ENTITLEMENTS[r["username"]].add(r["feature"])
 
 @startup
+async def _ensure_invites_log():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS invites_log(
+      invite_id UUID PRIMARY KEY,
+      email     TEXT NOT NULL,
+      member    TEXT NOT NULL,
+      role_req  TEXT NOT NULL,    -- admin|manager|employee
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      accepted_at TIMESTAMPTZ
+    );
+    """)
+
+@startup
+async def _ensure_invites_log():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS invites_log(
+      invite_id UUID PRIMARY KEY,
+      email     TEXT NOT NULL,
+      member    TEXT NOT NULL,
+      role_req  TEXT NOT NULL,    -- admin|manager|employee
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      accepted_at TIMESTAMPTZ
+    );
+    """)
+
+@startup
 async def _seed_demo_entitlements():
     try:
         # grant to a demo user or wildcard member you use
@@ -4228,6 +4270,31 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
     headers = {"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'}
     return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
+@app.get("/billing/reports", tags=["Billing"], summary="Monthly member report (PDF/CSV)")
+async def billing_reports(member: str = Query(...),
+                          month: str = Query(..., regex=r"^\d{4}-\d{2}$"),
+                          fmt: str = Query("pdf", regex=r"^(pdf|csv)$"),
+                          email_to: Optional[EmailStr] = None):
+    csv_text, pdf_bytes = await _build_member_statement_monthly(member, month)
+
+    # optional email note (attachment wiring can be added later)
+    if email_to:
+        try:
+            subj = f"BRidge Monthly Report — {member} — {month}"
+            html = f"<div style='font-family:system-ui'>Monthly report for <b>{member}</b> ({month}) generated.</div>"
+            await _send_email(str(email_to), subj, html, ref_type="report", ref_id=f"{member}:{month}")
+        except Exception:
+            pass
+
+    if fmt == "csv":
+        return StreamingResponse(iter([csv_text]), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{member}_{month}_report.csv"'}
+        )
+
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{member}_{month}_report.pdf"'}
+    )
+
 @shutdown
 async def shutdown_disconnect():
     try:
@@ -4288,7 +4355,7 @@ async def login(request: Request):
 
     # In production, require verified email before allowing login
     if os.getenv("ENV","").lower() == "production" and not bool(row["email_verified"]):
-        raise HTTPException(status_code=403, detail="Please verify your email (check your inbox).")
+        raise HTTPException(status_code=403, detail="Please verify your email (check your inbox) or POST /auth/resend_verification.")
     role = (row["role"] or "").lower()
     if role == "yard":  
         role = "seller"
@@ -4368,6 +4435,59 @@ async def set_member_plan(member: str, plan_code: str, request: Request=None):
     return {"ok": True, "member": member, "plan": plan_code}
 # ======= Member plan ========================
 
+# ------ Admin invite links -------
+from pydantic import BaseModel, EmailStr
+from urllib.parse import quote
+
+class InviteCreateIn(BaseModel):
+    email: EmailStr
+    member: str
+    role: str  # "admin" | "manager" | "employee"
+    send_email: bool = True
+
+@app.post("/admin/invites/create", tags=["Admin"], summary="Create invite link")
+async def admin_invites_create(body: InviteCreateIn, request: Request):
+    _require_admin(request)  # gated in prod
+
+    email  = body.email.strip().lower()
+    member = body.member.strip()
+    role   = (body.role or "employee").lower()
+    if role not in {"admin","manager","employee"}:
+        raise HTTPException(422, "role must be admin|manager|employee")
+
+    payload = {"email": email, "member": member, "role": role}
+    token   = make_signed_token(payload)  # uses _link_signer
+    base    = os.getenv("BILLING_PUBLIC_URL") or os.getenv("BASE_URL") or ""
+    link    = f"{base}/invites/accept?token={quote(token, safe='')}" if base else f"/invites/accept?token={quote(token, safe='')}"
+
+    # log (optional)
+    try:
+        await database.execute(
+            "INSERT INTO invites_log(invite_id,email,member,role_req) VALUES (:i,:e,:m,:r)",
+            {"i": str(uuid.uuid4()), "e": email, "m": member, "r": role}
+        )
+    except Exception:
+        pass
+
+    if body.send_email:
+        html = f"""
+          <div style="font-family:system-ui;line-height:1.45">
+            <h2>You're invited to BRidge</h2>
+            <p>Member: <b>{member}</b><br/>Role: <b>{role.title()}</b></p>
+            <p><a href="{link}" style="display:inline-block;background:#0d6efd;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">
+              Accept Invitation</a></p>
+            <p>If the button doesn't work, paste this link in your browser:<br><code>{link}</code></p>
+          </div>
+        """
+        try:
+            await _send_email(email, "Your BRidge Invitation", html, ref_type="invite", ref_id=member)
+        except Exception:
+            pass
+
+    return {"ok": True, "invite_url": link}
+# ------ Admin invite links -------
+
+# ===== Quick user creation (public signup) =====
 ALLOW_PUBLIC_SELLER_SIGNUP = os.getenv("ALLOW_PUBLIC_SELLER_SIGNUP", "0").lower() in ("1","true","yes")
 
 class SignupIn(BaseModel):
@@ -4472,6 +4592,7 @@ async def public_signup(payload: SignupIn, request: Request):
             if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
                 return SignupOut(ok=True, created=False, email=email, role=req_role, redirect="/buyer")
             raise
+# ===== Quick user creation (public signup) =====
 
 # ===== Email Verification & Registration =====
 def _make_verify_token(payload: dict) -> str:
@@ -6816,15 +6937,122 @@ def verify_signed_token(token: str, max_age_sec: int = 900) -> dict:
     except BadSignature:
         raise HTTPException(status_code=401, detail="Bad link signature")
 
+from fastapi import Form
+
+def _map_invited_role_to_user_role(invited: str) -> str:
+    # Keep public.users.role stable (admin|buyer|seller) and add org roles via entitlements
+    return "admin" if invited == "admin" else "buyer"
+
+async def _grant_org_entitlement(username: str, member: str, tag: str):
+    # tag examples: org.manager:ACME, org.employee:ACME
+    feat = f"{tag}:{member}"
+    try:
+        await database.execute("""
+          INSERT INTO runtime_entitlements(username, feature)
+          VALUES (:u,:f)
+          ON CONFLICT (username,feature) DO NOTHING
+        """, {"u": username, "f": feat})
+    except Exception:
+        pass
+
+@app.get("/invites/accept", include_in_schema=False)
+async def invites_accept_form(token: str):
+    try:
+        data = verify_signed_token(token, max_age_sec=7*24*3600)  # 7 days
+        email  = (data.get("email") or "").strip().lower()
+        member = (data.get("member") or "").strip()
+        role   = (data.get("role") or "employee").strip()
+    except HTTPException as e:
+        return HTMLResponse(f"<h3>Invite error</h3><p>{e.detail}</p>", status_code=400)
+
+    html = f"""
+    <!doctype html><meta charset="utf-8">
+    <title>Accept Invitation — BRidge</title>
+    <div style="font-family:system-ui;max-width:520px;margin:40px auto">
+      <h2>Accept Invitation</h2>
+      <p>Member: <b>{member}</b><br/>Role: <b>{role.title()}</b></p>
+      <form method="post" action="/invites/accept">
+        <input type="hidden" name="token" value="{_html.escape(token)}"/>
+        <div style="margin:8px 0">
+          <label>Email</label><br/>
+          <input name="email" value="{_html.escape(email)}" readonly style="width:100%;padding:8px">
+        </div>
+        <div style="margin:8px 0">
+          <label>Set Password (min 8)</label><br/>
+          <input name="password" type="password" minlength="8" required style="width:100%;padding:8px">
+        </div>
+        <button style="margin-top:8px;background:#0d6efd;color:#fff;border:0;padding:10px 16px;border-radius:6px">Create Account</button>
+      </form>
+    </div>
+    """
+    return HTMLResponse(html)
+
+@app.post("/invites/accept", include_in_schema=False)
+async def invites_accept_submit(token: str = Form(...), email: str = Form(...), password: str = Form(...)):
+    if len(password or "") < 8:
+        raise HTTPException(400, "Password too short")
+
+    data = verify_signed_token(token, max_age_sec=7*24*3600)
+    inv_email = (data.get("email") or "").strip().lower()
+    member    = (data.get("member") or "").strip()
+    invited_role = (data.get("role") or "employee").strip()
+
+    if email.strip().lower() != inv_email:
+        raise HTTPException(400, "Email mismatch")
+
+    # ensure pgcrypto for crypt()
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+
+    user_role = _map_invited_role_to_user_role(invited_role)
+    base_username = inv_email.split("@",1)[0][:64]
+    username = base_username
+
+    async def _try(u: str) -> bool:
+        try:
+            await database.execute("""
+              INSERT INTO public.users (email, username, password_hash, role, is_active, email_verified)
+              VALUES (:e, :u, crypt(:p, gen_salt('bf')), :r, TRUE, TRUE)
+            """, {"e": inv_email, "u": u, "p": password, "r": user_role})
+            return True
+        except Exception as ex:
+            msg = (str(ex) or "").lower()
+            if "duplicate key" in msg or "unique" in msg:
+                return False
+            raise
+
+    if not await _try(username):
+        for i in range(1,6):
+            if await _try(f"{base_username[:58]}-{i}"):
+                username = f"{base_username[:58]}-{i}"
+                break
+
+    # org-scoped entitlements for finer roles
+    if invited_role == "manager":
+        await _grant_org_entitlement(username, member, "org.manager")
+    elif invited_role == "employee":
+        await _grant_org_entitlement(username, member, "org.employee")
+
+    # audit + redirect
+    try:
+        await log_action(inv_email, "invite.accept", member, {"role": invited_role})
+    except Exception:
+        pass
+
+    return RedirectResponse("/buyer", status_code=302)
+
 # -------- Documents: BOL PDF --------
 from pathlib import Path
 import tempfile
 from zoneinfo import ZoneInfo
-def _local(ts):
-    if not ts: return "—"
+def _local(ts, tzname: str | None = None):
+    if not ts:
+        return "—"
     try:
-        tzname = (getattr(requests.request.state, "tzname", None) if request else None) or os.getenv("DEFAULT_TZ", "UTC")
-        return ts.astimezone(ZoneInfo(tzname)).isoformat()
+        _tz = ZoneInfo(tzname or os.getenv("DEFAULT_TZ", "UTC"))
+        return ts.astimezone(_tz).isoformat()
     except Exception:
         return ts.isoformat()
 
@@ -9971,6 +10199,88 @@ async def _build_member_statement(member: str, as_of: date):
     pdf_bytes = buf.getvalue(); buf.close()
 
     return csv_text, pdf_bytes
+
+# ----- monthly member statement ------
+def _month_bounds_slow(month: str):
+    # 'YYYY-MM' -> (date_start, date_end_exclusive)
+    y, m = map(int, month.split("-", 1))
+    from datetime import date as _d
+    start = _d(y, m, 1)
+    end   = _d(y + (m // 12), (m % 12) + 1, 1)
+    return start, end
+
+async def _build_member_statement_monthly(member: str, month: str) -> tuple[str, bytes]:
+    """
+    Returns (csv_text, pdf_bytes) for the member's monthly activity summary.
+    Rolls up contract notional & tons by day+symbol, plus delivered tons from BOLs.
+    """
+    start, end = _month_bounds_slow(month)
+
+    rows = await database.fetch_all("""
+      SELECT material AS symbol,
+             (created_at AT TIME ZONE 'utc')::date AS d,
+             ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS tons,
+             ROUND(SUM(COALESCE(price_per_ton,0)*COALESCE(weight_tons,0))::numeric, 2) AS notional
+      FROM contracts
+     WHERE seller = :m
+       AND created_at >= :s AND created_at < :e
+     GROUP BY symbol, d
+     ORDER BY d ASC, symbol
+    """, {"m": member, "s": start, "e": end})
+
+    bols = await database.fetch_all("""
+      SELECT material AS symbol,
+             (COALESCE(delivery_time, pickup_time) AT TIME ZONE 'utc')::date AS d,
+             ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS delivered_tons
+        FROM bols
+       WHERE seller = :m
+         AND COALESCE(delivery_time, pickup_time) >= :s
+         AND COALESCE(delivery_time, pickup_time) < :e
+       GROUP BY symbol, d
+       ORDER BY d ASC, symbol
+    """, {"m": member, "s": start, "e": end})
+
+    from collections import defaultdict
+    daymap = defaultdict(lambda: {"tons":0.0,"notional":0.0,"delivered":0.0})
+    for r in rows:
+        k = (str(r["d"]), r["symbol"])
+        daymap[k]["tons"]     += float(r["tons"] or 0)
+        daymap[k]["notional"] += float(r["notional"] or 0)
+    for b in bols:
+        k = (str(b["d"]), b["symbol"])
+        daymap[k]["delivered"] += float(b["delivered_tons"] or 0)
+
+    # CSV
+    import io, csv as _csv
+    csv_buf = io.StringIO()
+    w = _csv.writer(csv_buf)
+    w.writerow(["date","symbol","contract_tons","contract_notional_usd","delivered_tons"])
+    total_notional = 0.0
+    for (d,sym), agg in sorted(daymap.items()):
+        total_notional += agg["notional"]
+        w.writerow([d, sym, round(agg["tons"],2), round(agg["notional"],2), round(agg["delivered"],2)])
+    csv_text = csv_buf.getvalue()
+
+    # PDF
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=LETTER)
+    wpt, hpt = LETTER
+    y = hpt - 72
+    c.setFont("Helvetica-Bold", 14); c.drawString(72, y, f"BRidge Monthly Statement — {member}"); y -= 16
+    c.setFont("Helvetica", 10); c.drawString(72, y, f"Period: {start} to {end}"); y -= 18
+    c.drawString(72, y, f"Total Contract Notional: ${round(total_notional,2):,.2f}"); y -= 22
+    c.setFont("Helvetica-Bold", 10); c.drawString(72, y, "Date        Symbol        Tons    Delivered    Notional ($)"); y -= 14
+    c.setFont("Helvetica", 9)
+    for (d,sym), agg in sorted(daymap.items()):
+        line = f"{d:<12} {sym:<12} {agg['tons']:>8.2f} {agg['delivered']:>10.2f} {agg['notional']:>12.2f}"
+        c.drawString(72, y, line); y -= 11
+        if y < 72:
+            c.showPage(); y = hpt - 72; c.setFont("Helvetica", 9)
+    c.showPage(); c.save()
+    pdf_bytes = buf.getvalue(); buf.close()
+
+    return csv_text, pdf_bytes
+# ------ monthly member statement ------
 
 @clob_router.get("/statement", summary="Generate statement (CSV or PDF)")
 async def clob_statement(member: str, as_of: date, fmt: Literal["csv","pdf"]="pdf"):

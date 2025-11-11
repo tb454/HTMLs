@@ -504,6 +504,10 @@
     const $ = (id)=>document.getElementById(id);
     const qs = new URLSearchParams(location.search);
 
+    // Top-level pager (next to Tons table)
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
     // state
     let cLimit  = +(qs.get("c_limit")  || 25);
     let cOffset = +(qs.get("c_offset") || 0);
@@ -740,6 +744,12 @@
     endDate.addEventListener("change", ()=>{ aOffset=0; loadBOLsAdmin(); });
     buyerFilter.addEventListener("input", debounce(()=>{ aOffset=0; loadBOLsAdmin(); }));
     materialFilter.addEventListener("input", debounce(()=>{ aOffset=0; loadBOLsAdmin(); }));
+
+    // Top pager (global) → reuse BOLs pagination
+    const topPrevBtn = document.getElementById("prevBtn");
+    const topNextBtn = document.getElementById("nextBtn");
+    topPrevBtn?.addEventListener("click", ()=>{ aOffset = Math.max(0, aOffset - aLimit); loadBOLsAdmin(); });
+    topNextBtn?.addEventListener("click", ()=>{ aOffset = aOffset + aLimit; loadBOLsAdmin(); });
 
     // Delivery log modal
     async function showDeliveryLog(bolId){
