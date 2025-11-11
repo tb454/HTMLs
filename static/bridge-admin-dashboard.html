@@ -79,7 +79,7 @@
 </head>
 <body>
   <!-- Locale strip -->
-   <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap">
+  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
   <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
   <select id="lang-select" class="form-select form-select-sm w-auto">
     <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
@@ -439,7 +439,7 @@
                   <input type="date" id="markDate" class="form-control form-control-sm maxw-170" />
                   <span class="muted small">Backfill Mark Date (optional)</span>
                   <select id="filterSeriesProduct" class="form-select form-select-sm maxw-220"></select>
-                  <select id="filterSeriesStatus" class="form-select form-select-sm" style="width:160px;">
+                  <select id="filterSeriesStatus" class="form-select form-select-sm w-160">
                     <option value="">(all statuses)</option>
                     <option>Draft</option><option>Listed</option><option>Halted</option><option>Expired</option>
                   </select>
@@ -494,7 +494,7 @@
       </div>
       <div class="modal-body">
         <div id="logStats" class="small text-muted mb-2"></div>
-        <div class="table-scroll" style="max-height:50vh">
+        <div class="table-scroll maxh-50vh">
           <table class="table table-sm table-striped table-hover align-middle">
             <thead class="table-dark sticky"><tr><th>Attempt</th><th>When (UTC)</th><th>Status</th><th>Latency (ms)</th><th>Response</th></tr></thead>
             <tbody id="logTbody"></tbody>
@@ -1005,6 +1005,7 @@ Object.assign(window, {
         const span = document.createElement('span');
         span.textContent = ` ${m.symbol} ${m.price?.toFixed ? m.price.toFixed(4) : m.price} × ${m.qty_lots}  |`;
         tape.appendChild(span);
+        while (tape.childNodes.length > 400) { tape.removeChild(tape.firstChild); }
         tape.scrollLeft = tape.scrollWidth;  
       }
     };
