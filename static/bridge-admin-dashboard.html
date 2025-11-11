@@ -74,7 +74,7 @@
     });
 
   </script>
-  <script src="/static/js/locale.js" defer></script>
+  <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
 </head>
 <body>
   <!-- Locale strip -->
@@ -198,6 +198,11 @@
   }catch(e){ /* optional toast */ }
 })();
 </script>
+
+<div class="d-flex gap-2">
+  <button id="prevBtn" class="btn btn-outline-secondary btn-sm">Prev</button>
+  <button id="nextBtn" class="btn btn-outline-secondary btn-sm">Next</button>
+</div>
 
 <!-- RFQ (two-click) -->
 <div class="card p-3 mb-2">
@@ -518,9 +523,9 @@
     function currentFilterQS(){
       const filters = [
         ["status",   $("cStatus")?.value],
-        ["yard_id",  $("cYard")?.value],
-        ["date_from",$("cFrom")?.value],
-        ["date_to",  $("cTo")?.value],
+        ["seller",  $("cYard")?.value],
+        ["start",$("cFrom")?.value],
+        ["end",  $("cTo")?.value],
       ].filter(([k,v]) => v && v !== "all");
       return filters.map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&");
     }
@@ -586,7 +591,7 @@
       nextQS.set("c_limit",  String(cLimit));
       nextQS.set("c_offset", String(cOffset));
       const kv = Object.fromEntries(new URLSearchParams(fqs));
-      ["status","yard_id","date_from","date_to"].forEach(k=>{
+      ["status","seller","start","end"].forEach(k=>{
         if (kv[k]) nextQS.set(k, kv[k]); else nextQS.delete(k);
       });
       history.replaceState(null, "", `?${nextQS.toString()}`);

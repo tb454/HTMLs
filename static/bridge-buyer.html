@@ -34,7 +34,7 @@
   <script id="boot" nonce="{{NONCE}}">
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
   </script>
-  <script src="/static/js/locale.js" defer></script>
+  <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
 </head>
 <body>
   <!-- Locale strip -->

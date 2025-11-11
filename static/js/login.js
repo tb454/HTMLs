@@ -12,7 +12,6 @@ const endpoint = (window.ENDPOINT && typeof window.ENDPOINT === "string")
   } catch (_) {}
 })();
 
-
 // Collapse accidental double slashes
 function joinURL(base, path) {
   const b = (base || "").replace(/\/+$/, "");

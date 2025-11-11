@@ -1803,8 +1803,20 @@ except ModuleNotFoundError:
 # single canonical init
 if USE_STRIPE and stripe and STRIPE_API_KEY:
     stripe.api_key = STRIPE_API_KEY
-
-# which lookup keys you want to expose
+# --- Metered usage helper (safe in dev/CI) ---
+def record_usage_safe(subscription_item_id: str | None, qty: int = 1):
+    try:
+        if not (USE_STRIPE and stripe and STRIPE_API_KEY and subscription_item_id):
+            return
+        stripe.UsageRecord.create(
+            subscription_item=subscription_item_id,
+            quantity=qty,
+            action="increment"
+        )
+    except Exception:
+        # never crash request path on billing noise
+        pass
+# lookup keys to expose
 PRICE_LOOKUPS = [
     "bridge_starter_monthly",
     "bridge_standard_monthly",
@@ -2737,6 +2749,11 @@ async def _ensure_users_columns():
     except Exception:
         pass
 
+    try:
+        await database.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;")
+    except Exception:
+        pass
+
     # Uniqueness / PK-ish constraints 
     try:
         await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_id ON public.users(id);")
@@ -3321,7 +3338,19 @@ async def _daily_indices_job():
         tomorrow = (now + timedelta(days=1)).date()
         next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
         await asyncio.sleep((next_run - now).total_seconds())
+# -----------------------------------------------------------------------
 
+# ---------- docsign webhook endpoint ----------
+@app.post("/docsign")
+async def docsign_webhook(request: Request):
+    payload = await request.json()
+    envelope_id = payload.get("envelopeId")
+    status      = payload.get("status")
+    # TODO: link to contract_id, write audit row, set status
+    return {"ok": True}
+# ---------- docsign webhook endpoint ----------
+         
+# -------- Daily Indices Job ---------
 @startup
 async def _start_daily_indices():
     t = asyncio.create_task(_daily_indices_job())
@@ -4244,7 +4273,8 @@ async def login(request: Request):
         SELECT
         COALESCE(username, '') AS username,
         COALESCE(email, '')    AS email,
-        role
+        role,
+        COALESCE(email_verified, TRUE) AS email_verified
         FROM public.users
         WHERE (LOWER(COALESCE(email, '')) = :ident OR LOWER(COALESCE(username, '')) = :ident)
         AND password_hash = crypt(:pwd, password_hash)
@@ -4256,6 +4286,9 @@ async def login(request: Request):
     if not row:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # In production, require verified email before allowing login
+    if os.getenv("ENV","").lower() == "production" and not bool(row["email_verified"]):
+        raise HTTPException(status_code=403, detail="Please verify your email (check your inbox).")
     role = (row["role"] or "").lower()
     if role == "yard":  
         role = "seller"
@@ -4439,6 +4472,106 @@ async def public_signup(payload: SignupIn, request: Request):
             if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
                 return SignupOut(ok=True, created=False, email=email, role=req_role, redirect="/buyer")
             raise
+
+# ===== Email Verification & Registration =====
+def _make_verify_token(payload: dict) -> str:
+    # payload example: {"email": "..."}
+    return _link_signer.dumps(payload)
+
+def _read_verify_token(token: str, max_age_sec: int = 86400) -> dict:
+    try:
+        return _link_signer.loads(token, max_age=max_age_sec)
+    except SignatureExpired:
+        raise HTTPException(status_code=400, detail="Verification link expired")
+    except BadSignature:
+        raise HTTPException(status_code=400, detail="Invalid verification link")
+
+async def _send_verify_email(to_email: str):
+    base = os.getenv("BILLING_PUBLIC_URL") or os.getenv("BASE_URL") or "http://127.0.0.1:8000"
+    tok  = _make_verify_token({"email": to_email.strip().lower()})
+    link = f"{base}/auth/verify?token={tok}"
+    html = f"""
+      <div style="font-family:system-ui;line-height:1.45">
+        <h2>Confirm your BRidge account</h2>
+        <p>Click the button below to verify your email and finish setup.</p>
+        <p><a href="{link}" style="display:inline-block;background:#0d6efd;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">Verify Email</a></p>
+        <p>If the button doesn’t work, paste this link in your browser:<br><code>{link}</code></p>
+      </div>
+    """
+    try:
+        await _send_email(to_email, "Confirm your BRidge account", html)  # uses your existing async email helper
+    except Exception:
+        # fall back silently; don't break registration flow in dev
+        pass
+
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str
+    org_name: Optional[str] = None
+    role: Literal["buyer","seller","both"] = "buyer"
+
+@app.post("/register", tags=["Auth"], summary="Register + send email verification")
+async def register(body: RegisterIn):
+    email = body.email.strip().lower()
+    pwd   = body.password.strip()
+    role  = body.role if body.role in ("buyer","seller","both") else "buyer"
+
+    if len(pwd) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters.")
+
+    # Idempotent on email: if exists, just (re)send the verification link
+    existing = await database.fetch_one(
+        "SELECT email, COALESCE(email_verified, FALSE) AS ev FROM public.users WHERE lower(email)=:e",
+        {"e": email}
+    )
+    if not existing:
+        # ensure pgcrypto
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
+        # create user row
+        base_username = email.split("@",1)[0][:64]
+        username = base_username
+        for i in range(0, 6):
+            cand = username if i==0 else (f"{base_username[:58]}-{i}")
+            try:
+                await database.execute("""
+                  INSERT INTO public.users (email, username, password_hash, role, is_active, email_verified)
+                  VALUES (:email, :username, crypt(:pwd, gen_salt('bf')), :role, TRUE, FALSE)
+                """, {"email": email, "username": cand, "pwd": pwd, "role": ("buyer" if role=="both" else role)})
+                break
+            except Exception as e:
+                if "duplicate key" in str(e).lower():
+                    continue
+                raise
+
+    # (re)send verification link (best-effort)
+    await _send_verify_email(email)
+    return {"ok": True, "message": "Check your email to verify your account."}
+
+@app.post("/auth/resend_verification", tags=["Auth"], summary="Resend email verification")
+async def resend_verification(email: EmailStr):
+    await _send_verify_email(email.strip().lower())
+    return {"ok": True}
+
+@app.get("/auth/verify", tags=["Auth"], summary="Verify email by token")
+async def auth_verify(token: str):
+    data = _read_verify_token(token)
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "Invalid token payload")
+
+    await database.execute(
+        "UPDATE public.users SET email_verified=TRUE WHERE lower(email)=:e",
+        {"e": email}
+    )
+
+    # Friendly redirect to pricing (if you want Stripe right after) or login
+    base = os.getenv("BILLING_PUBLIC_URL") or os.getenv("BASE_URL") or ""
+    dest = f"{base}/pricing?verified=1" if base else "/buyer"
+    return RedirectResponse(dest, status_code=302)
+# ===== /Email Verification & Registration =====
 
 @app.post("/logout", tags=["Auth"], summary="Logout", description="Clears session cookie")
 async def logout(request: Request):
@@ -6219,6 +6352,14 @@ class BOLIn(BaseModel):
     carrier: CarrierInfo
     pickup_signature: Signature
     pickup_time: datetime
+    carbon_intensity_kgco2e: float | None = None
+    offset_kgco2e: float | None = None
+    esg_cert_id: str | None = None
+    country_of_origin: str | None = None
+    hs_code: str | None = None
+    export_port_code: str | None = None
+    import_port_code: str | None = None
+    duties_usd: float | None = None
 
     # --- NEW export/compliance fields ---
     origin_country: Optional[str] = None
@@ -6678,6 +6819,14 @@ def verify_signed_token(token: str, max_age_sec: int = 900) -> dict:
 # -------- Documents: BOL PDF --------
 from pathlib import Path
 import tempfile
+from zoneinfo import ZoneInfo
+def _local(ts):
+    if not ts: return "—"
+    try:
+        tzname = (getattr(requests.request.state, "tzname", None) if request else None) or os.getenv("DEFAULT_TZ", "UTC")
+        return ts.astimezone(ZoneInfo(tzname)).isoformat()
+    except Exception:
+        return ts.isoformat()
 
 @app.get("/bol/{bol_id}/pdf", tags=["Documents"], summary="Download BOL as PDF", status_code=200)
 async def generate_bol_pdf(bol_id: str):
@@ -6745,8 +6894,40 @@ async def generate_bol_pdf(bol_id: str):
     except Exception:
         pass
 
+        # --- ESG / Carbon lines (supports both old & new column names) ---
+    def _fmt(v, suffix=""):
+        return ("—" if v is None or v == "" else f"{v}{suffix}")
+
+    y -= line_height
+    c.setFont("Helvetica", 12)
+
+    # Carbon intensity & offset
+    ci = d.get("carbon_intensity_kgco2e")
+    off = d.get("offset_kgco2e")
+    esg = d.get("esg_cert_id")
+    draw("Carbon Intensity", f"{_fmt(ci, ' kgCO2e')}")
+    draw("Offset Applied",   f"{_fmt(off, ' kgCO2e')}   ESG Cert: {_fmt(esg)}")
+
+    # Country of origin (support both)
+    origin_val = d.get("country_of_origin") or d.get("origin_country")
+    draw("Country of Origin", _fmt(origin_val))
+
+    # Ports (support export/import or single port_code)
+    exp_port = d.get("export_port_code") or d.get("port_code")
+    imp_port = d.get("import_port_code")
+    ports_line = f"{_fmt(exp_port)}"
+    if imp_port is not None:
+        ports_line += f" → {_fmt(imp_port)}"
+    draw("Ports", ports_line)
+
+    # Duties (support duties_usd or duty_usd)
+    duties_val = d.get("duties_usd", d.get("duty_usd"))
+    if duties_val is not None:
+        draw("Duties (USD)", f"${float(duties_val):.2f}")
+    
     c.save()
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
+
 # -------- Documents: BOL PDF --------
 
 # -------- Receipts lifecycle --------
@@ -7950,7 +8131,18 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     )
                     RETURNING *
                 """, payload)
-
+        # (optional) Stripe metered usage: +1 contract for this seller
+        try:
+            member_key = (row["seller"] or "").strip()
+            # Get the tenant's subscription item id for "contracts"
+            mp = await database.fetch_one(
+                "SELECT stripe_item_contracts FROM member_plan_items WHERE member=:m",
+                {"m": member_key}
+            )
+            sub_item = (mp and mp.get("stripe_item_contracts")) or os.getenv("STRIPE_ITEM_CONTRACTS_DEFAULT")
+            record_usage_safe(sub_item, 1)
+        except Exception:
+            pass
         # best-effort audit/webhook; never crash
         try:
             actor = request.session.get("username") if hasattr(request, "session") else None
@@ -8354,7 +8546,17 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     we_created = row is not None
     if row is None:
         row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :id", {"id": bol_id_str})
-    
+    # Stripe metered usage: +1 BOL for this seller
+    try:
+        member_key = (row.get("seller") or "").strip()
+        mp = await database.fetch_one(
+            "SELECT stripe_item_bols FROM member_plan_items WHERE member=:m",
+            {"m": member_key}
+        )
+        sub_item = (mp and mp.get("stripe_item_bols")) or os.getenv("STRIPE_ITEM_BOLS_DEFAULT")
+        record_usage_safe(sub_item, 1)
+    except Exception:
+        pass
     resp = {
         **bol.model_dump(),
         "bol_id": _rget(row, "bol_id", bol_id_str),
@@ -10651,7 +10853,7 @@ async def build_export_zip() -> bytes:
     # contracts table: id, buyer, seller, material, weight_tons, price_per_ton, ...
     "contracts.csv": CONTRACTS_EXPORT_SQL,
 
-    # bols table: bol_id (not id) and detailed columns you actually store
+    # bols table: bol_id (not id) and detailed columns 
     "bols.csv": """
         SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
                price_per_unit, total_value,
