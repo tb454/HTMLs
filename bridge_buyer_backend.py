@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
+from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, EmailStr, Field 
 from typing import List, Optional, Literal
 from sqlalchemy import create_engine, Table, MetaData, and_, select, Column, String, DateTime, Integer, Text, Boolean
@@ -765,8 +766,7 @@ async def security_headers_mw(request, call_next):
     h["X-Permitted-Cross-Domain-Policies"] = "none"
     h["X-Download-Options"] = "noopen"
     h["Permissions-Policy"] = "geolocation=()"
-    path = request.url.path or "/"
-    # Swagger UI needs a tiny inline init script; allow it ONLY on /docs
+    path = request.url.path or "/"    
     if path.startswith("/docs"):
         h["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -1041,10 +1041,21 @@ async def _ensure_http_idem_table():
     """)
 # ----- idem key cache -----
 
-# =====  Sentry =====
+# =====  WebSocket keepalive =====
+@app.websocket("/md/ws")
+async def md_ws(ws: WebSocket):
+    await ws.accept()
+    try:
+        # Optional: keepalive so client knows it’s up
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+# =====  WebSocket keepalive =====
 
+# =====  Sentry =====
 dsn = (os.getenv("SENTRY_DSN") or "").strip()
-if dsn.startswith("http"):  # only init if it looks like a real DSN
+if dsn.startswith("http"):  
     sentry_sdk.init(dsn=dsn, traces_sample_rate=0.05)
 
 from prometheus_client import Histogram
@@ -6509,7 +6520,7 @@ async def _ensure_ice_delivery_log():
       response TEXT,
       pdf_sha256 TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_ice_log_bol ON ice_delivery_log(bol_id, when_utc DESC);
+    CREATE INDEX IF NOT EXISTS idx_ice_log_bol ON ice_delivery_log(bol_uuid, when_utc DESC);
     """)
 # ------ ICE delivery log ------
 

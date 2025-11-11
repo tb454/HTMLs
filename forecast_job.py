@@ -104,7 +104,7 @@ async def save_forecasts(conn, symbol, horizon, fcs, conf, model_name, run_id):
                            model_name, run_id)
 
 async def run_all():
-    pool = await asyncpg.create_pool(DATABASE_URL, max_size=5)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
     async with pool.acquire() as conn:
         for symbol in FORECAST_SYMBOLS:
             hist = await fetch_symbol_history(conn, symbol)
