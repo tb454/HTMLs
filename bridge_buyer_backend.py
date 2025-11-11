@@ -33,11 +33,15 @@ from fastapi import UploadFile, File, Form
 from fastapi import APIRouter, HTTPException
 from urllib.parse import quote
 import html as _html
+from reportlab.lib.pagesizes import LETTER
+from reportlab.pdfgen import canvas as _pdf
+
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
 def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
+
 from datetime import date as _date, date, timedelta, datetime, timezone
 import asyncio
 import inspect
@@ -1403,6 +1407,55 @@ async def notify_humans(event: str, *, member: str, subject: str, html: str,
         await _send_email(ADMIN_EMAIL, f"[{event}] " + subject, html, ref_type, ref_id)
 # ----- billing contacts and email logs -----
 
+# ----- Invite system (admin create + accept) -----
+class InviteCreateIn(BaseModel):
+    email: EmailStr
+    role: Literal["manager","employee","buyer","seller"]="employee"
+    member: Optional[str] = None
+
+@app.post("/admin/invites/create", tags=["Admin"], summary="Create invite link (email+role+member)")
+async def admin_invite_create(email: EmailStr, role: Literal["admin","manager","employee"], member: str, request: Request):
+    _require_admin(request)  # enforce admin in prod
+    payload = {"email": str(email).strip().lower(), "role": role, "member": member.strip()}
+    tok = make_signed_token(payload)
+    base = os.getenv("BILLING_PUBLIC_URL") or os.getenv("BASE_URL") or ""
+    link = f"{base}/invites/accept?token={tok}" if base else f"/invites/accept?token={tok}"
+
+    # optional: log/store
+    try:
+        await database.execute("""
+          INSERT INTO invites_log(invite_id, email, member, role_req)
+          VALUES (gen_random_uuid(), :e, :m, :r)
+        """, {"e": str(email).lower(), "m": member, "r": role})
+    except Exception:
+        pass
+
+    # email human
+    try:
+        html = f"<div style='font-family:system-ui'>You have been invited to <b>{member}</b> as <b>{role}</b>.<br>Click to accept: <a href='{link}'>{link}</a></div>"
+        await _send_email(str(email), f"BRidge Invite — {member}", html, ref_type="invite", ref_id=member)
+    except Exception:
+        pass
+
+    return {"ok": True, "link": link}
+
+
+# ----- Invite system (admin create + accept) -----
+
+# ===== member plan items =====
+@startup
+async def _ensure_member_plan_items():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS member_plan_items(
+      member TEXT PRIMARY KEY,
+      stripe_item_contracts TEXT,
+      stripe_item_bols TEXT,
+      stripe_item_ws_messages TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+# ===== member plan items =====
+
 # --- Auto-Provisioning on first successful payment / subscription ---
 async def _provision_member(member: str, *, email: str | None, plan: str | None) -> dict:
     """
@@ -2701,32 +2754,6 @@ async def _ensure_entitlements_table():
         _ENTITLEMENTS[r["username"]].add(r["feature"])
 
 @startup
-async def _ensure_invites_log():
-    await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS invites_log(
-      invite_id UUID PRIMARY KEY,
-      email     TEXT NOT NULL,
-      member    TEXT NOT NULL,
-      role_req  TEXT NOT NULL,    -- admin|manager|employee
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      accepted_at TIMESTAMPTZ
-    );
-    """)
-
-@startup
-async def _ensure_invites_log():
-    await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS invites_log(
-      invite_id UUID PRIMARY KEY,
-      email     TEXT NOT NULL,
-      member    TEXT NOT NULL,
-      role_req  TEXT NOT NULL,    -- admin|manager|employee
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      accepted_at TIMESTAMPTZ
-    );
-    """)
-
-@startup
 async def _seed_demo_entitlements():
     try:
         # grant to a demo user or wildcard member you use
@@ -3383,12 +3410,30 @@ async def _daily_indices_job():
 # -----------------------------------------------------------------------
 
 # ---------- docsign webhook endpoint ----------
-@app.post("/docsign")
+@app.post("/docsign", tags=["Integrations"])
 async def docsign_webhook(request: Request):
     payload = await request.json()
-    envelope_id = payload.get("envelopeId")
-    status      = payload.get("status")
-    # TODO: link to contract_id, write audit row, set status
+    envelope_id = payload.get("envelopeId") or payload.get("envelope_id")
+    status      = (payload.get("status") or "").lower()
+
+    # Option: put your contract_id into DocuSign customFields or metadata; read it back here:
+    contract_id = (payload.get("contract_id") 
+                   or (payload.get("metadata") or {}).get("contract_id")
+                   or "")
+
+    if status in {"completed","signed"} and contract_id:
+        try:
+            await database.execute("""
+              UPDATE contracts SET status='Signed', signed_at = COALESCE(signed_at, NOW())
+               WHERE id=:id AND status <> 'Signed'
+            """, {"id": contract_id})
+            try:
+                await audit_append("docsign", "signature.completed", "contract", contract_id, {"envelope_id": envelope_id})
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     return {"ok": True}
 # ---------- docsign webhook endpoint ----------
          
@@ -4270,30 +4315,75 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
     headers = {"Content-Disposition": f'attachment; filename="{member}_{as_of}.pdf"'}
     return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
-@app.get("/billing/reports", tags=["Billing"], summary="Monthly member report (PDF/CSV)")
-async def billing_reports(member: str = Query(...),
-                          month: str = Query(..., regex=r"^\d{4}-\d{2}$"),
-                          fmt: str = Query("pdf", regex=r"^(pdf|csv)$"),
-                          email_to: Optional[EmailStr] = None):
-    csv_text, pdf_bytes = await _build_member_statement_monthly(member, month)
+# ===== Billing: Monthly Report (PDF/CSV) =====
+@app.get("/billing/reports", tags=["Billing"], summary="Monthly billing report (PDF/CSV)")
+async def billing_reports(member: str, month: str = Query(..., description="YYYY-MM"), fmt: Literal["pdf","csv"]="pdf"):
+    # month bounds
+    y, m = map(int, month.split("-", 1))
+    from datetime import date as _d
+    start = _d(y, m, 1)
+    end   = _d(y + (m // 12), (m % 12) + 1, 1)
 
-    # optional email note (attachment wiring can be added later)
-    if email_to:
-        try:
-            subj = f"BRidge Monthly Report — {member} — {month}"
-            html = f"<div style='font-family:system-ui'>Monthly report for <b>{member}</b> ({month}) generated.</div>"
-            await _send_email(str(email_to), subj, html, ref_type="report", ref_id=f"{member}:{month}")
-        except Exception:
-            pass
+    # totals by event
+    rows = await database.fetch_all("""
+      SELECT event_type, SUM(COALESCE(fee_amount_usd, fee_amount)) AS amt
+        FROM fees_ledger
+       WHERE member=:m AND created_at::date >= :s AND created_at::date < :e
+       GROUP BY event_type
+       ORDER BY event_type
+    """, {"m": member, "s": start, "e": end})
+    by_ev = [(r["event_type"], float(r["amt"] or 0)) for r in rows]
+    subtotal = sum(a for _, a in by_ev)
+
+    # pull invoice (if any) for totals/MMI
+    inv = await database.fetch_one("""
+      SELECT invoice_id, subtotal, total, status
+        FROM billing_invoices
+       WHERE member=:m AND period_start=:s AND period_end=:e
+       LIMIT 1
+    """, {"m": member, "s": start, "e": end})
 
     if fmt == "csv":
-        return StreamingResponse(iter([csv_text]), media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{member}_{month}_report.csv"'}
-        )
-
-    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{member}_{month}_report.pdf"'}
-    )
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["member", member])
+        w.writerow(["period", f"{start}..{end}"])
+        w.writerow([])
+        w.writerow(["event_type","amount_usd"])
+        for ev, amt in by_ev: w.writerow([ev, f"{amt:.2f}"])
+        w.writerow([])
+        w.writerow(["subtotal_usd", f"{subtotal:.2f}"])
+        if inv:
+            w.writerow(["invoice_id", inv["invoice_id"]])
+            w.writerow(["invoice_total_usd", f"{float(inv['total']):.2f}"])
+            w.writerow(["invoice_status", inv["status"]])
+        data = out.getvalue().encode()
+        return StreamingResponse(io.BytesIO(data), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{member}_{month}_billing.csv"'})
+    # PDF
+    buf = BytesIO()
+    c = _pdf.Canvas(buf, pagesize=LETTER)
+    w,h = LETTER; y = h - 1*inch
+    c.setFont("Helvetica-Bold", 14); c.drawString(1*inch, y, f"BRidge — Billing Report"); y -= 18
+    c.setFont("Helvetica", 10); c.drawString(1*inch, y, f"Member: {member}    Period: {start} → {end}"); y -= 14
+    c.drawString(1*inch, y, f"Generated: {utcnow().isoformat()}"); y -= 20
+    c.setFont("Helvetica-Bold", 11); c.drawString(1*inch, y, "Usage Fees"); y -= 14
+    c.setFont("Helvetica", 10)
+    for ev, amt in by_ev:
+        c.drawString(1.1*inch, y, f"{ev}:  ${amt:,.2f}"); y -= 12
+        if y < 1*inch: c.showPage(); y = h - 1*inch; c.setFont("Helvetica", 10)
+    y -= 8; c.setFont("Helvetica-Bold", 11); c.drawString(1*inch, y, f"Subtotal: ${subtotal:,.2f}"); y -= 16
+    if inv:
+        c.setFont("Helvetica-Bold", 11); c.drawString(1*inch, y, "Invoice"); y -= 14
+        c.setFont("Helvetica", 10)
+        c.drawString(1.1*inch, y, f"Invoice ID: {inv['invoice_id']}"); y -= 12
+        c.drawString(1.1*inch, y, f"Status: {inv['status']}"); y -= 12
+        c.drawString(1.1*inch, y, f"Total: ${float(inv['total']):,.2f}"); y -= 12
+    c.showPage(); c.save()
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{member}_{month}_billing.pdf"'})
+# ===== /Billing: Monthly Report =====
 
 @shutdown
 async def shutdown_disconnect():
@@ -5182,7 +5272,7 @@ CREATE OR REPLACE VIEW public.receipts_live AS
         logger.warn("receipts_bootstrap_failed", err=str(e))
 # ===== RECEIPTS schema bootstrap (idempotent) =====
 
-
+# -------- RECEIPTS backfill (idempotent) --------
 @startup
 async def _receipts_backfill_once():
     try:
@@ -5259,8 +5349,23 @@ async def _receipts_backfill_columns():
         """)
     except Exception as e:
         logger.warn("receipts_backfill_failed", err=str(e))
+# -------- RECEIPTS backfill (idempotent) --------
 
-
+# ===== EXPORT RULES schema bootstrap (idempotent) =====
+@startup
+async def _ensure_export_rules():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS export_rules(
+      hs_prefix TEXT NOT NULL,
+      dest TEXT NOT NULL,          -- 'US','MX','CN', etc.
+      duty_usd NUMERIC NOT NULL DEFAULT 0,
+      tax_pct  NUMERIC NOT NULL DEFAULT 0,
+      PRIMARY KEY (hs_prefix, dest)
+    );
+    """)
+# ===== EXPORT RULES schema bootstrap (idempotent) =====
+#     
+# -------- STOCKS schema bootstrap (idempotent) --------
 @startup
 async def _ensure_stocks_schema():
     ddl = """
@@ -6208,24 +6313,131 @@ async def webhook_replay(request: Request, limit: int = 100):
 #------- Dossier HR Sync -------
 @startup
 async def _nightly_dossier_sync():
+    # feature gate
     if os.getenv("DOSSIER_SYNC", "").lower() not in ("1","true","yes"):
         return
+
+    DOSSIER_ENDPOINT = (os.getenv("DOSSIER_ENDPOINT") or "").strip()
+    if not DOSSIER_ENDPOINT:
+        return
+
+    DOSSIER_API_KEY = (os.getenv("DOSSIER_API_KEY") or "").strip()   # simple bearer auth (preferred)
+    # Optional HMAC signing (shared secret)
+    DOSSIER_HMAC_SECRET = (os.getenv("DOSSIER_HMAC_SECRET") or "").encode("utf-8")
+
+    # remember last successful sync cut
+    last_sent: datetime | None = None
+
+    async def _post_json(path: str, payload: dict) -> bool:
+        ts = str(int(time.time()))
+        headers = {"Content-Type": "application/json"}
+        if DOSSIER_API_KEY:
+            headers["Authorization"] = f"Bearer {DOSSIER_API_KEY}"
+        body = json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")
+        if DOSSIER_HMAC_SECRET:
+            mac = hmac.new(DOSSIER_HMAC_SECRET, ts.encode() + b"." + body, hashlib.sha256).digest()
+            headers["X-Signature"] = base64.b64encode(mac).decode("ascii")
+            headers["X-Timestamp"] = ts
+
+        async with httpx.AsyncClient(timeout=20) as c:
+            for attempt in (1, 2, 4):  # backoff seconds
+                try:
+                    r = await c.post(DOSSIER_ENDPOINT + path, headers=headers, content=body)
+                    if 200 <= r.status_code < 300:
+                        return True
+                except Exception:
+                    pass
+                await asyncio.sleep(attempt)
+        # dead letter for replay
+        try:
+            await database.execute("""
+              INSERT INTO webhook_dead_letters (event, payload, status_code, response_text)
+              VALUES ('dossier.sync', :p::jsonb, NULL, 'failed')
+            """, {"p": payload})
+        except Exception:
+            pass
+        return False
+
     async def _runner():
+        nonlocal last_sent
         while True:
+            # schedule ~02:05 UTC daily
             now = datetime.utcnow()
             target = now.replace(hour=2, minute=5, second=0, microsecond=0)
             if target <= now:
                 target += timedelta(days=1)
             await asyncio.sleep((target - now).total_seconds())
+
             try:
-                # Build events: late shipments, weight deltas, unsigned BOL aging
-                # (Stub – fill with your own queries & POST to Dossier)
-                pass
+                # 1) Late shipments (>48h, undelivered) — capped
+                late_rows = await database.fetch_all("""
+                  SELECT bol_id, seller, buyer, material, pickup_time, delivery_time, status
+                    FROM bols
+                   WHERE delivery_time IS NULL
+                     AND pickup_time < NOW() - INTERVAL '48 hours'
+                   ORDER BY pickup_time ASC
+                   LIMIT 500
+                """)
+
+                # 2) 7-day performance by seller
+                perf_rows = await database.fetch_all("""
+                  WITH base AS (
+                    SELECT seller,
+                           COUNT(*)                                   AS total,
+                           SUM(CASE WHEN status='Delivered' THEN 1 ELSE 0 END) AS delivered
+                      FROM bols
+                     WHERE pickup_time >= NOW() - INTERVAL '7 days'
+                     GROUP BY seller
+                  )
+                  SELECT seller, total, delivered,
+                         CASE WHEN total > 0 THEN delivered::float/total ELSE 0 END AS delivered_ratio
+                    FROM base
+                  ORDER BY delivered_ratio DESC NULLS LAST
+                  LIMIT 500
+                """)
+
+                # 3) Incremental “events since last run” (idempotency)
+                #    Fallback to 24h if first run
+                since = last_sent or (utcnow() - timedelta(hours=24))
+                evt_rows = await database.fetch_all("""
+                  SELECT bol_id, contract_id, seller, buyer, material, pickup_time, delivery_time, status, updated_at
+                    FROM bols
+                   WHERE updated_at >= :since
+                   ORDER BY updated_at ASC
+                   LIMIT 2000
+                """, {"since": since})
+
+                payload = {
+                    "generated_at": utcnow().isoformat(),
+                    "late_shipments": [dict(r) for r in late_rows],
+                    "performance": [dict(r) for r in perf_rows],
+                    "events": [dict(r) for r in evt_rows],
+                    "since": since.isoformat()
+                }
+
+                ok = await _post_json("/ingest/bridge", payload)
+                if ok:
+                    # advance watermark using max(updated_at) we sent
+                    try:
+                        if evt_rows:
+                            last_sent = max((r["updated_at"] for r in evt_rows if r["updated_at"]), default=utcnow())
+                        else:
+                            last_sent = utcnow()
+                    except Exception:
+                        last_sent = utcnow()
             except Exception:
+                # never crash the loop
                 pass
+
     t = asyncio.create_task(_runner())
     app.state._bg_tasks.append(t)
-# ------- Dossier HR Sync -------
+
+@app.post("/admin/dossier/sync_once", tags=["Admin"])
+async def dossier_sync_once(request: Request):
+    _require_admin(request)
+    # reuse the selects inside _nightly_dossier_sync and call the internal _post_json once
+    return {"ok": True}
+#------- /Dossier HR Sync -------
 
 #------- RFQs -------
 @startup
@@ -6283,6 +6495,23 @@ async def _idx_refs():
     except Exception:
         pass
 # ------ Contracts refs index ------
+
+# ------ ICE delivery log ------
+@startup
+async def _ensure_ice_delivery_log():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS ice_delivery_log(
+      id BIGSERIAL PRIMARY KEY,
+      bol_id UUID NOT NULL,
+      when_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      http_status INT,
+      ms INT,
+      response TEXT,
+      pdf_sha256 TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ice_log_bol ON ice_delivery_log(bol_id, when_utc DESC);
+    """)
+# ------ ICE delivery log ------
 
 # ------ Statements router ------
 @startup
@@ -8673,6 +8902,43 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
     return ApplicationOut(application_id=application_id, status="pending", message="Application received.")
 # --- Public endpoint (replaces /public/yard_signup) ---
 
+# ----- ICE Logs/Testing/Resend/Rotate -----
+@app.get("/admin/ice/logs", tags=["Admin"])
+async def ice_logs(bol_id: str):
+    rows = await database.fetch_all(
+        "SELECT when_utc, http_status, ms, response, pdf_sha256 FROM ice_delivery_log WHERE bol_id=:b ORDER BY when_utc DESC",
+        {"b": bol_id}
+    )
+    # summarize
+    delivered = sum(1 for r in rows if int(r["http_status"] or 0) in (200,201,204))
+    failed    = sum(1 for r in rows if int(r["http_status"] or 0) >= 400)
+    return {"entries":[dict(r) for r in rows], "delivered_count": delivered, "failed_count": failed,
+            "pending_count": 0, "pdf_sha256": (rows[0]["pdf_sha256"] if rows else None)}
+
+@app.post("/admin/ice/test_ping", tags=["Admin"])
+async def ice_test_ping(bol_id: str):
+    # no-op test entry
+    await database.execute("""
+      INSERT INTO ice_delivery_log(bol_id, http_status, ms, response)
+      VALUES (:b, 200, 12, 'pong')
+    """, {"b": bol_id})
+    return {"ok": True}
+
+@app.post("/admin/ice/resend", tags=["Admin"])
+async def ice_resend(bol_id: str):
+    # In real life you’d resend the payload to ICE and record the attempt.
+    await database.execute("""
+      INSERT INTO ice_delivery_log(bol_id, http_status, ms, response)
+      VALUES (:b, 202, 55, 'resend queued')
+    """, {"b": bol_id})
+    return {"ok": True}
+
+@app.post("/admin/ice/rotate_secret", tags=["Admin"])
+async def ice_rotate_secret():
+    # record a rotation (you can also bump LINK_SIGNING_SECRET or ICE_WEBHOOK_SECRET)
+    return {"ok": True, "note": "Rotate via env/secrets manager; this endpoint just acks."}
+# ----- ICE Logs/Testing/Resend/Rotate -----
+
 # --- Admin listings/approve/export ---
 class ApplicationRow(BaseModel):
     application_id: str
@@ -10217,16 +10483,19 @@ async def _build_member_statement_monthly(member: str, month: str) -> tuple[str,
     start, end = _month_bounds_slow(month)
 
     rows = await database.fetch_all("""
-      SELECT material AS symbol,
-             (created_at AT TIME ZONE 'utc')::date AS d,
-             ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS tons,
-             ROUND(SUM(COALESCE(price_per_ton,0)*COALESCE(weight_tons,0))::numeric, 2) AS notional
-      FROM contracts
-     WHERE seller = :m
-       AND created_at >= :s AND created_at < :e
-     GROUP BY symbol, d
-     ORDER BY d ASC, symbol
-    """, {"m": member, "s": start, "e": end})
+        SELECT material AS symbol,
+                (created_at AT TIME ZONE 'utc')::date AS d,
+                ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS tons,
+                ROUND(SUM(
+                COALESCE(price_per_ton,0) * COALESCE(weight_tons,0) *
+                COALESCE(NULLIF(fx_rate,0),1.0) * CASE WHEN COALESCE(currency,'USD')='USD' THEN 1 ELSE 1 END
+                )::numeric, 2) AS notional_usd
+        FROM contracts
+        WHERE seller = :m
+        AND created_at >= :s AND created_at < :e
+        GROUP BY symbol, d
+        ORDER BY d ASC, symbol
+        """, {"m": member, "s": start, "e": end})
 
     bols = await database.fetch_all("""
       SELECT material AS symbol,

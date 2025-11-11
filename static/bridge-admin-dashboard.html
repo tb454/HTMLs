@@ -75,6 +75,7 @@
 
   </script>
   <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
   <!-- Locale strip -->
@@ -196,6 +197,25 @@
     const tb = document.querySelector("#tonsTbl tbody");
     tb.innerHTML = data.map(r=>`<tr><td>${r.yard_id}</td><td>${r.tons_month}</td></tr>`).join("");
   }catch(e){ /* optional toast */ }
+})();
+</script>
+
+<canvas id="bolsByDay" height="120" class="mb-3"></canvas>
+<script nonce="{{NONCE}}">
+(async function(){
+  try{
+    const res = await api("/analytics/prices_over_time?material=Shred%20Steel&window=1M");
+    const data = await res.json();
+    const ctx = document.getElementById('bolsByDay').getContext('2d');    
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map(r=>r.date),
+        datasets: [{label:"Avg $/ton (1M)", data: data.map(r=>r.avg_price)}]
+      },
+      options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true}}}
+    });
+  }catch(e){}
 })();
 </script>
 
