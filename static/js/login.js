@@ -8,7 +8,7 @@ const endpoint = (window.ENDPOINT && typeof window.ENDPOINT === "string")
 // Eagerly mint XSRF-TOKEN so the SPA can echo X-CSRF immediately (harmless for /login which is exempt)
 (async () => {
   try {
-    await fetch(joinURL(endpoint, "/health"), { credentials: "include" });
+    await fetch(joinURL(endpoint, "/healthz"), { credentials: "include" });
   } catch (_) {}
 })();
 
