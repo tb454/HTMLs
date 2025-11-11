@@ -68,7 +68,9 @@ document.getElementById("loginForm").addEventListener("submit", async function (
   e.preventDefault();
   const errBox = document.getElementById("error");
   const okBox  = document.getElementById("success");
-  errBox.style.display = "none"; okBox.style.display = "none";
+  // CSP-safe: use Bootstrap's hidden
+  errBox.classList.add("hidden"); 
+  okBox.classList.add("hidden");
 
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
@@ -86,7 +88,7 @@ document.getElementById("loginForm").addEventListener("submit", async function (
     if (!res.ok) {
       let msg = "Invalid credentials. Try again.";
       try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch {}
-      errBox.textContent = msg; errBox.style.display = "block";
+      errBox.textContent = msg; errBox.classList.remove("hidden");
       return;
     }
 
@@ -107,7 +109,7 @@ document.getElementById("loginForm").addEventListener("submit", async function (
                          : role ? `/${role}` : "/buyer";
   } catch (err) {
     errBox.textContent = "Network error. Please try again.";
-    errBox.style.display = "block";
+    errBox.classList.remove("hidden");
     console.error(err);
   } finally {
     loginBtn.disabled = false; loginBtn.textContent = old;

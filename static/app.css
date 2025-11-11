@@ -300,3 +300,8 @@ tbody tr:hover{background:rgba(15,98,254,.04)}
 .flex-wrap{flex-wrap:wrap}
 .gap-8{gap:8px}
 .flex-1{flex:1}
+
+/* === Helpers to replace inline style attributes on login page === */
+.maxw-680{max-width:680px}
+.w-auto{width:auto}
+.w-220{width:220px}

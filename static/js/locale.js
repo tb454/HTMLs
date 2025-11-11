@@ -116,3 +116,11 @@
   // kick off
   try { await hydrateLocale(); } catch {}
 })();
+
+// Attach handler in JS to satisfy CSP (no inline events)
+window.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("save-locale");
+  if (btn && window.BRIDGE_LOCALE?.save) {
+    btn.addEventListener("click", () => BRIDGE_LOCALE.save());
+  }
+});
