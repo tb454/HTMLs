@@ -1012,7 +1012,7 @@ async def _connect_db_first():
             await database.connect()
         if getattr(app.state, "db_pool", None) is None:
             import asyncpg
-            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, max_size=10)
+            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, min_size=10, max_size=20)
 
     try:
         await _do_connect()
@@ -9617,17 +9617,10 @@ async def publish_mark(body: PublishMarkIn):
 @futures_router.get("/products", response_model=List[FuturesProductOut], summary="List products")
 async def list_products():
     rows = await database.fetch_all("""
-        SELECT 
-          id::text AS id,
-          symbol_root,
-          material,
-          delivery_location,
-          contract_size_tons,
-          tick_size,
-          currency,
-          price_method
-        FROM futures_products
-        ORDER BY created_at DESC
+        SELECT id, symbol_root, material, delivery_location,
+           contract_size_tons, tick_size, currency, price_method
+    FROM futures_products
+    ORDER BY id DESC
     """)
     return [dict(r) for r in rows]
 

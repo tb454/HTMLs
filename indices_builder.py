@@ -124,7 +124,7 @@ async def _compute_one(pool, cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # ---------- Entry point ----------
 async def run_indices_builder():
-    pool = await asyncpg.create_pool(DATABASE_URL, max_size=8)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=10, max_size=20)
     try:
         dt_utc = datetime.now(timezone.utc).date()
         defs = await _load_index_definitions(pool)
