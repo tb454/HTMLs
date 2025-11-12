@@ -36,6 +36,8 @@ from urllib.parse import quote
 import html as _html
 from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas as _pdf
+from fastapi import UploadFile, File
+from decimal import Decimal, ROUND_HALF_UP
 
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
@@ -920,6 +922,130 @@ def _ensure_database_exists(dsn: str):
         # Never block the process on auto-create errors; startup will show a clear failure later if still missing
         pass
 # ------- /DB ensure-database-exists -------
+
+# ===== Vendor Quotes (ingest + pricing blend) =====
+vendor_router = APIRouter(prefix="/vendor_quotes", tags=["Vendor Quotes"])
+
+@startup
+async def _ensure_vendor_quotes_schema():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS vendor_quotes(
+      id            BIGSERIAL PRIMARY KEY,
+      vendor        TEXT NOT NULL,
+      category      TEXT NOT NULL,          -- e.g., 'Aluminum','Copper','Brass','E-Scrap'
+      material      TEXT NOT NULL,          -- e.g., 'AL 6063 OLD EXTRUSION PREPARED'
+      price_per_lb  NUMERIC NOT NULL,       -- store normalized $/lb
+      unit_raw      TEXT,                   -- original unit label if present (e.g., 'LBS')
+      sheet_date    DATE,                   -- optional date on the sheet
+      source_file   TEXT,
+      inserted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vq_mat_time ON vendor_quotes(material, inserted_at DESC);
+    """)
+
+def _to_decimal(s) -> Decimal:
+    return Decimal(str(s).replace("$", "").replace(",", "").strip() or "0")
+
+@vendor_router.post("/ingest_csv", summary="Ingest a vendor quote CSV (columns: vendor,category,material,price,unit,date?)")
+async def vq_ingest_csv(file: UploadFile = File(...)):
+    text = (await file.read()).decode("utf-8-sig", errors="replace")
+    rdr = csv.DictReader(io.StringIO(text))
+    rows = []
+    for r in rdr:
+        vendor   = (r.get("vendor")   or r.get("Vendor")   or "").strip()
+        category = (r.get("category") or r.get("Category") or "").strip()
+        material = (r.get("material") or r.get("Material") or "").strip()
+        price    = _to_decimal(r.get("price") or r.get("Price") or 0)
+        unit     = (r.get("unit")     or r.get("Unit")     or "LBS").strip().upper()
+        dt_raw   = (r.get("date")     or r.get("Date")     or "").strip()
+        if not (vendor and material and price):
+            continue
+        # normalize to $/lb (your Jimmy sheets are already LBS)
+        price_per_lb = price if unit in ("LB","LBS","POUND","POUNDS") else (price / Decimal("2000") if unit in ("TON","TONS") else price)
+        sheet_date = None
+        try:
+            if dt_raw:
+                sheet_date = datetime.fromisoformat(dt_raw).date()
+        except Exception:
+            pass
+        rows.append({
+            "vendor": vendor, "category": category or "Unknown",
+            "material": material, "price_per_lb": price_per_lb,
+            "unit_raw": unit, "sheet_date": sheet_date, "source_file": file.filename
+        })
+    if not rows:
+        return {"inserted": 0}
+
+    await database.execute_many("""
+      INSERT INTO vendor_quotes(vendor,category,material,price_per_lb,unit_raw,sheet_date,source_file)
+      VALUES (:vendor,:category,:material,:price_per_lb,:unit_raw,:sheet_date,:source_file)
+    """, rows)
+    return {"inserted": len(rows)}
+
+@vendor_router.get("/current", summary="Latest blended $/lb per material (from most-recent vendor quotes)")
+async def vq_current(limit:int=500):
+    # pick the latest quote per (vendor, material) then average per material
+    q = """
+    WITH latest AS (
+      SELECT DISTINCT ON (vendor, material)
+             vendor, material, price_per_lb, inserted_at
+        FROM vendor_quotes
+       ORDER BY vendor, material, inserted_at DESC
+    )
+    SELECT material,
+           ROUND(AVG(price_per_lb)::numeric, 4) AS blended_lb,
+           COUNT(*) AS vendors
+      FROM latest
+     GROUP BY material
+     ORDER BY material
+     LIMIT :lim
+    """
+    rows = await database.fetch_all(q, {"lim": limit})
+    return [dict(r) for r in rows]
+
+@vendor_router.post("/snapshot_to_indices", summary="Snapshot vendor-blended prices into indices_daily for today")
+async def vq_snapshot_to_indices(as_of: date = None):
+    asof = as_of or datetime.utcnow().date()
+    rows = await database.fetch_all("""
+      WITH latest AS (
+        SELECT DISTINCT ON (vendor, material)
+               vendor, material, price_per_lb, inserted_at
+          FROM vendor_quotes
+         ORDER BY vendor, material, inserted_at DESC
+      ),
+      blend AS (
+        SELECT material, AVG(price_per_lb) AS avg_lb, COUNT(*) AS vendors
+          FROM latest
+         GROUP BY material
+      )
+      SELECT material, avg_lb, vendors FROM blend
+    """)
+    # write into indices_daily with a neutral "vendor" region
+    await database.execute("DELETE FROM indices_daily WHERE as_of_date=:d AND region='vendor'", {"d": asof})
+    for r in rows:
+        await database.execute("""
+          INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons)
+          VALUES (:d, 'vendor', :m, :p, NULL)
+          ON CONFLICT (as_of_date, region, material) DO UPDATE
+            SET avg_price=EXCLUDED.avg_price
+        """, {"d": asof, "m": r["material"], "p": float(r["avg_lb"]) * 2000.0})  # store as $/ton if you want
+    return {"ok": True, "date": str(asof), "materials": len(rows)}
+
+async def _vendor_blended_lb(material: str) -> float | None:
+    row = await database.fetch_one("""
+      WITH latest AS (
+        SELECT DISTINCT ON (vendor, material)
+               vendor, material, price_per_lb, inserted_at
+          FROM vendor_quotes
+         WHERE material = :m
+         ORDER BY vendor, material, inserted_at DESC
+      )
+      SELECT AVG(price_per_lb) AS p FROM latest
+    """, {"m": material})
+    return (float(row["p"]) if row and row["p"] is not None else None)
+
+app.include_router(vendor_router)
+# ===== Vendor Quotes (ingest + pricing blend) =====
 
 # =====  users minimal for tests =====
 @startup
@@ -3093,15 +3219,17 @@ async def pull_home():
 
 @router_pricing.get("/quote", summary="Compute material price using internal formulas")
 async def quote(category: str, material: str):
+    # 1) prefer vendor blended if available
+    vb = await _vendor_blended_lb(material)
+    if vb is not None:
+        return {"category": category, "material": material, "price_per_lb": round(vb, 4),
+                "notes": "Vendor-blended latest ($/lb)."}
+    # 2) fallback to existing COMEX/LME internal calc
     price = await compute_material_price(_fetch_base, category, material)
     if price is None:
         raise HTTPException(status_code=404, detail="No price available for that category/material")
-    return {
-        "category": category,
-        "material": material,
-        "price_per_lb": round(float(price), 4),
-        "notes": "Internal-only; bases use COMEX/LME with Cu rule (COMEX − $0.10).",
-    }
+    return {"category": category, "material": material, "price_per_lb": round(float(price), 4),
+            "notes": "Internal-only; bases use COMEX/LME with Cu rule (COMEX − $0.10)."}
 
 @router_fc.post("/run", summary="Run nightly forecast for all symbols")
 async def run_forecast_now():
@@ -8154,6 +8282,21 @@ async def material_price_history(material: str, seller: Optional[str] = None):
         rows = await database.fetch_all(q, {"material": material})
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
+
+@app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
+async def vendor_price_history(material: str, days:int = 365):
+    rows = await database.fetch_all("""
+      WITH latest AS (
+        SELECT DISTINCT ON (vendor, material, date_trunc('day', inserted_at)::date AS d)
+               date_trunc('day', inserted_at)::date AS d, vendor, material, price_per_lb
+          FROM vendor_quotes
+         WHERE material=:m AND inserted_at >= NOW() - make_interval(days => :days)
+         ORDER BY vendor, material, d, inserted_at DESC
+      )
+      SELECT d::date AS date, ROUND(AVG(price_per_lb)::numeric, 4) AS avg_lb, COUNT(*) AS vendors
+        FROM latest GROUP BY d ORDER BY d
+    """, {"m": material, "days": days})
+    return [{"date": str(r["date"]), "avg_lb": float(r["avg_lb"]), "vendors": int(r["vendors"])} for r in rows]
 
 # === Analytics: implement missing endpoints ===
 from datetime import timedelta as _td
