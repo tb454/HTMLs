@@ -9660,13 +9660,20 @@ async def publish_mark(body: PublishMarkIn):
     """, {"id": str(uuid.uuid4()), "lid": body.listing_id, "dt": (body.mark_date or _date.today()), "px": mark_price, "m": method})
     return {"listing_id": body.listing_id, "mark_date": str(body.mark_date or _date.today()), "mark_price": mark_price, "method": method}
 
-@futures_router.get("/products", response_model=List[FuturesProductOut], summary="List products")
+@futures_router.get("/products", summary="List products")
 async def list_products():
     rows = await database.fetch_all("""
-        SELECT id, symbol_root, material, delivery_location,
-           contract_size_tons, tick_size, currency, price_method
-    FROM futures_products
-    ORDER BY id DESC
+        SELECT 
+            id::text AS id,  -- Cast UUID to text to prevent Pydantic validation errors
+            symbol_root,
+            material,
+            delivery_location,
+            contract_size_tons,
+            tick_size,
+            currency,
+            price_method
+        FROM futures_products
+        ORDER BY id DESC
     """)
     return [dict(r) for r in rows]
 
