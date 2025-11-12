@@ -8113,113 +8113,94 @@ async def public_ticker(listing_id: str):
         "best_ask": (float(ask["price"]) if (ask and ask["price"] is not None) else None),
         "best_ask_size": (float(ask["qty"]) if (ask and ask["qty"] is not None) else None),
     }
-
-# ------- Contract ID--------
-def _paginate(total: int, limit: int, offset: int, items: list[dict]) -> Dict[str, Any]:
-    return {
-        "total": int(total or 0),
-        "limit": int(limit),
-        "offset": int(offset),
-        "count": len(items),
-        "has_more": (offset + len(items)) < (total or 0),
-        "items": items,
-    }
-
-@app.get("/contracts", tags=["Contracts"], summary="List contracts (paginated)")
-async def list_contracts(
-    limit: int = Query(25, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+ 
+# ------ Contracts --------
+@app.get(
+    "/contracts",
+    response_model=List[ContractOut],
+    tags=["Contracts"],
+    summary="List Contracts",
+    description="Retrieve contracts with optional filters: buyer, seller, material, status, created_at date range.",
+    status_code=200
+)
+async def get_all_contracts(
     buyer: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
     material: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime]   = Query(None),
+    reference_source: Optional[str] = Query(None),
+    reference_symbol: Optional[str] = Query(None),
+    sort: Optional[str] = Query(
+        None,
+        description="created_at_desc|price_per_ton_asc|price_per_ton_desc|weight_tons_desc"
+    ),
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    response: Response = None,   # lets us set X-Total-Count
 ):
-    where = []
-    params = {"limit": limit, "offset": offset}
-    if buyer:    where.append("buyer = :buyer");       params["buyer"] = buyer
-    if seller:   where.append("seller = :seller");     params["seller"] = seller
-    if material: where.append("material = :material"); params["material"] = material
-    if status:   where.append("status = :status");     params["status"] = status
+    # normalize inputs
+    buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
+    seller   = seller.strip()   if isinstance(seller, str) else seller
+    material = material.strip() if isinstance(material, str) else material
+    status   = status.strip()   if isinstance(status, str) else status
+    reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
+    reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
 
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    total = await database.fetch_val(f"SELECT COUNT(*) FROM contracts {where_sql}", params)
-    rows = await database.fetch_all(f"""
-        SELECT id,buyer,seller,material,weight_tons,price_per_ton,status,created_at,currency,tax_percent
-        FROM contracts
-        {where_sql}
-        ORDER BY created_at DESC
-        LIMIT :limit OFFSET :offset
-    """, params)
-    return _paginate(total or 0, limit, offset, [dict(r) for r in rows])
+    # base query
+    query = "SELECT * FROM contracts"
+    conditions, values = [], {}
 
-@app.get("/contracts/{contract_id}", tags=["Contracts"], summary="Fetch contract by id")
-async def get_contract_by_id(contract_id: str):
-    row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
-    if not row:
-        raise HTTPException(status_code=404, detail="contract not found")
-    return dict(row) 
+    if buyer:
+        conditions.append("buyer ILIKE :buyer");               values["buyer"] = f"%{buyer}%"
+    if seller:
+        conditions.append("seller ILIKE :seller");             values["seller"] = f"%{seller}%"
+    if material:
+        conditions.append("material ILIKE :material");         values["material"] = f"%{material}%"
+    if status:
+        conditions.append("status ILIKE :status");             values["status"] = f"%{status}%"
+    if start:
+        conditions.append("created_at >= :start");             values["start"] = start
+    if end:
+        conditions.append("created_at <= :end");               values["end"] = end
+    if reference_source:
+        conditions.append("reference_source = :ref_src");      values["ref_src"] = reference_source
+    if reference_symbol:
+        conditions.append("reference_symbol ILIKE :ref_sym");  values["ref_sym"] = f"%{reference_symbol}%"
 
-@app.put(
-    "/contracts/{contract_id}",
-    response_model=ContractOut,
-    tags=["Contracts"],
-    summary="Update Contract",
-    status_code=200
-)
-async def update_contract(
-    contract_id: str,
-    update: ContractUpdate,
-    request: Request
-):
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    # --- total count header ---
+    count_sql = "SELECT COUNT(*) AS c FROM contracts"
+    if conditions:
+        count_sql += " WHERE " + " AND ".join(conditions)
+    row_count = await database.fetch_one(count_sql, values)
     try:
-        row = await database.fetch_one(
-            """
-            UPDATE contracts
-            SET status = :status,
-                signature = :signature,
-                signed_at = CASE WHEN :signature IS NOT NULL THEN NOW() ELSE signed_at END
-            WHERE id = :id
-            RETURNING *
-            """,
-            {
-                "id": contract_id,
-                "status": update.status,
-                "signature": update.signature
-            }
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Contract not found")
+        if response is not None:
+            response.headers["X-Total-Count"] = str(int(row_count["c"] or 0))
+    except Exception:
+        pass
 
-        # Best-effort audit; never break the request
-        try:
-            actor = (request.session.get("username") if hasattr(request, "session") else None)
-            await log_action(
-                actor or "system",
-                "contract.update",
-                str(contract_id),
-                {"status": update.status, "signature_present": update.signature is not None}
-            )
-        except Exception as e:
-            try:
-                logger.warn("contract_update_audit_failed", err=str(e))
-            except Exception:
-                pass
+    # --- sort mapping ---
+    order_clause = "created_at DESC NULLS LAST"
+    if sort:
+        s = sort.lower()
+        if s == "price_per_ton_asc":
+            order_clause = "price_per_ton ASC NULLS LAST, created_at DESC NULLS LAST"
+        elif s == "price_per_ton_desc":
+            order_clause = "price_per_ton DESC NULLS LAST, created_at DESC NULLS LAST"
+        elif s == "weight_tons_desc":
+            order_clause = "weight_tons DESC NULLS LAST, created_at DESC NULLS LAST"
+        else:
+            order_clause = "created_at DESC NULLS LAST"
 
-        return row
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        # dev-safe fallback: return current row without failing the socket
-        try:
-            logger.warn("contract_update_failed", err=str(e))
-        except Exception:
-            pass
-        cur = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": contract_id})
-        if cur:
-            return cur
-        raise HTTPException(status_code=500, detail="contract update failed")
-# ------- Contract ID--------       
+    # finalize + fetch
+    query += f" ORDER BY {order_clause} LIMIT :limit OFFSET :offset"
+    values["limit"], values["offset"] = limit, offset
+    return await database.fetch_all(query=query, values=values)
+# ------ Contracts --------
 
 #-------- Export Contracts as CSV --------
 @app.get("/contracts/export_csv", tags=["Contracts"], summary="Export Contracts as CSV", status_code=200)
