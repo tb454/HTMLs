@@ -53,3 +53,107 @@ function csvDownload(filename, rows){
   const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
 }
+
+// Abortable fetch timeout (default 8s)
+function _withTimeout(ms = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  return { controller, cancel: () => clearTimeout(id) };
+}
+
+// JSON convenience wrapper that never hangs UI
+async function apiJSON(path, opts = {}) {
+  const { controller, cancel } = _withTimeout(opts.timeout || 8000);
+  try {
+    const res = await api(path, { ...opts, signal: controller.signal });
+    // Some endpoints may return empty bodies
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return res.json();
+    return null;
+  } finally {
+    cancel();
+  }
+}
+
+// ---- app.js (add once globally) ----
+function showLoading(){ document.documentElement.classList.add('loading'); }
+function hideLoading(){
+  document.documentElement.classList.remove('loading');
+  const f = document.querySelector('footer');
+  if (f) f.classList.remove('invisible');
+}
+// last resort, never let UI hang > 15s
+setTimeout(hideLoading, 15000);
+
+// ---- static/js/app.js (or your admin boot file) ----
+async function startMarketDataWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return new Promise((resolve, reject) => {
+    let opened = false;
+    const ws = new WebSocket(`${proto}://${location.host}/md/ws`);
+    ws.onopen  = () => { opened = true; resolve(); };
+    ws.onerror = () => { if (!opened) reject(new Error('ws failed')); };
+    ws.onclose = () => {}; // optional: reconnect later
+    ws.onmessage = (ev) => { /* update tickers */ };
+  });
+}
+
+function safe(fn){ try { return fn(); } catch(e){ console.warn(e); } }
+
+async function initAdmin() {
+  showLoading();
+
+  const tasks = [
+    // analytics
+    apiJSON('/analytics/prices_over_time?material=Shred%20Steel&window=1M')
+      .then(data => safe(() => drawPriceChart(data)))
+      .catch(err => console.warn('prices_over_time', err)),
+
+    apiJSON('/analytics/tons_by_yard_this_month')
+      .then(rows => safe(() => renderYardTons(rows)))
+      .catch(err => console.warn('tons_by_yard', err)),
+
+    // products (handle old/new shapes gracefully)
+    apiJSON('/admin/futures/products')
+      .then(payload => {
+        const products = payload?.products ?? payload ?? [];
+        safe(() => renderFuturesProducts(products));
+      })
+      .catch(err => console.warn('futures products', err)),
+
+    // BOLs table
+    apiJSON('/bols?limit=100&offset=0')
+      .then(rows => safe(() => renderBOLs(rows || [])))
+      .catch(err => console.warn('bols', err)),
+
+    // optional websocket — do NOT block ready
+    startMarketDataWS().catch(() => console.info('WS optional; continuing')),
+  ];
+
+  await Promise.allSettled(tasks);
+}
+
+// kick it
+window.addEventListener('DOMContentLoaded', () => {
+  initAdmin().finally(hideLoading);
+});
+
+function drawPriceChart(data){
+  if (!Array.isArray(data) || !data.length) { /* show placeholder */ return; }
+  // ... draw chart ...
+}
+
+function renderYardTons(rows){
+  if (!Array.isArray(rows)) rows = [];
+  // ... build table ...
+}
+
+function renderFuturesProducts(products){
+  if (!Array.isArray(products)) products = [];
+  // ... list products ...
+}
+
+function renderBOLs(rows){
+  if (!Array.isArray(rows)) rows = [];
+  // ... render BOL table ...
+}

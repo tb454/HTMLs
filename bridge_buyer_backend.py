@@ -6557,7 +6557,16 @@ async def _ensure_ice_delivery_log():
       response TEXT,
       pdf_sha256 TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_ice_log_bol ON ice_delivery_log(bol_uuid, when_utc DESC);
+
+    /* legacy safety: add columns if old table existed without them */
+    ALTER TABLE ice_delivery_log
+      ADD COLUMN IF NOT EXISTS bol_id UUID,
+      ADD COLUMN IF NOT EXISTS when_utc TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    /* fix the index to use the real column names */
+    DROP INDEX IF EXISTS idx_ice_log_bol;
+    CREATE INDEX IF NOT EXISTS idx_ice_log_bol
+      ON ice_delivery_log(bol_id, when_utc DESC);
     """)
 # ------ ICE delivery log ------
 
