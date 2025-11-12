@@ -6716,25 +6716,40 @@ async def _idx_refs():
 @startup
 async def _ensure_ice_delivery_log():
     await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS ice_delivery_log(
-      id BIGSERIAL PRIMARY KEY,
-      bol_id UUID NOT NULL,
-      when_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    /* base table (idempotent) */
+    CREATE TABLE IF NOT EXISTS public.ice_delivery_log(
+      id          BIGSERIAL PRIMARY KEY,
+      bol_id      UUID,
+      when_utc    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       http_status INT,
-      ms INT,
-      response TEXT,
-      pdf_sha256 TEXT
+      ms          INT,
+      response    TEXT,
+      pdf_sha256  TEXT
     );
 
-    /* legacy safety: add columns if old table existed without them */
-    ALTER TABLE ice_delivery_log
-      ADD COLUMN IF NOT EXISTS bol_id UUID,
+    /* legacy: rename bol_uuid -> bol_id if it exists */
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name='ice_delivery_log'
+          AND column_name='bol_uuid'
+      ) THEN
+        EXECUTE 'ALTER TABLE public.ice_delivery_log RENAME COLUMN bol_uuid TO bol_id';
+      END IF;
+    END $$;
+
+    /* add columns if an older, skinnier table exists */
+    ALTER TABLE public.ice_delivery_log
+      ADD COLUMN IF NOT EXISTS bol_id   UUID,
       ADD COLUMN IF NOT EXISTS when_utc TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-    /* fix the index to use the real column names */
+    /* ensure correct index (drop old, recreate on real columns) */
     DROP INDEX IF EXISTS idx_ice_log_bol;
     CREATE INDEX IF NOT EXISTS idx_ice_log_bol
-      ON ice_delivery_log(bol_id, when_utc DESC);
+      ON public.ice_delivery_log (bol_id, when_utc DESC);
     """)
 # ------ ICE delivery log ------
 
