@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html class="loading" lang="en" data-bs-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BRidge Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=20251111" nonce="{{NONCE}}">
   <link rel="icon" href="/static/favicon.ico" />
   
   <script nonce="{{NONCE}}">
@@ -74,9 +74,20 @@
     });
 
   </script>
-  <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-</head>
+  <script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
+  <script src="/static/js/admin-pagination.js?v=20251111" defer nonce="{{NONCE}}"></script>
+  <script nonce="{{NONCE}}">
+    // Belt-and-suspenders: if something above fails, end loading.
+    window.addEventListener('DOMContentLoaded', () => {
+      try { window.hideLoading && window.hideLoading(); } catch(_) {}
+      try {
+        const f = document.querySelector('footer.legal-footer');
+        if (f) f.classList.remove('invisible');
+      } catch(_) {}
+    });
+  </script>
+  </head>
+
 <body>
   <!-- Locale strip -->
   <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
@@ -107,7 +118,7 @@
     <!-- Tabs -->
     <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="bols-tab" data-bs-toggle="tab" data-bs-target="#bols-pane" type="button" role="tab" aria-controls="bols-pane" aria-selected="true">BOLs</button>
+        <button class="nav-link active" id="bols-tab" data-bs-toggle="tab" data-bs-target="#bols-pane" type="button" role="tab" aria-controls="bols-pane" aria-selected="true">BOLs</button>
       </li>
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="futures-tab" data-bs-toggle="tab" data-bs-target="#futures-pane" type="button" role="tab" aria-controls="futures-pane" aria-selected="false">Futures</button>
@@ -1061,7 +1072,7 @@ Object.assign(window, {
   });
 </script>
 
-  <footer class="legal-footer">
+  <footer class="legal-footer invisible">
     <hr class="mb-3">
     <nav class="small d-flex flex-wrap gap-2 justify-content-center" aria-label="Legal navigation">
       <a href="/legal/terms.html" class="link-secondary" rel="noopener noreferrer">Terms</a><span>·</span>
