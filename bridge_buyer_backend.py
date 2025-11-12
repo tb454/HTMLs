@@ -8,8 +8,11 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, EmailStr, Field 
+from pydantic import BaseModel, EmailStr, Field, field_validator 
 from typing import List, Optional, Literal
+from decimal import Decimal, ROUND_HALF_UP
+CURR_ALLOW = {"USD","EUR","GBP","JPY","CNY","CAD","AUD","MXN"}
+ISO2 = r"^[A-Z]{2}$"
 from sqlalchemy import create_engine, Table, MetaData, and_, select, Column, String, DateTime, Integer, Text, Boolean
 import os
 import databases
@@ -20,7 +23,7 @@ from io import BytesIO
 import zipfile
 import tempfile
 import pathlib
-from decimal import Decimal, ROUND_HALF_UP
+from typing import Any, Dict  
 import json, hashlib, base64, hmac
 from passlib.hash import bcrypt
 from dotenv import load_dotenv
@@ -946,6 +949,58 @@ async def _ensure_vendor_quotes_schema():
     );
     CREATE INDEX IF NOT EXISTS idx_vq_mat_time ON vendor_quotes(material, inserted_at DESC);
     """)
+# ------     Billing & International DDL -----
+@startup
+async def _ensure_billing_and_international_schema():
+    await run_ddl_multi("""
+    -- Orgs / Plans / Plan Prices
+    CREATE TABLE IF NOT EXISTS orgs(
+      org TEXT PRIMARY KEY,
+      display_name TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS plans(
+      plan TEXT PRIMARY KEY,      -- NONMEM, MEMBER, PROG
+      description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS plan_prices(
+      id BIGSERIAL PRIMARY KEY,
+      product TEXT NOT NULL,      -- EXCH, CLR, DELIVERY, CASHSETTLE, GIVEUP
+      plan TEXT NOT NULL REFERENCES plans(plan),
+      stripe_price_id TEXT NOT NULL,
+      UNIQUE(product, plan)
+    );
+
+    -- International extensions
+    ALTER TABLE contracts ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+    ALTER TABLE contracts ADD COLUMN IF NOT EXISTS tax_percent NUMERIC;
+    ALTER TABLE bols ADD COLUMN IF NOT EXISTS country_of_origin TEXT;
+    ALTER TABLE bols ADD COLUMN IF NOT EXISTS export_country TEXT;
+    CREATE INDEX IF NOT EXISTS idx_contracts_currency ON contracts(currency);
+    """)
+
+PRODUCTS = ["EXCH","CLR","DELIVERY","CASHSETTLE","GIVEUP"]
+PLANS = ["NONMEM","MEMBER","PROG"]
+
+@startup
+async def _seed_plan_prices():
+    for p in PLANS:
+        await database.execute(
+            "INSERT INTO plans(plan,description) VALUES(:p,:d) ON CONFLICT DO NOTHING",
+            {"p": p, "d": f"{p} plan"}
+        )
+    for product in PRODUCTS:
+        for plan in PLANS:
+            env_key = f"STRIPE_PRICE_METER_{product}_{plan}"
+            val = os.getenv(env_key)
+            if not val:
+                continue
+            await database.execute("""
+                INSERT INTO plan_prices(product,plan,stripe_price_id)
+                VALUES(:product,:plan,:pid)
+                ON CONFLICT(product,plan) DO UPDATE SET stripe_price_id = EXCLUDED.stripe_price_id
+            """, {"product": product, "plan": plan, "pid": val})
 
 def _to_decimal(s) -> Decimal:
     return Decimal(str(s).replace("$", "").replace(",", "").strip() or "0")
@@ -1085,6 +1140,21 @@ async def _vendor_blended_lb(material: str) -> float | None:
     return (float(row["p"]) if row and row["p"] is not None else None)
 
 app.include_router(vendor_router)
+
+@app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
+async def vendor_price_history(material: str, days:int = 365):
+    rows = await database.fetch_all("""
+      WITH latest AS (
+        SELECT DISTINCT ON (vendor, material, date_trunc('day', inserted_at)::date AS d)
+               date_trunc('day', inserted_at)::date AS d, vendor, material, price_per_lb
+          FROM vendor_quotes
+         WHERE material=:m AND inserted_at >= NOW() - make_interval(days => :days)
+         ORDER BY vendor, material, d, inserted_at DESC
+      )
+      SELECT d::date AS date, ROUND(AVG(price_per_lb)::numeric, 4) AS avg_lb, COUNT(*) AS vendors
+        FROM latest GROUP BY d ORDER BY d
+    """, {"m": material, "days": days})
+    return [{"date": str(r["date"]), "avg_lb": float(r["avg_lb"]), "vendors": int(r["vendors"])} for r in rows]
 # ===== Vendor Quotes (ingest + pricing blend) =====
 
 # =====  users minimal for tests =====
@@ -6897,17 +6967,36 @@ class ProductIn(BaseModel):
     unit: str
     quality: Optional[dict] = {}
 
+# -------- Contracts & BOLs --------
 class ContractIn(BaseModel):
     buyer: str
     seller: str
     material: str
     weight_tons: float
     price_per_ton: float
+    currency: str = Field(default="USD", description="ISO currency (subset)")
+    tax_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+
+    @field_validator("currency")
+    @classmethod
+    def _curr_ok(cls, v: str) -> str:
+        v = (v or "").upper()
+        if v not in CURR_ALLOW:
+            raise ValueError(f"Unsupported currency: {v}")
+        return v
+
     class Config:
-        schema_extra = {"example": {
-            "buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40.0,"price_per_ton":245.00
-        }}
+        json_schema_extra = {
+            "example": {
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40.0,
+                "price_per_ton": 245.00,
+                "currency": "USD",
+                "tax_percent": 0
+            }
+        }
 
 class ContractOut(ContractIn):
     id: uuid.UUID
@@ -6915,22 +7004,25 @@ class ContractOut(ContractIn):
     created_at: datetime
     signed_at: Optional[datetime]
     signature: Optional[str]
+
     class Config:
-        schema_extra = {"example": {
-            "id":"b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
-            "buyer":"Lewis Salvage","seller":"Winski Brothers",
-            "material":"Shred Steel","weight_tons":40,"price_per_ton":245.00,
-            "status":"Signed","created_at":"2025-09-01T10:00:00Z",
-            "signed_at":"2025-09-01T10:15:00Z","signature":"abc123signature"
-        }}
-
+        json_schema_extra = {
+            "example": {
+                "id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_ton": 245.00,
+                "currency": "USD",
+                "tax_percent": 0,
+                "status": "Signed",
+                "created_at": "2025-09-01T10:00:00Z",
+                "signed_at": "2025-09-01T10:15:00Z",
+                "signature": "abc123signature"
+            }
+        }
 # -------- Contracts & BOLs --------
-
-class PurchaseIn(BaseModel):
-    op: Literal["purchase"] = "purchase"
-    expected_status: Literal["Pending"] = "Pending"
-    idempotency_key: Optional[str] = None
-
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
     buyer: str
@@ -6945,37 +7037,49 @@ class BOLIn(BaseModel):
     carbon_intensity_kgco2e: float | None = None
     offset_kgco2e: float | None = None
     esg_cert_id: str | None = None
-    country_of_origin: str | None = None
-    hs_code: str | None = None
-    export_port_code: str | None = None
-    import_port_code: str | None = None
-    duties_usd: float | None = None
 
-    # --- NEW export/compliance fields ---
-    origin_country: Optional[str] = None
+    # legacy/loose export fields
+    origin_country: Optional[str] = None          # free-text country name/code
     destination_country: Optional[str] = None
     port_code: Optional[str] = None
     hs_code: Optional[str] = None
     duty_usd: Optional[float] = None
     tax_pct: Optional[float] = None
 
+    # strict ISO-2 country codes (DB columns added in _ensure_billing_and_international_schema)
+    country_of_origin: Optional[str] = Field(default=None, pattern=ISO2)
+    export_country: Optional[str] = Field(default=None, pattern=ISO2)
+
     class Config:
-        schema_extra = {"example": {
-            "contract_id": "1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
-            "buyer": "Lewis Salvage", "seller": "Winski Brothers",
-            "material": "Shred Steel", "weight_tons": 40, "price_per_unit": 245.00,
-            "total_value": 9800.00,
-            "carrier": {"name": "ABC Trucking Co.", "driver": "John Driver", "truck_vin": "1FDUF5GY3KDA12345"},
-            "pickup_signature": {"base64": "data:image/png;base64,iVBOR...", "timestamp": "2025-09-01T12:00:00Z"},
-            "pickup_time": "2025-09-01T12:15:00Z",
-            # new example fields
-            "origin_country": "US",
-            "destination_country": "MX",
-            "port_code": "LAX",
-            "hs_code": "7404",
-            "duty_usd": 125.50,
-            "tax_pct": 5.0
-        }}
+        json_schema_extra = {
+            "example": {
+                "contract_id": "1ec9e850-8b5a-45de-b631-f9fae4a1d4c9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_unit": 245.00,
+                "total_value": 9800.00,
+                "carrier": {
+                    "name": "ABC Trucking Co.",
+                    "driver": "John Driver",
+                    "truck_vin": "1FDUF5GY3KDA12345"
+                },
+                "pickup_signature": {
+                    "base64": "data:image/png;base64,iVBOR...",
+                    "timestamp": "2025-09-01T12:00:00Z"
+                },
+                "pickup_time": "2025-09-01T12:15:00Z",
+                "origin_country": "US",
+                "destination_country": "MX",
+                "port_code": "LAX",
+                "hs_code": "7404",
+                "duty_usd": 125.50,
+                "tax_pct": 5.0,
+                "country_of_origin": "US",
+                "export_country": "MX"
+            }
+        }
 
 class BOLOut(BOLIn):
     bol_id: uuid.UUID
@@ -6984,25 +7088,44 @@ class BOLOut(BOLIn):
     delivery_time: Optional[datetime] = None
 
     class Config:
-        schema_extra = {"example": {
-            "bol_id": "9fd89221-4247-4f93-bf4b-df9473ed8e57",
-            "contract_id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
-            "buyer": "Lewis Salvage", "seller": "Winski Brothers",
-            "material": "Shred Steel", "weight_tons": 40,
-            "price_per_unit": 245.0, "total_value": 9800.0,
-            "carrier": {"name": "ABC Trucking Co.", "driver": "Jane Doe", "truck_vin": "1FTSW21P34ED12345"},
-            "pickup_signature": {"base64": "data:image/png;base64,iVBOR...", "timestamp": "2025-09-01T12:00:00Z"},
-            "pickup_time": "2025-09-01T12:15:00Z",
-            "delivery_signature": None, "delivery_time": None, "status": "BOL Issued",
-            # new example fields
-            "origin_country": "US",
-            "destination_country": "MX",
-            "port_code": "LAX",
-            "hs_code": "7404",
-            "duty_usd": 125.50,
-            "tax_pct": 5.0
-        }}
-        
+        json_schema_extra = {
+            "example": {
+                "bol_id": "9fd89221-4247-4f93-bf4b-df9473ed8e57",
+                "contract_id": "b1c89b94-234a-4d55-b1fc-14bfb7fce7e9",
+                "buyer": "Lewis Salvage",
+                "seller": "Winski Brothers",
+                "material": "Shred Steel",
+                "weight_tons": 40,
+                "price_per_unit": 245.0,
+                "total_value": 9800.0,
+                "carrier": {
+                    "name": "ABC Trucking Co.",
+                    "driver": "Jane Doe",
+                    "truck_vin": "1FTSW21P34ED12345"
+                },
+                "pickup_signature": {
+                    "base64": "data:image/png;base64,iVBOR...",
+                    "timestamp": "2025-09-01T12:00:00Z"
+                },
+                "pickup_time": "2025-09-01T12:15:00Z",
+                "delivery_signature": None,
+                "delivery_time": None,
+                "status": "BOL Issued",
+                "origin_country": "US",
+                "destination_country": "MX",
+                "port_code": "LAX",
+                "hs_code": "7404",
+                "duty_usd": 125.50,
+                "tax_pct": 5.0,
+                "country_of_origin": "US",
+                "export_country": "MX"
+            }
+        }
+class PurchaseIn(BaseModel):
+    op: Literal["purchase"] = "purchase"
+    expected_status: Literal["Pending"] = "Pending"
+    idempotency_key: Optional[str] = None
+
 # Tighter typing for updates
 ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
 
@@ -7014,6 +7137,45 @@ class ContractUpdate(BaseModel):
         json_schema_extra = {
             "example": {"status": "Signed", "signature": "JohnDoe123"}
         }
+
+class BillingPriceOut(BaseModel):
+    org: str
+    plan: str
+    product: str
+    stripe_price_id: str
+
+def _org_from_request(request: Request) -> Optional[str]:
+    try:
+        return request.session.get("org")
+    except Exception:
+        return None
+
+async def _org_plan(org: Optional[str]) -> str:
+    # Swap for real org→plan mapping if you store it; default NONMEM unless you signal MEMBER.
+    return "MEMBER" if org else "NONMEM"
+
+async def resolve_price_id(org: Optional[str], product: str) -> str:
+    plan = await _org_plan(org)
+    row = await database.fetch_one(
+        "SELECT stripe_price_id FROM plan_prices WHERE product = :product AND plan = :plan",
+        {"product": product.upper(), "plan": plan}
+    )
+    if row and row["stripe_price_id"]:
+        return row["stripe_price_id"]
+    # env fallback
+    env_key = f"STRIPE_PRICE_METER_{product.upper()}_{plan}"
+    return os.getenv(env_key, "price_default")
+
+@app.get("/billing/price_id", response_model=BillingPriceOut, tags=["Billing"], summary="Resolve Stripe price id")
+async def billing_price_id(
+    product: str = Query(..., pattern=r"^(EXCH|CLR|DELIVERY|CASHSETTLE|GIVEUP)$"),
+    org: Optional[str] = Query(None),
+    request: Request = None
+):
+    eff_org = org or _org_from_request(request)
+    pid = await resolve_price_id(eff_org, product)
+    plan = await _org_plan(eff_org)
+    return BillingPriceOut(org=eff_org or "", plan=plan, product=product.upper(), stripe_price_id=pid)
 
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
@@ -7952,94 +8114,44 @@ async def public_ticker(listing_id: str):
         "best_ask_size": (float(ask["qty"]) if (ask and ask["qty"] is not None) else None),
     }
 
-# -------- Contracts (with Inventory linkage) --------
-@app.get(
-    "/contracts",
-    response_model=List[ContractOut],
-    tags=["Contracts"],
-    summary="List Contracts",
-    description="Retrieve contracts with optional filters: buyer, seller, material, status, created_at date range.",
-    status_code=200
-)
-async def get_all_contracts(
+# ------- Contract ID--------
+def _paginate(total: int, limit: int, offset: int, items: list[dict]) -> Dict[str, Any]:
+    return {
+        "total": int(total or 0),
+        "limit": int(limit),
+        "offset": int(offset),
+        "count": len(items),
+        "has_more": (offset + len(items)) < (total or 0),
+        "items": items,
+    }
+
+@app.get("/contracts", tags=["Contracts"], summary="List contracts (paginated)")
+async def list_contracts(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     buyer: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
     material: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime]   = Query(None),
-    reference_source: Optional[str] = Query(None),
-    reference_symbol: Optional[str] = Query(None),
-    sort: Optional[str] = Query(
-        None,
-        description="created_at_desc|price_per_ton_asc|price_per_ton_desc|weight_tons_desc"
-    ),
-    limit: int = Query(50, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    response: Response = None,   # lets us set X-Total-Count
 ):
-    # normalize inputs
-    buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
-    seller   = seller.strip()   if isinstance(seller, str) else seller
-    material = material.strip() if isinstance(material, str) else material
-    status   = status.strip()   if isinstance(status, str) else status
-    reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
-    reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
+    where = []
+    params = {"limit": limit, "offset": offset}
+    if buyer:    where.append("buyer = :buyer");       params["buyer"] = buyer
+    if seller:   where.append("seller = :seller");     params["seller"] = seller
+    if material: where.append("material = :material"); params["material"] = material
+    if status:   where.append("status = :status");     params["status"] = status
 
-    # base query
-    query = "SELECT * FROM contracts"
-    conditions, values = [], {}
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    total = await database.fetch_val(f"SELECT COUNT(*) FROM contracts {where_sql}", params)
+    rows = await database.fetch_all(f"""
+        SELECT id,buyer,seller,material,weight_tons,price_per_ton,status,created_at,currency,tax_percent
+        FROM contracts
+        {where_sql}
+        ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
+    """, params)
+    return _paginate(total or 0, limit, offset, [dict(r) for r in rows])
 
-    if buyer:
-        conditions.append("buyer ILIKE :buyer");               values["buyer"] = f"%{buyer}%"
-    if seller:
-        conditions.append("seller ILIKE :seller");             values["seller"] = f"%{seller}%"
-    if material:
-        conditions.append("material ILIKE :material");         values["material"] = f"%{material}%"
-    if status:
-        conditions.append("status ILIKE :status");             values["status"] = f"%{status}%"
-    if start:
-        conditions.append("created_at >= :start");             values["start"] = start
-    if end:
-        conditions.append("created_at <= :end");               values["end"] = end
-    if reference_source:
-        conditions.append("reference_source = :ref_src");      values["ref_src"] = reference_source
-    if reference_symbol:
-        conditions.append("reference_symbol ILIKE :ref_sym");  values["ref_sym"] = f"%{reference_symbol}%"
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    # --- total count header ---
-    count_sql = "SELECT COUNT(*) AS c FROM contracts"
-    if conditions:
-        count_sql += " WHERE " + " AND ".join(conditions)
-    row_count = await database.fetch_one(count_sql, values)
-    try:
-        if response is not None:
-            response.headers["X-Total-Count"] = str(int(row_count["c"] or 0))
-    except Exception:
-        pass
-
-    # --- sort mapping ---
-    order_clause = "created_at DESC NULLS LAST"
-    if sort:
-        s = sort.lower()
-        if s == "price_per_ton_asc":
-            order_clause = "price_per_ton ASC NULLS LAST, created_at DESC NULLS LAST"
-        elif s == "price_per_ton_desc":
-            order_clause = "price_per_ton DESC NULLS LAST, created_at DESC NULLS LAST"
-        elif s == "weight_tons_desc":
-            order_clause = "weight_tons DESC NULLS LAST, created_at DESC NULLS LAST"
-        else:
-            order_clause = "created_at DESC NULLS LAST"
-
-    # finalize + fetch
-    query += f" ORDER BY {order_clause} LIMIT :limit OFFSET :offset"
-    values["limit"], values["offset"] = limit, offset
-    return await database.fetch_all(query=query, values=values)
-
-# ------- Contract ID--------
 @app.get("/contracts/{contract_id}", tags=["Contracts"], summary="Fetch contract by id")
 async def get_contract_by_id(contract_id: str):
     row = await database.fetch_one("SELECT * FROM contracts WHERE id = :id", {"id": contract_id})
@@ -8337,21 +8449,6 @@ async def material_price_history(material: str, seller: Optional[str] = None):
         rows = await database.fetch_all(q, {"material": material})
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
-
-@app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
-async def vendor_price_history(material: str, days:int = 365):
-    rows = await database.fetch_all("""
-      WITH latest AS (
-        SELECT DISTINCT ON (vendor, material, date_trunc('day', inserted_at)::date AS d)
-               date_trunc('day', inserted_at)::date AS d, vendor, material, price_per_lb
-          FROM vendor_quotes
-         WHERE material=:m AND inserted_at >= NOW() - make_interval(days => :days)
-         ORDER BY vendor, material, d, inserted_at DESC
-      )
-      SELECT d::date AS date, ROUND(AVG(price_per_lb)::numeric, 4) AS avg_lb, COUNT(*) AS vendors
-        FROM latest GROUP BY d ORDER BY d
-    """, {"m": material, "days": days})
-    return [{"date": str(r["date"]), "avg_lb": float(r["avg_lb"]), "vendors": int(r["vendors"])} for r in rows]
 
 # === Analytics: implement missing endpoints ===
 from datetime import timedelta as _td
