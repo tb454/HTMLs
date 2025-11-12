@@ -982,6 +982,42 @@ async def vq_ingest_csv(file: UploadFile = File(...)):
     """, rows)
     return {"inserted": len(rows)}
 
+@vendor_router.post("/ingest_excel", summary="Ingest an Excel (.xlsx) vendor quote")
+async def vq_ingest_excel(file: UploadFile = File(...)):
+    import pandas as pd
+    import io
+    content = await file.read()
+    df = pd.read_excel(io.BytesIO(content))
+    rows = []
+    for _, r in df.iterrows():
+        vendor   = str(r.get("vendor") or r.get("Vendor") or "").strip()
+        category = str(r.get("category") or r.get("Category") or "").strip()
+        material = str(r.get("material") or r.get("Material") or "").strip()
+        price    = _to_decimal(r.get("price") or r.get("Price") or 0)
+        unit     = str(r.get("unit") or r.get("Unit") or "LBS").strip().upper()
+        dt_raw   = str(r.get("date") or r.get("Date") or "").strip()
+        if not (vendor and material and price):
+            continue
+        price_per_lb = price if unit in ("LB","LBS","POUND","POUNDS") else (price / Decimal("2000") if unit in ("TON","TONS") else price)
+        sheet_date = None
+        try:
+            if dt_raw:
+                sheet_date = datetime.fromisoformat(dt_raw).date()
+        except Exception:
+            pass
+        rows.append({
+            "vendor": vendor, "category": category or "Unknown",
+            "material": material, "price_per_lb": price_per_lb,
+            "unit_raw": unit, "sheet_date": sheet_date, "source_file": file.filename
+        })
+    if not rows:
+        return {"inserted": 0}
+    await database.execute_many("""
+        INSERT INTO vendor_quotes(vendor,category,material,price_per_lb,unit_raw,sheet_date,source_file)
+        VALUES (:vendor,:category,:material,:price_per_lb,:unit_raw,:sheet_date,:source_file)
+    """, rows)
+    return {"inserted": len(rows)}
+
 @vendor_router.get("/current", summary="Latest blended $/lb per material (from most-recent vendor quotes)")
 async def vq_current(limit:int=500):
     # pick the latest quote per (vendor, material) then average per material
