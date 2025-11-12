@@ -38,6 +38,10 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas as _pdf
 from fastapi import UploadFile, File
 from decimal import Decimal, ROUND_HALF_UP
+from fastapi import APIRouter, UploadFile, File
+from sqlalchemy import Table, Column, String, DateTime, Integer, Text, Boolean
+from datetime import datetime, date
+import csv, io
 
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
