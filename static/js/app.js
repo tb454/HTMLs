@@ -85,6 +85,45 @@ function hideLoading(){
 // last resort, never let UI hang > 15s
 setTimeout(hideLoading, 15000);
 
+async function startMarketDataWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return new Promise((resolve) => {
+    const ws = new WebSocket(`${proto}://${location.host}/md/ws`);
+    let settled = false;
+    const cleanup = () => { if (!settled) { settled = true; resolve(); } };
+    const timer = setTimeout(() => { try { ws.close(); } catch {} cleanup(); }, 5000);
+    ws.onopen = () => { clearTimeout(timer); settled = true; resolve(); };
+    ws.onerror = cleanup;
+    ws.onclose = cleanup;
+    ws.onmessage = (ev) => { /* optional live updates */ };
+  });
+}
+
+function safe(fn){ try { return fn(), true; } catch(e){ console.warn(e); return false; } }
+
+async function initAdmin() {
+  showLoading();
+    // kick off everything in parallel and NEVER await a single long-poll
+    const tasks = [
+      apiJSON('/analytics/prices_over_time?material=Shred%20Steel&window=1M')
+        .then(d => safe(() => drawPriceChart(d))).catch(e => console.warn('prices_over_time', e)),
+      apiJSON('/analytics/tons_by_yard_this_month')
+        .then(rows => safe(() => renderYardTons(rows))).catch(e => console.warn('tons_by_yard', e)),
+      apiJSON('/admin/futures/products')
+        .then(p => safe(() => renderFuturesProducts((p && p.products) ? p.products : (Array.isArray(p) ? p : []))))
+        .catch(e => console.warn('futures/products', e)),
+      apiJSON('/bols?limit=100&offset=0')
+        .then(rows => safe(() => renderBOLs(rows || []))).catch(e => console.warn('bols', e)),
+      // do not block on ws
+      startMarketDataWS().catch(() => console.info('WS optional; continuing')),
+    ];
+    await Promise.allSettled(tasks);
+  hideLoading();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initAdmin().catch(err => { console.error(err); hideLoading(); });
+});
 // ---- static/js/app.js (or your admin boot file) ----
 async function startMarketDataWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';

@@ -9059,8 +9059,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         return hit
 
     # Deterministic UUID when an Idempotency-Key is present
-    bol_uuid = uuid5(NAMESPACE_URL, f"bol:{key}") if key else uuid4()
-    bol_id_str = str(bol_uuid)
+    bol_id = uuid5(NAMESPACE_URL, f"bol:{key}") if key else uuid4()
+    bol_id_str = str(bol_id)
 
     # Try to insert; if it already exists (same key), fetch the existing row
     row = await database.fetch_one("""
