@@ -4923,12 +4923,36 @@ def admin_export_all(request: Request = None):
 @app.get("/admin/futures/products", tags=["Futures"], summary="List futures products")
 async def list_products():
     await _ensure_futures_tables_if_missing()
-    rows = await database.fetch_all("SELECT * FROM futures_products ORDER BY symbol_root ASC")
+    rows = await database.fetch_all("""
+        SELECT
+          id::text        AS id,
+          symbol_root,
+          material,
+          delivery_location,
+          contract_size_tons,
+          tick_size,
+          currency,
+          price_method
+        FROM futures_products
+        ORDER BY symbol_root ASC
+    """)
     return {"products": [dict(r) for r in rows]}
 @app.get("/admin/futures/listings", tags=["Futures"], summary="List futures listings")
 async def list_listings():
     await _ensure_futures_tables_if_missing()
-    rows = await database.fetch_all("SELECT * FROM futures_listings ORDER BY expiry_date DESC")
+    rows = await database.fetch_all("""
+        SELECT
+          id::text        AS id,
+          product_id::text AS product_id,
+          contract_month,
+          contract_year,
+          expiry_date,
+          first_notice_date,
+          last_trade_date,
+          status
+        FROM futures_listings
+        ORDER BY expiry_date DESC
+    """)
     return {"listings": [dict(r) for r in rows]}
 # ===== FUTURES endpoints =====
 
