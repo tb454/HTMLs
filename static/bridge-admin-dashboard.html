@@ -72,8 +72,23 @@
       await ping();
       setInterval(ping, 15000);
     });
-
   </script>
+
+  <script nonce="{{NONCE}}">
+    // Remove the 'loading' class and any preloader overlay if you use one
+    window.hideLoading = function(){
+      try { document.documentElement.classList.remove('loading'); } catch {}
+      try { document.body.classList.add('loaded'); } catch {}
+      const overlay = document.getElementById('preload') || document.getElementById('loading-overlay');
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+  </script>
+
+  <script nonce="{{NONCE}}">
+    // If DOMContentLoaded doesn't fire, still clear the loader.
+    setTimeout(() => { try { window.hideLoading && window.hideLoading(); } catch {} }, 2500);
+  </script>
+
   <script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/admin-pagination.js?v=20251111" defer nonce="{{NONCE}}"></script>
   <script nonce="{{NONCE}}">
@@ -213,21 +228,35 @@
 
 <canvas id="bolsByDay" height="120" class="mb-3"></canvas>
 <script nonce="{{NONCE}}">
-(async function(){
+onReady(async function(){
   try{
-    const res = await api("/analytics/prices_over_time?material=Shred%20Steel&window=1M");
+    // Wait until Chart.js is available (it’s loaded later on the page)
+    if (!window.Chart) {
+      let tries = 0;
+      await new Promise((resolve) => {
+        const iv = setInterval(() => {
+          if (window.Chart || tries++ > 100) { clearInterval(iv); resolve(); }
+        }, 30);
+      });
+    }
+    if (!window.Chart) return;
+
+    const res  = await api("/analytics/prices_over_time?material=Shred%20Steel&window=1M");
     const data = await res.json();
-    const ctx = document.getElementById('bolsByDay').getContext('2d');    
+    const el   = document.getElementById('bolsByDay');
+    if (!el) return;
+    const ctx  = el.getContext('2d');
+
     new Chart(ctx, {
       type: 'line',
       data: {
         labels: data.map(r=>r.date),
-        datasets: [{label:"Avg $/ton (1M)", data: data.map(r=>r.avg_price)}]
+        datasets: [{ label: "Avg $/ton (1M)", data: data.map(r=>r.avg_price) }]
       },
-      options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true}}}
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:true } } }
     });
-  }catch(e){}
-})();
+  } catch (e) {}
+});
 </script>
 
 <div class="d-flex gap-2">

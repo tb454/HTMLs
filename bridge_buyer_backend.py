@@ -8672,14 +8672,58 @@ async def analytics_prices_over_time(material: str, window: str = "1M"):
     rows = await database.fetch_all(q, {"m": material, "days": days})
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"]), "volume": float(r["volume_tons"])} for r in rows]
 
-@app.post("/indices/run", tags=["Indices"], summary="Run BR-Index builder")
+@app.post("/indices/run", tags=["Indices"], summary="Refs + Vendor + Blended")
 async def indices_run():
     try:
-        await run_indices_builder()
-        METRICS_INDICES_SNAPSHOTS.inc()
+        # 1) Pull references (COMEX/LME) – your stub is fine
+        await pull_now_all()
+
+        # 2) Snapshot vendor layer into indices_daily (region='vendor')
+        await vendor_snapshot_to_indices()
+
+        # 3) Blended 70/30 (reference price vs latest vendor LB)
+        await database.execute("""
+          INSERT INTO indices_daily(symbol, ts, region, price)
+          SELECT
+            CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
+            NOW()                                      AS ts,
+            'blended'                                  AS region,
+            0.70*b.price + 0.30*v.vendor_lb            AS price
+          FROM (
+            -- latest reference per symbol from reference_prices
+            SELECT rp.symbol, rp.price
+            FROM reference_prices rp
+            JOIN (
+              SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
+              FROM reference_prices
+              GROUP BY symbol
+            ) last ON last.symbol = rp.symbol
+                  AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
+          ) b
+          JOIN (
+            -- latest vendor LB per canonical material
+            SELECT m.material_canonical AS symbol,
+                   AVG(v.price_per_lb)  AS vendor_lb
+            FROM vendor_quotes v
+            JOIN vendor_material_map m
+              ON m.vendor = v.vendor AND m.material_vendor = v.material
+            WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+              AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+            GROUP BY 1
+          ) v ON v.symbol = b.symbol
+        """)
+
+        # keep your metric
+        try: METRICS_INDICES_SNAPSHOTS.inc()
+        except: pass
+
+        # log success
+        try: logger.info("indices_run_ok", step="refs+vendor+blended")
+        except: pass
+
         return {"ok": True}
     except Exception as e:
-        try: logger.warn("indices_run_failed", err=str(e))
+        try: logger.warning("indices_run_failed", err=str(e))
         except: pass
         return {"ok": False, "skipped": True}
 
