@@ -45,7 +45,7 @@ async function api(path, opts = {}) {
 }
 
 const $ = sel => document.querySelector(sel);
-function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
+function setBtnBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 function csvDownload(filename, rows){
   if(!rows?.length){ toast('No data.'); return; }
   const headers = Object.keys(rows[0]||{});
@@ -136,8 +136,6 @@ async function startMarketDataWS() {
     ws.onmessage = (ev) => { /* update tickers */ };
   });
 }
-
-function safe(fn){ try { return fn(); } catch(e){ console.warn(e); } }
 
 async function initAdmin() {
   showLoading();

@@ -5314,6 +5314,7 @@ async def list_products():
         ORDER BY symbol_root ASC
     """)
     return {"products": [dict(r) for r in rows]}
+
 @app.get("/admin/futures/listings", tags=["Futures"], summary="List futures listings")
 async def list_listings():
     await _ensure_futures_tables_if_missing()
@@ -5333,6 +5334,166 @@ async def list_listings():
     return {"listings": [dict(r) for r in rows]}
 # ===== FUTURES endpoints =====
 
+# -------- Futures (admin create/update) --------
+from fastapi import Body
+from pydantic import BaseModel, Field
+from datetime import datetime, date
+import os
+
+futures_admin = APIRouter(prefix="/admin/futures", tags=["Futures (Admin)"])
+
+@startup
+async def _ddl_futures_admin():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS futures_products(
+        id            BIGSERIAL PRIMARY KEY,
+        symbol        TEXT UNIQUE NOT NULL,   -- e.g., BR-AL6063
+        name          TEXT NOT NULL,
+        unit          TEXT NOT NULL DEFAULT 'LB',   -- LB / TON etc
+        currency      TEXT NOT NULL DEFAULT 'USD',
+        tick_size     NUMERIC NOT NULL DEFAULT 0.01,
+        active        BOOLEAN NOT NULL DEFAULT TRUE,
+        inserted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS futures_pricing_params(
+        id            BIGSERIAL PRIMARY KEY,
+        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
+        pricing_model  TEXT NOT NULL DEFAULT 'vwap',  -- vwap/manual/formula
+        vendor_weight  NUMERIC NOT NULL DEFAULT 0.30,
+        bench_weight   NUMERIC NOT NULL DEFAULT 0.70,
+        metadata       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        inserted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS futures_series(
+        id            BIGSERIAL PRIMARY KEY,
+        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
+        contract_month DATE NOT NULL,                 -- use first of month
+        status        TEXT NOT NULL DEFAULT 'Draft',  -- Draft/Listed/Expired
+        UNIQUE(product_symbol, contract_month)
+    );
+
+    CREATE TABLE IF NOT EXISTS futures_marks(
+        id            BIGSERIAL PRIMARY KEY,
+        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
+        contract_month DATE NOT NULL,
+        ts            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        method        TEXT NOT NULL DEFAULT 'Manual', -- Manual/VWAP
+        price         NUMERIC NOT NULL,
+        note          TEXT,
+        UNIQUE(product_symbol, contract_month, ts)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_fut_series_prod_month ON futures_series(product_symbol, contract_month);
+    CREATE INDEX IF NOT EXISTS idx_fut_marks_prod_month ON futures_marks(product_symbol, contract_month, ts DESC);
+    """)
+
+class FutProductIn(BaseModel):
+    symbol: str = Field(..., examples=["BR-AL6063"])
+    name: str
+    unit: str = "LB"
+    currency: str = "USD"
+    tick_size: float = 0.01
+    active: bool = True
+
+@futures_admin.post("/products", summary="Create/Upsert futures product")
+async def create_or_upsert_product(p: FutProductIn):
+    q = """
+    INSERT INTO futures_products(symbol, name, unit, currency, tick_size, active)
+    VALUES(:symbol, :name, :unit, :currency, :tick_size, :active)
+    ON CONFLICT(symbol) DO UPDATE SET
+        name=EXCLUDED.name,
+        unit=EXCLUDED.unit,
+        currency=EXCLUDED.currency,
+        tick_size=EXCLUDED.tick_size,
+        active=EXCLUDED.active,
+        updated_at=NOW()
+    RETURNING *;
+    """
+    row = await database.fetch_one(query=q, values=p.model_dump())
+    return row
+
+class FutPricingIn(BaseModel):
+    product_symbol: str
+    pricing_model: str = "vwap"         # vwap/manual/formula
+    vendor_weight: float = 0.30
+    bench_weight: float = 0.70
+    metadata: dict = {}
+
+@futures_admin.post("/pricing", summary="Set pricing parameters for product")
+async def set_pricing(params: FutPricingIn):
+    # simple guard
+    if params.vendor_weight + params.bench_weight == 0:
+        raise HTTPException(status_code=400, detail="Both weights are zero.")
+    q = """
+    INSERT INTO futures_pricing_params(product_symbol, pricing_model, vendor_weight, bench_weight, metadata)
+    VALUES(:product_symbol, :pricing_model, :vendor_weight, :bench_weight, :metadata)
+    RETURNING *;
+    """
+    row = await database.fetch_one(query=q, values=params.model_dump())
+    return row
+
+class FutSeriesGenIn(BaseModel):
+    product_symbol: str
+    start_month: date         # use YYYY-MM-01
+    months: int = 12          # how many months to generate
+    list_immediately: bool = False
+
+@futures_admin.post("/series/generate", summary="Generate monthly series")
+async def generate_series(inp: FutSeriesGenIn):
+    created = 0
+    status = "Listed" if inp.list_immediately else "Draft"
+    month = date(inp.start_month.year, inp.start_month.month, 1)
+    for i in range(inp.months):
+        q = """
+        INSERT INTO futures_series(product_symbol, contract_month, status)
+        VALUES(:ps, :cm, :st)
+        ON CONFLICT(product_symbol, contract_month) DO NOTHING;
+        """
+        vals = {"ps": inp.product_symbol, "cm": month, "st": status}
+        await database.execute(query=q, values=vals)
+        created += 1
+        # roll 1 month
+        if month.month == 12:
+            month = date(month.year + 1, 1, 1)
+        else:
+            month = date(month.year, month.month + 1, 1)
+    return {"created": created, "status": status}
+
+class FutPublishMarkIn(BaseModel):
+    product_symbol: str
+    contract_month: date      # YYYY-MM-01
+    method: str = "Manual"    # Manual/VWAP
+    price: float
+    note: str | None = None
+    list_if_draft: bool = True
+
+@futures_admin.post("/marks/publish", summary="Publish a settlement/mark and (optionally) list series")
+async def publish_mark(inp: FutPublishMarkIn):
+    # write mark
+    q1 = """
+    INSERT INTO futures_marks(product_symbol, contract_month, method, price, note)
+    VALUES(:ps, :cm, :m, :p, :n)
+    RETURNING *;
+    """
+    mark = await database.fetch_one(query=q1, values={
+        "ps": inp.product_symbol, "cm": inp.contract_month,
+        "m": inp.method, "p": inp.price, "n": inp.note
+    })
+    # flip Draft -> Listed if requested
+    if inp.list_if_draft:
+        await database.execute(
+            "UPDATE futures_series SET status='Listed' WHERE product_symbol=:ps AND contract_month=:cm AND status='Draft'",
+            {"ps": inp.product_symbol, "cm": inp.contract_month}
+        )
+    return {"mark": mark}
+
+# mount
+app.include_router(futures_admin)
+# ------- Futures (admin create/update) -------
+ 
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
 def dr_objectives():
@@ -6911,6 +7072,117 @@ async def _ensure_rfq_schema():
         except Exception as e:
             logger.warn("rfq_schema_bootstrap_failed", err=str(e), sql=s[:90])
 #------- RFQs -------
+
+# -------- RFQ (create/quote/award) --------
+rfq_router = APIRouter(prefix="/rfq", tags=["RFQ"])
+
+@startup
+async def _ddl_rfq():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS rfq(
+        id           BIGSERIAL PRIMARY KEY,
+        buyer        TEXT NOT NULL,
+        material     TEXT NOT NULL,
+        tons         NUMERIC NOT NULL,
+        target_date  DATE,
+        notes        TEXT,
+        status       TEXT NOT NULL DEFAULT 'Open',  -- Open/Awarded/Closed
+        inserted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS rfq_quotes(
+        id           BIGSERIAL PRIMARY KEY,
+        rfq_id       BIGINT NOT NULL REFERENCES rfq(id) ON DELETE CASCADE,
+        seller       TEXT NOT NULL,
+        price_per_lb NUMERIC NOT NULL,
+        notes        TEXT,
+        inserted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS rfq_awards(
+        id           BIGSERIAL PRIMARY KEY,
+        rfq_id       BIGINT NOT NULL REFERENCES rfq(id) ON DELETE CASCADE,
+        quote_id     BIGINT NOT NULL REFERENCES rfq_quotes(id) ON DELETE CASCADE,
+        awarded_by   TEXT NOT NULL,
+        awarded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rfq_status ON rfq(status);
+    CREATE INDEX IF NOT EXISTS idx_rfq_quotes_rfq ON rfq_quotes(rfq_id);
+    """)
+
+class RFQCreate(BaseModel):
+    buyer: str
+    material: str
+    tons: float
+    target_date: date | None = None
+    notes: str | None = None
+
+@rfq_router.post("", summary="Create RFQ")
+async def create_rfq(data: RFQCreate):
+    q = """
+    INSERT INTO rfq(buyer, material, tons, target_date, notes)
+    VALUES(:buyer, :material, :tons, :target_date, :notes)
+    RETURNING *;
+    """
+    row = await database.fetch_one(query=q, values=data.model_dump())
+    return row
+
+class RFQQuoteIn(BaseModel):
+    seller: str
+    price_per_lb: float
+    notes: str | None = None
+
+@rfq_router.post("/{rfq_id}/quote", summary="Submit quote for an RFQ")
+async def quote_rfq(rfq_id: int, qin: RFQQuoteIn):
+    # RFQ must be open
+    rfq_row = await database.fetch_one("SELECT id, status FROM rfq WHERE id=:id", {"id": rfq_id})
+    if not rfq_row:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq_row["status"] != "Open":
+        raise HTTPException(status_code=400, detail="RFQ not open")
+
+    q = """
+    INSERT INTO rfq_quotes(rfq_id, seller, price_per_lb, notes)
+    VALUES(:rfq_id, :seller, :price_per_lb, :notes)
+    RETURNING *;
+    """
+    row = await database.fetch_one(query=q, values={"rfq_id": rfq_id, **qin.model_dump()})
+    return row
+
+class RFQAwardIn(BaseModel):
+    quote_id: int
+    awarded_by: str
+
+@rfq_router.post("/{rfq_id}/award", summary="Award an RFQ to a quote")
+async def award_rfq(rfq_id: int, ain: RFQAwardIn):
+    # verify RFQ and quote
+    rfq_row = await database.fetch_one("SELECT id, status FROM rfq WHERE id=:id", {"id": rfq_id})
+    if not rfq_row:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq_row["status"] != "Open":
+        raise HTTPException(status_code=400, detail="RFQ not open")
+
+    qrow = await database.fetch_one(
+        "SELECT id FROM rfq_quotes WHERE id=:qid AND rfq_id=:rid",
+        {"qid": ain.quote_id, "rid": rfq_id}
+    )
+    if not qrow:
+        raise HTTPException(status_code=404, detail="Quote not found for this RFQ")
+
+    # award + close rfq
+    award = await database.fetch_one("""
+        INSERT INTO rfq_awards(rfq_id, quote_id, awarded_by)
+        VALUES(:rid, :qid, :by)
+        RETURNING *;
+    """, {"rid": rfq_id, "qid": ain.quote_id, "by": ain.awarded_by})
+
+    await database.execute("UPDATE rfq SET status='Awarded' WHERE id=:id", {"id": rfq_id})
+    return {"award": award}
+
+# mount
+app.include_router(rfq_router)
+# -------- RFQ (create/quote/award) --------
 
 # ------ Contracts refs index ------
 @startup
@@ -9565,6 +9837,87 @@ async def ice_rotate_secret():
     # record a rotation (you can also bump LINK_SIGNING_SECRET or ICE_WEBHOOK_SECRET)
     return {"ok": True, "note": "Rotate via env/secrets manager; this endpoint just acks."}
 # ----- ICE Logs/Testing/Resend/Rotate -----
+
+# -------- Admin (ICE logs/tools) --------
+admin_ice = APIRouter(prefix="/admin/ice", tags=["Admin/ICE"])
+
+@startup
+async def _ddl_admin_ice():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS ice_delivery_logs(
+        id            BIGSERIAL PRIMARY KEY,
+        bol_id        BIGINT,
+        endpoint      TEXT,
+        status_code   INT,
+        latency_ms    INT,
+        ok            BOOLEAN,
+        payload       JSONB,
+        error         TEXT,
+        ts            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ice_logs_ts ON ice_delivery_logs(ts DESC);
+
+    CREATE TABLE IF NOT EXISTS ice_secrets(
+        id            BIGSERIAL PRIMARY KEY,
+        name          TEXT UNIQUE NOT NULL,
+        secret        TEXT NOT NULL,
+        rotated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
+
+class LogsPage(BaseModel):
+    items: list[dict]
+    total: int
+    limit: int
+    offset: int
+
+@admin_ice.get("/logs", response_model=LogsPage, summary="List ICE delivery logs")
+async def ice_logs(limit: int = 25, offset: int = 0):
+    total = await database.fetch_val("SELECT COUNT(*) FROM ice_delivery_logs")
+    rows = await database.fetch_all(
+        "SELECT * FROM ice_delivery_logs ORDER BY ts DESC LIMIT :lim OFFSET :off",
+        {"lim": limit, "off": offset}
+    )
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+class ResendIn(BaseModel):
+    log_id: int
+
+@admin_ice.post("/resend", summary="Resend a failed ICE delivery (stub)")
+async def ice_resend(inp: ResendIn):
+    row = await database.fetch_one("SELECT * FROM ice_delivery_logs WHERE id=:id", {"id": inp.log_id})
+    if not row:
+        raise HTTPException(status_code=404, detail="Log not found")
+    # TODO: actually re-post payload to ICE endpoint with signing; for now we just write a synthetic success
+    await database.execute("""
+        INSERT INTO ice_delivery_logs(bol_id, endpoint, status_code, latency_ms, ok, payload, error)
+        VALUES(:bol, :ep, 200, 123, TRUE, :pl, NULL)
+    """, {"bol": row["bol_id"], "ep": row["endpoint"], "pl": row["payload"]})
+    return {"status": "resent_enqueued"}
+
+@admin_ice.post("/test_ping", summary="Test ICE connectivity (stub)")
+async def ice_test_ping():
+    # In real impl: make a signed HEAD/GET to ICE sandbox
+    await asyncio.sleep(0.05)
+    return {"ok": True, "latency_ms": 50}
+
+class RotateIn(BaseModel):
+    name: str
+
+@admin_ice.post("/rotate_secret", summary="Rotate ICE signing secret (stub)")
+async def ice_rotate_secret(inp: RotateIn):
+    new_secret = secrets.token_urlsafe(48)
+    await database.execute("""
+        INSERT INTO ice_secrets(name, secret, rotated_at)
+        VALUES(:n, :s, NOW())
+        ON CONFLICT(name) DO UPDATE SET secret=EXCLUDED.secret, rotated_at=NOW()
+    """, {"n": inp.name, "s": new_secret})
+    return {"name": inp.name, "last4": new_secret[-4:]}
+
+# mount
+app.include_router(admin_ice)
+# -------- Admin (ICE logs/tools) --------
 
 # --- Admin listings/approve/export ---
 class ApplicationRow(BaseModel):
