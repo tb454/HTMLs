@@ -746,7 +746,7 @@ onReady(async function(){
     async function fetchJSON(url, opts){ const r = await api(url, opts||{}); return r.json(); }
     function statusColor(s){ return {Open:'secondary',Matched:'info','BOL Issued':'primary','In Transit':'warning',Delivered:'success',Closed:'dark'}[s] || 'light'; }
     function formatTime(iso){ try{ return iso? new Date(iso).toLocaleString() : '—'; }catch{ return '—'; } }
-    const safe = v => (v ?? '—');
+    const safeVal = v => (v ?? '—');
     const _fmtUSD = new Intl.NumberFormat(undefined, { style:'currency', currency:'USD', maximumFractionDigits:2 });
     const money = n => _fmtUSD.format(Number(n||0));
     const esc = (s)=>String(s??'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
@@ -836,7 +836,7 @@ onReady(async function(){
           <td>${esc(bol.contract_id)}</td>
           <td>${esc(bol.buyer)}</td>
           <td>${esc(bol.material)}</td>
-          <td>${safe(bol.weight_tons)}</td>
+          <td>${safeVal(bol.weight_tons)}</td>
           <td><span class="badge bg-${statusColor(bol.status)}">${esc(bol.status)}</span></td>
           <td>${formatTime(bol.pickup_time)}</td>
           <td>${formatTime(bol.delivery_time)}</td>
