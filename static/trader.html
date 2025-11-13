@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="x-ua-compatible" content="ie=edge"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Trader</title>
+</head>
+<body class="min-h-screen" style="font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;">
+  <header style="padding:12px 16px; border-bottom:1px solid #ddd;">
+    <h1 style="margin:0; font-size:20px;">Trader</h1>
+  </header>
+
+  <main style="padding:16px; display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+    <!-- Left: Index chart -->
+    <section style="border:1px solid #eee; border-radius:12px; padding:12px;">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">BR-Index</h2>
+
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+        <label for="symbolSel">Symbol</label>
+        <select id="symbolSel" style="min-width:260px; padding:6px;"></select>
+
+        <label for="limitSel">Points</label>
+        <select id="limitSel" style="padding:6px;">
+          <option>100</option>
+          <option selected>500</option>
+          <option>1000</option>
+        </select>
+
+        <button id="loadBtn" style="padding:6px 10px; border:1px solid #ccc; border-radius:8px; cursor:pointer;">Load</button>
+      </div>
+
+      <canvas id="idxChart" height="220"></canvas>
+
+      <div id="idxMeta" style="margin-top:8px; font-size:12px; opacity:.8;"></div>
+    </section>
+
+    <!-- Right: Quick Scrap Quote -->
+    <section style="border:1px solid #eee; border-radius:12px; padding:12px;">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Quick Scrap Quote</h2>
+
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+        <label for="matInput">Material</label>
+        <input id="matInput" type="text" placeholder="e.g., AL 6063 OLD EXTRUSION PREPARED" style="flex:1; min-width:260px; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        <button id="quoteBtn" style="padding:6px 10px; border:1px solid #ccc; border-radius:8px; cursor:pointer;">Get Quote</button>
+      </div>
+
+      <div id="quoteOut" style="font-size:14px;"></div>
+      <div id="quoteErr" style="font-size:12px; color:#b00020; margin-top:6px;"></div>
+
+      <hr style="margin:12px 0; border:0; border-top:1px solid #eee;"/>
+
+      <p style="font-size:12px; opacity:.8; margin:0;">
+        Quotes prefer vendor-blended $/lb when available; otherwise they fall back to reference benchmarks.
+      </p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer nonce="{{NONCE}}"></script>
+  <script defer nonce="{{NONCE}}">
+  (function(){
+    // helpers
+    async function api(path){
+      const r = await fetch(path, { credentials: 'same-origin' });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }
+
+    const symbolSel = document.getElementById('symbolSel');
+    const limitSel  = document.getElementById('limitSel');
+    const loadBtn   = document.getElementById('loadBtn');
+    const matInput  = document.getElementById('matInput');
+    const quoteBtn  = document.getElementById('quoteBtn');
+    const quoteOut  = document.getElementById('quoteOut');
+    const quoteErr  = document.getElementById('quoteErr');
+    const idxMeta   = document.getElementById('idxMeta');
+    const ctx       = document.getElementById('idxChart').getContext('2d');
+
+    let chart;
+
+    function drawChart(points){
+      const labels = points.map(p => p.ts || p.time || p.date || '');
+      const data   = points.map(p => +p.price);
+
+      if(chart){ chart.destroy(); }
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets: [{ label: 'Price', data }] },
+        options: { responsive:true, animation:false, scales:{ y:{ beginAtZero:false } } }
+      });
+    }
+
+    async function loadUniverse(){
+      try {
+        const syms = await api('/indices/universe');
+        symbolSel.innerHTML = syms.map(s => `<option value="${s}">${s}</option>`).join('');
+      } catch(e){
+        console.error(e);
+        symbolSel.innerHTML = `<option disabled>Failed to load</option>`;
+      }
+    }
+
+    async function loadHistory(){
+      const symbol = symbolSel.value;
+      const limit  = +limitSel.value || 500;
+      idxMeta.textContent = '';
+      try {
+        const rows = await api(`/indices/history?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+        drawChart(rows.slice().reverse()); // ascending for chart aesthetics
+        if(rows.length){
+          const last = rows[0];
+          idxMeta.textContent = `Latest: ${last.price} @ ${last.ts} (region: ${last.region})`;
+        } else {
+          idxMeta.textContent = 'No data for this symbol yet.';
+        }
+      } catch(e){
+        console.error(e);
+        idxMeta.textContent = 'Failed to load history.';
+      }
+    }
+
+    async function getQuote(){
+      quoteOut.textContent = '';
+      quoteErr.textContent = '';
+      const material = (matInput.value || '').trim();
+      if(!material){ quoteErr.textContent = 'Enter a material name.'; return; }
+      try {
+        const q = await api(`/pricing/quote?material=${encodeURIComponent(material)}`);
+        quoteOut.textContent = `${q.material}: $${q.price_per_lb.toFixed ? q.price_per_lb.toFixed(4) : q.price_per_lb} per lb (source: ${q.source})`;
+      } catch(e){
+        quoteErr.textContent = 'No quote found (try a different material or ensure reference/vendor data is loaded).';
+      }
+    }
+
+    // events
+    loadBtn.addEventListener('click', loadHistory);
+    quoteBtn.addEventListener('click', getQuote);
+
+    // init
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadUniverse();
+      if(symbolSel.options.length){ await loadHistory(); }
+    });
+  })();
+  </script>
+</body>
+</html>

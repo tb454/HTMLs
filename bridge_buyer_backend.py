@@ -501,6 +501,12 @@ async def ice_status():
     return {"status": "live" if live else "sandbox"}
 # --- ICE status probe ---
 
+# ---- Trader page ----
+@app.get("/trader", include_in_schema=False)
+async def _trader_page():
+    return FileResponse("static/trader.html")
+# ---- Trader page ----
+
 # ===== DB bootstrap for CI/staging =====
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     """Create minimal tables needed for app/tests when ENV is non-prod."""
@@ -8809,13 +8815,10 @@ async def public_indices_csv(days: int = 365, region: Optional[str] = None, mate
 
 @app.post("/indices/snapshot_blended", tags=["Indices"], summary="Snapshot 70/30 blended (bench/vendor) into indices_daily", status_code=200)
 async def indices_snapshot_blended():
-    # bench: latest reference_prices per symbol (price_lb)
-    # vend : latest vendor LB per symbol (avg)
     await database.execute("""
         INSERT INTO indices_daily(symbol, ts, region, price)
         SELECT CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
-               NOW() AS ts,
-               'blended' AS region,
+               NOW(), 'blended',
                0.70 * b.price_lb + 0.30 * v.vendor_lb AS price
         FROM (
           SELECT symbol, price_lb
