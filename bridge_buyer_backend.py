@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, pathlib
-
+import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,13 @@ from fastapi import APIRouter, UploadFile, File
 from sqlalchemy import Table, Column, String, DateTime, Integer, Text, Boolean
 from datetime import datetime, date
 import csv, io
+from fastapi.responses import StreamingResponse, RedirectResponse
+import zipfile, io, csv
+import sqlalchemy
+from sqlalchemy import text as _sqltext
+from uuid import uuid4, uuid5, NAMESPACE_URL
+from datetime import timedelta as _td
+from datetime import datetime as _dt, timezone as _tz
 
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
@@ -453,6 +460,36 @@ async def get_pricing():
             "ws_messages_per_1m": 5.00,
         },
     }
+
+@app.get("/pricing/quote", tags=["Pricing"], summary="Quote $/lb for material", status_code=200)
+async def pricing_quote(material: str):
+    # 1) Try vendor blend via mapping first
+    row = await database.fetch_one("""
+        WITH latest_vendor AS (
+          SELECT m.material_canonical AS mat, AVG(v.price_per_lb) AS vendor_lb
+          FROM vendor_quotes v
+          JOIN vendor_material_map m
+            ON m.vendor=v.vendor AND m.material_vendor=v.material
+          WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+            AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+            AND m.material_canonical ILIKE :mat
+          GROUP BY 1
+        )
+        SELECT vendor_lb FROM latest_vendor
+    """, {"mat": material})
+    if row and row["vendor_lb"] is not None:
+        return {"material": material, "price_per_lb": float(row["vendor_lb"]), "source": "vendor"}
+
+    # 2) Fallback to your benchmark/reference (adapt to your schema if needed)
+    bench = await database.fetch_one("""
+        SELECT price_lb FROM reference_prices
+        WHERE symbol ILIKE :mat
+        ORDER BY ts DESC LIMIT 1
+    """, {"mat": material})
+    if bench:
+        return {"material": material, "price_per_lb": float(bench["price_lb"]), "source": "reference"}
+
+    raise HTTPException(status_code=404, detail="No price found")
 # === Prices endpoint ===
 
 # --- ICE status probe for UI banner ---
@@ -465,9 +502,6 @@ async def ice_status():
 # --- ICE status probe ---
 
 # ===== DB bootstrap for CI/staging =====
-import sqlalchemy
-from sqlalchemy import text as _sqltext
-
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     """Create minimal tables needed for app/tests when ENV is non-prod."""
     ddl = """
@@ -933,6 +967,39 @@ def _ensure_database_exists(dsn: str):
 # ===== Vendor Quotes (ingest + pricing blend) =====
 vendor_router = APIRouter(prefix="/vendor_quotes", tags=["Vendor Quotes"])
 
+@vendor_router.get("/latest", summary="Latest vendor quotes by sheet_date", status_code=200)
+async def vendor_latest(limit: int = 200):
+    rows = await database.fetch_all("""
+        WITH latest_date AS (
+          SELECT MAX(sheet_date) AS d FROM vendor_quotes
+        )
+        SELECT vendor, category, material, price_per_lb, unit_raw, sheet_date, source_file, inserted_at
+        FROM vendor_quotes, latest_date
+        WHERE sheet_date = latest_date.d
+        ORDER BY vendor, material
+        LIMIT :limit
+    """, {"limit": limit})
+    return [dict(r) for r in rows]
+
+@vendor_router.post("/snapshot_to_indices", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
+async def vendor_snapshot_to_indices():
+    # Use your existing _vendor_blended_lb(material) helper if it exists and returns lb-price;
+    # Here we snapshot *all mapped* materials.
+    await database.execute("""
+        INSERT INTO indices_daily(symbol, ts, region, price)
+        SELECT
+          CONCAT('BR-', REPLACE(m.material_canonical, ' ', '-')) AS symbol,
+          NOW() AS ts,
+          'vendor' AS region,
+          v.price_per_lb AS price
+        FROM vendor_quotes v
+        JOIN vendor_material_map m
+          ON m.vendor = v.vendor AND m.material_vendor = v.material
+        WHERE v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+          AND v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+    """)
+    return {"ok": True}
+
 @startup
 async def _ensure_vendor_quotes_schema():
     await run_ddl_multi("""
@@ -948,7 +1015,19 @@ async def _ensure_vendor_quotes_schema():
       inserted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_vq_mat_time ON vendor_quotes(material, inserted_at DESC);
+
+    -- vendor_material_map (maps vendor's raw material name to your canonical key)
+    CREATE TABLE IF NOT EXISTS vendor_material_map (
+      id BIGSERIAL PRIMARY KEY,
+      vendor TEXT NOT NULL,
+      material_vendor TEXT NOT NULL,
+      material_canonical TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_vmm_vendor_vendor_mat
+      ON vendor_material_map(vendor, material_vendor);
     """)
+# ===== Vendor Quotes (ingest + pricing blend) =====
+
 # ------     Billing & International DDL -----
 @startup
 async def _ensure_billing_and_international_schema():
@@ -1130,14 +1209,16 @@ async def _vendor_blended_lb(material: str) -> float | None:
     row = await database.fetch_one("""
       WITH latest AS (
         SELECT DISTINCT ON (vendor, material)
-               vendor, material, price_per_lb, inserted_at
+               vendor, material, price_per_lb, unit_raw, inserted_at
           FROM vendor_quotes
          WHERE material = :m
+           AND (unit_raw IS NULL OR UPPER(unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
          ORDER BY vendor, material, inserted_at DESC
       )
-      SELECT AVG(price_per_lb) AS p FROM latest
+      SELECT AVG(price_per_lb) AS p
+        FROM latest
     """, {"m": material})
-    return (float(row["p"]) if row and row["p"] is not None else None)
+    return float(row["p"]) if row and row["p"] is not None else None
 
 app.include_router(vendor_router)
 
@@ -4088,9 +4169,6 @@ async def billing_prefs_upsert(
     """, {"m": member, "d": billing_day, "tz": timezone, "ac": auto_charge})
     return {"ok": True}
 
-from datetime import datetime as _dt, timezone as _tz
-import pytz
-
 def _cycle_bounds(today_local: _dt, billing_day: int):
     # given local “now” and target day (2..26), compute current-cycle start & end (open interval [start, end))
     # If today is billing day, end is today; start = previous billing day (last month or this month).
@@ -5064,10 +5142,6 @@ ORDER BY c.created_at DESC NULLS LAST, c.id DESC
 """
 
 # --- ZIP export (all core data) ---
-from fastapi.responses import StreamingResponse
-import zipfile, io, csv
-from sqlalchemy import text as _sqltext
-
 @app.get("/admin/export_all", tags=["Admin"], summary="Download ZIP of all CSVs")
 def admin_export_all(request: Request = None):
     try:
@@ -5155,6 +5229,30 @@ def admin_export_all(request: Request = None):
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
+
+@app.get("/admin/exports/all.zip", tags=["Admin"], summary="Download all datasets in a zip", status_code=200)
+async def admin_export_all():
+    import io, zipfile, csv, datetime as dt
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+      for name, sql in [
+        ("contracts.csv", "SELECT * FROM contracts"),
+        ("bols.csv", "SELECT * FROM bols"),
+        ("vendor_quotes.csv", "SELECT * FROM vendor_quotes"),
+        ("indices_daily.csv", "SELECT * FROM indices_daily"),
+      ]:
+        rows = await database.fetch_all(sql)
+        s = io.StringIO()
+        if rows:
+            writer = csv.DictWriter(s, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows([dict(r) for r in rows])
+        else:
+            s.write("")
+        z.writestr(name, s.getvalue())
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="all.zip"'} )
 # --- ZIP export (all core data) ---
 
 # ===== FUTURES endpoints =====
@@ -7677,7 +7775,6 @@ async def invites_accept_submit(token: str = Form(...), email: str = Form(...), 
 # -------- Documents: BOL PDF --------
 from pathlib import Path
 import tempfile
-from zoneinfo import ZoneInfo
 def _local(ts, tzname: str | None = None):
     if not ts:
         return "—"
@@ -7898,6 +7995,23 @@ async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: R
 
     return {"receipt_id": receipt_id, "status": "consumed"}
 #-------- Receipts lifecycle --------
+
+# ----- Reference Prices -----
+@app.post("/reference_prices/pull_now_all", tags=["Reference"], summary="Pull reference prices now", status_code=200)
+async def pull_now_all():
+    # Wire to your actual COMEX/LME puller; for now a stub response
+    # (call your existing internal function if you have one)
+    return {"ok": True, "msg": "Pull started"}
+# ----- Reference Prices -----
+
+# ----- News -----
+@app.get("/news/ticker", tags=["News"], summary="Simple ticker list", status_code=200)
+async def news_ticker():
+    return [
+        {"source": "Bloomberg", "title": "Metals rally on supply shock", "url": "https://example.com/1"},
+        {"source": "NPR", "title": "Recycling prices diverge by region", "url": "https://example.com/2"},
+    ]
+# ----- News -----
 
 # ---- Finance: receivables mint ----
 class ReceivableIn(BaseModel):
@@ -8432,8 +8546,6 @@ async def material_price_history(material: str, seller: Optional[str] = None):
     return [{"date": str(r["d"]), "avg_price": float(r["avg_price"])} for r in rows]
 
 # === Analytics: implement missing endpoints ===
-from datetime import timedelta as _td
-
 def _parse_window_to_days(window: str) -> int:
     w = (window or "1M").strip().upper()
     if w.endswith("D"): return max(1, int(w[:-1]))
@@ -8706,6 +8818,25 @@ async def get_latest_indices():
         f"{r['region'].lower()}_{r['sku'].lower()}_index": float(r["avg_price"])
         for r in rows
     }
+
+@app.get("/indices/universe", tags=["Indices"], summary="Universe", status_code=200)
+async def indices_universe():
+    rows = await database.fetch_all("""
+        SELECT DISTINCT symbol FROM indices_daily ORDER BY symbol
+    """)
+    return [r["symbol"] for r in rows]
+
+@app.get("/indices/history", tags=["Indices"], summary="History (alias to /index/history)", status_code=200)
+async def indices_history(symbol: str, limit: int = 500):
+    rows = await database.fetch_all("""
+        SELECT ts, price, region
+        FROM indices_daily
+        WHERE symbol = :symbol
+        ORDER BY ts DESC
+        LIMIT :limit
+    """, {"symbol": symbol, "limit": limit})
+    return [dict(r) for r in rows]
+# ----- Indices Feed -----
 
 @app.get("/export/tax_lookup", tags=["Compliance"], summary="Duty/Tax lookup by HS + destination")
 async def tax_lookup(hs_code: str, dest: str):
@@ -9325,8 +9456,6 @@ async def export_applications_csv():
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
 # -------- BOLs (with PDF generation) --------
-from uuid import uuid4, uuid5, NAMESPACE_URL
-
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
     key = _idem_key(request)
@@ -9497,8 +9626,7 @@ async def create_bol_alias(request: Request):
     pickup_sig_b64 = pickup_sig.get("base64")
     pickup_sig_time = pickup_sig.get("timestamp")
 
-    # Accept provided pickup_time or synthesize one
-    from datetime import datetime as _dt, timezone as _tz
+    # Accept provided pickup_time or synthesize one    
     pickup_time = body.get("pickup_time")
     if not pickup_time:
         pickup_time = _dt.now(_tz.utc)
@@ -9579,10 +9707,6 @@ async def create_bol_alias(request: Request):
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============   
-from fastapi.responses import StreamingResponse, RedirectResponse
-from sqlalchemy import text as _sqltext
-import io, csv, zipfile
-
 admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
 
 @admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
