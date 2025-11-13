@@ -52,6 +52,7 @@ from sqlalchemy import text as _sqltext
 from uuid import uuid4, uuid5, NAMESPACE_URL
 from datetime import timedelta as _td
 from datetime import datetime as _dt, timezone as _tz
+from fastapi import Depends
 
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
@@ -304,6 +305,13 @@ allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com"
 
 prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
+
+# When BRIDGE_BOOTSTRAP_DDL=0 in the environment, we will NOT run any of the
+# idempotent CREATE TABLE / ALTER TABLE bootstrap blocks. This is important
+# when pointing at a managed schema (e.g. Supabase) that already has these
+# tables defined.
+BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
+
 if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
 
@@ -505,6 +513,123 @@ async def ice_status():
 @app.get("/trader", include_in_schema=False)
 async def _trader_page():
     return FileResponse("static/trader.html")
+
+trader_router = APIRouter(prefix="/trader", tags=["Trader"])
+
+class BookSide(BaseModel):
+    price: float
+    qty_lots: float
+
+class BookSnapshot(BaseModel):
+    bids: List[BookSide]
+    asks: List[BookSide]
+
+@trader_router.get("/book", response_model=BookSnapshot)
+async def trader_book(symbol: str):
+    """
+    Simple depth from clob_orders where qty_open > 0 and status='open'.
+    """
+    rows = await database.fetch_all(
+        """
+        SELECT side, price, SUM(qty_open) AS qty_open
+        FROM clob_orders
+        WHERE symbol = :sym
+          AND status = 'open'
+          AND qty_open > 0
+        GROUP BY side, price
+        """,
+        {"sym": symbol},
+    )
+    bids = []
+    asks = []
+    for r in rows:
+        side = (r["side"] or "").lower()
+        row = BookSide(price=float(r["price"]), qty_lots=float(r["qty_open"]))
+        if side == "buy":
+            bids.append(row)
+        elif side == "sell":
+            asks.append(row)
+    # sort bids desc, asks asc
+    bids.sort(key=lambda x: x.price, reverse=True)
+    asks.sort(key=lambda x: x.price)
+    return BookSnapshot(bids=bids, asks=asks)
+
+class TraderOrder(BaseModel):
+    symbol_root: Optional[str] = None
+    symbol: Optional[str] = None
+    side: str
+    price: float
+    qty: float
+    qty_open: float
+    status: str
+
+from fastapi import Request as _Request
+async def get_username(request: _Request) -> str:
+    # Pull username from session; fallback to email or anonymous
+    return (request.session.get("username")
+            or request.session.get("email")
+            or "anonymous")
+
+@trader_router.get("/orders", response_model=List[TraderOrder])
+async def trader_orders(username: str = Depends(get_username)):
+    """
+    Futures orders for all accounts tied to current username.
+    """
+    rows = await database.fetch_all(
+        """
+        SELECT fp.symbol_root,
+               fp.material,
+               o.side, o.price, o.qty, o.qty_open, o.status
+        FROM orders o
+        JOIN futures_listings fl ON o.listing_id = fl.id
+        JOIN futures_products fp ON fl.product_id = fp.id
+        JOIN account_users au ON o.account_id = au.account_id
+        WHERE au.username = :u
+          AND o.status IN ('NEW','PARTIAL')
+        ORDER BY o.created_at DESC
+        """,
+        {"u": username},
+    )
+    out: List[TraderOrder] = []
+    for r in rows:
+        out.append(
+            TraderOrder(
+                symbol_root=r["symbol_root"],
+                symbol=r["symbol_root"],  # keep it simple
+                side=r["side"],
+                price=float(r["price"]),
+                qty=float(r["qty"]),
+                qty_open=float(r["qty_open"]),
+                status=r["status"],
+            )
+        )
+    return out
+
+class TraderPosition(BaseModel):
+    symbol_root: str
+    net_lots: float
+
+@trader_router.get("/positions", response_model=List[TraderPosition])
+async def trader_positions(username: str = Depends(get_username)):
+    rows = await database.fetch_all(
+        """
+        SELECT fp.symbol_root,
+               SUM(p.net_qty) AS net_qty
+        FROM positions p
+        JOIN futures_listings fl ON p.listing_id = fl.id
+        JOIN futures_products fp ON fl.product_id = fp.id
+        JOIN account_users au ON p.account_id = au.account_id
+        WHERE au.username = :u
+        GROUP BY fp.symbol_root
+        """,
+        {"u": username},
+    )
+    return [
+        TraderPosition(symbol_root=r["symbol_root"], net_lots=float(r["net_qty"] or 0))
+        for r in rows
+    ]
+
+
 # ---- Trader page ----
 
 # ===== DB bootstrap for CI/staging =====
@@ -992,18 +1117,50 @@ async def vendor_snapshot_to_indices():
     # Use your existing _vendor_blended_lb(material) helper if it exists and returns lb-price;
     # Here we snapshot *all mapped* materials.
     await database.execute("""
-        INSERT INTO indices_daily(symbol, ts, region, price)
-        SELECT
-          CONCAT('BR-', REPLACE(m.material_canonical, ' ', '-')) AS symbol,
-          NOW() AS ts,
-          'vendor' AS region,
-          v.price_per_lb AS price
-        FROM vendor_quotes v
-        JOIN vendor_material_map m
-          ON m.vendor = v.vendor AND m.material_vendor = v.material
-        WHERE v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-          AND v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
-    """)
+          INSERT INTO indices_daily(symbol, ts, region, price)
+          SELECT
+            CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
+            NOW()                                      AS ts,
+            'blended'                                  AS region,
+            -- 50% reference, 30% vendor, 20% contracts (all in USD/lb)
+            0.50*b.price
+            + 0.30*v.vendor_lb
+            + 0.20*COALESCE(c.contract_lb, b.price)   AS price
+          FROM (
+            -- latest reference per symbol from reference_prices
+            SELECT rp.symbol, rp.price
+            FROM reference_prices rp
+            JOIN (
+              SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
+              FROM reference_prices
+              GROUP BY symbol
+            ) last ON last.symbol = rp.symbol
+                  AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
+          ) b
+          JOIN (
+            -- latest vendor LB per canonical material
+            SELECT m.material_canonical AS symbol,
+                   AVG(v.price_per_lb)  AS vendor_lb
+            FROM vendor_quotes v
+            JOIN vendor_material_map m
+              ON m.vendor = v.vendor AND m.material_vendor = v.material
+            WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+              AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+            GROUP BY 1
+          ) v ON v.symbol = b.symbol
+          LEFT JOIN (
+            -- contract-weighted average over recent window, converted from $/ton to $/lb
+            SELECT
+              mim.symbol,
+              AVG(c.price_per_ton / 2000.0) AS contract_lb
+            FROM contracts c
+            JOIN material_index_map mim
+              ON mim.material = c.material
+            WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+              AND c.created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY mim.symbol
+          ) c ON c.symbol = b.symbol
+        """)
     return {"ok": True}
 
 @startup
@@ -1456,6 +1613,408 @@ async def _ensure_account_user_map():
     """)
 # =====  account - user ownership =====
 
+# ===== Admin Accounts & Account-Users =====
+accounts_router = APIRouter(prefix="/admin/accounts", tags=["Admin/Accounts"])
+
+class AccountIn(BaseModel):
+    name: str
+    type: Literal["buyer", "seller", "broker"] = "buyer"
+
+class AccountOut(BaseModel):
+    id: str
+    name: str
+    type: str
+
+class AccountUserLinkIn(BaseModel):
+    username: str
+
+@accounts_router.get("", summary="List accounts", response_model=List[AccountOut])
+async def admin_list_accounts(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    request: Request | None = None,
+):
+    _require_admin(request)
+    rows = await database.fetch_all(
+        """
+        SELECT id::text AS id, name, type
+        FROM accounts
+        ORDER BY created_at DESC NULLS LAST, name
+        LIMIT :limit OFFSET :offset
+        """,
+        {"limit": limit, "offset": offset},
+    )
+    return [AccountOut(**dict(r)) for r in rows]
+
+@accounts_router.post("", summary="Create account", response_model=AccountOut, status_code=201)
+async def admin_create_account(body: AccountIn, request: Request | None = None):
+    _require_admin(request)
+    acc_id = str(uuid.uuid4())
+    await database.execute(
+        """
+        INSERT INTO accounts(id, name, type)
+        VALUES (:id, :name, :type)
+        """,
+        {"id": acc_id, "name": body.name.strip(), "type": body.type},
+    )
+    return AccountOut(id=acc_id, name=body.name.strip(), type=body.type)
+
+@accounts_router.post("/{account_id}/users", summary="Attach user to account", status_code=200)
+async def admin_attach_user(
+    account_id: str,
+    body: AccountUserLinkIn,
+    request: Request | None = None,
+):
+    _require_admin(request)
+    # sanity check account exists
+    acc = await database.fetch_one("SELECT 1 FROM accounts WHERE id=:id", {"id": account_id})
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # upsert mapping (one user per account_id in this simple mapping)
+    await database.execute(
+        """
+        INSERT INTO account_users(account_id, username)
+        VALUES (:id, :u)
+        ON CONFLICT (account_id) DO UPDATE SET username = EXCLUDED.username
+        """,
+        {"id": account_id, "u": body.username.strip()},
+    )
+    return {"ok": True, "account_id": account_id, "username": body.username.strip()}
+
+@accounts_router.get("/{account_id}/users", summary="Get user linked to account")
+async def admin_get_account_user(account_id: str, request: Request | None = None):
+    _require_admin(request)
+    row = await database.fetch_one(
+        "SELECT account_id::text AS account_id, username FROM account_users WHERE account_id=:id",
+        {"id": account_id},
+    )
+    if not row:
+        return {"account_id": account_id, "username": None}
+    return dict(row)
+
+# wire router
+app.include_router(accounts_router)
+# ===== /Admin Accounts & Account-Users =====
+
+# ----- Yard Rules -----
+YARD_RULES_DDL = """
+    CREATE TABLE IF NOT EXISTS yard_rules (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    yard                TEXT NOT NULL,
+    material            TEXT NOT NULL,
+    formula             TEXT,
+    loss_min_pct        NUMERIC,
+    loss_max_pct        NUMERIC,
+    min_margin_usd_ton  NUMERIC,
+    target_hedge_ratio  NUMERIC,
+    min_tons            NUMERIC,
+    futures_symbol_root TEXT,
+    auto_hedge          BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_yard_rules_yard_material
+    ON yard_rules(yard, material);
+    """
+
+@startup
+async def _ensure_yard_rules():
+    await run_ddl_multi(YARD_RULES_DDL)
+
+yard_router = APIRouter(tags=["Yard Rules"])
+
+class YardRuleIn(BaseModel):
+    yard: str
+    material: str
+    formula: Optional[str] = None
+    loss_min_pct: Optional[float] = None
+    loss_max_pct: Optional[float] = None
+    min_margin_usd_ton: Optional[float] = None
+    target_hedge_ratio: Optional[float] = None
+    min_tons: Optional[float] = None
+    futures_symbol_root: Optional[str] = None
+    auto_hedge: Optional[bool] = False
+
+class YardRuleOut(YardRuleIn):
+    id: str
+    updated_at: datetime
+
+@yard_router.get("/yard_rules", response_model=List[YardRuleOut])
+async def list_yard_rules(yard: str):
+    """
+    Return saved yard pricing / hedge rules for a given yard key.
+    """
+    # If table isn't created yet, just return empty to avoid 500s
+    try:
+        rows = await database.fetch_all(
+            """
+            SELECT id, yard, material, formula,
+                   loss_min_pct, loss_max_pct,
+                   min_margin_usd_ton, target_hedge_ratio,
+                   min_tons, futures_symbol_root,
+                   auto_hedge, updated_at
+            FROM yard_rules
+            WHERE yard = :yard
+            ORDER BY material
+            """,
+            {"yard": yard},
+        )
+    except Exception:
+        return []  # stub fallback
+
+    return [YardRuleOut(**dict(r)) for r in rows]
+
+@yard_router.post("/yard_rules", response_model=YardRuleOut)
+async def upsert_yard_rule(rule: YardRuleIn):
+    """
+    Create or update a yard rule keyed by (yard, material).
+    """
+    # Try update; if 0 rows, insert
+    query_update = """
+    UPDATE yard_rules
+       SET formula = :formula,
+           loss_min_pct = :loss_min_pct,
+           loss_max_pct = :loss_max_pct,
+           min_margin_usd_ton = :min_margin_usd_ton,
+           target_hedge_ratio = :target_hedge_ratio,
+           min_tons = :min_tons,
+           futures_symbol_root = :futures_symbol_root,
+           auto_hedge = :auto_hedge,
+           updated_at = now()
+     WHERE yard = :yard AND material = :material
+     RETURNING id, yard, material, formula,
+               loss_min_pct, loss_max_pct,
+               min_margin_usd_ton, target_hedge_ratio,
+               min_tons, futures_symbol_root,
+               auto_hedge, updated_at;
+    """
+
+    params = rule.dict()
+    try:
+        row = await database.fetch_one(query_update, params)
+    except Exception:
+        # Table doesn't exist yet
+        raise HTTPException(status_code=500, detail="yard_rules table not created yet")
+
+    if row:
+        return YardRuleOut(**dict(row))
+
+    query_insert = """
+    INSERT INTO yard_rules(
+      yard, material, formula,
+      loss_min_pct, loss_max_pct,
+      min_margin_usd_ton, target_hedge_ratio,
+      min_tons, futures_symbol_root, auto_hedge
+    )
+    VALUES(
+      :yard, :material, :formula,
+      :loss_min_pct, :loss_max_pct,
+      :min_margin_usd_ton, :target_hedge_ratio,
+      :min_tons, :futures_symbol_root, :auto_hedge
+    )
+    RETURNING id, yard, material, formula,
+              loss_min_pct, loss_max_pct,
+              min_margin_usd_ton, target_hedge_ratio,
+              min_tons, futures_symbol_root,
+              auto_hedge, updated_at;
+    """
+
+    row = await database.fetch_one(query_insert, params)
+    return YardRuleOut(**dict(row))
+# ----- Yard Rules -----
+
+# ---- Hedge Recs ----
+class HedgeRec(BaseModel):
+    material: str
+    on_hand_tons: float
+    hedged_tons: float
+    target_hedge_ratio: float
+    suggested_lots: float
+
+@yard_router.get("/hedge/recommendations", response_model=List[HedgeRec])
+async def hedge_recommendations(yard: str):
+    """
+    Very simple hedge recs: look at inventory_items for this seller,
+    join yard_rules for target_hedge_ratio and min_tons, assume 20t per lot.
+    """
+    try:
+        inv_rows = await database.fetch_all(
+            """
+            SELECT i.sku AS material,
+                   COALESCE(i.qty_on_hand,0) AS qty_on_hand
+            FROM inventory_items i
+            WHERE i.seller = :yard
+            """,
+            {"yard": yard},
+        )
+    except Exception:
+        return []
+
+    try:
+        rule_rows = await database.fetch_all(
+            """
+            SELECT material, target_hedge_ratio, min_tons
+            FROM yard_rules
+            WHERE yard = :yard
+            """,
+            {"yard": yard},
+        )
+        rules_map = {
+            (r["material"] or "").lower(): r for r in rule_rows
+        }
+    except Exception:
+        rules_map = {}
+
+    recs: List[HedgeRec] = []
+    LOT_SIZE = 20.0  # tons per futures lot (adjust if needed)
+
+    for inv in inv_rows:
+        mat = inv["material"]
+        on_hand = float(inv["qty_on_hand"] or 0)
+        if on_hand <= 0:
+            continue
+        rule = rules_map.get((mat or "").lower())
+        if not rule:
+            continue
+
+        target_ratio = float(rule["target_hedge_ratio"] or 0.0)
+        min_tons = float(rule["min_tons"] or 0.0)
+        if target_ratio <= 0 or on_hand < min_tons:
+            continue
+
+        # TODO: once futures positions wired, compute true hedged_tons
+        hedged_tons = 0.0
+        target_hedged = on_hand * target_ratio
+        additional_tons = max(0.0, target_hedged - hedged_tons)
+        suggested_lots = additional_tons / LOT_SIZE
+
+        recs.append(
+            HedgeRec(
+                material=mat,
+                on_hand_tons=on_hand,
+                hedged_tons=hedged_tons,
+                target_hedge_ratio=target_ratio,
+                suggested_lots=round(suggested_lots, 2),
+            )
+        )
+
+    return recs
+app.include_router(yard_router)
+# ---- Hedge Recs ----
+
+# --- Usage By Member ---
+analytics_router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+class UsageRow(BaseModel):
+    member: str
+    plan_code: Optional[str] = None
+    bols_month: int = 0
+    contracts_month: int = 0
+    receipts_month: int = 0
+    overage_usd: float = 0.0
+
+@analytics_router.get("/usage_by_member_current_cycle", response_model=List[UsageRow])
+async def usage_by_member_current_cycle():
+    """
+    Rough usage counters per member for the current calendar month.
+    Member is approximated as `buyer` on BOLs and `seller` on contracts.
+    """
+    today = date.today()
+    start = today.replace(day=1)
+    # naive month-end
+    if today.month == 12:
+        end = date(today.year + 1, 1, 1)
+    else:
+        end = date(today.year, today.month + 1, 1)
+
+    # BOL counts by buyer
+    bols_sql = """
+      SELECT buyer AS member, COUNT(*) AS cnt
+      FROM bols
+      WHERE pickup_time >= :start AND pickup_time < :end
+      GROUP BY buyer
+    """
+    contracts_sql = """
+      SELECT seller AS member, COUNT(*) AS cnt
+      FROM contracts
+      WHERE created_at >= :start AND created_at < :end
+      GROUP BY seller
+    """
+
+    bols_rows = await database.fetch_all(bols_sql, {"start": start, "end": end})
+    c_rows = await database.fetch_all(contracts_sql, {"start": start, "end": end})
+
+    usage: dict[str, UsageRow] = {}
+
+    for r in bols_rows:
+        m = r["member"] or "unknown"
+        row = usage.setdefault(m, UsageRow(member=m))
+        row.bols_month = int(r["cnt"] or 0)
+
+    for r in c_rows:
+        m = r["member"] or "unknown"
+        row = usage.setdefault(m, UsageRow(member=m))
+        row.contracts_month = int(r["cnt"] or 0)
+
+    # Optionally hydrate plan_code from member_plans
+    try:
+        plan_rows = await database.fetch_all("SELECT member, plan_code FROM member_plans")
+        plan_map = {p["member"]: p["plan_code"] for p in plan_rows}
+        for m, row in usage.items():
+            row.plan_code = plan_map.get(m)
+    except Exception:
+        pass
+
+    return list(usage.values())
+# ---- Usage By Member ----
+
+# --- Recent Anomalies ----
+class AnomalyRow(BaseModel):
+    member: str
+    symbol: str
+    as_of: date
+    score: float
+
+@analytics_router.get("/anomalies_recent", response_model=List[AnomalyRow])
+async def anomalies_recent(limit: int = 25):
+    rows = await database.fetch_all(
+        """
+        SELECT member, symbol, as_of, score
+        FROM anomaly_scores
+        ORDER BY as_of DESC, created_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [AnomalyRow(**dict(r)) for r in rows]
+# --- Recent Anomalies ----
+
+# ---- Recent Surveillance ----
+class SurveilRow(BaseModel):
+    rule: str
+    subject: str
+    severity: str
+    opened_at: datetime
+
+@analytics_router.get("/surveil_recent", response_model=List[SurveilRow])
+async def surveil_recent(limit: int = 25):
+    rows = await database.fetch_all(
+        """
+        SELECT rule, subject, severity, created_at
+        FROM surveil_alerts
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [SurveilRow(rule=r["rule"],
+                       subject=r["subject"],
+                       severity=r["severity"],
+                       opened_at=r["created_at"]) for r in rows]
+app.include_router(analytics_router)
+# ---- Recent Surveillance ----
+
 # =====  invites log =====
 @startup
 async def _ensure_invites_log():
@@ -1498,8 +2057,911 @@ async def _ensure_more_indexes():
             logger.warn("extra_index_bootstrap_failed", sql=s[:100], err=str(e))
 # ----- Extra indexes -----
 
-# ===== Billing core (fees ledger + preview/run) =====
-fees_router = APIRouter(prefix="/billing", tags=["Billing"])
+# ----- Billing core -----
+billing_router = APIRouter(prefix="/billing", tags=["Billing"])
+
+class BillingPlan(BaseModel):
+    plan_code: str
+    name: str
+    price_usd: Decimal
+    description: Optional[str] = None
+    active: bool = True
+
+class PlanLimits(BaseModel):
+    plan_code: str
+    max_users: int
+    max_contracts_per_day: int
+    max_bols_month: Optional[int] = None
+    max_contracts_month: Optional[int] = None
+    max_ws_messages_month: Optional[int] = None
+    max_receipts_month: Optional[int] = None
+    max_invoices_month: Optional[int] = None
+    overage_bol_usd: Optional[Decimal] = None
+    overage_contract_usd: Optional[Decimal] = None
+
+class MemberPlan(BaseModel):
+    member: str
+    plan_code: str
+    effective_date: date
+    stripe_price_id: Optional[str] = None
+
+class BillingPrefs(BaseModel):
+    member: str
+    billing_day: int
+    invoice_cc_emails: Optional[List[str]] = None
+    autopay: bool
+    timezone: Optional[str] = None
+    next_cycle_start: Optional[date] = None
+    auto_charge: bool
+
+class InvoiceSummary(BaseModel):
+    invoice_id: str
+    period_start: date
+    period_end: date
+    subtotal: Decimal
+    tax: Decimal
+    total: Decimal
+    status: str
+    created_at: datetime
+
+class InvoiceLine(BaseModel):
+    line_id: str
+    event_type: str
+    description: Optional[str]
+    amount: Decimal
+    currency: str
+
+class GuarantyFundRow(BaseModel):
+    member: str
+    contribution_usd: Decimal
+    updated_at: datetime
+
+class DefaultEventRow(BaseModel):
+    id: str
+    member: str
+    occurred_at: datetime
+    amount_usd: Decimal
+    notes: Optional[str]
+
+@billing_router.get("/plans", response_model=List[BillingPlan])
+async def list_plans(active: Optional[bool] = None):
+    q = """
+      SELECT plan_code, name, price_usd, description, active
+      FROM billing_plans
+    """
+    params = {}
+    if active is not None:
+        q += " WHERE active = :active"
+        params["active"] = active
+    q += " ORDER BY price_usd ASC"
+    rows = await database.fetch_all(q, params)
+    return [BillingPlan(**dict(r)) for r in rows]
+
+
+@billing_router.get("/plans/{plan_code}", response_model=BillingPlan)
+async def get_plan(plan_code: str):
+    row = await database.fetch_one(
+        """
+        SELECT plan_code, name, price_usd, description, active
+        FROM billing_plans WHERE plan_code = :p
+        """,
+        {"p": plan_code},
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return BillingPlan(**dict(row))
+
+@billing_router.get("/plan_limits/{plan_code}", response_model=PlanLimits)
+async def get_plan_limits(plan_code: str):
+    row = await database.fetch_one(
+        """
+        SELECT plan_code, max_users, max_contracts_per_day,
+               max_bols_month, max_contracts_month,
+               max_ws_messages_month, max_receipts_month,
+               max_invoices_month, overage_bol_usd, overage_contract_usd
+        FROM billing_plan_limits
+        WHERE plan_code = :p
+        """,
+        {"p": plan_code},
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Plan limits not found")
+    return PlanLimits(**dict(row))
+
+@billing_router.get("/member_plan", response_model=Optional[MemberPlan])
+async def get_member_plan(member: str = Query(...)):
+    row = await database.fetch_one(
+        """
+        SELECT member, plan_code, effective_date, stripe_price_id
+        FROM member_plans
+        WHERE member = :m
+        """,
+        {"m": member},
+    )
+    return MemberPlan(**dict(row)) if row else None
+
+@billing_router.get("/preferences", response_model=Optional[BillingPrefs])
+async def get_billing_prefs(member: str = Query(...)):
+    row = await database.fetch_one(
+        """
+        SELECT member, billing_day, invoice_cc_emails, autopay,
+               timezone, next_cycle_start, auto_charge
+        FROM billing_preferences
+        WHERE member = :m
+        """,
+        {"m": member},
+    )
+    if not row:
+        return None
+    # invoice_cc_emails is text[]; convert to list[str]
+    data = dict(row)
+    emails = data.get("invoice_cc_emails")
+    if emails is None:
+        data["invoice_cc_emails"] = []
+    return BillingPrefs(**data)
+
+
+class BillingPrefsUpdate(BaseModel):
+    billing_day: Optional[int] = None
+    invoice_cc_emails: Optional[List[str]] = None
+    autopay: Optional[bool] = None
+    timezone: Optional[str] = None
+    auto_charge: Optional[bool] = None
+
+
+@billing_router.put("/preferences", response_model=BillingPrefs)
+async def update_billing_prefs(
+    member: str = Query(...), body: BillingPrefsUpdate = None
+):
+    existing = await get_billing_prefs(member)
+    if not existing:
+        # create row with defaults + provided fields
+        day = body.billing_day or 1
+        emails = body.invoice_cc_emails or []
+        autopay = body.autopay or False
+        tz = body.timezone or "America/New_York"
+        auto_charge = body.auto_charge or False
+        row = await database.fetch_one(
+            """
+            INSERT INTO billing_preferences(
+              member,billing_day,invoice_cc_emails,autopay,timezone,auto_charge
+            )
+            VALUES(:m,:d,:e,:a,:tz,:ac)
+            RETURNING member,billing_day,invoice_cc_emails,autopay,
+                      timezone,next_cycle_start,auto_charge
+            """,
+            {"m": member, "d": day, "e": emails, "a": autopay, "tz": tz, "ac": auto_charge},
+        )
+    else:
+        # update existing
+        data = existing.dict()
+        for field in body.dict(exclude_unset=True):
+            data[field] = body.dict()[field]
+        row = await database.fetch_one(
+            """
+            UPDATE billing_preferences
+               SET billing_day = :d,
+                   invoice_cc_emails = :e,
+                   autopay = :a,
+                   timezone = :tz,
+                   auto_charge = :ac
+             WHERE member = :m
+             RETURNING member,billing_day,invoice_cc_emails,autopay,
+                       timezone,next_cycle_start,auto_charge
+            """,
+            {
+                "m": member,
+                "d": data["billing_day"],
+                "e": data["invoice_cc_emails"],
+                "a": data["autopay"],
+                "tz": data["timezone"],
+                "ac": data["auto_charge"],
+            },
+        )
+    return BillingPrefs(**dict(row))
+
+@billing_router.get("/invoices", response_model=List[InvoiceSummary])
+async def list_invoices(member: str = Query(...)):
+    rows = await database.fetch_all(
+        """
+        SELECT invoice_id, period_start, period_end,
+               subtotal, tax, total, status, created_at
+        FROM billing_invoices
+        WHERE member = :m
+        ORDER BY period_start DESC
+        """,
+        {"m": member},
+    )
+    return [InvoiceSummary(**dict(r)) for r in rows]
+
+
+@billing_router.get("/invoices/{invoice_id}/lines", response_model=List[InvoiceLine])
+async def list_invoice_lines(invoice_id: str):
+    rows = await database.fetch_all(
+        """
+        SELECT line_id, event_type, description, amount, currency
+        FROM billing_line_items
+        WHERE invoice_id = :id
+        ORDER BY line_id
+        """,
+        {"id": invoice_id},
+    )
+    return [InvoiceLine(**dict(r)) for r in rows]
+
+@billing_router.get("/guaranty_fund", response_model=List[GuarantyFundRow])
+async def list_guaranty_fund():
+    rows = await database.fetch_all(
+        """
+        SELECT member, contribution_usd, updated_at
+        FROM guaranty_fund
+        ORDER BY contribution_usd DESC
+        """
+    )
+    return [GuarantyFundRow(**dict(r)) for r in rows]
+
+
+@billing_router.get("/defaults", response_model=List[DefaultEventRow])
+async def list_defaults(member: Optional[str] = None):
+    q = """
+      SELECT id, member, occurred_at, amount_usd, notes
+      FROM default_events
+    """
+    params = {}
+    if member:
+        q += " WHERE member = :m"
+        params["m"] = member
+    q += " ORDER BY occurred_at DESC"
+    rows = await database.fetch_all(q, params)
+    return [DefaultEventRow(**dict(r)) for r in rows]
+app.include_router(billing_router)
+# ----- Billing core -----
+
+# ----- Compliance, Surveillance, Runtime Limits -----
+compliance_router = APIRouter(prefix="/compliance", tags=["Compliance"])
+surveil_router    = APIRouter(prefix="/surveil", tags=["Surveillance"])
+runtime_router    = APIRouter(prefix="/runtime", tags=["Runtime"])
+limits_router     = APIRouter(prefix="/limits", tags=["Limits"])
+
+class ComplianceMember(BaseModel):
+    username: str
+    kyc_passed: bool
+    aml_passed: bool
+    bsa_risk: str
+    sanctions_screened: bool
+    boi_collected: bool
+    updated_at: datetime
+
+@compliance_router.get("/members", response_model=List[ComplianceMember])
+async def list_compliance_members():
+    rows = await database.fetch_all(
+        """
+        SELECT username, kyc_passed, aml_passed, bsa_risk,
+               sanctions_screened, boi_collected, updated_at
+        FROM compliance_members
+        ORDER BY username
+        """
+    )
+    return [ComplianceMember(**dict(r)) for r in rows]
+
+
+class ComplianceUpdate(BaseModel):
+    kyc_passed: Optional[bool] = None
+    aml_passed: Optional[bool] = None
+    bsa_risk: Optional[str] = None
+    sanctions_screened: Optional[bool] = None
+    boi_collected: Optional[bool] = None
+
+@compliance_router.patch("/members/{username}", response_model=ComplianceMember)
+async def update_compliance_member(username: str, body: ComplianceUpdate):
+    existing = await database.fetch_one(
+        "SELECT * FROM compliance_members WHERE username = :u", {"u": username}
+    )
+    if not existing:
+        # create new row with defaults + updates
+        data = {
+            "kyc_passed": body.kyc_passed or False,
+            "aml_passed": body.aml_passed or False,
+            "bsa_risk": body.bsa_risk or "low",
+            "sanctions_screened": body.sanctions_screened or False,
+            "boi_collected": body.boi_collected or False,
+        }
+        row = await database.fetch_one(
+            """
+            INSERT INTO compliance_members(
+              username, kyc_passed, aml_passed, bsa_risk,
+              sanctions_screened, boi_collected
+            )
+            VALUES(:u, :kyc, :aml, :bsa, :san, :boi)
+            RETURNING username, kyc_passed, aml_passed, bsa_risk,
+                      sanctions_screened, boi_collected, updated_at
+            """,
+            {
+                "u": username,
+                "kyc": data["kyc_passed"],
+                "aml": data["aml_passed"],
+                "bsa": data["bsa_risk"],
+                "san": data["sanctions_screened"],
+                "boi": data["boi_collected"],
+            },
+        )
+        return ComplianceMember(**dict(row))
+    else:
+        data = dict(existing)
+        for k, v in body.dict(exclude_unset=True).items():
+            data[k] = v
+        row = await database.fetch_one(
+            """
+            UPDATE compliance_members
+               SET kyc_passed = :kyc,
+                   aml_passed = :aml,
+                   bsa_risk = :bsa,
+                   sanctions_screened = :san,
+                   boi_collected = :boi,
+                   updated_at = now()
+             WHERE username = :u
+             RETURNING username, kyc_passed, aml_passed, bsa_risk,
+                       sanctions_screened, boi_collected, updated_at
+            """,
+            {
+                "u": username,
+                "kyc": data["kyc_passed"],
+                "aml": data["aml_passed"],
+                "bsa": data["bsa_risk"],
+                "san": data["sanctions_screened"],
+                "boi": data["boi_collected"],
+            },
+        )
+        return ComplianceMember(**dict(row))
+
+class SurveilAlert(BaseModel):
+    alert_id: str
+    rule: str
+    subject: str
+    severity: str
+    created_at: datetime
+    data: dict
+
+@surveil_router.get("/alerts", response_model=List[SurveilAlert])
+async def list_alerts(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT alert_id, rule, subject, severity, created_at, data
+        FROM surveil_alerts
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [SurveilAlert(**dict(r)) for r in rows]
+
+
+class SurveilCase(BaseModel):
+    case_id: str
+    rule: str
+    subject: str
+    opened_at: datetime
+    status: str
+    notes: Optional[str]
+
+@surveil_router.get("/cases", response_model=List[SurveilCase])
+async def list_cases(status: Optional[str] = None, limit: int = 50):
+    q = """
+      SELECT case_id, rule, subject, opened_at, status, notes
+      FROM surveil_cases
+    """
+    params = {}
+    if status:
+        q += " WHERE status = :st"
+        params["st"] = status
+    q += " ORDER BY opened_at DESC LIMIT :limit"
+    params["limit"] = limit
+    rows = await database.fetch_all(q, params)
+    return [SurveilCase(**dict(r)) for r in rows]
+
+
+class CaseUpdate(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+@surveil_router.patch("/cases/{case_id}", response_model=SurveilCase)
+async def update_case(case_id: str, body: CaseUpdate):
+    existing = await database.fetch_one(
+        "SELECT * FROM surveil_cases WHERE case_id = :id", {"id": case_id}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Case not found")
+    data = dict(existing)
+    for k, v in body.dict(exclude_unset=True).items():
+        data[k] = v
+    row = await database.fetch_one(
+        """
+        UPDATE surveil_cases
+           SET status = :st,
+               notes  = :notes
+         WHERE case_id = :id
+         RETURNING case_id, rule, subject, opened_at, status, notes
+        """,
+        {"id": case_id, "st": data["status"], "notes": data["notes"]},
+    )
+    return SurveilCase(**dict(row))
+
+class EntitlementRow(BaseModel):
+    username: str
+    feature: str
+
+@runtime_router.get("/entitlements", response_model=List[EntitlementRow])
+async def list_entitlements(username: Optional[str] = None):
+    q = "SELECT username, feature FROM runtime_entitlements"
+    params = {}
+    if username:
+        q += " WHERE username = :u"
+        params["u"] = username
+    q += " ORDER BY username, feature"
+    rows = await database.fetch_all(q, params)
+    return [EntitlementRow(**dict(r)) for r in rows]
+
+class EntitlementUpdate(BaseModel):
+    feature: str
+
+@runtime_router.post("/entitlements/{username}", response_model=EntitlementRow)
+async def add_entitlement(username: str, body: EntitlementUpdate):
+    await database.execute(
+        """
+        INSERT INTO runtime_entitlements(username, feature)
+        VALUES(:u,:f)
+        ON CONFLICT DO NOTHING
+        """,
+        {"u": username, "f": body.feature},
+    )
+    return EntitlementRow(username=username, feature=body.feature)
+
+
+@runtime_router.delete("/entitlements/{username}")
+async def delete_entitlement(username: str, feature: str = Query(...)):
+    await database.execute(
+        "DELETE FROM runtime_entitlements WHERE username=:u AND feature=:f",
+        {"u": username, "f": feature},
+    )
+    return {"ok": True}
+
+class LuldRow(BaseModel):
+    symbol: str
+    down_pct: Optional[Decimal]
+    up_pct: Optional[Decimal]
+
+@runtime_router.get("/luld", response_model=List[LuldRow])
+async def list_luld():
+    rows = await database.fetch_all(
+        "SELECT symbol, down_pct, up_pct FROM runtime_luld ORDER BY symbol"
+    )
+    return [LuldRow(**dict(r)) for r in rows]
+
+class LuldUpdate(BaseModel):
+    down_pct: Optional[Decimal] = None
+    up_pct: Optional[Decimal] = None
+
+@runtime_router.put("/luld/{symbol}", response_model=LuldRow)
+async def upsert_luld(symbol: str, body: LuldUpdate):
+    row = await database.fetch_one(
+        """
+        INSERT INTO runtime_luld(symbol, down_pct, up_pct, updated_at)
+        VALUES(:s, :d, :u, now())
+        ON CONFLICT (symbol) DO UPDATE
+        SET down_pct = EXCLUDED.down_pct,
+            up_pct = EXCLUDED.up_pct,
+            updated_at = now()
+        RETURNING symbol, down_pct, up_pct
+        """,
+        {"s": symbol, "d": body.down_pct, "u": body.up_pct},
+    )
+    return LuldRow(**dict(row))
+
+class PriceBandRow(BaseModel):
+    symbol: str
+    lower: Optional[Decimal]
+    upper: Optional[Decimal]
+
+@runtime_router.get("/price_bands", response_model=List[PriceBandRow])
+async def list_price_bands():
+    rows = await database.fetch_all(
+        "SELECT symbol, lower, upper FROM runtime_price_bands ORDER BY symbol"
+    )
+    return [PriceBandRow(**dict(r)) for r in rows]
+
+
+class PriceBandUpdate(BaseModel):
+    lower: Optional[Decimal] = None
+    upper: Optional[Decimal] = None
+
+@runtime_router.put("/price_bands/{symbol}", response_model=PriceBandRow)
+async def upsert_price_band(symbol: str, body: PriceBandUpdate):
+    row = await database.fetch_one(
+        """
+        INSERT INTO runtime_price_bands(symbol, lower, upper, updated_at)
+        VALUES(:s, :lo, :hi, now())
+        ON CONFLICT (symbol) DO UPDATE
+        SET lower = EXCLUDED.lower,
+            upper = EXCLUDED.upper,
+            updated_at = now()
+        RETURNING symbol, lower, upper
+        """,
+        {"s": symbol, "lo": body.lower, "hi": body.upper},
+    )
+    return PriceBandRow(**dict(row))
+
+class PositionLimitRow(BaseModel):
+    id: int
+    member: str
+    symbol: str
+    limit_lots: Decimal
+
+@limits_router.get("/positions", response_model=List[PositionLimitRow])
+async def list_position_limits(member: Optional[str] = None):
+    q = "SELECT id, member, symbol, limit_lots FROM position_limits"
+    params = {}
+    if member:
+        q += " WHERE member = :m"
+        params["m"] = member
+    q += " ORDER BY member, symbol"
+    rows = await database.fetch_all(q, params)
+    return [PositionLimitRow(**dict(r)) for r in rows]
+
+
+class PositionLimitUpdate(BaseModel):
+    member: str
+    symbol: str
+    limit_lots: Decimal
+
+@limits_router.post("/positions", response_model=PositionLimitRow)
+async def upsert_position_limit(body: PositionLimitUpdate):
+    row = await database.fetch_one(
+        """
+        INSERT INTO position_limits(member, symbol, limit_lots)
+        VALUES(:m,:s,:l)
+        ON CONFLICT (member,symbol) DO UPDATE
+        SET limit_lots = EXCLUDED.limit_lots
+        RETURNING id, member, symbol, limit_lots
+        """,
+        {"m": body.member, "s": body.symbol, "l": body.limit_lots},
+    )
+    return PositionLimitRow(**dict(row))
+
+app.include_router(compliance_router)
+app.include_router(surveil_router)
+app.include_router(runtime_router)
+app.include_router(limits_router)
+# ----- Compliance, Surveillance, Runtime Limits -----
+
+# ----- Onboarding, Tenants, Invite -----
+onboard_router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
+tenants_router = APIRouter(prefix="/tenants", tags=["Tenants"])
+invites_router = APIRouter(prefix="/invites", tags=["Invites"])
+orgs_router    = APIRouter(prefix="/orgs", tags=["Orgs"])
+
+class ApplicationRow(BaseModel):
+    id: str
+    created_at: datetime
+    entity_type: str
+    role: str
+    org_name: str
+    monthly_volume_tons: Optional[int]
+    contact_name: str
+    email: str
+    phone: Optional[str]
+    plan: str
+    is_reviewed: bool
+
+@onboard_router.get("/applications", response_model=List[ApplicationRow])
+async def list_applications(reviewed: Optional[bool] = None):
+    q = """
+      SELECT id, created_at, entity_type, role, org_name,
+             monthly_volume_tons, contact_name, email, phone,
+             plan, is_reviewed
+      FROM applications
+    """
+    params = {}
+    if reviewed is not None:
+        q += " WHERE is_reviewed = :r"
+        params["r"] = reviewed
+    q += " ORDER BY created_at DESC"
+    rows = await database.fetch_all(q, params)
+    return [ApplicationRow(**dict(r)) for r in rows]
+
+
+class ApplicationUpdate(BaseModel):
+    is_reviewed: Optional[bool] = None
+    notes: Optional[str] = None
+
+@onboard_router.patch("/applications/{app_id}", response_model=ApplicationRow)
+async def update_application(app_id: str, body: ApplicationUpdate):
+    existing = await database.fetch_one(
+        "SELECT * FROM applications WHERE id = :id", {"id": app_id}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Application not found")
+    data = dict(existing)
+    for k, v in body.dict(exclude_unset=True).items():
+        data[k] = v
+    row = await database.fetch_one(
+        """
+        UPDATE applications
+           SET is_reviewed = COALESCE(:r, is_reviewed),
+               notes       = COALESCE(:n, notes)
+         WHERE id = :id
+         RETURNING id, created_at, entity_type, role, org_name,
+                   monthly_volume_tons, contact_name, email, phone,
+                   plan, is_reviewed
+        """,
+        {"id": app_id, "r": body.is_reviewed, "n": body.notes},
+    )
+    return ApplicationRow(**dict(row))
+
+class TenantSignupRow(BaseModel):
+    signup_id: str
+    created_at: datetime
+    status: str
+    yard_name: str
+    contact_name: str
+    email: str
+    phone: Optional[str]
+    plan: str
+    monthly_volume_tons: Optional[int]
+    region: Optional[str]
+
+@tenants_router.get("/signups", response_model=List[TenantSignupRow])
+async def list_signups(status: Optional[str] = None):
+    q = """
+      SELECT signup_id, created_at, status, yard_name, contact_name,
+             email, phone, plan, monthly_volume_tons, region
+      FROM tenant_signups
+    """
+    params = {}
+    if status:
+        q += " WHERE status = :st"
+        params["st"] = status
+    q += " ORDER BY created_at DESC"
+    rows = await database.fetch_all(q, params)
+    return [TenantSignupRow(**dict(r)) for r in rows]
+
+class InviteRow(BaseModel):
+    invite_id: str
+    email: str
+    member: str
+    role_req: str
+    created_at: datetime
+    accepted_at: Optional[datetime]
+
+@invites_router.get("", response_model=List[InviteRow])
+async def list_invites(member: Optional[str] = None):
+    q = """
+      SELECT invite_id, email, member, role_req, created_at, accepted_at
+      FROM invites_log
+    """
+    params = {}
+    if member:
+        q += " WHERE member = :m"
+        params["m"] = member
+    q += " ORDER BY created_at DESC"
+    rows = await database.fetch_all(q, params)
+    return [InviteRow(**dict(r)) for r in rows]
+
+
+class InviteCreate(BaseModel):
+    email: str
+    member: str
+    role_req: str
+
+@invites_router.post("", response_model=InviteRow)
+async def create_invite(body: InviteCreate):
+    row = await database.fetch_one(
+        """
+        INSERT INTO invites_log(invite_id, email, member, role_req)
+        VALUES(gen_random_uuid(), :e, :m, :r)
+        RETURNING invite_id, email, member, role_req, created_at, accepted_at
+        """,
+        {"e": body.email, "m": body.member, "r": body.role_req},
+    )
+    return InviteRow(**dict(row))
+
+class OrgRow(BaseModel):
+    org: str
+    display_name: Optional[str]
+
+@orgs_router.get("", response_model=List[OrgRow])
+async def list_orgs():
+    rows = await database.fetch_all(
+        "SELECT org, display_name FROM orgs ORDER BY org"
+    )
+    return [OrgRow(**dict(r)) for r in rows]
+
+app.include_router(onboard_router)
+app.include_router(tenants_router)
+app.include_router(invites_router)
+app.include_router(orgs_router)
+# ----- Onboarding, Tenants, Invite -----
+
+# ----- Integrations, Logs, Keys -----
+integrations_router = APIRouter(prefix="/integrations", tags=["Integrations"])
+webhook_router      = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+http_router         = APIRouter(prefix="/http", tags=["HTTP"])
+events_router       = APIRouter(prefix="/events", tags=["Events"])
+inventory_log_router= APIRouter(prefix="/inventory", tags=["InventoryLog"])
+keys_router         = APIRouter(prefix="/keys", tags=["Keys"])
+
+class QboEventRow(BaseModel):
+    id: str
+    state: str
+    code: str
+    realm_id: str
+    created_at: datetime
+
+@integrations_router.get("/qbo/oauth_events", response_model=List[QboEventRow])
+async def list_qbo_events(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT id, state, code, realm_id, created_at
+        FROM qbo_oauth_events
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+        {"limit": limit},
+    )
+    return [QboEventRow(**dict(r)) for r in rows]
+
+class DeadLetterRow(BaseModel):
+    id: int
+    event_type: str
+    status_code: Optional[int]
+    response: Optional[str]
+    created_at: datetime
+
+@webhook_router.get("/dead_letters", response_model=List[DeadLetterRow])
+async def list_dead_letters(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT id, event_type, status_code, response, created_at
+        FROM webhook_dead_letters
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    return [DeadLetterRow(**dict(r)) for r in rows]
+
+class IdemRow(BaseModel):
+    key: str
+    created_at: datetime
+
+@http_router.get("/idempotency", response_model=List[IdemRow])
+async def list_idempotency(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT key, created_at
+        FROM http_idempotency
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    return [IdemRow(**dict(r)) for r in rows]
+
+class MatchingRow(BaseModel):
+    id: int
+    topic: str
+    enqueued_at: datetime
+    processed_at: Optional[datetime]
+
+@events_router.get("/matching", response_model=List[MatchingRow])
+async def list_matching_events(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT id, topic, enqueued_at, processed_at
+        FROM matching_events
+        ORDER BY enqueued_at DESC
+        LIMIT :limit
+        """
+    )
+    return [MatchingRow(**dict(r)) for r in rows]
+
+class IngestLogRow(BaseModel):
+    id: str
+    source: Optional[str]
+    seller: Optional[str]
+    item_count: Optional[int]
+    idem_key: Optional[str]
+    sig_present: Optional[bool]
+    sig_valid: Optional[bool]
+    remote_addr: Optional[str]
+    user_agent: Optional[str]
+    created_at: datetime
+
+@inventory_log_router.get("/ingest_log", response_model=List[IngestLogRow])
+async def list_ingest_log(limit: int = 50):
+    rows = await database.fetch_all(
+        """
+        SELECT id, source, seller, item_count, idem_key,
+               sig_present, sig_valid, remote_addr, user_agent, created_at
+        FROM inventory_ingest_log
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    return [IngestLogRow(**dict(r)) for r in rows]
+
+class KeyRow(BaseModel):
+    key_name: str
+    version: int
+    material: str
+    rotated_at: datetime
+
+@keys_router.get("", response_model=List[KeyRow])
+async def list_keys():
+    rows = await database.fetch_all(
+        """
+        SELECT key_name, version, material, rotated_at
+        FROM key_registry
+        ORDER BY key_name, version DESC
+        """
+    )
+    return [KeyRow(**dict(r)) for r in rows]
+
+app.include_router(integrations_router)
+app.include_router(webhook_router)
+app.include_router(http_router)
+app.include_router(events_router)
+app.include_router(inventory_log_router)
+app.include_router(keys_router)
+# ----- Integrations, Logs, Keys -----
+
+# ----- Products & Settlements -----
+products_router    = APIRouter(prefix="/products", tags=["Products"])
+settlements_router = APIRouter(prefix="/settlements", tags=["Settlements"])
+
+class ProductRow(BaseModel):
+    symbol: str
+    description: str
+    unit: str
+    quality: dict
+
+@products_router.get("", response_model=List[ProductRow])
+async def list_products():
+    rows = await database.fetch_all(
+        "SELECT symbol, description, unit, quality FROM products ORDER BY symbol"
+    )
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["quality"] = d.get("quality") or {}
+        result.append(ProductRow(**d))
+    return result
+
+class SettlementRow(BaseModel):
+    id: int
+    as_of: date
+    symbol: str
+    settle: Decimal
+    method: str
+    currency: str
+
+@settlements_router.get("", response_model=List[SettlementRow])
+async def list_settlements(symbol: Optional[str] = None, days: int = 30):
+    q = """
+      SELECT id, as_of, symbol, settle, method, currency
+      FROM settlements
+    """
+    params = {}
+    if symbol:
+        q += " WHERE symbol = :s"
+        params["s"] = symbol
+    q += " ORDER BY as_of DESC LIMIT :limit"
+    params["limit"] = days
+    rows = await database.fetch_all(q, params)
+    return [SettlementRow(**dict(r)) for r in rows]
+
+app.include_router(products_router)
+app.include_router(settlements_router)
+# ----- Products & Settlements -----
+
+# ===== Fees core (fees ledger + preview/run) =====
+fees_router = APIRouter(prefix="/fees", tags=["Fees"])
 
 @startup
 async def _ensure_billing_core():
@@ -1636,6 +3098,140 @@ async def billing_run(member: str, month: str, force: bool=False, request: Reque
 
 app.include_router(fees_router)
 # ===== /Billing core =====
+
+# ----- Billing plans + member summary -----
+@fees_router.get("/plans", summary="List active billing plans")
+async def billing_plans_list():
+    """
+    Public-ish plan catalog. Shows starter/standard/enterprise with price & description.
+    Uses billing_plans table; falls back gracefully if empty.
+    """
+    rows = await database.fetch_all(
+        """
+        SELECT plan_code, name, price_usd, description
+        FROM billing_plans
+        WHERE active = TRUE
+        ORDER BY price_usd ASC, plan_code
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+@fees_router.get("/member/summary", summary="Current plan + limits + monthly preview")
+async def billing_member_summary(
+    member: str = Query(..., description="Tenant/org key used in member_plans"),
+    month: Optional[str] = Query(
+        None,
+        description="Billing month in YYYY-MM; defaults to current calendar month.",
+    ),
+):
+    """
+    Returns:
+      - current plan (code, name, price_usd)
+      - plan limits (from billing_plan_limits if present)
+      - latest invoice for that month (if exists)
+      - preview of event totals + MMI true-up for that month
+    """
+    # 1) Resolve month window [start, end)
+    from datetime import date as _d
+
+    if month:
+        try:
+            y, m = map(int, month.split("-", 1))
+        except Exception:
+            raise HTTPException(400, "month must be YYYY-MM")
+    else:
+        today = _d.today()
+        y, m = today.year, today.month
+
+    start = _d(y, m, 1)
+    end = _d(y + (m // 12), (m % 12) + 1, 1)
+
+    # 2) Plan + limits
+    plan_row = await database.fetch_one(
+        """
+        SELECT mp.plan_code,
+               bp.name,
+               bp.price_usd
+          FROM member_plans mp
+          JOIN billing_plans bp ON bp.plan_code = mp.plan_code
+         WHERE mp.member = :m
+        """,
+        {"m": member},
+    )
+    limits_row = await database.fetch_one(
+        """
+        SELECT *
+          FROM billing_plan_limits
+         WHERE plan_code = (SELECT plan_code FROM member_plans WHERE member=:m)
+        """,
+        {"m": member},
+    )
+
+    plan = None
+    if plan_row:
+        plan = {
+            "plan_code": plan_row["plan_code"],
+            "name": plan_row["name"],
+            "price_usd": float(plan_row["price_usd"] or 0),
+        }
+
+    limits = None
+    if limits_row:
+        limits = {
+            "inc_bol_create": int(limits_row["inc_bol_create"]),
+            "inc_bol_deliver_tons": float(limits_row["inc_bol_deliver_tons"]),
+            "inc_receipts": int(limits_row["inc_receipts"]),
+            "inc_warrants": int(limits_row["inc_warrants"]),
+            "inc_ws_msgs": int(limits_row["inc_ws_msgs"]),
+            "over_bol_create_usd": float(limits_row["over_bol_create_usd"]),
+            "over_deliver_per_ton_usd": float(limits_row["over_deliver_per_ton_usd"]),
+            "over_receipt_usd": float(limits_row["over_receipt_usd"]),
+            "over_warrant_usd": float(limits_row["over_warrant_usd"]),
+            "over_ws_per_million_usd": float(limits_row["over_ws_per_million_usd"]),
+        }
+
+    # 3) Latest invoice in that window (if any)
+    invoice = await database.fetch_one(
+        """
+        SELECT invoice_id, subtotal, tax, total, status, created_at
+          FROM billing_invoices
+         WHERE member=:m AND period_start=:s AND period_end=:e
+         ORDER BY created_at DESC
+         LIMIT 1
+        """,
+        {"m": member, "s": start, "e": end},
+    )
+    invoice_out = None
+    if invoice:
+        invoice_out = {
+            "invoice_id": str(invoice["invoice_id"]),
+            "subtotal": float(invoice["subtotal"] or 0),
+            "tax": float(invoice["tax"] or 0),
+            "total": float(invoice["total"] or 0),
+            "status": invoice["status"],
+            "created_at": invoice["created_at"].isoformat() if invoice["created_at"] else None,
+        }
+
+    # 4) Preview event totals + MMI true-up using existing helper
+    by_ev, subtotal, mmi, trueup = await _member_totals(member, start, end)
+
+    return {
+        "member": member,
+        "period_start": str(start),
+        "period_end": str(end),
+        "plan": plan,
+        "limits": limits,
+        "latest_invoice": invoice_out,
+        "preview": {
+            "by_event": by_ev,
+            "subtotal_usd": round(subtotal, 2),
+            "mmi_usd": round(mmi, 2),
+            "trueup_usd": round(trueup, 2),
+            "total_usd": round(subtotal + trueup, 2),
+        },
+    }
+# ----- /Billing plans + member summary -----
 
 # ----- billing contacts and email logs -----
 @startup
@@ -1928,6 +3524,83 @@ async def _provision_member(member: str, *, email: str | None, plan: str | None)
 
     return {"ok": True, "member": member_norm, "plan": plan, "role": desired_role}
 # ===== Auto-Provisioning on first successful payment / subscription  =====
+
+# ---- Ensure Policy Details ----
+@startup
+async def _ensure_policies_table():
+    POLICY_DDL = """
+    CREATE TABLE IF NOT EXISTS user_policy_acceptance (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username      TEXT NOT NULL,
+        policy_key    TEXT NOT NULL,
+        policy_version TEXT NOT NULL,
+        accepted_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_policy_accept_user
+      ON user_policy_acceptance(username, policy_key, policy_version);
+    """
+    await run_ddl_multi(POLICY_DDL)
+
+policy_router = APIRouter(prefix="/policies", tags=["Policies"])
+
+class PolicyStatus(BaseModel):
+    accepted: bool
+
+class PolicyCurrent(BaseModel):
+    key: str
+    version: str
+    url: str
+    summary: str
+
+class PolicyAcceptIn(BaseModel):
+    key: str
+    version: Optional[str] = None
+
+RULEBOOK_VERSION = "v1"  # bump if you change rulebook
+
+async def get_username(request: Request) -> str:
+    # derive username from session; fallback to email or anonymous
+    return (request.session.get("username")
+            or request.session.get("email")
+            or "anonymous")
+
+@policy_router.get("/status", response_model=PolicyStatus)
+async def policy_status(username: str = Depends(get_username)):
+    row = await database.fetch_one(
+        """
+        SELECT 1
+        FROM user_policy_acceptance
+        WHERE username = :u AND policy_key = 'rulebook' AND policy_version = :v
+        LIMIT 1
+        """,
+        {"u": username, "v": RULEBOOK_VERSION},
+    )
+    return PolicyStatus(accepted=bool(row))
+
+@policy_router.get("/current", response_model=PolicyCurrent)
+async def policy_current():
+    return PolicyCurrent(
+        key="rulebook",
+        version=RULEBOOK_VERSION,
+        url="/legal/rulebook",
+        summary="BRidge Rulebook, Fee Schedule, Terms, and associated policies."
+    )
+
+@policy_router.post("/accept")
+async def policy_accept(body: PolicyAcceptIn, username: str = Depends(get_username)):
+    version = body.version or RULEBOOK_VERSION
+    await database.execute(
+        """
+        INSERT INTO user_policy_acceptance(username, policy_key, policy_version)
+        VALUES (:u, :k, :v)
+        ON CONFLICT DO NOTHING;
+        """,
+        {"u": username, "k": body.key, "v": version},
+    )
+    return {"ok": True}
+app.include_router(policy_router)
+# ---- Ensure Policy Details ----
 
 # =====  Billing payment profiles (Stripe customers + payment methods) =====
 @startup
@@ -2556,6 +4229,12 @@ async def _ensure_products_schema():
 # ----- Anomaly scores -----
 @startup
 async def _ensure_anomaly_scores_schema():
+    # In production with Supabase, the table already exists and may have a
+    # slightly different shape (e.g. BIGSERIAL id PK). When BRIDGE_BOOTSTRAP_DDL=0
+    # we skip these DDL statements entirely and trust the managed schema.
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS public.anomaly_scores (
       member  TEXT NOT NULL,
@@ -5827,6 +7506,12 @@ async def _ensure_inventory_schema():
 # ------ RECEIPTS schema bootstrap (idempotent) =====
 @startup
 async def _ensure_receipts_schema():
+    # Same pattern as anomaly_scores: when we are pointing at a managed DB
+    # (Supabase), we do NOT want to redefine the receipts table. Set
+    # BRIDGE_BOOTSTRAP_DDL=0 in prod to skip this block entirely.
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
 CREATE TABLE IF NOT EXISTS public.receipts (
   receipt_id      UUID PRIMARY KEY,
@@ -5839,9 +7524,7 @@ CREATE TABLE IF NOT EXISTS public.receipts (
   consumed_at     TIMESTAMPTZ,
   consumed_bol_id UUID,
   provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
-);
-
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_tons NUMERIC;
+...
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;
 ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;
@@ -7023,9 +8706,94 @@ async def dossier_sync_once(request: Request):
     _require_admin(request)
     # reuse the selects inside _nightly_dossier_sync and call the internal _post_json once
     return {"ok": True}
+
+admin_dossier_router = APIRouter(prefix="/admin/dossier", tags=["Dossier"])
+
+class DossierQueueItem(BaseModel):
+    source_system: str = "bridge"
+    source_table: str
+    event_type: str
+    status: str
+    attempts: int
+    last_error: Optional[str] = None
+    created_at: datetime
+
+@admin_dossier_router.get("/queue", response_model=List[DossierQueueItem])
+async def dossier_queue(limit: int = 40):
+    """
+    Stub version: if dossier_ingest_queue exists, read from it; otherwise return [].
+    """
+    try:
+        rows = await database.fetch_all(
+            """
+            SELECT source_system, source_table, event_type, status,
+                   attempts, last_error, created_at
+            FROM atlas_ingest_queue
+            ORDER BY created_at DESC
+            LIMIT :limit
+            """,
+            {"limit": limit},
+        )
+        return [DossierQueueItem(**dict(r)) for r in rows]
+    except Exception:
+        # Table not there yet → empty queue
+        return []
+
+@admin_dossier_router.post("/retry_failed")
+async def dossier_retry_failed():
+    """
+    Stub: if dossier_ingest_queue exists, reset failed rows to pending.
+    """
+    try:
+        await database.execute(
+            """
+            UPDATE dossier_ingest_queue
+               SET status = 'pending', attempts = 0
+             WHERE status = 'failed'
+            """
+        )
+        return {"ok": True, "message": "Failed events flagged for retry."}
+    except Exception:
+        return {"ok": False, "message": "dossier_ingest_queue not configured; nothing to retry."}
+app.include_router(admin_dossier_router)
 #------- /Dossier HR Sync -------
 
 #------- RFQs -------
+rfq_router = APIRouter(prefix="/rfqs", tags=["RFQ"])
+
+class RfqOut(BaseModel):
+    rfq_id: str
+    symbol: str
+    side: str
+    quantity_lots: float
+    expires_at: datetime
+
+@rfq_router.get("", response_model=List[RfqOut])
+async def list_rfqs(scope: Optional[str] = None, username: str = Depends(get_username)):
+    """
+    If scope=mine, return RFQs created by this user; otherwise global (or stub).
+    """
+    if scope == "mine":
+        rows = await database.fetch_all(
+            """
+            SELECT rfq_id, symbol, side, quantity_lots, expires_at
+            FROM rfqs
+            WHERE creator = :u
+            ORDER BY created_at DESC
+            """,
+            {"u": username},
+        )
+    else:
+        rows = await database.fetch_all(
+            """
+            SELECT rfq_id, symbol, side, quantity_lots, expires_at
+            FROM rfqs
+            ORDER BY created_at DESC
+            LIMIT 50
+            """
+        )
+    return [RfqOut(**dict(r)) for r in rows]
+
 @startup
 async def _ensure_rfq_schema():
     ddl = [
@@ -9006,23 +10774,13 @@ def flag_outliers(prices, z=3.0):
     sd = statistics.pstdev(prices) or 1
     return [i for i,p in enumerate(prices) if abs((p-mu)/sd) >= z]
 
-@app.post("/forecasts/run", tags=["Forecasts"], summary="Run simple EMA forecasts (stub)", status_code=200)
-async def forecasts_run(symbol: str = "BR-AL-6063-OLD", span: int = 7):
-    rows = await database.fetch_all("""
-        SELECT ts, price FROM indices_daily
-        WHERE symbol = :s AND region = 'blended'
-        ORDER BY ts ASC
-        LIMIT 2000
-    """, {"s": symbol})
-    if not rows:
-        return {"ok": False, "msg": "no data"}
-    alpha = 2/(span+1)
-    ema = None
-    for r in rows:
-        p = float(r["price"])
-        ema = p if ema is None else (alpha*p + (1-alpha)*ema)
-    # Write a single forecast row (optional; define a forecasts table if you want persistence)
-    return {"ok": True, "symbol": symbol, "ema": round(ema, 4)}
+@app.post("/forecasts/run", tags=["Forecasts"], summary="Run nightly forecast for all symbols", status_code=200)
+async def forecasts_run():
+    """
+    Thin alias so /forecasts/run (used by indices.js) kicks off the real batch job.
+    """
+    await _forecast_run_all()
+    return {"ok": True}
 
 @app.get("/analytics/rolling_bands", tags=["Analytics"], summary="Rolling 7/30/90d bands per material")
 async def rolling_bands(material: str, days: int = 365):
@@ -9256,15 +11014,47 @@ async def get_latest_indices():
 
 @app.get("/indices/universe", tags=["Indices"], summary="Universe", status_code=200)
 async def indices_universe():
+    """
+    Global index universe for UI:
+      - Prefer bridge_index_definitions (symbol, method, factor, base_symbol, enabled)
+      - Fallback to DEFAULT_INDEX_SET from indices_builder
+    """
     rows = await database.fetch_all("""
-        SELECT DISTINCT symbol FROM indices_daily ORDER BY symbol
+        SELECT symbol, method, factor, base_symbol, enabled
+        FROM bridge_index_definitions
+        ORDER BY symbol
     """)
-    return [r["symbol"] for r in rows]
+    if rows:
+        return [dict(r) for r in rows]
 
-@app.get("/indices/history", tags=["Indices"], summary="History (alias to /index/history)", status_code=200)
+    # Fallback: in case DB not seeded yet, use DEFAULT_INDEX_SET constants
+    from indices_builder import DEFAULT_INDEX_SET
+    return [
+        {
+            "symbol": d["symbol"],
+            "method": d["method"],
+            "factor": d["factor"],
+            "base_symbol": d["base_symbol"],
+            "enabled": True,
+        }
+        for d in DEFAULT_INDEX_SET
+    ]
+
+@app.get("/indices/history", tags=["Indices"], summary="History (from indices_daily)", status_code=200)
 async def indices_history(symbol: str, limit: int = 500):
+    """
+    Unified history endpoint for:
+      - Trader page     → expects ts, price, region
+      - Indices dashboard → expects dt, close_price
+    We pull from indices_daily and expose both naming styles.
+    """
     rows = await database.fetch_all("""
-        SELECT ts, price, region
+        SELECT
+          ts,
+          ts::date               AS dt,
+          price,
+          price                  AS close_price,
+          region
         FROM indices_daily
         WHERE symbol = :symbol
         ORDER BY ts DESC

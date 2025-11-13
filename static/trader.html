@@ -11,7 +11,7 @@
     <h1 style="margin:0; font-size:20px;">Trader</h1>
   </header>
 
-  <main style="padding:16px; display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+  <main style="padding:16px; display:grid; grid-template-columns:1.1fr 1.1fr 1.1fr; gap:16px;">
     <!-- Left: Index chart -->
     <section style="border:1px solid #eee; border-radius:12px; padding:12px;">
       <h2 style="margin:0 0 8px 0; font-size:16px;">BR-Index</h2>
@@ -35,13 +35,14 @@
       <div id="idxMeta" style="margin-top:8px; font-size:12px; opacity:.8;"></div>
     </section>
 
-    <!-- Right: Quick Scrap Quote -->
+    <!-- Middle: Quick Scrap Quote & Order Book -->
     <section style="border:1px solid #eee; border-radius:12px; padding:12px;">
       <h2 style="margin:0 0 8px 0; font-size:16px;">Quick Scrap Quote</h2>
 
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
         <label for="matInput">Material</label>
-        <input id="matInput" type="text" placeholder="e.g., AL 6063 OLD EXTRUSION PREPARED" style="flex:1; min-width:260px; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        <input id="matInput" type="text" placeholder="e.g., AL 6063 OLD EXTRUSION PREPARED"
+               style="flex:1; min-width:260px; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
         <button id="quoteBtn" style="padding:6px 10px; border:1px solid #ccc; border-radius:8px; cursor:pointer;">Get Quote</button>
       </div>
 
@@ -50,8 +51,78 @@
 
       <hr style="margin:12px 0; border:0; border-top:1px solid #eee;"/>
 
-      <p style="font-size:12px; opacity:.8; margin:0;">
-        Quotes prefer vendor-blended $/lb when available; otherwise they fall back to reference benchmarks.
+      <h3 style="margin:0 0 6px 0; font-size:14px;">Order Book</h3>
+      <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
+        <label>Futures Symbol Root</label>
+        <input id="bookSymbolRoot" type="text" placeholder="e.g., HMS"
+               style="min-width:120px; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        <button id="bookLoadBtn" style="padding:4px 8px; border:1px solid #ccc; border-radius:8px; cursor:pointer;">Refresh Book</button>
+      </div>
+
+      <div id="bookWrap" style="display:flex; gap:8px; font-size:13px;">
+        <div style="flex:1;">
+          <div style="font-weight:600; margin-bottom:4px;">Bids</div>
+          <table id="bookBids" style="width:100%; border-collapse:collapse;">
+            <thead><tr><th style="text-align:left;">Price</th><th style="text-align:right;">Lots</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div style="flex:1;">
+          <div style="font-weight:600; margin-bottom:4px;">Asks</div>
+          <table id="bookAsks" style="width:100%; border-collapse:collapse;">
+            <thead><tr><th style="text-align:left;">Price</th><th style="text-align:right;">Lots</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p style="font-size:12px; opacity:.8; margin-top:8px;">
+        Book, orders, and positions all read from the same CLOB/futures backend used by admin.
+      </p>
+    </section>
+
+    <!-- Right: Orders, Positions, RFQs -->
+    <section style="border:1px solid #eee; border-radius:12px; padding:12px;">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Trader Blotter</h2>
+
+      <div style="font-size:13px; margin-bottom:6px;">
+        <strong>Open Orders</strong>
+      </div>
+      <div style="max-height:120px; overflow:auto; border:1px solid #eee; border-radius:8px; margin-bottom:8px;">
+        <table id="ordersTbl" style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr><th>Symbol</th><th>Side</th><th>Price</th><th>Qty</th><th>Status</th></tr>
+          </thead>
+          <tbody><tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div style="font-size:13px; margin-bottom:6px;">
+        <strong>Positions</strong>
+      </div>
+      <div style="max-height:100px; overflow:auto; border:1px solid #eee; border-radius:8px; margin-bottom:8px;">
+        <table id="posTbl" style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr><th>Symbol</th><th>Net Lots</th></tr>
+          </thead>
+          <tbody><tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div style="font-size:13px; margin-bottom:6px;">
+        <strong>RFQs</strong>
+      </div>
+      <div style="max-height:120px; overflow:auto; border:1px solid #eee; border-radius:8px;">
+        <table id="rfqTbl" style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Expires</th></tr>
+          </thead>
+          <tbody><tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <p style="font-size:12px; opacity:.8; margin-top:6px;">
+        RFQs shown here are those you created or are eligible to respond to. Use admin RFQ tools for global book.
       </p>
     </section>
   </main>
@@ -93,7 +164,10 @@
     async function loadUniverse(){
       try {
         const syms = await api('/indices/universe');
-        symbolSel.innerHTML = syms.map(s => `<option value="${s}">${s}</option>`).join('');
+        symbolSel.innerHTML = syms.map(row => {
+          const sym = (typeof row === 'string') ? row : row.symbol;
+          return `<option value="${sym}">${sym}</option>`;
+        }).join('');
       } catch(e){
         console.error(e);
         symbolSel.innerHTML = `<option disabled>Failed to load</option>`;
@@ -132,6 +206,102 @@
       }
     }
 
+    async function loadBook(){
+      const symbolRoot = (document.getElementById('bookSymbolRoot')?.value || '').trim();
+      const fallback = (symbolSel?.value || '').trim();
+      const sym = symbolRoot || fallback;
+      if (!sym) return;
+      try{
+        const book = await api(`/trader/book?symbol=${encodeURIComponent(sym)}`);
+        const bidsBody = document.querySelector('#bookBids tbody');
+        const asksBody = document.querySelector('#bookAsks tbody');
+        function renderSide(rows, body){
+          if (!rows || !rows.length){
+            body.innerHTML = `<tr><td colspan="2" style="opacity:.6; padding:4px;">No depth</td></tr>`;
+            return;
+          }
+          body.innerHTML = rows.map(r => `
+            <tr>
+              <td>${r.price}</td>
+              <td style="text-align:right;">${r.qty_lots}</td>
+            </tr>
+          `).join('');
+        }
+        renderSide(book.bids || [], bidsBody);
+        renderSide(book.asks || [], asksBody);
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    async function loadOrders(){
+      const body = document.querySelector('#ordersTbl tbody');
+      if (!body) return;
+      body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      try{
+        const rows = await api('/trader/orders');
+        if (!rows.length){
+          body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">No open orders.</td></tr>`;
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.symbol_root || r.symbol || ''}</td>
+            <td>${(r.side || '').toUpperCase()}</td>
+            <td>${r.price}</td>
+            <td>${r.qty_open ?? r.qty ?? ''}</td>
+            <td>${r.status || ''}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
+    async function loadPositions(){
+      const body = document.querySelector('#posTbl tbody');
+      if (!body) return;
+      body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      try{
+        const rows = await api('/trader/positions');
+        if (!rows.length){
+          body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">No positions.</td></tr>`;
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.symbol_root || r.symbol || ''}</td>
+            <td>${r.net_lots ?? r.net_qty ?? 0}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
+    async function loadRfqs(){
+      const body = document.querySelector('#rfqTbl tbody');
+      if (!body) return;
+      body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      try{
+        const rows = await api('/rfqs?scope=mine');
+        if (!rows.length){
+          body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">No RFQs.</td></tr>`;
+          return;
+        }
+        body.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.symbol || ''}</td>
+            <td>${(r.side || '').toUpperCase()}</td>
+            <td>${r.quantity_lots ?? r.qty_lots ?? ''}</td>
+            <td>${r.expires_at || ''}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
     // events
     loadBtn.addEventListener('click', loadHistory);
     quoteBtn.addEventListener('click', getQuote);
@@ -140,6 +310,25 @@
     document.addEventListener('DOMContentLoaded', async () => {
       await loadUniverse();
       if(symbolSel.options.length){ await loadHistory(); }
+
+      // Wire additional controls
+      document.getElementById('bookLoadBtn')?.addEventListener('click', loadBook);
+      document.getElementById('quoteBtn')?.addEventListener('click', getQuote);
+
+      // Initial loads
+      loadBook().catch(()=>{});
+      loadOrders().catch(()=>{});
+      loadPositions().catch(()=>{});
+      loadRfqs().catch(()=>{});
+
+      // Lightweight auto-refresh every ~45s when visible
+      function tick(){
+        if (document.hidden) return;
+        loadOrders().catch(()=>{});
+        loadPositions().catch(()=>{});
+        loadRfqs().catch(()=>{});
+      }
+      setInterval(tick, 45000);
     });
   })();
   </script>

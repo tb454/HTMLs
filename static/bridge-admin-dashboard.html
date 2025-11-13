@@ -24,6 +24,8 @@
     // Clear after 3s no matter what
     setTimeout(() => { try { window.hideLoading(); } catch {} }, 3000);
   </script>
+  <script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
+  <script src="/static/js/admin-pagination.js?v=20251111" defer nonce="{{NONCE}}"></script>
 
   <script nonce="{{NONCE}}">
     // Single source of truth for API base
@@ -93,9 +95,6 @@
     // If DOMContentLoaded doesn't fire, still clear the loader.
     setTimeout(() => { try { window.hideLoading && window.hideLoading(); } catch {} }, 2500);
   </script>
-
-  <script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
-  <script src="/static/js/admin-pagination.js?v=20251111" defer nonce="{{NONCE}}"></script>
   
   <script nonce="{{NONCE}}">
     // Belt-and-suspenders: if something above fails, end loading.
@@ -134,7 +133,15 @@
 
   <div class="container-fluid">
     <div class="d-flex align-items-center justify-content-between mb-2">
-      <h2 class="mb-0">📊 BRidge Admin Dashboard</h2>
+      <div class="d-flex align-items-center gap-2">
+        <h2 class="mb-0">📊 BRidge Admin Dashboard</h2>
+        <div class="d-flex align-items-center gap-1">
+          <label for="tenantSelect" class="small text-muted mb-0">Tenant</label>
+          <select id="tenantSelect" class="form-select form-select-sm" style="min-width:160px">
+            <option value="">(all)</option>
+          </select>
+        </div>
+      </div>
       <span class="health-badge" data-health-badge>● Checking…</span>
     </div>
 
@@ -151,7 +158,20 @@
           Contracts
         </button>
       </li>
-    </ul>
+          <li class="nav-item" role="presentation">
+            <button
+              class="nav-link"
+              id="futures-tab"
+              data-bs-toggle="tab"
+              data-bs-target="#futuresTab"
+              type="button"
+              role="tab"
+              aria-controls="futuresTab"
+              aria-selected="false">
+              Futures
+            </button>
+          </li>
+      </ul>
     <div class="tab-content" id="adminTabsContent">
 
       <!-- BR-Indices Controls -->
@@ -272,6 +292,80 @@ onReady(async function(){
   <button id="nextBtn" class="btn btn-outline-secondary btn-sm">Next</button>
 </div>
 
+<!-- Usage & Risk Overview -->
+<div class="row g-3 mt-3">
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5 class="mb-2">Usage by Member (Current Cycle)</h5>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle" id="usageTbl">
+          <thead>
+            <tr>
+              <th>Member</th><th>Plan</th><th>BOLs</th><th>Contracts</th><th>Receipts</th><th>Overage ($)</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="6" class="text-muted text-center py-2">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="small text-muted mt-1">
+        Backed by billing_plan_limits, usage_events and billing_invoices. ICE/Citadel ready.
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5 class="mb-2">Risk & Surveillance</h5>
+      <div class="row g-2">
+        <div class="col-12">
+          <strong class="small text-muted">Recent Anomaly Scores</strong>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle mb-1" id="anomalyTbl">
+              <thead>
+                <tr><th>Member</th><th>Symbol</th><th>Score</th><th>As Of</th></tr>
+              </thead>
+              <tbody><tr><td colspan="4" class="text-muted text-center py-1">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="col-12">
+          <strong class="small text-muted">Surveillance Alerts</strong>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle mb-0" id="surveilTbl">
+              <thead>
+                <tr><th>Rule</th><th>Subject</th><th>Severity</th><th>Opened</th></tr>
+              </thead>
+              <tbody><tr><td colspan="4" class="text-muted text-center py-1">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="small text-muted mt-1">
+        Feeds from anomaly_scores and surveil_alerts/surveil_cases. Use for T+1 reviews and ICE audits.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Dossier Ingestion Status -->
+<div class="card p-3 mb-3 mt-3">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <h5 class="m-0">Dossier Ingestion</h5>
+    <button class="btn btn-outline-secondary btn-sm" id="dossierRetry">Retry Failed</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle" id="dossierTbl">
+      <thead>
+        <tr>
+          <th>Source</th><th>Table</th><th>Event</th><th>Status</th><th>Attempts</th><th>Last Error</th><th>Created</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="7" class="text-muted text-center py-2">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="small text-muted mt-1" id="dossierMsg"></div>
+</div>
+
 <!-- RFQ (two-click) -->
 <div class="card p-3 mb-2">
   <h5 class="m-0 mb-2">Quick RFQ</h5>
@@ -309,6 +403,138 @@ onReady(async function(){
     };
   })();
 </script>
+
+  <script nonce="{{NONCE}}">
+  // ---- Yard Pricing & Hedge Config UI ----
+  (function(){
+    const $ = (id)=>document.getElementById(id);
+
+    function yardKey(){
+      const fromField = ($('yardConfigSeller')?.value || '').trim();
+      if (fromField) return fromField;
+      const seller = ($('sellerName')?.value || '').trim();
+      if (seller) return seller;
+      return '';
+    }
+
+    function skuKey(){
+      return ($('yardConfigSku')?.value || $('material')?.value || '').trim();
+    }
+
+    function setMsg(msg){
+      const el = $('yardConfigMsg');
+      if (el) el.textContent = msg || '';
+    }
+
+    function renderRules(rows){
+      const tb = $('yardRulesTable')?.querySelector('tbody');
+      if (!tb) return;
+      if (!rows || !rows.length){
+        tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No rules yet.</td></tr>`;
+        return;
+      }
+      tb.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.material || ''}</td>
+          <td>${r.formula || ''}</td>
+          <td>${(r.loss_min_pct ?? 0)}–${(r.loss_max_pct ?? 0)}%</td>
+          <td>${r.min_margin_usd_ton ?? 0}</td>
+          <td>${(r.target_hedge_ratio ?? 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderHedges(rows){
+      const tb = $('yardHedgeTable')?.querySelector('tbody');
+      if (!tb) return;
+      if (!rows || !rows.length){
+        tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No hedge recommendations.</td></tr>`;
+        return;
+      }
+      tb.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.material || ''}</td>
+          <td>${r.on_hand_tons ?? ''}</td>
+          <td>${r.hedged_tons ?? ''}</td>
+          <td>${(r.target_hedge_ratio ?? 0)}</td>
+          <td>${r.suggested_lots ?? 0}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadRules(){
+      const yard = yardKey();
+      if (!yard){ setMsg('Set Seller or Yard key first.'); return; }
+      setMsg('Loading rules...');
+      try{
+        const res = await api(`/yard_rules?yard=${encodeURIComponent(yard)}`);
+        const rows = await res.json();
+        renderRules(rows || []);
+        setMsg(`Loaded ${rows.length || 0} rule(s) for ${yard}.`);
+      }catch(e){
+        setMsg(e.message || 'Failed to load rules');
+      }
+    }
+
+    async function saveRule(){
+      const yard = yardKey();
+      const sku  = skuKey();
+      if (!yard || !sku){ toast('Seller/Yard and SKU are required.'); return; }
+      const body = {
+        yard,
+        material: sku,
+        formula: ($('yardConfigFormula')?.value || '').trim() || null,
+        loss_min_pct: $('yardLossMin')?.value ? parseFloat($('yardLossMin').value) : null,
+        loss_max_pct: $('yardLossMax')?.value ? parseFloat($('yardLossMax').value) : null,
+        min_margin_usd_ton: $('yardMinMargin')?.value ? parseFloat($('yardMinMargin').value) : null,
+        target_hedge_ratio: $('yardHedgeRatio')?.value ? parseFloat($('yardHedgeRatio').value) : null,
+        min_tons: $('yardMinTons')?.value ? parseFloat($('yardMinTons').value) : null,
+        futures_symbol_root: ($('yardSymbolRoot')?.value || '').trim() || null,
+        auto_hedge: ($('yardAutoHedge')?.value === 'true')
+      };
+      setMsg('Saving rule...');
+      try{
+        await api('/yard_rules', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        toast('Yard rule saved.');
+        await loadRules();
+        setMsg('Saved.');
+      }catch(e){
+        setMsg(e.message || 'Failed to save rule');
+      }
+    }
+
+    async function loadHedgeRecs(){
+      const yard = yardKey();
+      if (!yard){ toast('Set Seller/Yard first.'); return; }
+      setMsg('Loading hedge recommendations...');
+      try{
+        const res = await api(`/hedge/recommendations?yard=${encodeURIComponent(yard)}`);
+        const rows = await res.json();
+        renderHedges(rows || []);
+        setMsg(`Got ${rows.length || 0} hedge recommendation(s).`);
+      }catch(e){
+        setMsg(e.message || 'Failed to load hedge recommendations');
+      }
+    }
+
+    onReady(() => {
+      $('yardRuleLoad')?.addEventListener('click', loadRules);
+      $('yardRuleSave')?.addEventListener('click', saveRule);
+      $('yardHedgeRecs')?.addEventListener('click', loadHedgeRecs);
+
+      // If seller is already set, auto-populate yardConfigSeller & load rules on first open
+      const seller = (document.getElementById('sellerName')?.value || '').trim();
+      if (seller && $('yardConfigSeller')) {
+        $('yardConfigSeller').value = seller;
+        loadRules().catch(()=>{});
+      }
+    });
+  })();
+  </script>
 
 <section class="card">
   <h3>Vendor Pricing (Latest Sheet)</h3>
@@ -1185,6 +1411,108 @@ Object.assign(window, {
   });
 </script>
 
+  <!-- Policy Acceptance Modal -->
+  <div class="modal fade" id="policyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Policy Update</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" disabled></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted mb-2" id="policySummary">You must accept the current Terms / Rulebook to create contracts and BOLs.</p>
+          <p class="small">
+            View full documents:
+            <a href="/legal/terms" target="_blank" rel="noopener noreferrer">Terms</a> ·
+            <a href="/legal/eula" target="_blank" rel="noopener noreferrer">EULA</a> ·
+            <a href="/legal/fees" target="_blank" rel="noopener noreferrer">Fees</a> ·
+            <a href="/legal/rulebook" target="_blank" rel="noopener noreferrer">Rulebook</a>
+          </p>
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="policyAgreeChkSeller">
+            <label class="form-check-label small" for="policyAgreeChkSeller">
+              I have read and agree to the current Terms, Rulebook, Fee Schedule, and Policies.
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="policyAcceptBtnSeller" type="button" class="btn btn-primary" disabled>Accept & Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script nonce="{{NONCE}}">
+  // Seller/Yard: policy gating
+  (function(){
+    async function checkPolicies(){
+      try{
+        const res = await api('/policies/status');
+        const j = await res.json();
+        if (j.accepted) return;
+
+        let summary = 'You must accept the current Terms / Rulebook to create contracts and BOLs.';
+        try{
+          const r2 = await api('/policies/current');
+          const p = await r2.json();
+          if (p && p.version){
+            summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to create contracts and BOLs.`;
+          }
+        }catch{}
+        const sEl = document.getElementById('policySummary'); if (sEl) sEl.textContent = summary;
+
+        const modalEl = document.getElementById('policyModal');
+        if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
+        const modal = new bootstrap.Modal(modalEl, { backdrop:'static', keyboard:false });
+        modal.show();
+
+        const chk = document.getElementById('policyAgreeChkSeller');
+        const btn = document.getElementById('policyAcceptBtnSeller');
+        chk?.addEventListener('change', ()=>{ btn.disabled = !chk.checked; });
+        btn?.addEventListener('click', async ()=>{
+          btn.disabled = true;
+          try{
+            await api('/policies/accept', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ key:'rulebook', version: null })
+            });
+            modal.hide();
+            toast('Policy accepted.');
+          }catch(e){
+            toast(e.message || 'Could not record acceptance');
+            btn.disabled = false;
+          }
+        });
+      }catch{}
+    }
+    onReady(checkPolicies);
+  })();
+  </script>
+
+  <script nonce="{{NONCE}}">
+  // Admin: tenant dropdown stub
+  (function(){
+    async function loadTenants(){
+      const sel = document.getElementById('tenantSelect');
+      if (!sel) return;
+      try{
+        const res = await api('/admin/tenants');
+        const rows = await res.json();
+        rows.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.id || t.slug || t.org || t.name;
+          opt.textContent = t.display_name || t.name || t.slug || opt.value;
+          sel.appendChild(opt);
+        });
+      }catch(e){
+        console.warn('tenants load failed', e);
+      }
+    }
+    onReady(loadTenants);
+  })();
+  </script>
+
   <footer class="legal-footer invisible">
     <hr class="mb-3">
     <nav class="small d-flex flex-wrap gap-2 justify-content-center" aria-label="Legal navigation">
@@ -1218,6 +1546,136 @@ Object.assign(window, {
       fn(el.dataset.bolId || el.dataset.listingId || e);
     });
   });
-</script>
+  </script>
+
+  <script nonce="{{NONCE}}">
+  // ---- Admin Usage, Risk, Dossier Ingest ----
+  (function(){
+    const $ = (id)=>document.getElementById(id);
+
+    async function loadUsage(){
+      const tb = $('usageTbl')?.querySelector('tbody');
+      if (!tb) return;
+      tb.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">Loading…</td></tr>`;
+      try{
+        const res = await api('/analytics/usage_by_member_current_cycle');
+        const rows = await res.json();
+        if (!rows.length){
+          tb.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">No usage yet in this cycle.</td></tr>`;
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.member || ''}</td>
+            <td>${r.plan_code || ''}</td>
+            <td>${r.bols_month ?? 0}</td>
+            <td>${r.contracts_month ?? 0}</td>
+            <td>${r.receipts_month ?? 0}</td>
+            <td>${(r.overage_usd ?? 0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2})}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        tb.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">Failed: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
+    async function loadAnomalies(){
+      const tb = $('anomalyTbl')?.querySelector('tbody');
+      if (!tb) return;
+      tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">Loading…</td></tr>`;
+      try{
+        const res = await api('/analytics/anomalies_recent?limit=25');
+        const rows = await res.json();
+        if (!rows.length){
+          tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">No recent anomalies.</td></tr>`;
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.member || ''}</td>
+            <td>${r.symbol || ''}</td>
+            <td>${r.score ?? ''}</td>
+            <td>${r.as_of || ''}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">Failed: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
+    async function loadSurveil(){
+      const tb = $('surveilTbl')?.querySelector('tbody');
+      if (!tb) return;
+      tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">Loading…</td></tr>`;
+      try{
+        const res = await api('/analytics/surveil_recent?limit=25');
+        const rows = await res.json();
+        if (!rows.length){
+          tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">No recent alerts.</td></tr>`;
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.rule || ''}</td>
+            <td>${r.subject || ''}</td>
+            <td>${r.severity || 'info'}</td>
+            <td>${r.opened_at || r.created_at || ''}</td>
+          </tr>
+        `).join('');
+      }catch(e){
+        tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">Failed: ${e.message || 'error'}</td></tr>`;
+      const tb = $('dossierTbl')?.querySelector('tbody');
+      const msg = $('dossierMsg');
+    async function loadDossier(){
+      const tb = $('dossierTbl')?.querySelector('tbody');
+      const msg = $('dossierMsg');
+      if (!tb) return;
+      tb.innerHTML = `<tr><td colspan="7" class="text-muted text-center py-2">Loading…</td></tr>`;
+      try{
+        const res = await api('/admin/dossier/queue?limit=40');
+        const rows = await res.json();
+        if (!rows.length){
+          tb.innerHTML = `<tr><td colspan="7" class="text-muted text-center py-2">Ingest queue is empty.</td></tr>`;
+          if (msg) msg.textContent = '';
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.source_system || 'bridge'}</td>
+            <td>${r.source_table || ''}</td>
+            <td>${r.event_type || ''}</td>
+            <td>${r.status || ''}</td>
+            <td>${r.attempts ?? 0}</td>
+            <td class="small">${(r.last_error || '').slice(0,80)}</td>
+            <td>${r.created_at || ''}</td>
+          </tr>
+        `).join('');
+        if (msg) msg.textContent = `Pending: ${(rows.filter(x => x.status==='pending').length || 0)} · Failed: ${(rows.filter(x => x.status==='failed').length || 0)}`;
+      }catch(e){
+        tb.innerHTML = `<tr><td colspan="7" class="text-muted text-center py-2">Failed: ${e.message || 'error'}</td></tr>`;
+        if (msg) msg.textContent = '';
+      }
+    }
+
+    async function retryDossierFailed(){
+      try{
+        const res = await api('/admin/dossier/retry_failed', { method:'POST' });
+        const j = await res.json().catch(()=>({}));
+        toast(j.message || 'Retry triggered.');
+        await loadDossier();
+      }catch(e){
+        toast(e.message || 'Retry failed');
+      }
+    }
+
+    onReady(() => {
+      loadUsage().catch(()=>{});
+      loadAnomalies().catch(()=>{});
+      loadSurveil().catch(()=>{});
+      loadDossier().catch(()=>{});
+      $('dossierRetry')?.addEventListener('click', retryDossierFailed);
+    });
+  </script>
+
 </body>
 </html>
