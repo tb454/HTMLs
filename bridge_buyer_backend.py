@@ -6921,6 +6921,21 @@ async def _idx_refs():
         pass
 # ------ Contracts refs index ------
 
+# ------ Indices Migration ------
+@startup
+async def _indices_daily_migration_add_cols():
+    await run_ddl_multi("""
+    ALTER TABLE indices_daily
+      ADD COLUMN IF NOT EXISTS symbol   TEXT,
+      ADD COLUMN IF NOT EXISTS ts       TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS price    NUMERIC,
+      ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
+
+    CREATE INDEX IF NOT EXISTS idx_indices_daily_sym_ts
+      ON indices_daily(symbol, ts DESC);
+    """)
+# ------ Indices Migration ------
+
 # ------ ICE delivery log ------
 @startup
 async def _ensure_ice_delivery_log():
