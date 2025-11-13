@@ -1236,6 +1236,30 @@ async def vendor_price_history(material: str, days:int = 365):
         FROM latest GROUP BY d ORDER BY d
     """, {"m": material, "days": days})
     return [{"date": str(r["date"]), "avg_lb": float(r["avg_lb"]), "vendors": int(r["vendors"])} for r in rows]
+
+@app.get("/analytics/vendor_coverage", tags=["Analytics"], summary="Coverage counts for vendor mapping", status_code=200)
+async def analytics_vendor_coverage(sheet_date: str):
+    row = await database.fetch_one("""
+    WITH x AS (
+      SELECT COUNT(DISTINCT material) AS n
+      FROM vendor_quotes
+      WHERE sheet_date = :d
+    ),
+    y AS (
+      SELECT COUNT(DISTINCT COALESCE(m.material_canonical, v.material)) AS n
+      FROM vendor_quotes v
+      LEFT JOIN vendor_material_map m
+        ON m.vendor=v.vendor AND m.material_vendor=v.material
+      WHERE v.sheet_date = :d
+    ),
+    z AS (
+      SELECT COUNT(DISTINCT material) AS n FROM contracts
+    )
+    SELECT (SELECT n FROM x) AS vendor_materials,
+           (SELECT n FROM y) AS mapped_materials,
+           (SELECT n FROM z) AS system_materials
+    """, {"d": sheet_date})
+    return dict(row) if row else {"vendor_materials": 0, "mapped_materials": 0, "system_materials": 0}
 # ===== Vendor Quotes (ingest + pricing blend) =====
 
 # =====  users minimal for tests =====
@@ -5253,6 +5277,17 @@ async def admin_export_all():
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="all.zip"'} )
+
+@app.get("/admin/export_behavior.json", tags=["Admin"], summary="Behavioral export (contracts, BOLs) for Dossier", status_code=200)
+async def admin_export_behavior():
+    import json
+    contracts = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC LIMIT 2000")
+    bols      = await database.fetch_all("SELECT * FROM bols ORDER BY created_at DESC LIMIT 2000")
+    return {
+      "exported_at": __import__("datetime").datetime.utcnow().isoformat()+"Z",
+      "contracts": [dict(x) for x in contracts],
+      "bols": [dict(x) for x in bols],
+    }
 # --- ZIP export (all core data) ---
 
 # ===== FUTURES endpoints =====
@@ -8002,6 +8037,26 @@ async def pull_now_all():
     # Wire to your actual COMEX/LME puller; for now a stub response
     # (call your existing internal function if you have one)
     return {"ok": True, "msg": "Pull started"}
+
+@app.post("/reference_prices/upsert_from_vendor", tags=["Reference"], summary="Upsert today's vendor-blended LB into reference_prices", status_code=200)
+async def upsert_vendor_to_reference():
+    # Ensure reference_prices has columns: symbol TEXT, ts TIMESTAMPTZ, price_lb NUMERIC, source TEXT
+    # Upsert by (symbol, ts::date, source) can be added later; for now just insert "now".
+    await database.execute("""
+        INSERT INTO reference_prices (symbol, ts, price_lb, source)
+        SELECT m.material_canonical AS symbol,
+               NOW() AS ts,
+               AVG(v.price_per_lb) AS price_lb,
+               'vendor' AS source
+        FROM vendor_quotes v
+        JOIN vendor_material_map m
+          ON m.vendor=v.vendor AND m.material_vendor=v.material
+        WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+          AND v.price_per_lb IS NOT NULL
+          AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+        GROUP BY m.material_canonical
+    """)
+    return {"ok": True}
 # ----- Reference Prices -----
 
 # ----- News -----
@@ -8614,6 +8669,24 @@ def flag_outliers(prices, z=3.0):
     sd = statistics.pstdev(prices) or 1
     return [i for i,p in enumerate(prices) if abs((p-mu)/sd) >= z]
 
+@app.post("/forecasts/run", tags=["Forecasts"], summary="Run simple EMA forecasts (stub)", status_code=200)
+async def forecasts_run(symbol: str = "BR-AL-6063-OLD", span: int = 7):
+    rows = await database.fetch_all("""
+        SELECT ts, price FROM indices_daily
+        WHERE symbol = :s AND region = 'blended'
+        ORDER BY ts ASC
+        LIMIT 2000
+    """, {"s": symbol})
+    if not rows:
+        return {"ok": False, "msg": "no data"}
+    alpha = 2/(span+1)
+    ema = None
+    for r in rows:
+        p = float(r["price"])
+        ema = p if ema is None else (alpha*p + (1-alpha)*ema)
+    # Write a single forecast row (optional; define a forecasts table if you want persistence)
+    return {"ok": True, "symbol": symbol, "ema": round(ema, 4)}
+
 @app.get("/analytics/rolling_bands", tags=["Analytics"], summary="Rolling 7/30/90d bands per material")
 async def rolling_bands(material: str, days: int = 365):
     q = """
@@ -8733,6 +8806,34 @@ async def public_indices_csv(days: int = 365, region: Optional[str] = None, mate
         return StreamingResponse(iter(["as_of_date,region,material,avg_price,volume_tons\n"]),
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
+
+@app.post("/indices/snapshot_blended", tags=["Indices"], summary="Snapshot 70/30 blended (bench/vendor) into indices_daily", status_code=200)
+async def indices_snapshot_blended():
+    # bench: latest reference_prices per symbol (price_lb)
+    # vend : latest vendor LB per symbol (avg)
+    await database.execute("""
+        INSERT INTO indices_daily(symbol, ts, region, price)
+        SELECT CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
+               NOW() AS ts,
+               'blended' AS region,
+               0.70 * b.price_lb + 0.30 * v.vendor_lb AS price
+        FROM (
+          SELECT symbol, price_lb
+          FROM reference_prices
+          WHERE ts = (SELECT MAX(ts) FROM reference_prices)
+        ) b
+        JOIN (
+          SELECT m.material_canonical AS symbol, AVG(v.price_per_lb) AS vendor_lb
+          FROM vendor_quotes v
+          JOIN vendor_material_map m
+            ON m.vendor=v.vendor AND m.material_vendor=v.material
+          WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+            AND v.price_per_lb IS NOT NULL
+            AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+          GROUP BY 1
+        ) v ON v.symbol = b.symbol
+    """)
+    return {"ok": True}
 # --------- Daily index snapshot ---------
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
