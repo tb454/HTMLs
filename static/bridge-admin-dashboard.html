@@ -18,6 +18,11 @@
     }
     // Mint XSRF-TOKEN early so POST/PUT/PATCH/DELETE have a header to echo
     onReady(async () => { try { await fetch('/health', { credentials:'include' }); } catch {} });
+    // If any script errors or unhandled promise rejections happen, don't hang the loader
+    window.addEventListener('error', () => { try { window.hideLoading(); } catch {} });
+    window.addEventListener('unhandledrejection', () => { try { window.hideLoading(); } catch {} });
+    // Clear after 3s no matter what
+    setTimeout(() => { try { window.hideLoading(); } catch {} }, 3000);
   </script>
 
   <script nonce="{{NONCE}}">
@@ -69,7 +74,7 @@
           el.textContent='● Degraded'; el.dataset.ok='0';
         }
       }
-      await ping();
+      ping();
       setInterval(ping, 15000);
     });
   </script>
@@ -91,6 +96,7 @@
 
   <script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/admin-pagination.js?v=20251111" defer nonce="{{NONCE}}"></script>
+  
   <script nonce="{{NONCE}}">
     // Belt-and-suspenders: if something above fails, end loading.
     window.addEventListener('DOMContentLoaded', () => {
@@ -99,6 +105,8 @@
         const f = document.querySelector('footer.legal-footer');
         if (f) f.classList.remove('invisible');
       } catch(_) {}
+      // If DOMContentLoaded fired but something still blocked earlier scripts, re-clear in a microtask
+      queueMicrotask(() => { try { window.hideLoading && window.hideLoading(); } catch {} });
     });
   </script>
   </head>
@@ -316,7 +324,17 @@ onReady(async function(){
   <canvas id="vendorChart" height="120"></canvas>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script nonce="{{NONCE}}">
+  (function loadChartJS(){
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    s.defer = true;
+    s.onload = () => console.debug('Chart.js loaded');
+    s.onerror = () => console.warn('Chart.js failed to load; continuing without charts');
+    document.head.appendChild(s);
+  })();
+</script>
+
 <script nonce="{{NONCE}}">
 (async function(){
   try {
@@ -700,6 +718,7 @@ onReady(async function(){
       const data = await res.json();
 
       render(Array.isArray(data.items) ? data.items : data);
+      try { window.hideLoading(); } catch {}
 
       // pager UI
       $("cPrev").disabled = (cOffset <= 0);
@@ -804,8 +823,10 @@ onReady(async function(){
       if (end){ const d=new Date(end); d.setHours(23,59,59,999); qs.set("end", d.toISOString()); }
 
       showSkeleton('#bol-table', 11);
+      const ctl = new AbortController();
+      const _timer = setTimeout(() => ctl.abort(), 15000); // 15s hard timeout so UI never hangs
       try {
-        const res = await api(`/bols?${qs.toString()}`, { headers:{ "Accept":"application/json" }});
+        const res = await api(`/bols?${qs.toString()}`, { headers:{ "Accept":"application/json" }, signal: ctl.signal });
         const total = +(res.headers.get('X-Total-Count') || 0);
         const rows = await res.json();
 
@@ -816,8 +837,13 @@ onReady(async function(){
           ? `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows • ${aOffset+1}–${aOffset+rows.length} of ${total}`
           : `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows`;
 
-      } catch(e){ toast(e.message||'Load failed'); }
-      finally { clearBusy('#bol-table'); }
+      } catch(e){
+        toast(e.message||'Load failed');
+      } finally {
+        clearTimeout(_timer);
+        clearBusy('#bol-table');
+        try { window.hideLoading(); } catch {}
+      }
     }
 
     function renderBOLTable(rows){
