@@ -703,7 +703,7 @@ def send_application_email(payload: ApplyRequest, app_id: str):
     subject = f"[BRidge] New Access Application — {payload.org_name} ({payload.plan})"
     lines = [
         f"Application ID: {app_id}",
-        f"Received At: {datetime.utcnow().isoformat()}Z",
+        f"Received At: {datetime.now(datetime.timezone.utc).isoformat()}Z",
         "",
         f"Entity Type: {payload.entity_type}",
         f"Role: {payload.role}",
@@ -1354,7 +1354,7 @@ async def vq_current(limit:int=500):
 
 @vendor_router.post("/snapshot_to_indices", summary="Snapshot vendor-blended prices into indices_daily for today")
 async def vq_snapshot_to_indices(as_of: date = None):
-    asof = as_of or datetime.utcnow().date()
+    asof = as_of or datetime.now(datetime.timezone.utc).date()
     rows = await database.fetch_all("""
       WITH latest AS (
         SELECT DISTINCT ON (vendor, material)
@@ -1556,18 +1556,6 @@ async def _ensure_http_idem_table():
     CREATE INDEX IF NOT EXISTS idx_http_idem_ttl ON http_idempotency (created_at);
     """)
 # ----- idem key cache -----
-
-# =====  WebSocket keepalive =====
-@app.websocket("/md/ws")
-async def md_ws(ws: WebSocket):
-    await ws.accept()
-    try:
-        # Optional: keepalive so client knows it’s up
-        while True:
-            await ws.receive_text()
-    except WebSocketDisconnect:
-        pass
-# =====  WebSocket keepalive =====
 
 # =====  Sentry =====
 dsn = (os.getenv("SENTRY_DSN") or "").strip()
@@ -7017,7 +7005,7 @@ async def admin_export_behavior():
     contracts = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC LIMIT 2000")
     bols      = await database.fetch_all("SELECT * FROM bols ORDER BY created_at DESC LIMIT 2000")
     return {
-      "exported_at": __import__("datetime").datetime.utcnow().isoformat()+"Z",
+      "exported_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()+"Z",
       "contracts": [dict(x) for x in contracts],
       "bols": [dict(x) for x in bols],
     }
@@ -8679,7 +8667,7 @@ async def _nightly_dossier_sync():
         nonlocal last_sent
         while True:
             # schedule ~02:05 UTC daily
-            now = datetime.utcnow()
+            now = datetime.now(datetime.timezone.utc)
             target = now.replace(hour=2, minute=5, second=0, microsecond=0)
             if target <= now:
                 target += timedelta(days=1)
@@ -10279,7 +10267,7 @@ async def stocks_snapshot(as_of: date):
 
 @app.get("/stocks", tags=["Stocks"], summary="Read stocks snapshot (JSON)")
 async def stocks(as_of: date | None = None):
-    d = as_of or datetime.utcnow().date()
+    d = as_of or datetime.now(datetime.timezone.utc).date()
     rows = await database.fetch_all("""
       SELECT as_of, symbol, location, qty_lots, lot_size
       FROM public.stocks_daily
@@ -10290,7 +10278,7 @@ async def stocks(as_of: date | None = None):
 
 @app.get("/stocks.csv", tags=["Stocks"], summary="Read stocks snapshot (CSV)")
 async def stocks_csv(as_of: date | None = None):
-    d = as_of or datetime.utcnow().date()
+    d = as_of or datetime.now(datetime.timezone.utc).date()
     rows = await database.fetch_all("""
       SELECT as_of, symbol, location, qty_lots, lot_size
       FROM public.stocks_daily
@@ -10384,7 +10372,7 @@ async def get_all_bols_pg(
             },
             "pickup_signature": {
                 "base64": d.get("pickup_signature_base64") or "",
-                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.utcnow(),
+                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.now(datetime.timezone.utc),
             },
             "delivery_signature": (
                 {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
@@ -12854,6 +12842,122 @@ async def ml_anomaly(a: AnomIn):
         try: logger.warn("ml_anomaly_failed", err=str(e))
         except: pass
         raise HTTPException(400, "ml anomaly failed")
+    
+@startup
+async def _flywheel_anomaly_cron():
+    """
+    Nightly flywheel job:
+    - Look at last 60 days of contracts
+    - Compute per-(seller, material) price anomaly
+    - Write one row into anomaly_scores per pair
+    This is completely internal; no QBO/ICE calls.
+    """
+    async def _run():
+        while True:
+            try:
+                # Pull last 60 days of price history per seller/material
+                rows = await database.fetch_all(
+                    """
+                    SELECT seller       AS member,
+                           material     AS symbol,
+                           price_per_ton,
+                           created_at
+                    FROM contracts
+                    WHERE created_at >= NOW() - INTERVAL '60 days'
+                      AND price_per_ton IS NOT NULL
+                    """
+                )
+
+                # Group into (member, symbol) -> [(price, created_at), ...]
+                buckets: Dict[Tuple[str, str], List[Tuple[float, datetime]]] = {}
+                for r in rows:
+                    member = (r["member"] or "").strip()
+                    symbol = (r["symbol"] or "").strip()
+                    if not member or not symbol:
+                        continue
+                    key = (member, symbol)
+                    buckets.setdefault(key, []).append(
+                        (float(r["price_per_ton"]), r["created_at"])
+                    )
+
+                for (member, symbol), pts in buckets.items():
+                    if len(pts) < 10:
+                        # need at least 10 points for anything meaningful
+                        continue
+
+                    # Sort oldest → newest by created_at
+                    pts.sort(key=lambda x: x[1])
+                    prices = [p for p, _tstamp in pts]
+                    last_price, last_ts = pts[-1]
+
+                    try:
+                        mu = mean(prices)
+                        sd = stdev(prices) or 0.0
+                    except Exception:
+                        continue
+
+                    if sd <= 0:
+                        # flat curve, nothing to flag
+                        continue
+
+                    z = (last_price - mu) / sd
+                    # Normalize to [0,1]: |z| / 4.0, capped at 1.0
+                    score = float(min(1.0, max(0.0, abs(z) / 4.0)))
+
+                    as_of = last_ts.date()
+                    features = {
+                        "avg_price": round(mu, 4),
+                        "stdev_price": round(sd, 4),
+                        "last_price": round(last_price, 4),
+                        "zscore": round(z, 4),
+                        "n": len(prices),
+                    }
+
+                    try:
+                        # Supabase shape (id BIGSERIAL PK) is fine with plain INSERT,
+                        # and your managed schema already exists (BRIDGE_BOOTSTRAP_DDL=0).
+                        await database.execute(
+                            """
+                            INSERT INTO anomaly_scores(member, symbol, as_of, score, features)
+                            VALUES (:m, :s, :d, :sc, :feat::jsonb)
+                            """,
+                            {
+                                "m": member,
+                                "s": symbol,
+                                "d": as_of,
+                                "sc": score,
+                                "feat": json.dumps(features),
+                            },
+                        )
+                    except Exception as e:
+                        try:
+                            logger.warn("flywheel_anomaly_insert_failed",
+                                        member=member, symbol=symbol, err=str(e))
+                        except Exception:
+                            pass
+
+                try:
+                    logger.info("flywheel_anomaly_run_ok", pairs=len(buckets))
+                except Exception:
+                    pass
+
+            except Exception as e:
+                # Never kill the worker on flywheel errors
+                try:
+                    logger.warn("flywheel_anomaly_cron_failed", err=str(e))
+                except Exception:
+                    pass
+
+            # Sleep ~24h between runs
+            try:
+                await asyncio.sleep(24 * 3600)
+            except Exception:
+                # if sleep is interrupted, just loop again
+                pass
+
+    # Spawn the background task and register in app.state._bg_tasks
+    t = asyncio.create_task(_run())
+    app.state._bg_tasks.append(t)
 # ===== Surveillance / Alerts =====
 
 # =============== CONTRACTS & BOLs ===============
@@ -13821,7 +13925,7 @@ async def index_history_csv(symbol: str, start: date | None = None, end: date | 
 
 @app.get("/index/tweet", tags=["Index"], summary="One-line tweet text for today’s BR-Settle")
 async def index_tweet(as_of: date | None = None):
-    d = as_of or datetime.utcnow().date()
+    d = as_of or datetime.now(datetime.timezone.utc).date()
     rows = await database.fetch_all(
         "SELECT symbol, settle FROM public.settlements WHERE as_of=:d ORDER BY symbol",
         {"d": d}
@@ -14211,8 +14315,9 @@ async def export_trades_csv(day: str = Query(..., description="YYYY-MM-DD")):
 
 app.include_router(trade_router)
 app.include_router(clob_router)
-
 #=================== /TRADING (Order Book) =====================
+
+# ----- nightly snapshot -----
 async def _fetch_csv_rows(query: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     rows = await database.fetch_all(query, params or {})
     return [dict(r) for r in rows]
@@ -14299,7 +14404,7 @@ async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
 
 async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
     data = await build_export_zip()
-    now = datetime.utcnow()
+    now = datetime.now(datetime.timezone.utc)
     day = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{stamp}_export_all.zip"
@@ -14321,6 +14426,67 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
         except Exception:
             pass
         return {"ok": False, "error": str(e), "path": path}
+
+@startup
+async def _nightly_snapshot_cron():
+    """
+    Nightly backup job:
+    - Runs only when ENV=production
+    - Uses run_daily_snapshot() with storage backend from env
+    - Logs success/failure, never crashes the worker
+    """
+    env = os.getenv("ENV", "").lower()
+    if env != "production":
+        # don't run backups in dev/ci
+        return
+
+    # choose backend: default supabase, override with SNAPSHOT_BACKEND if set
+    backend = os.getenv("SNAPSHOT_BACKEND", "supabase")
+
+    async def _runner():
+        while True:
+            try:
+                # Schedule around 03:30 UTC by default
+                now = utcnow()
+                target = now.replace(hour=3, minute=30, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+
+                # sleep until the target time
+                delay = max(60.0, (target - now).total_seconds())
+                try:
+                    await asyncio.sleep(delay)
+                except Exception:
+                    # if sleep is interrupted, just recalc next time
+                    pass
+
+                # Run snapshot once per cycle
+                try:
+                    res = await run_daily_snapshot(storage=backend)
+                    try:
+                        logger.info("snapshot_nightly", backend=backend, **res)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    try:
+                        logger.warn("snapshot_nightly_failed", backend=backend, err=str(e))
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                # absolute last-ditch guard: log and sleep a day
+                try:
+                    logger.warn("snapshot_cron_loop_failed", err=str(e))
+                except Exception:
+                    pass
+                try:
+                    await asyncio.sleep(24 * 3600)
+                except Exception:
+                    pass
+
+    t = asyncio.create_task(_runner())
+    app.state._bg_tasks.append(t)
+# ------ nightly snapshot ------
 
 # ===================== CLEARING (Margin & Variation) =====================
 clearing_router = APIRouter(prefix="/clearing", tags=["Clearing"])

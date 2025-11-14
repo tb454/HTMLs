@@ -164,6 +164,9 @@
     const ctx       = document.getElementById('idxChart').getContext('2d');
 
     let chart;
+    let ordersLoaded = false;
+    let positionsLoaded = false;
+    let rfqsLoaded = false;
 
     function drawChart(points){
       const labels = points.map(p => p.ts || p.time || p.date || '');
@@ -253,13 +256,20 @@
     async function loadOrders(){
       const body = document.querySelector('#ordersTbl tbody');
       if (!body) return;
-      body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
-      try{
+
+      // Only show the initial "Loading…" if nothing has ever been rendered
+      if (!ordersLoaded && !body.children.length) {
+        body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      }
+
+      try {
         const rows = await api('/trader/orders');
-        if (!rows.length){
+        if (!rows.length) {
           body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">No open orders.</td></tr>`;
+          ordersLoaded = true;
           return;
         }
+
         body.innerHTML = rows.map(r => `
           <tr>
             <td>${r.symbol_root || r.symbol || ''}</td>
@@ -269,19 +279,27 @@
             <td>${r.status || ''}</td>
           </tr>
         `).join('');
-      }catch(e){
+        ordersLoaded = true;
+      } catch (e) {
         body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+        ordersLoaded = true;
       }
     }
 
     async function loadPositions(){
       const body = document.querySelector('#posTbl tbody');
       if (!body) return;
-      body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
-      try{
+
+      // Only show the initial "Loading…" if nothing has been rendered yet
+      if (!positionsLoaded && !body.children.length) {
+        body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      }
+
+      try {
         const rows = await api('/trader/positions');
         if (!rows.length){
           body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">No positions.</td></tr>`;
+          positionsLoaded = true;
           return;
         }
         body.innerHTML = rows.map(r => `
@@ -290,19 +308,27 @@
             <td>${r.net_lots ?? r.net_qty ?? 0}</td>
           </tr>
         `).join('');
-      }catch(e){
+        positionsLoaded = true;
+      } catch (e) {
         body.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+        positionsLoaded = true;
       }
     }
 
     async function loadRfqs(){
       const body = document.querySelector('#rfqTbl tbody');
       if (!body) return;
-      body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
-      try{
+
+      // Only show the initial "Loading…" if nothing has been rendered yet
+      if (!rfqsLoaded && !body.children.length) {
+        body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+      }
+
+      try {
         const rows = await api('/rfqs?scope=mine');
         if (!rows.length){
           body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">No RFQs.</td></tr>`;
+          rfqsLoaded = true;
           return;
         }
         body.innerHTML = rows.map(r => `
@@ -313,8 +339,10 @@
             <td>${r.expires_at || ''}</td>
           </tr>
         `).join('');
-      }catch(e){
+        rfqsLoaded = true;
+      } catch (e) {
         body.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+        rfqsLoaded = true;
       }
     }
 

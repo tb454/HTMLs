@@ -258,7 +258,7 @@
       });
     })();
     </script>
-    
+
     <!-- Price This Material -->
     <section class="section">
       <div class="section-title">Price This Material</div>
@@ -729,10 +729,11 @@ onReady(async () => {
 
     async function loadFinishedGoods(seller) {
       const tbody = document.querySelector('#greenspark-table tbody');
-      if (!seller) { tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Enter seller to load finished goods.</td></tr>`; return; }
-      // skeleton
-      tbody.innerHTML = ''; for(let i=0;i<5;i++){ const tr=document.createElement('tr'); tr.className='group-sub'; tr.innerHTML = '<td colspan="6"><span class="skeleton" style="height:12px;display:block"></span></td>'; tbody.appendChild(tr); }
-
+      if (!seller) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Enter seller to load finished goods.</td></tr>`;
+        return;
+      }
+      
       try {
         const r = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
         const rows = await r.json();
@@ -853,10 +854,7 @@ onReady(async () => {
       if (start)  qs.set("start", new Date(start).toISOString());
       if (end)    qs.set("end",   new Date(end).toISOString());
 
-      const tbody = document.querySelector("#sellerContractsTable tbody");
-      // skeleton
-      tbody.innerHTML=''; for(let i=0;i<5;i++){ const tr=document.createElement('tr'); tr.className='skeleton-row'; tr.innerHTML=Array.from({length:7},()=>'<td><span class="skeleton"></span></td>').join(''); tbody.appendChild(tr); }
-
+      const tbody = document.querySelector("#sellerContractsTable tbody");      
       const res = await api(`/contracts?${qs.toString()}`);
       const totalCount = +(res.headers.get('X-Total-Count') || 0);
       const rows = await res.json();

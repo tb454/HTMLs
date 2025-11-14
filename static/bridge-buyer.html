@@ -247,8 +247,7 @@
     const endpoint = window.endpoint;
     let offset = 0, limit = 100; // pagination
     let sortBy = 'created_at_desc';
-    let loadCtl = null;          // AbortController for overlapping loads
-    let refreshTimer = null;     // interval handle
+    let loadCtl = null;          // AbortController for overlapping loads    
     let paused = false;
 
     // ---- Timezone toggle (UTC vs local) ----
@@ -275,7 +274,7 @@
       });
     }
     onReady(_renderTZHint);
-    // ---- /Timezone toggle ----
+   // ---- /Timezone toggle ----
 
     function currentRole(){
       try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
@@ -283,25 +282,6 @@
     }
 
     function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-
-    function showSkeletonCards(n=5){
-      const root = document.getElementById('list');
-      root.innerHTML = '';
-      for(let i=0;i<n;i++){
-        const div = document.createElement('div');
-        div.className = 'cardy';
-        const row = document.createElement('div'); row.className='d-flex justify-content-between align-items-start';
-        const left = document.createElement('div'); left.style.flex='1'; left.style.paddingRight='12px';
-        const s1 = document.createElement('div'); s1.className='skeleton'; s1.style.cssText='width:40%;margin-bottom:10px;';
-        const s2 = document.createElement('div'); s2.className='skeleton'; s2.style.cssText='width:60%;margin-bottom:8px;';
-        const s3 = document.createElement('div'); s3.className='skeleton'; s3.style.cssText='width:55%;margin-bottom:6px;';
-        const s4 = document.createElement('div'); s4.className='skeleton'; s4.style.cssText='width:50%;';
-        left.append(s1,s2,s3,s4);
-        const right = document.createElement('div'); right.style.width='90px';
-        const s5 = document.createElement('div'); s5.className='skeleton'; right.append(s5);
-        row.append(left,right); div.append(row); root.append(div);
-      }
-    }
 
     function _syncQuery(params){
       const u = new URL(location.href);
@@ -366,7 +346,6 @@
       if (ls) ls.textContent = 'Loading contracts…';
       setLoadingUI(true);
       root.setAttribute('aria-busy','true');
-      showSkeletonCards(5);
 
       const q = new URLSearchParams({ status: 'Pending', limit, offset, sort: sortBy });
       const buyerEl = document.getElementById('buyerFilter');
@@ -529,50 +508,15 @@
       if (p) { paused = true; const pb = document.getElementById('pauseBtn'); if (pb) pb.textContent = 'Resume'; }
     })();
   
-    // Auto-refresh controls (pause + jitter)    
-    const MIN_MS = 35000;  // 35s
-    const MAX_MS = 55000;  // 55s
-    function _jitter() { return Math.floor(MIN_MS + Math.random() * (MAX_MS - MIN_MS)); }
-
-    function tickAuto(){
-      if (paused) return;
-      loadOpenContracts().catch(()=>{});
-      refreshTimer = setTimeout(tickAuto, _jitter());
-    }
-
-    function startAuto(){
-      if (refreshTimer) return;
-      refreshTimer = setTimeout(tickAuto, _jitter());
-    }
-    function stopAuto(){
-      if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
-    } 
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopAuto(); else { loadOpenContracts(); startAuto(); }
-    });
-
-    // Add a Pause/Resume button next to Refresh
-    (function addPause(){
-      const bar = document.querySelector('.d-flex.gap-2.mb-3.align-items-end');
-      if (!bar) return;
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-secondary btn-sm';
-      btn.type = 'button';
-      btn.id = 'pauseBtn';
-      btn.textContent = paused ? 'Resume' : 'Pause';
-      btn.setAttribute('aria-pressed', String(!paused));
-      btn.onclick = () => {
-        paused = !paused;
-        localStorage.setItem('buyer.paused', paused ? '1':'0');
-        btn.textContent = paused ? 'Resume' : 'Pause';
-        btn.setAttribute('aria-pressed', String(!paused));
-        if (!paused) { loadOpenContracts(); startAuto(); } else { stopAuto(); }
-      };
-      bar.appendChild(btn);
-    })(); 
-    // Initial load + start timer
+    // Initial load + keep refreshing in the background 
     loadOpenContracts();
-    startAuto();
+
+    // Refresh every 45s, but do NOT clear the table first.
+    setInterval(() => {
+      if (!paused && !document.hidden) {
+        loadOpenContracts();
+      }
+    }, 45000);
   </script>
 
   <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
