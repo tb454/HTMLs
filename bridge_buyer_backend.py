@@ -7504,11 +7504,7 @@ async def _ensure_inventory_schema():
             bol_id        BIGINT,
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_inv_mov_account_sku_time
-            ON inventory_movements(account_id, seller, sku, created_at DESC);
-        """,
+        """,       
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
           id BIGSERIAL PRIMARY KEY,
