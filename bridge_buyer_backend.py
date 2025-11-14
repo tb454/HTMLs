@@ -9322,7 +9322,7 @@ class YardProfileIn(BaseModel):
 
 class YardProfileOut(YardProfileIn):
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
 
 
 class YardPricingRuleIn(BaseModel):
@@ -9339,7 +9339,7 @@ class YardPricingRuleIn(BaseModel):
 class YardPricingRuleOut(YardPricingRuleIn):
     id: UUID
     yard_id: UUID
-    updated_at: datetime.datetime
+    updated_at: datetime
 
 
 class YardHedgeRuleIn(BaseModel):
@@ -9357,7 +9357,7 @@ class YardHedgeRuleIn(BaseModel):
 class YardHedgeRuleOut(YardHedgeRuleIn):
     id: UUID
     yard_id: UUID
-    updated_at: datetime.datetime
+    updated_at: datetime
 
 
 class PricingQuoteRequest(BaseModel):
@@ -12024,9 +12024,7 @@ async def update_yard_hedge_rule(rule_id: UUID, body: YardHedgeRuleUpdate):
 # ---------- Yard Profiles & Config Endpoints ----------
 
 # ---------- Pricing Helper Endpoint ----------
-
 PRICING_TAG = ["Pricing"]
-
 
 @app.post(
     "/pricing/quote_from_formula",
