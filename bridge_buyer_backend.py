@@ -516,6 +516,26 @@ async def _trader_page():
 
 trader_router = APIRouter(prefix="/trader", tags=["Trader"])
 
+class BookLevel(BaseModel):
+    price: Decimal
+    qty_lots: Decimal
+
+
+class TraderOrder(BaseModel):
+    order_id: str
+    symbol: str
+    side: str
+    price: Decimal
+    qty_lots: Decimal
+    qty_open: Decimal
+    status: str
+    created_at: datetime
+
+
+class TraderPosition(BaseModel):
+    symbol: str
+    net_lots: Decimal
+
 class BookSide(BaseModel):
     price: float
     qty_lots: float
@@ -524,35 +544,28 @@ class BookSnapshot(BaseModel):
     bids: List[BookSide]
     asks: List[BookSide]
 
-@trader_router.get("/book", response_model=BookSnapshot)
-async def trader_book(symbol: str):
-    """
-    Simple depth from clob_orders where qty_open > 0 and status='open'.
-    """
+@trader_router.get("/book")
+async def get_book(symbol: str = Query(...)):
     rows = await database.fetch_all(
         """
-        SELECT side, price, SUM(qty_open) AS qty_open
+        SELECT price, side, SUM(qty_open) AS qty_open
         FROM clob_orders
-        WHERE symbol = :sym
-          AND status = 'open'
-          AND qty_open > 0
-        GROUP BY side, price
+        WHERE symbol = :sym AND status = 'open'
+        GROUP BY price, side
         """,
         {"sym": symbol},
     )
-    bids = []
-    asks = []
+    bids, asks = [], []
     for r in rows:
-        side = (r["side"] or "").lower()
-        row = BookSide(price=float(r["price"]), qty_lots=float(r["qty_open"]))
-        if side == "buy":
-            bids.append(row)
-        elif side == "sell":
-            asks.append(row)
-    # sort bids desc, asks asc
-    bids.sort(key=lambda x: x.price, reverse=True)
-    asks.sort(key=lambda x: x.price)
-    return BookSnapshot(bids=bids, asks=asks)
+        d = dict(r)
+        lvl = {"price": d["price"], "qty_lots": d["qty_open"]}
+        if d["side"] == "buy":
+            bids.append(lvl)
+        else:
+            asks.append(lvl)
+    bids.sort(key=lambda x: x["price"], reverse=True)
+    asks.sort(key=lambda x: x["price"])
+    return {"symbol": symbol, "bids": bids, "asks": asks}
 
 class TraderOrder(BaseModel):
     symbol_root: Optional[str] = None
@@ -628,9 +641,8 @@ async def trader_positions(username: str = Depends(get_username)):
         TraderPosition(symbol_root=r["symbol_root"], net_lots=float(r["net_qty"] or 0))
         for r in rows
     ]
-
-
 # ---- Trader page ----
+
 
 # ===== DB bootstrap for CI/staging =====
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
@@ -2763,6 +2775,53 @@ async def create_invite(body: InviteCreate):
     )
     return InviteRow(**dict(row))
 
+admin_tenants_router = APIRouter(prefix="/admin", tags=["Tenants"])
+
+class AdminTenant(BaseModel):
+    id: Optional[str] = None
+    org: str
+    display_name: Optional[str] = None
+    name: Optional[str] = None
+    slug: Optional[str] = None
+
+@admin_tenants_router.get("/tenants", response_model=List[AdminTenant])
+async def admin_list_tenants():
+    rows = await database.fetch_all("SELECT org, display_name FROM orgs ORDER BY org")
+    out: List[AdminTenant] = []
+    for r in rows:
+        d = dict(r)
+        org = d["org"]
+        disp = d.get("display_name")
+        out.append(
+            AdminTenant(
+                org=org,
+                display_name=disp,
+                name=disp or org,
+                slug=org,
+                id=org,
+            )
+        )
+    return out
+
+@admin_tenants_router.get("/tenants", response_model=List[AdminTenant])
+async def admin_list_tenants():
+    rows = await database.fetch_all("SELECT org, display_name FROM orgs ORDER BY org")
+    out: List[AdminTenant] = []
+    for r in rows:
+        d = dict(r)
+        org = d["org"]
+        disp = d.get("display_name")
+        out.append(
+            AdminTenant(
+                org=org,
+                display_name=disp,
+                name=disp or org,
+                slug=org,
+                id=org,
+            )
+        )
+    return out
+
 class OrgRow(BaseModel):
     org: str
     display_name: Optional[str]
@@ -2778,6 +2837,7 @@ app.include_router(onboard_router)
 app.include_router(tenants_router)
 app.include_router(invites_router)
 app.include_router(orgs_router)
+app.include_router(admin_tenants_router)
 # ----- Onboarding, Tenants, Invite -----
 
 # ----- Integrations, Logs, Keys -----
@@ -8789,6 +8849,47 @@ async def dossier_retry_failed():
         return {"ok": True, "message": "Failed events flagged for retry."}
     except Exception:
         return {"ok": False, "message": "dossier_ingest_queue not configured; nothing to retry."}
+admin_dossier_router = APIRouter(prefix="/admin/dossier", tags=["Dossier Ingest"])
+
+
+class DossierQueueRow(BaseModel):
+    id: int
+    source_system: str
+    source_table: str
+    event_type: str
+    status: str
+    attempts: int
+    last_error: Optional[str]
+    created_at: datetime
+
+
+@admin_dossier_router.get("/queue", response_model=List[DossierQueueRow])
+async def list_dossier_queue(limit: int = 40):
+    rows = await database.fetch_all(
+        """
+        SELECT id, source_system, source_table, event_type,
+               status, attempts, last_error, created_at
+        FROM dossier_ingest_queue
+        ORDER BY created_at DESC
+        LIMIT :lim
+        """,
+        {"lim": limit},
+    )
+    return [DossierQueueRow(**dict(r)) for r in rows]
+
+
+@admin_dossier_router.post("/retry_failed")
+async def retry_failed_dossier():
+    # Simple implementation: mark failed → pending; external worker will pick up
+    count = await database.execute(
+        """
+        UPDATE dossier_ingest_queue
+        SET status = 'pending', attempts = 0
+        WHERE status = 'failed'
+        """
+    )
+    return {"ok": True, "message": "Retry triggered", "updated": count}
+
 app.include_router(admin_dossier_router)
 #------- /Dossier HR Sync -------
 
