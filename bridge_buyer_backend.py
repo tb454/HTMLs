@@ -11595,7 +11595,30 @@ async def _ensure_tenant_schema():
     ALTER TABLE IF EXISTS warrants
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """,)
-# ========== Tenant Applications ==========
+
+@startup
+async def _ensure_inventory_movements_table():
+    """
+    Ensure inventory_movements exists with the columns used by _manual_upsert_absolute_tx.
+    This is safe to run repeatedly in CI and prod.
+    """
+    try:
+        await database.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+          id            BIGSERIAL PRIMARY KEY,
+          seller        TEXT NOT NULL,
+          sku           TEXT NOT NULL,
+          movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
+          qty           NUMERIC NOT NULL,
+          ref_contract  TEXT,
+          meta          JSONB,
+          tenant_id     UUID,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """)
+    except Exception:
+        pass
+# ------ Tenant Applications ------
 
 # --- Public endpoint (replaces /public/yard_signup) ---
 @app.post(
