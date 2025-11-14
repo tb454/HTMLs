@@ -7491,20 +7491,18 @@ async def _ensure_inventory_schema():
           PRIMARY KEY (seller, sku)
         );
         """,
-        """
+       """
         CREATE TABLE IF NOT EXISTS inventory_movements (
-            id            BIGSERIAL PRIMARY KEY,
-            account_id    UUID NOT NULL,
-            seller        TEXT NOT NULL,
-            sku           TEXT NOT NULL,
-            movement_type TEXT NOT NULL,   -- e.g. 'RESERVED','OUTBOUND','ADJUST'
-            qty           NUMERIC NOT NULL,
-            uom           TEXT NOT NULL,   -- 'ton','lb'
-            contract_id   BIGINT,
-            bol_id        BIGINT,
-            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """,       
+          id            BIGSERIAL PRIMARY KEY,
+          seller        TEXT NOT NULL,
+          sku           TEXT NOT NULL,
+          movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
+          qty           NUMERIC NOT NULL,
+          ref_contract  TEXT,
+          meta          JSONB,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """,
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
           id BIGSERIAL PRIMARY KEY,
