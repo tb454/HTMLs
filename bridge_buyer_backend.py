@@ -12332,6 +12332,63 @@ async def _ensure_inventory_movements_table():
     except Exception:
         pass
 # ------ Tenant Applications ------
+
+# ---- Multi-tenant yard configuration ----
+@startup
+async def _ensure_multitenant_schema() -> None:
+    """
+    Hard multitenancy bootstrap.
+
+    - tenants: one row per tenant/org (e.g. Winski, Lewis, etc.)
+    - tenant_id columns: added to core tables so we can later scope queries.
+    """
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS tenants (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug       TEXT UNIQUE NOT NULL,   -- e.g. 'winski', 'lewis-salvage'
+      name       TEXT NOT NULL,
+      region     TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Core contract/logistics tables
+    ALTER TABLE contracts           ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE bols                ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE inventory_items     ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Trading / positions
+    ALTER TABLE orders          ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE positions       ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE buyer_positions ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- RFQ / deals
+    ALTER TABLE rfqs        ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE rfq_quotes  ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE rfq_deals   ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Receipts / warrants (storage layer)
+    ALTER TABLE receipts ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    ALTER TABLE warrants ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Helpful indexes (if table exists, index will succeed; otherwise our
+    -- run_ddl_multi wrapper will log and move on)
+    CREATE INDEX IF NOT EXISTS idx_contracts_tenant            ON contracts(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_bols_tenant                 ON bols(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_items_tenant      ON inventory_items(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_movements_tenant  ON inventory_movements(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_tenant               ON orders(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_positions_tenant            ON positions(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_buyer_positions_tenant      ON buyer_positions(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_rfqs_tenant                 ON rfqs(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_rfq_quotes_tenant           ON rfq_quotes(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_rfq_deals_tenant            ON rfq_deals(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_receipts_tenant             ON receipts(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_warrants_tenant             ON warrants(tenant_id);
+    """)
+# ---- Multi-tenant yard configuration ----
+
+# ------ yard configuration ----
 @startup
 async def _ensure_yard_config_schema():
     """
@@ -12379,6 +12436,7 @@ async def _ensure_yard_config_schema():
     CREATE INDEX IF NOT EXISTS idx_yard_hedge_rules_yard_material
       ON yard_hedge_rules (yard_id, material);
     """)
+# ----- yard configuration ----
 
 # --- Public endpoint (replaces /public/yard_signup) ---
 @app.post(
