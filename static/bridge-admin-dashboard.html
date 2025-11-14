@@ -157,20 +157,7 @@
         <button class="nav-link" id="contracts-tab" data-bs-toggle="tab" data-bs-target="#contracts-pane" type="button" role="tab" aria-controls="contracts-pane" aria-selected="false">
           Contracts
         </button>
-      </li>
-          <li class="nav-item" role="presentation">
-            <button
-              class="nav-link"
-              id="futures-tab"
-              data-bs-toggle="tab"
-              data-bs-target="#futuresTab"
-              type="button"
-              role="tab"
-              aria-controls="futuresTab"
-              aria-selected="false">
-              Futures
-            </button>
-          </li>
+      </li>          
       </ul>
     <div class="tab-content" id="adminTabsContent">
 
@@ -1548,7 +1535,7 @@ Object.assign(window, {
   });
   </script>
 
-  <script nonce="{{NONCE}}">
+    <script nonce="{{NONCE}}">
   // ---- Admin Usage, Risk, Dossier Ingest ----
   (function(){
     const $ = (id)=>document.getElementById(id);
@@ -1624,8 +1611,9 @@ Object.assign(window, {
         `).join('');
       }catch(e){
         tb.innerHTML = `<tr><td colspan="4" class="text-muted text-center py-1">Failed: ${e.message || 'error'}</td></tr>`;
-      const tb = $('dossierTbl')?.querySelector('tbody');
-      const msg = $('dossierMsg');
+      }
+    }
+
     async function loadDossier(){
       const tb = $('dossierTbl')?.querySelector('tbody');
       const msg = $('dossierMsg');
@@ -1650,7 +1638,11 @@ Object.assign(window, {
             <td>${r.created_at || ''}</td>
           </tr>
         `).join('');
-        if (msg) msg.textContent = `Pending: ${(rows.filter(x => x.status==='pending').length || 0)} · Failed: ${(rows.filter(x => x.status==='failed').length || 0)}`;
+        if (msg) {
+          const pending = rows.filter(x => x.status === 'pending').length || 0;
+          const failed  = rows.filter(x => x.status === 'failed').length  || 0;
+          msg.textContent = `Pending: ${pending} · Failed: ${failed}`;
+        }
       }catch(e){
         tb.innerHTML = `<tr><td colspan="7" class="text-muted text-center py-2">Failed: ${e.message || 'error'}</td></tr>`;
         if (msg) msg.textContent = '';
@@ -1675,6 +1667,7 @@ Object.assign(window, {
       loadDossier().catch(()=>{});
       $('dossierRetry')?.addEventListener('click', retryDossierFailed);
     });
+  })();
   </script>
 
 </body>

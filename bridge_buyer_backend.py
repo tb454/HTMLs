@@ -2960,6 +2960,40 @@ app.include_router(products_router)
 app.include_router(settlements_router)
 # ----- Products & Settlements -----
 
+# ----- Admin Tenants -----
+admin_tenants_router = APIRouter(prefix="/admin", tags=["Tenants"])
+
+class TenantRow(BaseModel):
+    id: Optional[str] = None
+    slug: Optional[str] = None
+    org: Optional[str] = None
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+
+@admin_tenants_router.get("/tenants", response_model=List[TenantRow])
+async def list_admin_tenants():
+    """
+    Simple placeholder: use orgs table as tenant list.
+    """
+    rows = await database.fetch_all(
+        "SELECT org, display_name FROM orgs ORDER BY org"
+    )
+    out = []
+    for r in rows:
+        d = dict(r)
+        out.append(
+            TenantRow(
+                org=d["org"],
+                display_name=d.get("display_name"),
+                name=d.get("display_name") or d["org"],
+                slug=d["org"],
+            )
+        )
+    return out
+
+app.include_router(admin_tenants_router)
+# ----- Admin Tenants -----
+
 # ===== Fees core (fees ledger + preview/run) =====
 fees_router = APIRouter(prefix="/fees", tags=["Fees"])
 
