@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html class="loading" lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BRidge · Yard Settings</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css?v=20251111" nonce="{{NONCE}}">
+  <link rel="icon" href="/static/favicon.ico" />
+
+  <script nonce="{{NONCE}}">
+    function onReady(fn) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fn);
+      } else {
+        try { fn(); } catch (e) { console.error(e); }
+      }
+    }
+    // Touch /health so session/XSRF cookie gets minted like other dashboards
+    onReady(async () => {
+      try { await fetch('/health', { credentials: 'include' }); } catch (e) { console.warn(e); }
+    });
+  </script>
+
+  <script src="/static/js/yard_settings.js?v=20251114" nonce="{{NONCE}}"></script>
+</head>
+
+<body class="bg-body">
+  <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom mb-3">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="/admin">
+        BRidge Admin
+      </a>
+      <span class="navbar-text">
+        &raquo; Yard Settings
+      </span>
+    </div>
+  </nav>
+
+  <main class="container-xxl my-3">
+    <!-- Top row: Yard selector + basic info -->
+    <div class="row mb-4">
+      <div class="col-12 col-lg-4 mb-3">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">Yard Selector</span>
+            <div class="d-flex gap-2">
+              <button id="btnRefreshYards" class="btn btn-sm btn-outline-secondary">Refresh</button>
+              <button id="btnNewYard" class="btn btn-sm btn-primary">New Yard</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label for="selectYard" class="form-label">Select Yard</label>
+              <select id="selectYard" class="form-select">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+            <div id="yardSelectorStatus" class="small text-muted"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-8 mb-3">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">Yard Profile</span>
+            <button id="btnSaveYardProfile" class="btn btn-sm btn-success">
+              Save Profile
+            </button>
+          </div>
+          <div class="card-body">
+            <form id="yardProfileForm" class="row g-3">
+              <!-- Hidden yard_id -->
+              <input type="hidden" id="yard_id" />
+
+              <div class="col-md-4">
+                <label for="yard_code" class="form-label">Yard Code</label>
+                <input type="text" class="form-control" id="yard_code" placeholder="WINSKI" />
+              </div>
+
+              <div class="col-md-8">
+                <label for="yard_name" class="form-label">Name</label>
+                <input type="text" class="form-control" id="yard_name" placeholder="Winski Brothers Scrap Metal" />
+              </div>
+
+              <div class="col-md-4">
+                <label for="yard_city" class="form-label">City</label>
+                <input type="text" class="form-control" id="yard_city" placeholder="Frankfort, IN" />
+              </div>
+
+              <div class="col-md-4">
+                <label for="yard_region" class="form-label">Region</label>
+                <input type="text" class="form-control" id="yard_region" placeholder="Midwest" />
+              </div>
+
+              <div class="col-md-2">
+                <label for="yard_currency" class="form-label">Currency</label>
+                <input type="text" class="form-control" id="yard_currency" value="USD" />
+              </div>
+
+              <div class="col-md-2">
+                <label for="yard_default_hedge_ratio" class="form-label">Default Hedge %</label>
+                <input type="number" step="0.01" min="0" max="1" class="form-control" id="yard_default_hedge_ratio" value="0.60" />
+              </div>
+            </form>
+            <div id="yardProfileStatus" class="small mt-2 text-muted"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Second row: Pricing rules + hedge rules -->
+    <div class="row mb-4">
+      <!-- Pricing Rules -->
+      <div class="col-12 col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Pricing Rules</span>
+            <button id="btnNewPricingRule" class="btn btn-sm btn-primary">New Rule</button>
+          </div>
+          <div class="card-body p-0 d-flex flex-column">
+            <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+              <table class="table table-sm mb-0 align-middle" id="tblPricingRules">
+                <thead class="table-light">
+                  <tr>
+                    <th>Material</th>
+                    <th>Formula</th>
+                    <th>Loss Min</th>
+                    <th>Loss Max</th>
+                    <th>Min Margin</th>
+                    <th>Active</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- populated by JS -->
+                </tbody>
+              </table>
+            </div>
+            <div class="border-top p-3">
+              <form id="pricingRuleForm" class="row g-2">
+                <input type="hidden" id="pricing_rule_id" />
+
+                <div class="col-6">
+                  <label class="form-label small" for="pricing_material">Material</label>
+                  <input type="text" id="pricing_material" class="form-control form-control-sm" placeholder="Shred Steel" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label small" for="pricing_formula">Formula</label>
+                  <input type="text" id="pricing_formula" class="form-control form-control-sm" placeholder="REF - 0.10" />
+                </div>
+
+                <div class="col-4">
+                  <label class="form-label small" for="pricing_loss_min">Loss Min %</label>
+                  <input type="number" step="0.01" min="0" max="1" id="pricing_loss_min" class="form-control form-control-sm" value="0.00" />
+                </div>
+                <div class="col-4">
+                  <label class="form-label small" for="pricing_loss_max">Loss Max %</label>
+                  <input type="number" step="0.01" min="0" max="1" id="pricing_loss_max" class="form-control form-control-sm" value="0.08" />
+                </div>
+                <div class="col-4">
+                  <label class="form-label small" for="pricing_min_margin">Min Margin $/ton</label>
+                  <input type="number" step="0.01" id="pricing_min_margin" class="form-control form-control-sm" value="0" />
+                </div>
+
+                <div class="col-6 d-flex align-items-center">
+                  <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="pricing_active" checked />
+                    <label class="form-check-label small" for="pricing_active">Active</label>
+                  </div>
+                </div>
+                <div class="col-6 text-end">
+                  <button id="btnSavePricingRule" type="button" class="btn btn-sm btn-success mt-2">
+                    Save Rule
+                  </button>
+                </div>
+              </form>
+              <div id="pricingStatus" class="small mt-1 text-muted"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hedge Rules -->
+      <div class="col-12 col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Hedge Rules</span>
+            <button id="btnNewHedgeRule" class="btn btn-sm btn-primary">New Hedge Rule</button>
+          </div>
+          <div class="card-body p-0 d-flex flex-column">
+            <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+              <table class="table table-sm mb-0 align-middle" id="tblHedgeRules">
+                <thead class="table-light">
+                  <tr>
+                    <th>Material</th>
+                    <th>Min Tons</th>
+                    <th>Target Hedge</th>
+                    <th>Symbol Root</th>
+                    <th>Auto</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- populated by JS -->
+                </tbody>
+              </table>
+            </div>
+            <div class="border-top p-3">
+              <form id="hedgeRuleForm" class="row g-2">
+                <input type="hidden" id="hedge_rule_id" />
+
+                <div class="col-6">
+                  <label class="form-label small" for="hedge_material">Material</label>
+                  <input type="text" id="hedge_material" class="form-control form-control-sm" placeholder="Shred Steel" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label small" for="hedge_symbol_root">Futures Symbol Root</label>
+                  <input type="text" id="hedge_symbol_root" class="form-control form-control-sm" placeholder="HG" />
+                </div>
+
+                <div class="col-4">
+                  <label class="form-label small" for="hedge_min_tons">Min Tons</label>
+                  <input type="number" step="0.01" id="hedge_min_tons" class="form-control form-control-sm" value="40" />
+                </div>
+                <div class="col-4">
+                  <label class="form-label small" for="hedge_target_ratio">Target Hedge %</label>
+                  <input type="number" step="0.01" min="0" max="1" id="hedge_target_ratio" class="form-control form-control-sm" value="0.60" />
+                </div>
+                <div class="col-4 d-flex align-items-center">
+                  <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="hedge_auto" />
+                    <label class="form-check-label small" for="hedge_auto">Auto Hedge</label>
+                  </div>
+                </div>
+
+                <div class="col-12 text-end">
+                  <button id="btnSaveHedgeRule" type="button" class="btn btn-sm btn-success mt-2">
+                    Save Hedge Rule
+                  </button>
+                </div>
+              </form>
+              <div id="hedgeStatus" class="small mt-1 text-muted"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hedge Recommendation Preview (optional v1) -->
+    <div class="row mb-4">
+      <div class="col-12">
+        <div class="card shadow-sm">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Hedge Recommendations (Preview)</span>
+            <button id="btnRefreshHedgeRecs" class="btn btn-sm btn-outline-primary">
+              Refresh Recommendations
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle" id="tblHedgeRecs">
+                <thead class="table-light">
+                  <tr>
+                    <th>Material</th>
+                    <th>On Hand (tons)</th>
+                    <th>Target Hedge %</th>
+                    <th>Current Hedged</th>
+                    <th>Hedge More (tons)</th>
+                    <th>Lots</th>
+                    <th>Symbol Root</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- populated by JS -->
+                </tbody>
+              </table>
+            </div>
+            <div id="hedgeRecsStatus" class="small mt-2 text-muted"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
