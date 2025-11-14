@@ -7493,15 +7493,23 @@ async def _ensure_inventory_schema():
         """,
        """
         CREATE TABLE IF NOT EXISTS inventory_movements (
-          id            BIGSERIAL PRIMARY KEY,
-          seller        TEXT NOT NULL,
-          sku           TEXT NOT NULL,
-          movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
-          qty           NUMERIC NOT NULL,
-          ref_contract  TEXT,
-          meta          JSONB,
-          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            id            BIGSERIAL PRIMARY KEY,
+            account_id    UUID,
+            seller        TEXT NOT NULL,
+            sku           TEXT NOT NULL,
+            movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
+            qty           NUMERIC NOT NULL,
+            uom           TEXT,
+            contract_id   BIGINT,
+            bol_id        BIGINT,
+            ref_contract  TEXT,
+            meta          JSONB,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+
+        ALTER TABLE inventory_movements
+            ADD COLUMN IF NOT EXISTS ref_contract TEXT,
+            ADD COLUMN IF NOT EXISTS meta JSONB;
         """,
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
@@ -11518,6 +11526,75 @@ async def _ensure_tenant_applications_schema():
     );
     CREATE INDEX IF NOT EXISTS idx_tenant_apps_created ON tenant_applications(created_at DESC);
     """)
+
+@startup
+async def _ensure_tenant_schema():
+    """
+    Multitenancy foundation:
+    - tenants table (one row per yard/org/tenant)
+    - tenant_id columns on core tables (nullable for now)
+    """
+    await run_ddl_multi("""
+    --------------------------------------------------
+    -- Tenants (one row per yard/org/tenant)
+    --------------------------------------------------
+    CREATE TABLE IF NOT EXISTS tenants (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug       TEXT UNIQUE NOT NULL,   -- e.g. 'winski', 'lewis-salvage'
+      name       TEXT NOT NULL,
+      region     TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    --------------------------------------------------
+    -- Add tenant_id to core domain tables
+    -- (nullable for now, we will backfill + enforce later)
+    --------------------------------------------------
+
+    -- Contracts & BOLs
+    ALTER TABLE IF EXISTS contracts
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS bols
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Inventory
+    ALTER TABLE IF EXISTS inventory_items
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS inventory_movements
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Trading / positions
+    ALTER TABLE IF EXISTS orders
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS trades
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS positions
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS buyer_positions
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- RFQ flow
+    ALTER TABLE IF EXISTS rfqs
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS rfq_quotes
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS rfq_deals
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    -- Receipts / warrants
+    ALTER TABLE IF EXISTS receipts
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF EXISTS warrants
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    """, label="multitenancy_core")
 # ========== Tenant Applications ==========
 
 # --- Public endpoint (replaces /public/yard_signup) ---
