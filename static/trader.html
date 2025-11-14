@@ -92,7 +92,55 @@
         </div>
       </div>
 
-      <p style="font-size:12px; opacity:.8; margin-top:8px;">
+      <hr style="margin:12px 0; border:0; border-top:1px solid #eee;"/>
+
+      <h3 style="margin:0 0 6px 0; font-size:14px;">New Order (CLOB)</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
+        <div style="flex:1 1 120px;">
+          <label style="font-size:12px; display:block; margin-bottom:2px;">Symbol</label>
+          <input id="ordSymbol" type="text" placeholder="e.g., CU-SHRED-1M"
+                 style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        </div>
+        <div style="flex:0 0 80px;">
+          <label style="font-size:12px; display:block; margin-bottom:2px;">Side</label>
+          <select id="ordSide" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;">
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </div>
+        <div style="flex:0 0 80px;">
+          <label style="font-size:12px; display:block; margin-bottom:2px;">TIF</label>
+          <select id="ordTif" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;">
+            <option value="day">DAY</option>
+            <option value="ioc">IOC</option>
+            <option value="fok">FOK</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-bottom:6px;">
+        <div style="flex:0 0 110px;">
+          <label style="font-size:12px; display:block; margin-bottom:2px;">Price</label>
+          <input id="ordPrice" type="number" step="0.01" placeholder="Limit"
+                 style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+          <div style="font-size:11px; opacity:.7;">Blank = MARKET (sell-only, banded)</div>
+        </div>
+        <div style="flex:0 0 110px;">
+          <label style="font-size:12px; display:block; margin-bottom:2px;">Qty (lots)</label>
+          <input id="ordQty" type="number" step="0.01" min="0.01" value="1.0"
+                 style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        </div>
+        <div style="flex:1 1 120px; text-align:right;">
+          <button id="ordSubmitBtn"
+                  style="padding:6px 12px; border:1px solid #0a7b34; border-radius:8px; background:#0f9d58; color:white; cursor:pointer;">
+            Submit Order
+          </button>
+        </div>
+      </div>
+
+      <div id="ordMsg" style="font-size:12px; margin-bottom:4px;"></div>
+
+      <p style="font-size:12px; opacity:.8; margin-top:4px;">
         Book, orders, and positions all read from the same CLOB/futures backend used by admin.
       </p>
     </section>
@@ -164,13 +212,27 @@
     const ctx       = document.getElementById('idxChart').getContext('2d');
 
     let chart;
+    // Order ticket elements
+    const ordSymbol   = document.getElementById('ordSymbol');
+    const ordSide     = document.getElementById('ordSide');
+    const ordTif      = document.getElementById('ordTif');
+    const ordPrice    = document.getElementById('ordPrice');
+    const ordQty      = document.getElementById('ordQty');
+    const ordMsg      = document.getElementById('ordMsg');
+    const ordSubmitBtn= document.getElementById('ordSubmitBtn');
+
+    function setOrdMsg(msg, ok){
+      if(!ordMsg) return;
+      ordMsg.style.color = ok ? '#0a7b34' : '#b00020';
+      ordMsg.textContent = msg || '';
+    }
     let ordersLoaded = false;
     let positionsLoaded = false;
     let rfqsLoaded = false;
 
     function drawChart(points){
-      const labels = points.map(p => p.ts || p.time || p.date || '');
-      const data   = points.map(p => +p.price);
+      const labels = points.map(p => p.ts || p.time || p.date || p.dt || '');
+      const data   = points.map(p => +(p.price ?? p.close_price ?? 0));
 
       if(chart){ chart.destroy(); }
       chart = new Chart(ctx, {
@@ -250,6 +312,73 @@
         renderSide(book.asks || [], asksBody);
       }catch(e){
         console.error(e);
+      }
+    }
+
+    async function submitOrder(){
+      if (!ordSymbol || !ordQty) return;
+
+      const symFromTicket = (ordSymbol.value || '').trim();
+      const symFromBook   = (document.getElementById('bookSymbolRoot')?.value || '').trim();
+      const sym = symFromTicket || symFromBook || (symbolSel?.value || '').trim();
+
+      const side = (ordSide?.value || 'buy');
+      const tif  = (ordTif?.value || 'day');
+      const qty  = parseFloat(ordQty.value || '0');
+
+      if (!sym){
+        setOrdMsg('Enter a symbol (e.g., CU-SHRED-1M).', false);
+        return;
+      }
+      if (!qty || qty <= 0){
+        setOrdMsg('Qty must be > 0.', false);
+        return;
+      }
+
+      const priceRaw = ordPrice?.value;
+      const body = {
+        symbol: sym,
+        side: side,
+        qty_lots: qty,
+        tif: tif,
+      };
+      if (priceRaw !== '' && priceRaw != null){
+        body.price = Number(priceRaw);
+      }
+
+      try {
+        setOrdMsg('Submitting…', true);
+        const r = await fetch('/clob/orders', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!r.ok){
+          let detail = 'HTTP ' + r.status;
+          try {
+            const j = await r.json();
+            detail = j.detail || j.error || detail;
+          } catch(_) {}
+          throw new Error(detail);
+        }
+        const j = await r.json();
+        const oid = j.order_id || j.id || 'ok';
+        setOrdMsg(`Order accepted (ID: ${oid})`, true);
+
+        // Keep symbol fields in sync
+        if (!symFromTicket && ordSymbol) ordSymbol.value = sym;
+        const bookSymInput = document.getElementById('bookSymbolRoot');
+        if (bookSymInput && !bookSymInput.value) bookSymInput.value = sym;
+
+        // Refresh panes
+        loadBook().catch(()=>{});
+        loadOrders().catch(()=>{});
+        loadPositions().catch(()=>{});
+        loadRfqs().catch(()=>{});
+      } catch(e){
+        console.error(e);
+        setOrdMsg('Order failed: ' + (e.message || e), false);
       }
     }
 
@@ -358,6 +487,19 @@
       // Wire additional controls
       document.getElementById('bookLoadBtn')?.addEventListener('click', loadBook);
       document.getElementById('quoteBtn')?.addEventListener('click', getQuote);
+
+      // Order ticket button
+      if (ordSubmitBtn){
+        ordSubmitBtn.addEventListener('click', function(ev){
+          ev.preventDefault();
+          submitOrder().catch(()=>{});
+        });
+      }
+
+      // Seed ticket symbol from current selection if empty
+      if (ordSymbol && !ordSymbol.value && symbolSel && symbolSel.value){
+        ordSymbol.value = symbolSel.value;
+      }
 
       // Initial loads
       loadBook().catch(()=>{});
