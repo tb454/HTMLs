@@ -131,7 +131,26 @@
   <!-- Toast lives in <body> (valid HTML) -->
   <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
 
+  <!-- Admin Navbar -->
+  <header class="border-bottom mb-3 bg-light">
+    <div class="container-fluid py-2 d-flex align-items-center justify-content-between">
+      <div class="d-flex align-items-center gap-2">
+        <span class="brand-badge">B</span>
+        <span class="fw-semibold">BRidge Admin</span>
+      </div>
+      <nav class="nav nav-pills small">
+        <a class="nav-link active" href="/static/bridge-admin-dashboard.html">Dashboard</a>
+        <a class="nav-link" href="/static/admin-billing.html">Billing</a>
+        <a class="nav-link" href="/static/admin-compliance.html">Compliance</a>
+        <a class="nav-link" href="/static/admin-tenants.html">Tenants</a>
+        <a class="nav-link" href="/static/indices.html">Indices</a>
+        <a class="nav-link" href="/static/trader.html">Trader</a>
+      </nav>
+    </div>
+  </header>
+
   <div class="container-fluid">
+
     <div class="d-flex align-items-center justify-content-between mb-2">
       <div class="d-flex align-items-center gap-2">
         <h2 class="mb-0">📊 BRidge Admin Dashboard</h2>
@@ -390,138 +409,6 @@ onReady(async function(){
     };
   })();
 </script>
-
-  <script nonce="{{NONCE}}">
-  // ---- Yard Pricing & Hedge Config UI ----
-  (function(){
-    const $ = (id)=>document.getElementById(id);
-
-    function yardKey(){
-      const fromField = ($('yardConfigSeller')?.value || '').trim();
-      if (fromField) return fromField;
-      const seller = ($('sellerName')?.value || '').trim();
-      if (seller) return seller;
-      return '';
-    }
-
-    function skuKey(){
-      return ($('yardConfigSku')?.value || $('material')?.value || '').trim();
-    }
-
-    function setMsg(msg){
-      const el = $('yardConfigMsg');
-      if (el) el.textContent = msg || '';
-    }
-
-    function renderRules(rows){
-      const tb = $('yardRulesTable')?.querySelector('tbody');
-      if (!tb) return;
-      if (!rows || !rows.length){
-        tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No rules yet.</td></tr>`;
-        return;
-      }
-      tb.innerHTML = rows.map(r => `
-        <tr>
-          <td>${r.material || ''}</td>
-          <td>${r.formula || ''}</td>
-          <td>${(r.loss_min_pct ?? 0)}–${(r.loss_max_pct ?? 0)}%</td>
-          <td>${r.min_margin_usd_ton ?? 0}</td>
-          <td>${(r.target_hedge_ratio ?? 0)}</td>
-        </tr>
-      `).join('');
-    }
-
-    function renderHedges(rows){
-      const tb = $('yardHedgeTable')?.querySelector('tbody');
-      if (!tb) return;
-      if (!rows || !rows.length){
-        tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No hedge recommendations.</td></tr>`;
-        return;
-      }
-      tb.innerHTML = rows.map(r => `
-        <tr>
-          <td>${r.material || ''}</td>
-          <td>${r.on_hand_tons ?? ''}</td>
-          <td>${r.hedged_tons ?? ''}</td>
-          <td>${(r.target_hedge_ratio ?? 0)}</td>
-          <td>${r.suggested_lots ?? 0}</td>
-        </tr>
-      `).join('');
-    }
-
-    async function loadRules(){
-      const yard = yardKey();
-      if (!yard){ setMsg('Set Seller or Yard key first.'); return; }
-      setMsg('Loading rules...');
-      try{
-        const res = await api(`/yard_rules?yard=${encodeURIComponent(yard)}`);
-        const rows = await res.json();
-        renderRules(rows || []);
-        setMsg(`Loaded ${rows.length || 0} rule(s) for ${yard}.`);
-      }catch(e){
-        setMsg(e.message || 'Failed to load rules');
-      }
-    }
-
-    async function saveRule(){
-      const yard = yardKey();
-      const sku  = skuKey();
-      if (!yard || !sku){ toast('Seller/Yard and SKU are required.'); return; }
-      const body = {
-        yard,
-        material: sku,
-        formula: ($('yardConfigFormula')?.value || '').trim() || null,
-        loss_min_pct: $('yardLossMin')?.value ? parseFloat($('yardLossMin').value) : null,
-        loss_max_pct: $('yardLossMax')?.value ? parseFloat($('yardLossMax').value) : null,
-        min_margin_usd_ton: $('yardMinMargin')?.value ? parseFloat($('yardMinMargin').value) : null,
-        target_hedge_ratio: $('yardHedgeRatio')?.value ? parseFloat($('yardHedgeRatio').value) : null,
-        min_tons: $('yardMinTons')?.value ? parseFloat($('yardMinTons').value) : null,
-        futures_symbol_root: ($('yardSymbolRoot')?.value || '').trim() || null,
-        auto_hedge: ($('yardAutoHedge')?.value === 'true')
-      };
-      setMsg('Saving rule...');
-      try{
-        await api('/yard_rules', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(body)
-        });
-        toast('Yard rule saved.');
-        await loadRules();
-        setMsg('Saved.');
-      }catch(e){
-        setMsg(e.message || 'Failed to save rule');
-      }
-    }
-
-    async function loadHedgeRecs(){
-      const yard = yardKey();
-      if (!yard){ toast('Set Seller/Yard first.'); return; }
-      setMsg('Loading hedge recommendations...');
-      try{
-        const res = await api(`/hedge/recommendations?yard=${encodeURIComponent(yard)}`);
-        const rows = await res.json();
-        renderHedges(rows || []);
-        setMsg(`Got ${rows.length || 0} hedge recommendation(s).`);
-      }catch(e){
-        setMsg(e.message || 'Failed to load hedge recommendations');
-      }
-    }
-
-    onReady(() => {
-      $('yardRuleLoad')?.addEventListener('click', loadRules);
-      $('yardRuleSave')?.addEventListener('click', saveRule);
-      $('yardHedgeRecs')?.addEventListener('click', loadHedgeRecs);
-
-      // If seller is already set, auto-populate yardConfigSeller & load rules on first open
-      const seller = (document.getElementById('sellerName')?.value || '').trim();
-      if (seller && $('yardConfigSeller')) {
-        $('yardConfigSeller').value = seller;
-        loadRules().catch(()=>{});
-      }
-    });
-  })();
-  </script>
 
 <section class="card">
   <h3>Vendor Pricing (Latest Sheet)</h3>
