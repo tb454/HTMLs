@@ -1642,9 +1642,9 @@ class AccountUserLinkIn(BaseModel):
 
 @accounts_router.get("", summary="List accounts", response_model=List[AccountOut])
 async def admin_list_accounts(
+    request: Request,
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    request: Request | None = None,
+    offset: int = Query(0, ge=0),    
 ):
     _require_admin(request)
     rows = await database.fetch_all(
@@ -1659,7 +1659,7 @@ async def admin_list_accounts(
     return [AccountOut(**dict(r)) for r in rows]
 
 @accounts_router.post("", summary="Create account", response_model=AccountOut, status_code=201)
-async def admin_create_account(body: AccountIn, request: Request | None = None):
+async def admin_create_account(body: AccountIn, request: Request):
     _require_admin(request)
     acc_id = str(uuid.uuid4())
     await database.execute(
@@ -1673,9 +1673,9 @@ async def admin_create_account(body: AccountIn, request: Request | None = None):
 
 @accounts_router.post("/{account_id}/users", summary="Attach user to account", status_code=200)
 async def admin_attach_user(
+    request: Request,
     account_id: str,
-    body: AccountUserLinkIn,
-    request: Request | None = None,
+    body: AccountUserLinkIn,    
 ):
     _require_admin(request)
     # sanity check account exists
@@ -1695,7 +1695,7 @@ async def admin_attach_user(
     return {"ok": True, "account_id": account_id, "username": body.username.strip()}
 
 @accounts_router.get("/{account_id}/users", summary="Get user linked to account")
-async def admin_get_account_user(account_id: str, request: Request | None = None):
+async def admin_get_account_user(account_id: str, request: Request):
     _require_admin(request)
     row = await database.fetch_one(
         "SELECT account_id::text AS account_id, username FROM account_users WHERE account_id=:id",
@@ -2777,31 +2777,19 @@ async def create_invite(body: InviteCreate):
 
 admin_tenants_router = APIRouter(prefix="/admin", tags=["Tenants"])
 
+class TenantRow(BaseModel):
+    id: Optional[str] = None
+    slug: Optional[str] = None
+    org: Optional[str] = None
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+
 class AdminTenant(BaseModel):
     id: Optional[str] = None
     org: str
     display_name: Optional[str] = None
     name: Optional[str] = None
     slug: Optional[str] = None
-
-@admin_tenants_router.get("/tenants", response_model=List[AdminTenant])
-async def admin_list_tenants():
-    rows = await database.fetch_all("SELECT org, display_name FROM orgs ORDER BY org")
-    out: List[AdminTenant] = []
-    for r in rows:
-        d = dict(r)
-        org = d["org"]
-        disp = d.get("display_name")
-        out.append(
-            AdminTenant(
-                org=org,
-                display_name=disp,
-                name=disp or org,
-                slug=org,
-                id=org,
-            )
-        )
-    return out
 
 @admin_tenants_router.get("/tenants", response_model=List[AdminTenant])
 async def admin_list_tenants():
@@ -3019,40 +3007,6 @@ async def list_settlements(symbol: Optional[str] = None, days: int = 30):
 app.include_router(products_router)
 app.include_router(settlements_router)
 # ----- Products & Settlements -----
-
-# ----- Admin Tenants -----
-admin_tenants_router = APIRouter(prefix="/admin", tags=["Tenants"])
-
-class TenantRow(BaseModel):
-    id: Optional[str] = None
-    slug: Optional[str] = None
-    org: Optional[str] = None
-    name: Optional[str] = None
-    display_name: Optional[str] = None
-
-@admin_tenants_router.get("/tenants", response_model=List[TenantRow])
-async def list_admin_tenants():
-    """
-    Simple placeholder: use orgs table as tenant list.
-    """
-    rows = await database.fetch_all(
-        "SELECT org, display_name FROM orgs ORDER BY org"
-    )
-    out = []
-    for r in rows:
-        d = dict(r)
-        out.append(
-            TenantRow(
-                org=d["org"],
-                display_name=d.get("display_name"),
-                name=d.get("display_name") or d["org"],
-                slug=d["org"],
-            )
-        )
-    return out
-
-app.include_router(admin_tenants_router)
-# ----- Admin Tenants -----
 
 # ===== Fees core (fees ledger + preview/run) =====
 fees_router = APIRouter(prefix="/fees", tags=["Fees"])
@@ -8822,7 +8776,7 @@ async def dossier_queue(limit: int = 40):
             """
             SELECT source_system, source_table, event_type, status,
                    attempts, last_error, created_at
-            FROM atlas_ingest_queue
+            FROM dossier_ingest_queue
             ORDER BY created_at DESC
             LIMIT :limit
             """,
@@ -9617,7 +9571,7 @@ def _is_admin_session(request: Request) -> bool:
         return False
 
 # ===== Admin gate helper  =====
-def _require_admin(request: Request | None):
+def _require_admin(request: Request):
     """
     In production: require a session role of 'admin'.
     In non-prod: no-op, and never crash if request is None.
@@ -10228,12 +10182,6 @@ async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: R
 #-------- Receipts lifecycle --------
 
 # ----- Reference Prices -----
-@app.post("/reference_prices/pull_now_all", tags=["Reference"], summary="Pull reference prices now", status_code=200)
-async def pull_now_all():
-    # Wire to your actual COMEX/LME puller; for now a stub response
-    # (call your existing internal function if you have one)
-    return {"ok": True, "msg": "Pull started"}
-
 @app.post("/reference_prices/upsert_from_vendor", tags=["Reference"], summary="Upsert today's vendor-blended LB into reference_prices", status_code=200)
 async def upsert_vendor_to_reference():
     # Ensure reference_prices has columns: symbol TEXT, ts TIMESTAMPTZ, price_lb NUMERIC, source TEXT
@@ -11146,56 +11094,6 @@ async def get_latest_indices():
         f"{r['region'].lower()}_{r['sku'].lower()}_index": float(r["avg_price"])
         for r in rows
     }
-
-@app.get("/indices/universe", tags=["Indices"], summary="Universe", status_code=200)
-async def indices_universe():
-    """
-    Global index universe for UI:
-      - Prefer bridge_index_definitions (symbol, method, factor, base_symbol, enabled)
-      - Fallback to DEFAULT_INDEX_SET from indices_builder
-    """
-    rows = await database.fetch_all("""
-        SELECT symbol, method, factor, base_symbol, enabled
-        FROM bridge_index_definitions
-        ORDER BY symbol
-    """)
-    if rows:
-        return [dict(r) for r in rows]
-
-    # Fallback: in case DB not seeded yet, use DEFAULT_INDEX_SET constants
-    from indices_builder import DEFAULT_INDEX_SET
-    return [
-        {
-            "symbol": d["symbol"],
-            "method": d["method"],
-            "factor": d["factor"],
-            "base_symbol": d["base_symbol"],
-            "enabled": True,
-        }
-        for d in DEFAULT_INDEX_SET
-    ]
-
-@app.get("/indices/history", tags=["Indices"], summary="History (from indices_daily)", status_code=200)
-async def indices_history(symbol: str, limit: int = 500):
-    """
-    Unified history endpoint for:
-      - Trader page     → expects ts, price, region
-      - Indices dashboard → expects dt, close_price
-    We pull from indices_daily and expose both naming styles.
-    """
-    rows = await database.fetch_all("""
-        SELECT
-          ts,
-          ts::date               AS dt,
-          price,
-          price                  AS close_price,
-          region
-        FROM indices_daily
-        WHERE symbol = :symbol
-        ORDER BY ts DESC
-        LIMIT :limit
-    """, {"symbol": symbol, "limit": limit})
-    return [dict(r) for r in rows]
 # ----- Indices Feed -----
 
 @app.get("/export/tax_lookup", tags=["Compliance"], summary="Duty/Tax lookup by HS + destination")
