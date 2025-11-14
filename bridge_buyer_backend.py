@@ -3001,6 +3001,32 @@ app.include_router(settlements_router)
 fees_router = APIRouter(prefix="/fees", tags=["Fees"])
 
 @startup
+async def _ensure_usage_events_schema():
+    """
+    Usage event log for metering and billing (parallel to fees_ledger).
+
+    This is intentionally simple and append-only. It does **not** drive billing
+    by itself yet – but gives you a clean table to aggregate meters, compare
+    against Stripe, or export for analytics.
+    """
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS usage_events(
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      member         TEXT NOT NULL,              -- yard/org key
+      tenant_id      UUID,                       -- optional tenant FK
+      event_type     TEXT NOT NULL,              -- EXCH_CONTRACT, BOL_ISSUED, DELIVERY_TONS, etc.
+      quantity       NUMERIC NOT NULL DEFAULT 1, -- unit depends on event_type
+      ref_table      TEXT,
+      ref_id         TEXT,
+      ts             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      billing_status TEXT NOT NULL DEFAULT 'unbilled',  -- unbilled|invoiced|written_off
+      invoice_id     UUID
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_member_ts
+      ON usage_events(member, ts DESC);
+    """)
+
+@startup
 async def _ensure_billing_core():
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS fees_ledger(
@@ -3046,6 +3072,43 @@ async def _ensure_billing_core():
       SELECT date_trunc('day', created_at) AS d, member, SUM(fee_amount_usd) AS amt_usd
         FROM fees_ledger GROUP BY 1,2 ORDER BY 1,2;
     """)
+
+async def record_usage_event(
+    member: str,
+    event_type: str,
+    quantity: float = 1.0,
+    ref_table: str | None = None,
+    ref_id: str | None = None,
+    tenant_id: str | None = None,
+) -> None:
+    """
+    Best-effort usage meter.
+
+    This **never** raises in hot paths – it logs failures and returns.
+    Units:
+      - EXCH_CONTRACT      → quantity = 1 per contract
+      - BOL_ISSUED         → quantity = 1 per BOL
+      - DELIVERY_TONS      → quantity = delivered tons
+      - RECEIPT_CREATED    → quantity = 1 per receipt
+      - WS_MESSAGES        → raw message count, etc.
+    """
+    try:
+        await database.execute("""
+          INSERT INTO usage_events(member, tenant_id, event_type, quantity, ref_table, ref_id)
+          VALUES (:m, :tid, :ev, :q, :tbl, :rid)
+        """, {
+            "m":   member,
+            "tid": tenant_id,
+            "ev":  event_type,
+            "q":   quantity,
+            "tbl": ref_table,
+            "rid": ref_id,
+        })
+    except Exception as e:
+        try:
+            logger.warn("usage_event_failed", member=member, ev=event_type, err=str(e))
+        except Exception:
+            pass
 
 async def _mmi_usd(member: str) -> float:
     """
@@ -12623,6 +12686,22 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         except Exception:
             pass
 
+        # Usage metering: 1 contract event for this seller (best-effort)
+        try:
+            d = dict(row)
+            member_key = (d.get("seller") or "").strip()
+            if member_key:
+                await record_usage_event(
+                    member=member_key,
+                    event_type="EXCH_CONTRACT",
+                    quantity=1.0,
+                    ref_table="contracts",
+                    ref_id=str(d.get("id")) if d.get("id") else None,
+                    tenant_id=d.get("tenant_id"),
+                )
+        except Exception:
+            pass
+
         resp = row
         return await _idem_guard(request, key, resp)
 
@@ -13360,6 +13439,31 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         record_usage_safe(sub_item, 1)
     except Exception:
         pass
+        # Usage metering: BOL_ISSUED (1 per BOL) for this seller
+    try:
+        if row:
+            d = dict(row)
+            member_key = (d.get("seller") or "").strip()
+            if member_key:
+                await record_usage_event(
+                    member=member_key,
+                    event_type="BOL_ISSUED",
+                    quantity=1.0,
+                    ref_table="bols",
+                    ref_id=str(d.get("bol_id")) if d.get("bol_id") else None,
+                    tenant_id=d.get("tenant_id"),
+                )
+    except Exception:
+        pass
+
+    resp = {
+        **bol.model_dump(),
+        "bol_id": _rget(row, "bol_id", bol_id_str),
+        "status": _rget(row, "status", "Scheduled"),
+        "delivery_signature": None,
+        "delivery_time": None,
+    }
+
     resp = {
         **bol.model_dump(),
         "bol_id": _rget(row, "bol_id", bol_id_str),
@@ -13469,6 +13573,24 @@ async def bols_mark_delivered(
                 "receipts": [str(x) for x in (receipt_ids or [])],
             },
         )
+    except Exception:
+        pass
+
+        # Usage metering: delivery tons by seller (DELIVERY_TONS)
+    try:
+        d = await database.fetch_one("SELECT seller, weight_tons, tenant_id FROM bols WHERE bol_id = :id", {"id": bol_id})
+        if d:
+            seller = (d["seller"] or "").strip()
+            tons   = float(d["weight_tons"] or 0.0)
+            if seller and tons > 0:
+                await record_usage_event(
+                    member=seller,
+                    event_type="DELIVERY_TONS",
+                    quantity=tons,
+                    ref_table="bols",
+                    ref_id=bol_id,
+                    tenant_id=d.get("tenant_id"),
+                )
     except Exception:
         pass
 
