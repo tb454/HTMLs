@@ -1,4 +1,5 @@
 # bridge_seed_reference_data.py
+
 import os
 import sys
 import asyncio
@@ -14,6 +15,7 @@ AL_PATH_DEFAULT = os.path.join(BASE_DIR, "Aluminum Futures Historical Data(in).c
 CU_PATH_DEFAULT = os.path.join(BASE_DIR, "Copper Futures Historical Data(in).csv")
 INV_PATH_DEFAULT = os.path.join(BASE_DIR, "qbo_out", "bridge_invoices.csv")
 
+# --- 1) Raw futures time series (kept if you want them) ---
 FUTURES_DDL = """
 CREATE TABLE IF NOT EXISTS futures_prices(
   id          BIGSERIAL PRIMARY KEY,
@@ -31,6 +33,7 @@ CREATE TABLE IF NOT EXISTS futures_prices(
 );
 """
 
+# --- 2) Legacy invoices (QBO export; useful for offline analysis) ---
 INVOICES_DDL = """
 CREATE TABLE IF NOT EXISTS legacy_invoices(
   id              BIGSERIAL PRIMARY KEY,
@@ -55,6 +58,23 @@ CREATE TABLE IF NOT EXISTS legacy_invoices(
   pdf_path        TEXT,
   UNIQUE(invoice_id, item_original, line_amount)
 );
+"""
+
+# --- 3) The one that actually matters for pricing: reference_prices ---
+REFERENCE_DDL = """
+CREATE TABLE IF NOT EXISTS reference_prices (
+  id bigserial PRIMARY KEY,
+  symbol      text NOT NULL,
+  source      text NOT NULL,
+  price       numeric(16,6) NOT NULL,
+  ts_market   timestamptz NULL,
+  ts_server   timestamptz NOT NULL DEFAULT now(),
+  raw_snippet text
+);
+CREATE INDEX IF NOT EXISTS idx_refprices_symbol_ts
+  ON reference_prices(symbol, ts_server DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
+  ON reference_prices(symbol, ts_market);
 """
 
 
@@ -98,17 +118,32 @@ def _parse_iso_date(s) -> dt.date | None:
 
 
 async def _ensure_schema(db: Database) -> None:
-    # Each DDL string is a single statement → safe for asyncpg
-    for ddl in (FUTURES_DDL, INVOICES_DDL):
-        await db.execute(ddl)
+    # Split multi-statement DDL so asyncpg doesn't freak out
+    for ddl_block in (FUTURES_DDL, INVOICES_DDL, REFERENCE_DDL):
+        for stmt in ddl_block.split(";"):
+            sql = stmt.strip()
+            if not sql:
+                continue
+            if not sql.endswith(";"):
+                sql += ";"
+            await db.execute(sql)
 
 
-async def ingest_futures_file(db: Database, path: str, symbol: str) -> int:
+async def ingest_futures_file(
+    db: Database,
+    path: str,
+    futures_symbol: str,
+    reference_symbol: str,
+) -> int:
+    """
+    - Writes the full OHLCV series into futures_prices (symbol = futures_symbol)
+    - ALSO seeds reference_prices (symbol = reference_symbol, using 'Price' as close)
+    """
     if not os.path.exists(path):
         print(f"FUTURES: file not found, skipping: {path}")
         return 0
 
-    print(f"FUTURES: ingesting {symbol} from {os.path.basename(path)}")
+    print(f"FUTURES: ingesting {futures_symbol} → {reference_symbol} from {os.path.basename(path)}")
     count = 0
 
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -134,6 +169,7 @@ async def ingest_futures_file(db: Database, path: str, symbol: str) -> int:
                 vol_ = row.get("Vol.")
                 chg_ = _parse_change_pct(row.get("Change %"))
 
+                # 1) Store full OHLC into futures_prices (raw time series)
                 await db.execute(
                     """
                     INSERT INTO futures_prices(
@@ -150,7 +186,7 @@ async def ingest_futures_file(db: Database, path: str, symbol: str) -> int:
                         source     = EXCLUDED.source;
                     """,
                     {
-                        "symbol": symbol,
+                        "symbol": futures_symbol,
                         "as_of": as_of,
                         "open": open_,
                         "high": high_,
@@ -161,9 +197,30 @@ async def ingest_futures_file(db: Database, path: str, symbol: str) -> int:
                         "source": "seed_csv",
                     },
                 )
+
+                # 2) Seed reference_prices for pricing/indices
+                ts_market = dt.datetime(
+                    as_of.year, as_of.month, as_of.day, tzinfo=dt.timezone.utc
+                )
+                await db.execute(
+                    """
+                    INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+                    VALUES (:symbol, :source, :price, :ts_market, now(), NULL)
+                    ON CONFLICT (symbol, ts_market) DO UPDATE
+                      SET price  = EXCLUDED.price,
+                          source = EXCLUDED.source
+                    """,
+                    {
+                        "symbol": reference_symbol,
+                        "source": "seed_csv",
+                        "price": close_,
+                        "ts_market": ts_market,
+                    },
+                )
+
                 count += 1
 
-    print(f"FUTURES: {symbol} → inserted/updated {count} rows")
+    print(f"FUTURES: {futures_symbol} / {reference_symbol} → inserted/updated {count} rows")
     return count
 
 
@@ -262,13 +319,13 @@ async def main():
     await _ensure_schema(db)
 
     try:
-        # Aluminum → use symbol 'AL' (LME-style)
-        await ingest_futures_file(db, AL_PATH_DEFAULT, "AL")
+        # Aluminum CSV → futures_prices symbol 'AL', reference_prices symbol 'LME_AL'
+        await ingest_futures_file(db, AL_PATH_DEFAULT, "AL", "LME_AL")
 
-        # Copper → use symbol 'HG' (COMEX copper)
-        await ingest_futures_file(db, CU_PATH_DEFAULT, "HG")
+        # Copper CSV → futures_prices symbol 'HG', reference_prices symbol 'COMEX_CU'
+        await ingest_futures_file(db, CU_PATH_DEFAULT, "HG", "COMEX_CU")
 
-        # Legacy invoices (Winski + others)
+        # Legacy invoices (Winski + others) into legacy_invoices
         await ingest_invoices(db, INV_PATH_DEFAULT)
     finally:
         await db.disconnect()

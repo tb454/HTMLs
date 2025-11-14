@@ -7493,14 +7493,21 @@ async def _ensure_inventory_schema():
         """,
         """
         CREATE TABLE IF NOT EXISTS inventory_movements (
-          seller TEXT NOT NULL,
-          sku TEXT NOT NULL,
-          movement_type TEXT NOT NULL,
-          qty NUMERIC NOT NULL,
-          ref_contract TEXT,
-          meta JSONB,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+            id            BIGSERIAL PRIMARY KEY,
+            account_id    UUID NOT NULL,
+            seller        TEXT NOT NULL,
+            sku           TEXT NOT NULL,
+            movement_type TEXT NOT NULL,   -- e.g. 'RESERVED','OUTBOUND','ADJUST'
+            qty           NUMERIC NOT NULL,
+            uom           TEXT NOT NULL,   -- 'ton','lb'
+            contract_id   BIGINT,
+            bol_id        BIGINT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_inv_mov_account_sku_time
+            ON inventory_movements(account_id, seller, sku, created_at DESC);
         """,
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
@@ -11855,16 +11862,42 @@ async def bols_mark_delivered(
     receipt_ids: Optional[List[str]] = Query(None),
     request: Request = None
 ):
-    # mark delivered
-    row = await database.fetch_one("""
+    # mark delivered and fetch linked contract
+    bol = await database.fetch_one("""
       UPDATE bols
-         SET status='Delivered',
+         SET status = 'Delivered',
              delivery_time = COALESCE(delivery_time, NOW())
-       WHERE bol_id=:id
-       RETURNING bol_id
+       WHERE bol_id = :id
+       RETURNING bol_id, contract_id
     """, {"id": bol_id})
-    if not row:
+    if not bol:
         raise HTTPException(404, "BOL not found")
+
+    contract_id = bol["contract_id"]
+
+    # auto-update contract → Fulfilled
+    try:
+        await database.execute("""
+          UPDATE contracts
+             SET status = 'Fulfilled'
+           WHERE id = :cid
+             AND status <> 'Fulfilled'
+        """, {"cid": contract_id})
+    except Exception:
+        # don’t break the request if this fails
+        pass
+
+    # auto-update buyer_positions → Closed for this contract
+    try:
+        await database.execute("""
+          UPDATE buyer_positions
+             SET status = 'Closed'
+           WHERE contract_id = :cid
+             AND status <> 'Closed'
+        """, {"cid": contract_id})
+    except Exception:
+        # best-effort only
+        pass
 
     # consume linked receipts (best-effort)
     if receipt_ids:
@@ -11878,12 +11911,24 @@ async def bols_mark_delivered(
     try:
         await audit_append(
             (request.session.get("username") if hasattr(request, "session") else "system"),
-            "bol.deliver", "bol", bol_id, {"receipts": receipt_ids or []}
+            "bol.deliver",
+            "bol",
+            bol_id,
+            {
+                "receipts": receipt_ids or [],
+                "contract_id": str(contract_id),
+                "new_contract_status": "Fulfilled",
+            },
         )
     except Exception:
         pass
 
-    return {"bol_id": bol_id, "status": "Delivered", "receipts_consumed": receipt_ids or []}
+    return {
+        "bol_id": bol_id,
+        "status": "Delivered",
+        "contract_id": str(contract_id),
+        "receipts_consumed": receipt_ids or [],
+    }
 
 @app.post("/bol", include_in_schema=False)
 async def create_bol_alias(request: Request):
