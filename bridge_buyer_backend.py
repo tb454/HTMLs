@@ -11619,6 +11619,53 @@ async def _ensure_inventory_movements_table():
     except Exception:
         pass
 # ------ Tenant Applications ------
+@startup
+async def _ensure_yard_config_schema():
+    """
+    Yard / tenant-level pricing + hedge configuration.
+    Safe to run in CI and prod (IF NOT EXISTS everywhere).
+    """
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS yard_profiles (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      yard_code         TEXT UNIQUE,            -- e.g. 'WINSKI','LEWIS'
+      name              TEXT NOT NULL,
+      city              TEXT,
+      region            TEXT,
+      default_currency  TEXT NOT NULL DEFAULT 'USD',
+      default_hedge_ratio NUMERIC DEFAULT 0.6,  -- 60% baseline hedge
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS yard_pricing_rules (
+      id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      yard_id            UUID NOT NULL REFERENCES yard_profiles(id) ON DELETE CASCADE,
+      material           TEXT NOT NULL,          -- ties into canonical materials
+      formula            TEXT NOT NULL,          -- e.g. 'COMEX - 0.10 - freight - fee'
+      loss_min_pct       NUMERIC DEFAULT 0,      -- 0.00 - 1.00
+      loss_max_pct       NUMERIC DEFAULT 0.08,   -- 8% loss band
+      min_margin_usd_ton NUMERIC DEFAULT 0,
+      active             BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_yard_pricing_rules_yard_material
+      ON yard_pricing_rules (yard_id, material);
+
+    CREATE TABLE IF NOT EXISTS yard_hedge_rules (
+      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      yard_id             UUID NOT NULL REFERENCES yard_profiles(id) ON DELETE CASCADE,
+      material            TEXT NOT NULL,
+      min_tons            NUMERIC NOT NULL,      -- start hedging after this size
+      target_hedge_ratio  NUMERIC NOT NULL,      -- 0–1
+      futures_symbol_root TEXT NOT NULL,         -- ties into futures_products.symbol_root
+      auto_hedge          BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_yard_hedge_rules_yard_material
+      ON yard_hedge_rules (yard_id, material);
+    """)
 
 # --- Public endpoint (replaces /public/yard_signup) ---
 @app.post(
