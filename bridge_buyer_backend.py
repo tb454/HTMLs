@@ -11594,7 +11594,7 @@ async def _ensure_tenant_schema():
 
     ALTER TABLE IF EXISTS warrants
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
-    """, label="multitenancy_core")
+    """,)
 # ========== Tenant Applications ==========
 
 # --- Public endpoint (replaces /public/yard_signup) ---
