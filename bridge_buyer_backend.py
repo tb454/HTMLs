@@ -9279,7 +9279,7 @@ class ContractIn(BaseModel):
             }
         }
 
-class ContractOut(ContractIn):
+class ContractOut(BaseModel):
     id: uuid.UUID
     status: str
     created_at: datetime
@@ -9303,6 +9303,386 @@ class ContractOut(ContractIn):
                 "signature": "abc123signature"
             }
         }
+# ---------------- Yard config models ----------------
+
+class YardProfileIn(BaseModel):
+    yard_code: Optional[str] = Field(
+        default=None,
+        description="Short code for the yard, e.g. 'WINSKI' or 'LEWIS'."
+    )
+    name: str
+    city: Optional[str] = None
+    region: Optional[str] = None
+    default_currency: str = "USD"
+    default_hedge_ratio: Decimal = Field(
+        default=Decimal("0.6"),
+        description="Baseline hedge ratio, e.g. 0.6 for 60%."
+    )
+
+
+class YardProfileOut(YardProfileIn):
+    id: UUID
+    created_at: datetime.datetime
+
+
+class YardPricingRuleIn(BaseModel):
+    material: str
+    formula: str = Field(
+        description="Human-readable formula, e.g. 'COMEX - 0.10 - freight - fee'."
+    )
+    loss_min_pct: Decimal = Decimal("0")
+    loss_max_pct: Decimal = Decimal("0.08")
+    min_margin_usd_ton: Decimal = Decimal("0")
+    active: bool = True
+
+
+class YardPricingRuleOut(YardPricingRuleIn):
+    id: UUID
+    yard_id: UUID
+    updated_at: datetime.datetime
+
+
+class YardHedgeRuleIn(BaseModel):
+    material: str
+    min_tons: Decimal
+    target_hedge_ratio: Decimal = Field(
+        description="0–1, e.g. 0.6 = 60% hedged."
+    )
+    futures_symbol_root: str = Field(
+        description="Ties into futures_products.symbol_root, e.g. 'BR-SHRED'."
+    )
+    auto_hedge: bool = False
+
+
+class YardHedgeRuleOut(YardHedgeRuleIn):
+    id: UUID
+    yard_id: UUID
+    updated_at: datetime.datetime
+
+
+class PricingQuoteRequest(BaseModel):
+    yard_id: UUID
+    material: str
+    reference_symbol: Optional[str] = None
+    reference_price: Decimal = Field(
+        description="Reference price per ton (internal calc, e.g. COMEX derived)."
+    )
+    tons: Decimal = Field(
+        description="Tonnage for this quote; used only for context right now."
+    )
+
+
+class PricingQuoteResponse(BaseModel):
+    yard_id: UUID
+    material: str
+    price_per_ton: Decimal
+    band_low: Decimal
+    band_high: Decimal
+    formula: str
+    loss_min_pct: Decimal
+    loss_max_pct: Decimal
+    reference_symbol: Optional[str] = None
+    reference_price: Decimal
+    tons: Decimal
+inventory_router = APIRouter(prefix="/inventory", tags=["Inventory"])
+
+# ---------------- Yard configuration API ----------------
+
+yard_router = APIRouter(prefix="/yards", tags=["Yard Config"])
+
+
+async def _fetch_one_or_404(query: str, values: Dict[str, Any], not_found_msg: str):
+    row = await database.fetch_one(query, values)
+    if not row:
+        raise HTTPException(status_code=404, detail=not_found_msg)
+    return row
+
+@yard_router.get(
+    "",
+    response_model=List[YardProfileOut],
+    summary="List yards",
+    description="Return all yard profiles configured in the system.",
+)
+async def list_yards() -> List[YardProfileOut]:
+    rows = await database.fetch_all(
+        "SELECT id, yard_code, name, city, region, default_currency, "
+        "default_hedge_ratio, created_at "
+        "FROM yard_profiles ORDER BY name"
+    )
+    return [YardProfileOut(**dict(r)) for r in rows]
+
+
+@yard_router.post(
+    "",
+    response_model=YardProfileOut,
+    status_code=201,
+    summary="Create yard",
+    description="Create a new yard profile (e.g. Winski, Lewis).",
+)
+async def create_yard(payload: YardProfileIn) -> YardProfileOut:
+    values = payload.dict()
+    # if no yard_code provided, derive simple code from name
+    if not values.get("yard_code") and values.get("name"):
+        values["yard_code"] = values["name"].upper().replace(" ", "_")[:16]
+
+    row = await database.fetch_one(
+        """
+        INSERT INTO yard_profiles
+          (yard_code, name, city, region, default_currency, default_hedge_ratio)
+        VALUES (:yard_code, :name, :city, :region, :default_currency, :default_hedge_ratio)
+        RETURNING id, yard_code, name, city, region, default_currency,
+                  default_hedge_ratio, created_at
+        """,
+        values,
+    )
+    return YardProfileOut(**dict(row))
+
+
+@yard_router.get(
+    "/{yard_id}",
+    response_model=YardProfileOut,
+    summary="Get yard",
+    description="Fetch a single yard profile by id.",
+)
+async def get_yard(yard_id: UUID) -> YardProfileOut:
+    row = await _fetch_one_or_404(
+        """
+        SELECT id, yard_code, name, city, region, default_currency,
+               default_hedge_ratio, created_at
+        FROM yard_profiles
+        WHERE id = :yard_id
+        """,
+        {"yard_id": yard_id},
+        "yard not found",
+    )
+    return YardProfileOut(**dict(row))
+
+
+@yard_router.put(
+    "/{yard_id}",
+    response_model=YardProfileOut,
+    summary="Update yard",
+    description="Update a yard profile by id.",
+)
+async def update_yard(yard_id: UUID, payload: YardProfileIn) -> YardProfileOut:
+    values = payload.dict()
+    values["yard_id"] = yard_id
+
+    row = await database.fetch_one(
+        """
+        UPDATE yard_profiles
+        SET
+          yard_code = COALESCE(:yard_code, yard_code),
+          name      = :name,
+          city      = :city,
+          region    = :region,
+          default_currency    = :default_currency,
+          default_hedge_ratio = :default_hedge_ratio
+        WHERE id = :yard_id
+        RETURNING id, yard_code, name, city, region,
+                  default_currency, default_hedge_ratio, created_at
+        """,
+        values,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="yard not found")
+    return YardProfileOut(**dict(row))
+
+# ---- Pricing rules (per yard + material) ----
+
+@yard_router.get(
+    "/{yard_id}/pricing_rules",
+    response_model=List[YardPricingRuleOut],
+    summary="List yard pricing rules",
+)
+async def list_yard_pricing_rules(yard_id: UUID) -> List[YardPricingRuleOut]:
+    # ensure yard exists
+    await _fetch_one_or_404(
+        "SELECT id FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": yard_id},
+        "yard not found",
+    )
+
+    rows = await database.fetch_all(
+        """
+        SELECT id, yard_id, material, formula,
+               loss_min_pct, loss_max_pct, min_margin_usd_ton,
+               active, updated_at
+        FROM yard_pricing_rules
+        WHERE yard_id = :yard_id
+        ORDER BY material
+        """,
+        {"yard_id": yard_id},
+    )
+    return [YardPricingRuleOut(**dict(r)) for r in rows]
+
+
+@yard_router.post(
+    "/{yard_id}/pricing_rules",
+    response_model=YardPricingRuleOut,
+    status_code=201,
+    summary="Create yard pricing rule",
+)
+async def create_yard_pricing_rule(
+    yard_id: UUID,
+    payload: YardPricingRuleIn,
+) -> YardPricingRuleOut:
+    # ensure yard exists
+    await _fetch_one_or_404(
+        "SELECT id FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": yard_id},
+        "yard not found",
+    )
+
+    values = payload.dict()
+    values["yard_id"] = yard_id
+
+    row = await database.fetch_one(
+        """
+        INSERT INTO yard_pricing_rules
+          (yard_id, material, formula, loss_min_pct,
+           loss_max_pct, min_margin_usd_ton, active)
+        VALUES (:yard_id, :material, :formula, :loss_min_pct,
+                :loss_max_pct, :min_margin_usd_ton, :active)
+        RETURNING id, yard_id, material, formula,
+                  loss_min_pct, loss_max_pct, min_margin_usd_ton,
+                  active, updated_at
+        """,
+        values,
+    )
+    return YardPricingRuleOut(**dict(row))
+
+
+@yard_router.put(
+    "/pricing_rules/{rule_id}",
+    response_model=YardPricingRuleOut,
+    summary="Update yard pricing rule",
+)
+async def update_yard_pricing_rule(
+    rule_id: UUID,
+    payload: YardPricingRuleIn,
+) -> YardPricingRuleOut:
+    values = payload.dict()
+    values["rule_id"] = rule_id
+
+    row = await database.fetch_one(
+        """
+        UPDATE yard_pricing_rules
+        SET
+          material           = :material,
+          formula            = :formula,
+          loss_min_pct       = :loss_min_pct,
+          loss_max_pct       = :loss_max_pct,
+          min_margin_usd_ton = :min_margin_usd_ton,
+          active             = :active,
+          updated_at         = NOW()
+        WHERE id = :rule_id
+        RETURNING id, yard_id, material, formula,
+                  loss_min_pct, loss_max_pct, min_margin_usd_ton,
+                  active, updated_at
+        """,
+        values,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="pricing rule not found")
+    return YardPricingRuleOut(**dict(row))
+
+# ---- Hedge rules (per yard + material) ----
+
+@yard_router.get(
+    "/{yard_id}/hedge_rules",
+    response_model=List[YardHedgeRuleOut],
+    summary="List yard hedge rules",
+)
+async def list_yard_hedge_rules(yard_id: UUID) -> List[YardHedgeRuleOut]:
+    await _fetch_one_or_404(
+        "SELECT id FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": yard_id},
+        "yard not found",
+    )
+
+    rows = await database.fetch_all(
+        """
+        SELECT id, yard_id, material, min_tons,
+               target_hedge_ratio, futures_symbol_root,
+               auto_hedge, updated_at
+        FROM yard_hedge_rules
+        WHERE yard_id = :yard_id
+        ORDER BY material
+        """,
+        {"yard_id": yard_id},
+    )
+    return [YardHedgeRuleOut(**dict(r)) for r in rows]
+
+
+@yard_router.post(
+    "/{yard_id}/hedge_rules",
+    response_model=YardHedgeRuleOut,
+    status_code=201,
+    summary="Create yard hedge rule",
+)
+async def create_yard_hedge_rule(
+    yard_id: UUID,
+    payload: YardHedgeRuleIn,
+) -> YardHedgeRuleOut:
+    await _fetch_one_or_404(
+        "SELECT id FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": yard_id},
+        "yard not found",
+    )
+
+    values = payload.dict()
+    values["yard_id"] = yard_id
+
+    row = await database.fetch_one(
+        """
+        INSERT INTO yard_hedge_rules
+          (yard_id, material, min_tons,
+           target_hedge_ratio, futures_symbol_root, auto_hedge)
+        VALUES (:yard_id, :material, :min_tons,
+                :target_hedge_ratio, :futures_symbol_root, :auto_hedge)
+        RETURNING id, yard_id, material, min_tons,
+                  target_hedge_ratio, futures_symbol_root,
+                  auto_hedge, updated_at
+        """,
+        values,
+    )
+    return YardHedgeRuleOut(**dict(row))
+
+
+@yard_router.put(
+    "/hedge_rules/{rule_id}",
+    response_model=YardHedgeRuleOut,
+    summary="Update yard hedge rule",
+)
+async def update_yard_hedge_rule(
+    rule_id: UUID,
+    payload: YardHedgeRuleIn,
+) -> YardHedgeRuleOut:
+    values = payload.dict()
+    values["rule_id"] = rule_id
+
+    row = await database.fetch_one(
+        """
+        UPDATE yard_hedge_rules
+        SET
+          material            = :material,
+          min_tons            = :min_tons,
+          target_hedge_ratio  = :target_hedge_ratio,
+          futures_symbol_root = :futures_symbol_root,
+          auto_hedge          = :auto_hedge,
+          updated_at          = NOW()
+        WHERE id = :rule_id
+        RETURNING id, yard_id, material, min_tons,
+                  target_hedge_ratio, futures_symbol_root,
+                  auto_hedge, updated_at
+        """,
+        values,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="hedge rule not found")
+    return YardHedgeRuleOut(**dict(row))
+app.include_router(yard_router)
 
 # ---------- Yard Profiles / Pricing / Hedge Models ----------
 class YardProfileBase(BaseModel):
