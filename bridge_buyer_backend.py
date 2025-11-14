@@ -9281,10 +9281,25 @@ class ContractIn(BaseModel):
 
 class ContractOut(BaseModel):
     id: uuid.UUID
+
+    buyer: str
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_ton: Decimal
+    currency: str = "USD"
+    tax_percent: Optional[Decimal] = None
+
     status: str
     created_at: datetime
-    signed_at: Optional[datetime]
-    signature: Optional[str]
+    signed_at: Optional[datetime] = None
+    signature: Optional[str] = None
+
+    pricing_formula: Optional[str] = None
+    reference_symbol: Optional[str] = None
+    reference_price: Optional[float] = None
+    reference_source: Optional[str] = None
+    reference_timestamp: Optional[datetime] = None
 
     class Config:
         json_schema_extra = {
@@ -9293,14 +9308,19 @@ class ContractOut(BaseModel):
                 "buyer": "Lewis Salvage",
                 "seller": "Winski Brothers",
                 "material": "Shred Steel",
-                "weight_tons": 40,
-                "price_per_ton": 245.00,
+                "weight_tons": 40.0,
+                "price_per_ton": "245.00",
                 "currency": "USD",
                 "tax_percent": 0,
                 "status": "Signed",
                 "created_at": "2025-09-01T10:00:00Z",
                 "signed_at": "2025-09-01T10:15:00Z",
-                "signature": "abc123signature"
+                "signature": "abc123signature",
+                "pricing_formula": "COMEX - 0.10 - freight - fee",
+                "reference_symbol": "HG=F",
+                "reference_price": 4.25,
+                "reference_source": "COMEX (internal derived)",
+                "reference_timestamp": "2025-09-01T09:59:00Z"
             }
         }
 # ---------------- Yard config models ----------------
@@ -12452,7 +12472,30 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                   "material": contract.material, "wt": contract.weight_tons,
                   "ppt": quantize_money(contract.price_per_ton), "ccy": contract.currency})
             row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
-            return await _idem_guard(request, key, row if row else {"id": cid, "status": "Pending"})
+            if row:
+                return await _idem_guard(request, key, row)
+
+            # ultra-rare fallback: synthesize a minimal ContractOut-shaped dict
+            fallback = {
+                "id": cid,
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "weight_tons": float(contract.weight_tons),
+                "price_per_ton": quantize_money(contract.price_per_ton),
+                "currency": contract.currency or "USD",
+                "tax_percent": contract.tax_percent,
+                "status": "Pending",
+                "created_at": utcnow(),
+                "signed_at": None,
+                "signature": None,
+                "pricing_formula": contract.pricing_formula,
+                "reference_symbol": contract.reference_symbol,
+                "reference_price": contract.reference_price,
+                "reference_source": contract.reference_source,
+                "reference_timestamp": contract.reference_timestamp,
+            }
+            return await _idem_guard(request, key, fallback)
         except Exception as e2:
             try:
                 logger.warn("contract_create_failed_fallback", err=str(e2))
