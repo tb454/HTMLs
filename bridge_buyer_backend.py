@@ -8625,7 +8625,38 @@ async def webhook_replay(request: Request, limit: int = 100):
 # ------- Webhook DLQ replayer -------
 
 
-#------- Dossier HR Sync -------
+#------- Dossier HR ingest queue & sync -------
+@startup
+async def _ensure_dossier_ingest_queue_schema():
+    """
+    Queue for per-event ingestion into Dossier/Atlas.
+
+    Safe in CI/prod (IF NOT EXISTS). We also expose admin APIs to inspect
+    and drain this queue into the Dossier HR ingest endpoint.
+    """
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS dossier_ingest_queue (
+      id            BIGSERIAL PRIMARY KEY,
+      source_system TEXT     NOT NULL DEFAULT 'bridge',
+      source_table  TEXT     NOT NULL,
+      source_id     TEXT     NOT NULL,
+      event_type    TEXT     NOT NULL,
+      payload       JSONB,
+      status        TEXT     NOT NULL DEFAULT 'pending',  -- pending|sent|failed
+      attempts      INT      NOT NULL DEFAULT 0,
+      last_error    TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at       TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_dossier_queue_status_created
+      ON dossier_ingest_queue(status, created_at);
+    """)
+
+# Primary ingest endpoint / secret for Atlas/Dossier
+ATLAS_INGEST_URL    = (os.getenv("ATLAS_INGEST_URL", "").strip()
+                       or os.getenv("DOSSIER_ENDPOINT", "").strip())
+ATLAS_INGEST_SECRET = os.getenv("ATLAS_INGEST_SECRET", "").strip()
+
 @startup
 async def _nightly_dossier_sync():
     # feature gate
@@ -8747,6 +8778,37 @@ async def _nightly_dossier_sync():
     t = asyncio.create_task(_runner())
     app.state._bg_tasks.append(t)
 
+async def enqueue_atlas_event(
+    source_table: str,
+    source_id: str,
+    event_type: str,
+    payload: Optional[Dict[str, Any]] = None,
+    source_system: str = "bridge",
+) -> None:
+    """
+    Best-effort: stage an event into the Dossier/Atlas ingest queue.
+    This must never fail hot-path requests; callers should generally
+    wrap it in a try/except and ignore errors.
+    """
+    try:
+        await database.execute("""
+          INSERT INTO dossier_ingest_queue(
+            source_system, source_table, source_id, event_type, payload
+          )
+          VALUES (:sys, :tbl, :sid, :evt, :payload::jsonb)
+        """, {
+            "sys": source_system,
+            "tbl": source_table,
+            "sid": str(source_id),
+            "evt": event_type,
+            "payload": json.dumps(payload or {}, default=str),
+        })
+    except Exception as e:
+        try:
+            logger.warn("dossier_enqueue_failed", table=source_table, id=str(source_id), err=str(e))
+        except Exception:
+            pass
+
 @app.post("/admin/dossier/sync_once", tags=["Admin"])
 async def dossier_sync_once(request: Request):
     _require_admin(request)
@@ -8841,6 +8903,92 @@ async def retry_failed_dossier():
         """
     )
     return {"ok": True, "message": "Retry triggered", "updated": count}
+
+@admin_dossier_router.post("/run_batch", summary="Drain pending Dossier/Atlas ingest queue")
+async def run_dossier_ingest_batch(limit: int = 100):
+    """
+    Pull up to `limit` pending rows from dossier_ingest_queue, POST them to
+    ATLAS_INGEST_URL (or DOSSIER_ENDPOINT), and mark each as sent/failed.
+
+    This is idempotent per row: status transitions are:
+      pending -> sent   (on 2xx)
+      pending -> failed (on non-2xx or network error)
+    """
+    if not ATLAS_INGEST_URL:
+        return {"ok": False, "sent": 0, "failed": 0, "reason": "ATLAS_INGEST_URL (or DOSSIER_ENDPOINT) not configured"}
+
+    rows = await database.fetch_all("""
+      SELECT id, source_system, source_table, source_id, event_type, payload
+      FROM dossier_ingest_queue
+      WHERE status = 'pending'
+      ORDER BY created_at ASC
+      LIMIT :lim
+    """, {"lim": limit})
+
+    if not rows:
+        return {"ok": True, "sent": 0, "failed": 0}
+
+    sent = 0
+    failed = 0
+
+    async def _headers_and_body(r):
+        body = {
+            "source_system": r["source_system"],
+            "source_table":  r["source_table"],
+            "source_id":     r["source_id"],
+            "event_type":    r["event_type"],
+            "payload":       r["payload"] or {},
+        }
+        raw = json.dumps(body, separators=(",", ":"), default=str).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if ATLAS_INGEST_SECRET:
+            ts = str(int(time.time()))
+            mac = hmac.new(ATLAS_INGEST_SECRET.encode("utf-8"),
+                           ts.encode("utf-8") + b"." + raw,
+                           hashlib.sha256).hexdigest()
+            headers["X-Atlas-Timestamp"] = ts
+            headers["X-Atlas-Signature"] = mac
+        return headers, raw
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for r in rows:
+            try:
+                headers, raw = await _headers_and_body(r)
+                resp = await client.post(ATLAS_INGEST_URL, headers=headers, content=raw)
+                ok = 200 <= resp.status_code < 300
+                if ok:
+                    sent += 1
+                    await database.execute("""
+                      UPDATE dossier_ingest_queue
+                         SET status='sent',
+                             attempts = attempts + 1,
+                             last_error = NULL,
+                             sent_at = NOW()
+                       WHERE id = :id
+                    """, {"id": r["id"]})
+                else:
+                    failed += 1
+                    await database.execute("""
+                      UPDATE dossier_ingest_queue
+                         SET status='failed',
+                             attempts = attempts + 1,
+                             last_error = :err
+                       WHERE id = :id
+                    """, {"id": r["id"], "err": f"{resp.status_code} {resp.text[:200]}"} )
+            except Exception as e:
+                failed += 1
+                try:
+                    await database.execute("""
+                      UPDATE dossier_ingest_queue
+                         SET status='failed',
+                             attempts = attempts + 1,
+                             last_error = :err
+                       WHERE id = :id
+                    """, {"id": r["id"], "err": str(e)})
+                except Exception:
+                    pass
+
+    return {"ok": True, "sent": sent, "failed": failed}
 
 app.include_router(admin_dossier_router)
 #------- /Dossier HR Sync -------
@@ -12452,6 +12600,29 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         except Exception:
             pass
 
+         # Dossier / Atlas ingest: stage a CONTRACT_CREATED event (best-effort)
+        try:
+            d = dict(row)
+            created_ts = d.get("created_at")
+            await enqueue_atlas_event(
+                source_table="contracts",
+                source_id=d.get("id"),
+                event_type="CONTRACT_CREATED",
+                payload={
+                    "id": str(d.get("id")) if d.get("id") else None,
+                    "buyer": d.get("buyer"),
+                    "seller": d.get("seller"),
+                    "material": d.get("material"),
+                    "weight_tons": float(d.get("weight_tons") or 0),
+                    "price_per_ton": float(d.get("price_per_ton") or 0),
+                    "currency": d.get("currency") or "USD",
+                    "status": d.get("status"),
+                    "created_at": created_ts.isoformat() if isinstance(created_ts, datetime) else None,
+                },
+            )
+        except Exception:
+            pass
+
         resp = row
         return await _idem_guard(request, key, resp)
 
@@ -13196,6 +13367,27 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None,
     }
+    # Dossier / Atlas ingest: BOL_SCHEDULED
+    try:
+        if row:
+            d = dict(row)
+            await enqueue_atlas_event(
+                source_table="bols",
+                source_id=d.get("bol_id"),
+                event_type="BOL_SCHEDULED",
+                payload={
+                    "bol_id": str(d.get("bol_id")) if d.get("bol_id") else None,
+                    "contract_id": str(d.get("contract_id")) if d.get("contract_id") else None,
+                    "buyer": d.get("buyer"),
+                    "seller": d.get("seller"),
+                    "material": d.get("material"),
+                    "weight_tons": float(d.get("weight_tons") or 0),
+                    "status": d.get("status"),
+                    "pickup_time": d["pickup_time"].isoformat() if d.get("pickup_time") else None,
+                },
+            )
+    except Exception:
+        pass
     return await _idem_guard(request, key, resp)
 
 @app.post("/bols/{bol_id}/deliver", tags=["BOLs"], summary="Mark BOL delivered and expire linked receipts")
@@ -13260,6 +13452,21 @@ async def bols_mark_delivered(
                 "receipts": receipt_ids or [],
                 "contract_id": str(contract_id),
                 "new_contract_status": "Fulfilled",
+            },
+        )
+    except Exception:
+        pass
+
+    # Dossier / Atlas ingest: BOL_DELIVERED
+    try:
+        await enqueue_atlas_event(
+            source_table="bols",
+            source_id=bol_id,
+            event_type="BOL_DELIVERED",
+            payload={
+                "bol_id": bol_id,
+                "contract_id": str(contract_id),
+                "receipts": [str(x) for x in (receipt_ids or [])],
             },
         )
     except Exception:
