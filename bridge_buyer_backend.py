@@ -9379,6 +9379,37 @@ class YardHedgeRuleOut(YardHedgeRuleBase):
     yard_id: UUID
     updated_at: datetime
 
+# ---------- Pricing & Hedge Helper Models ----------
+
+class PricingQuoteRequest(BaseModel):
+    yard_id: UUID
+    material: str
+    reference_symbol: Optional[str] = None   # e.g. "COMEX_HG"
+    reference_price: float                   # price per lb or per ton, your choice
+    tons: float
+
+
+class PricingQuoteResponse(BaseModel):
+    yard_id: UUID
+    material: str
+    reference_symbol: Optional[str] = None
+    reference_price: float
+    tons: float
+    price_per_ton: float
+    band_low: float
+    band_high: float
+    formula: str
+
+
+class HedgeRecommendationOut(BaseModel):
+    material: str
+    on_hand_tons: float
+    target_hedge_ratio: float
+    current_hedged_tons: float
+    hedge_more_tons: float
+    hedge_more_lots: int
+    futures_symbol_root: str
+
 # -------- Contracts & BOLs --------
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
@@ -9643,6 +9674,42 @@ def _is_admin_session(request: Request) -> bool:
         return request.session.get("role") == "admin"
     except Exception:
         return False
+
+def _eval_pricing_formula(formula: str, reference_price: float) -> float:
+    """
+    Very small, safe evaluator for pricing formulas.
+
+    Allowed tokens:
+      - 'REF' or 'ref' -> reference_price
+      - numbers (0-9, .)
+      - +, -, *, /, (, ), spaces
+
+    Everything else is stripped out.
+    """
+    if not formula:
+        return reference_price
+
+    # Replace REF with the numeric value
+    expr = formula.replace("REF", str(reference_price)).replace("ref", str(reference_price))
+
+    # Whitelist characters
+    allowed_chars = set("0123456789.+-*/() ")
+    cleaned = "".join(ch for ch in expr if ch in allowed_chars)
+
+    if not cleaned.strip():
+        return reference_price
+
+    try:
+        # Evaluate in a tiny safe namespace
+        price = eval(cleaned, {"__builtins__": {}}, {})
+    except Exception:
+        # Fallback: just use reference price
+        return reference_price
+
+    try:
+        return float(price)
+    except Exception:
+        return reference_price
 
 # ===== Admin gate helper  =====
 def _require_admin(request: Request):
@@ -11575,6 +11642,184 @@ async def update_yard_hedge_rule(rule_id: UUID, body: YardHedgeRuleUpdate):
         raise HTTPException(status_code=404, detail="Hedge rule not found")
     return YardHedgeRuleOut(**dict(row))
 # ---------- Yard Profiles & Config Endpoints ----------
+
+# ---------- Pricing Helper Endpoint ----------
+
+PRICING_TAG = ["Pricing"]
+
+
+@app.post(
+    "/pricing/quote_from_formula",
+    response_model=PricingQuoteResponse,
+    tags=PRICING_TAG,
+    summary="Quote from Yard Pricing Formula",
+    description=(
+        "Compute a price per ton and shrink band using the yard_pricing_rules "
+        "formula for a given yard + material."
+    ),
+    status_code=200,
+)
+async def quote_from_formula(body: PricingQuoteRequest):
+    yard_id = str(body.yard_id)
+
+    # Load yard profile (mainly to validate it exists)
+    yard = await database.fetch_one(
+        "SELECT id, yard_code, name FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": yard_id},
+    )
+    if not yard:
+        raise HTTPException(status_code=404, detail="Yard not found")
+
+    # Load pricing rule for this yard + material
+    rule = await database.fetch_one(
+        """
+        SELECT
+          id,
+          yard_id,
+          material,
+          formula,
+          loss_min_pct,
+          loss_max_pct,
+          min_margin_usd_ton,
+          active
+        FROM yard_pricing_rules
+        WHERE yard_id = :yard_id
+          AND material = :material
+          AND active = TRUE
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        {"yard_id": yard_id, "material": body.material},
+    )
+    if not rule:
+        raise HTTPException(status_code=404, detail="No active pricing rule for this material")
+
+    formula = rule["formula"] or "REF"
+    base_price_per_ton = _eval_pricing_formula(formula, body.reference_price)
+
+    # Apply loss band around base price (simple model)
+    loss_min_pct = float(rule["loss_min_pct"] or 0.0)
+    loss_max_pct = float(rule["loss_max_pct"] or 0.0)
+
+    # band_low = price with max loss, band_high = price with min loss
+    band_low = base_price_per_ton * (1.0 - loss_max_pct)
+    band_high = base_price_per_ton * (1.0 - loss_min_pct)
+
+    resp = PricingQuoteResponse(
+        yard_id=body.yard_id,
+        material=body.material,
+        reference_symbol=body.reference_symbol,
+        reference_price=body.reference_price,
+        tons=body.tons,
+        price_per_ton=base_price_per_ton,
+        band_low=band_low,
+        band_high=band_high,
+        formula=formula,
+    )
+    return resp
+# ---------- Pricing Helper Endpoint ----------
+
+# ---------- Hedge Recommendation Endpoint ----------
+
+HEDGE_TAG = ["Hedge"]
+
+
+@app.get(
+    "/hedge/recommendations",
+    response_model=List[HedgeRecommendationOut],
+    tags=HEDGE_TAG,
+    summary="Hedge Recommendations for Yard",
+    description=(
+        "Compute simple hedge recommendations per material for a yard, "
+        "based on yard_hedge_rules and inventory_items. "
+        "Current hedged tons are treated as 0 in this initial version."
+    ),
+    status_code=200,
+)
+async def hedge_recommendations(yard_id: UUID):
+    yard_row = await database.fetch_one(
+        "SELECT id, name FROM yard_profiles WHERE id = :yard_id",
+        {"yard_id": str(yard_id)},
+    )
+    if not yard_row:
+        raise HTTPException(status_code=404, detail="Yard not found")
+
+    yard_name = yard_row["name"]
+
+    # Aggregate inventory by sku for this yard (assumes seller == yard name)
+    inv_rows = await database.fetch_all(
+        """
+        SELECT
+          sku,
+          SUM(qty_on_hand) AS on_hand_tons
+        FROM inventory_items
+        WHERE seller = :seller
+        GROUP BY sku
+        """,
+        {"seller": yard_name},
+    )
+    inv_map = {r["sku"]: float(r["on_hand_tons"] or 0.0) for r in inv_rows}
+
+    # Load hedge rules for this yard
+    rule_rows = await database.fetch_all(
+        """
+        SELECT
+          id,
+          yard_id,
+          material,
+          min_tons,
+          target_hedge_ratio,
+          futures_symbol_root,
+          auto_hedge,
+          updated_at
+        FROM yard_hedge_rules
+        WHERE yard_id = :yard_id
+        ORDER BY material
+        """,
+        {"yard_id": str(yard_id)},
+    )
+
+    recommendations: List[HedgeRecommendationOut] = []
+
+    # TODO: later we will pull real positions to compute current_hedged_tons
+    DEFAULT_LOT_SIZE_TONS = 25.0
+
+    for r in rule_rows:
+        material = r["material"]
+        on_hand_tons = inv_map.get(material, 0.0)
+        min_tons = float(r["min_tons"])
+        target_ratio = float(r["target_hedge_ratio"])
+
+        if on_hand_tons < min_tons:
+            # Below threshold, skip recommendation
+            continue
+
+        target_hedged_tons = on_hand_tons * target_ratio
+        current_hedged_tons = 0.0  # placeholder until we wire positions
+        hedge_more_tons = max(target_hedged_tons - current_hedged_tons, 0.0)
+
+        if hedge_more_tons <= 0:
+            continue
+
+        hedge_more_lots = int(hedge_more_tons // DEFAULT_LOT_SIZE_TONS)
+
+        if hedge_more_lots <= 0:
+            continue
+
+        recommendations.append(
+            HedgeRecommendationOut(
+                material=material,
+                on_hand_tons=on_hand_tons,
+                target_hedge_ratio=target_ratio,
+                current_hedged_tons=current_hedged_tons,
+                hedge_more_tons=hedge_more_tons,
+                hedge_more_lots=hedge_more_lots,
+                futures_symbol_root=r["futures_symbol_root"],
+            )
+        )
+
+    return recommendations
+# ---------- Hedge Recommendation Endpoint ----------
 
 #======== Contracts (with Inventory linkage) ==========
 class ContractInExtended(ContractIn):
