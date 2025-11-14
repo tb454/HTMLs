@@ -19,8 +19,15 @@ CREATE TABLE IF NOT EXISTS vendor_quotes(
 CREATE INDEX IF NOT EXISTS idx_vq_mat_time ON vendor_quotes(material, inserted_at DESC);
 """
 
-async def _ensure_schema(db: Database):
-    await db.execute(DDL)
+async def _ensure_schema(db: Database):    
+    for stmt in DDL.split(";"):
+        stmt = stmt.strip()
+        if not stmt:
+            continue
+        if not stmt.endswith(";"):
+            stmt += ";"
+        print(f"Running DDL: {stmt}")
+        await db.execute(stmt)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DIR = os.path.join(BASE_DIR, "Vendor Quotes")
