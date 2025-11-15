@@ -423,9 +423,9 @@ async def prices_copper_last():
 
     Priority:
       1) rows where source = 'seed_csv' (your futures CSVs / bridge_seed_reference_data)
-      2) any other source (scraper/manual), newest ts_market/ts_server
+      2) any other source, newest ts_market/ts_server
 
-    This keeps all comexlive / scraper junk *behind* your CSVs.
+    Uses the async `database` client instead of app.state.db_pool to avoid pool/attribute issues.
     """
     now = _t.time()
 
@@ -440,17 +440,17 @@ async def prices_copper_last():
 
     # 2) pull latest from reference_prices, preferring seed_csv
     try:
-        row = await app.state.db_pool.fetchrow(
+        row = await database.fetch_one(
             """
             SELECT price, ts_market, ts_server, source
             FROM reference_prices
-            WHERE symbol = $1
+            WHERE symbol = :sym
             ORDER BY
               (source = 'seed_csv') DESC,
               COALESCE(ts_market, ts_server) DESC
             LIMIT 1
             """,
-            "COMEX_CU",
+            {"sym": "COMEX_CU"},
         )
 
         if row and row["price"] is not None:
@@ -470,7 +470,7 @@ async def prices_copper_last():
         except Exception:
             pass
 
-    # 3) if DB is empty or query exploded: safe static fallback
+    # 3) if DB is empty or the query blew up: safe static fallback, never 500
     last = 4.25
     _PRICE_CACHE["copper_last"] = last
     _PRICE_CACHE["ts"] = now
@@ -480,6 +480,7 @@ async def prices_copper_last():
         "source": "fallback",
         "note": "no COMEX_CU in reference_prices; using static default",
     }
+# ------ Prices endpoint ------
 
 @app.get("/fx/convert", tags=["Global"], summary="Convert amount between currencies (static FX)")
 async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
