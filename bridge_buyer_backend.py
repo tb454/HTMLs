@@ -413,31 +413,73 @@ async def indices_latest(symbol: str):
     "/prices/copper_last",
     tags=["Prices"],
     summary="COMEX copper last trade (USD/lb)",
-    description="Scrapes https://comexlive.org/copper/ for the 'last trade' price and returns base = last - 0.25",
+    description="Returns last COMEX copper close from reference_prices (CSV/vendor seeded) and COMEX−$0.25 base. No external HTTP.",
     status_code=200
 )
 async def prices_copper_last():
+    """
+    Source of truth:
+      reference_prices.symbol = 'COMEX_CU'
+
+    Priority:
+      1) rows where source = 'seed_csv' (your futures CSVs / bridge_seed_reference_data)
+      2) any other source (scraper/manual), newest ts_market/ts_server
+
+    This keeps all comexlive / scraper junk *behind* your CSVs.
+    """
     now = _t.time()
+
+    # 1) in-memory cache, 5-minute TTL
     if _PRICE_CACHE["copper_last"] and now - _PRICE_CACHE["ts"] < PRICE_TTL_SEC:
         last = _PRICE_CACHE["copper_last"]
-        return {"last": last, "base_minus_025": round(last - 0.25, 4)}
+        return {
+            "last": last,
+            "base_minus_025": round(last - 0.25, 4),
+            "source": "cache",
+        }
+
+    # 2) pull latest from reference_prices, preferring seed_csv
     try:
-        async with httpx.AsyncClient(timeout=6) as c:
-            r = await c.get("https://comexlive.org/copper/")
-            r.raise_for_status()
-            html = r.text
-        m = (re.search(r"Last\s*Trade[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
-             or re.search(r"Last[^0-9]*([0-9]+\.[0-9]+)", html, re.I)
-             or re.search(r'>(\d\.\d{2,4})<', html))
-        if not m:
-            raise ValueError("Unable to locate last trade price on page.")
-        last = float(m.group(1))
-        _PRICE_CACHE["copper_last"] = last
-        _PRICE_CACHE["ts"] = now
-        return {"last": last, "base_minus_025": round(last - 0.25, 4)}
+        row = await app.state.db_pool.fetchrow(
+            """
+            SELECT price, ts_market, ts_server, source
+            FROM reference_prices
+            WHERE symbol = $1
+            ORDER BY
+              (source = 'seed_csv') DESC,
+              COALESCE(ts_market, ts_server) DESC
+            LIMIT 1
+            """,
+            "COMEX_CU",
+        )
+
+        if row and row["price"] is not None:
+            last = float(row["price"])
+            _PRICE_CACHE["copper_last"] = last
+            _PRICE_CACHE["ts"] = now
+            return {
+                "last": last,
+                "base_minus_025": round(last - 0.25, 4),
+                "source": row["source"],
+                "ts_market": row["ts_market"],
+                "ts_server": row["ts_server"],
+            }
     except Exception as e:
-        last = 4.19
-        return {"last": last, "base_minus_025": round(last - 0.25, 4), "note": f"fallback: {e.__class__.__name__}"}
+        try:
+            logger.warn("prices_copper_last_ref_error", err=str(e))
+        except Exception:
+            pass
+
+    # 3) if DB is empty or query exploded: safe static fallback
+    last = 4.25
+    _PRICE_CACHE["copper_last"] = last
+    _PRICE_CACHE["ts"] = now
+    return {
+        "last": last,
+        "base_minus_025": round(last - 0.25, 4),
+        "source": "fallback",
+        "note": "no COMEX_CU in reference_prices; using static default",
+    }
 
 @app.get("/fx/convert", tags=["Global"], summary="Convert amount between currencies (static FX)")
 async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
