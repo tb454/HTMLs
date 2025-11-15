@@ -5250,19 +5250,86 @@ async def pull_home():
     await pull_comex_home_once(app.state.db_pool)
     return {"ok": True}
 
-@router_pricing.get("/quote", summary="Compute material price using internal formulas")
+@router_pricing.get("/quote", summary="Compute material price using vendor sheets + reference curves")
 async def quote(category: str, material: str):
-    # 1) prefer vendor blended if available
-    vb = await _vendor_blended_lb(material)
-    if vb is not None:
-        return {"category": category, "material": material, "price_per_lb": round(vb, 4),
-                "notes": "Vendor-blended latest ($/lb)."}
-    # 2) fallback to existing COMEX/LME internal calc
-    price = await compute_material_price(_fetch_base, category, material)
-    if price is None:
-        raise HTTPException(status_code=404, detail="No price available for that category/material")
-    return {"category": category, "material": material, "price_per_lb": round(float(price), 4),
-            "notes": "Internal-only; bases use COMEX/LME with Cu rule (COMEX − $0.10)."}
+    """
+    Pricing resolution order:
+
+    1) vendor_material_map → vendor_quotes (latest sheet_date, mapped canonical name)
+    2) direct vendor_quotes match by material ILIKE (latest sheet_date)
+    3) compute_material_price() using COMEX/LME curves (wrapped; never 500s)
+    """
+
+    mat = material.strip()
+
+    # 1) Vendor blend via mapping: Jimmy label -> canonical material name (Bare Bright, #1 Copper, etc)
+    row = await database.fetch_one("""
+        WITH latest_vendor AS (
+          SELECT
+            m.material_canonical AS mat,
+            AVG(v.price_per_lb)  AS vendor_lb
+          FROM vendor_quotes v
+          JOIN vendor_material_map m
+            ON m.vendor = v.vendor
+           AND m.material_vendor = v.material
+          WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
+            AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+            AND m.material_canonical ILIKE :mat
+          GROUP BY 1
+        )
+        SELECT vendor_lb FROM latest_vendor
+    """, {"mat": mat})
+    if row and row["vendor_lb"] is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(row["vendor_lb"]), 4),
+            "source": "vendor_mapped",
+            "notes": "Vendor-blended latest ($/lb) via vendor_material_map."
+        }
+
+    # 2) Direct vendor_quotes match (no mapping yet) by vendor material name
+    row2 = await database.fetch_one("""
+        WITH latest_date AS (
+          SELECT MAX(sheet_date) AS d FROM vendor_quotes
+        )
+        SELECT AVG(price_per_lb) AS p
+          FROM vendor_quotes v, latest_date
+         WHERE (v.sheet_date = latest_date.d OR v.sheet_date IS NULL)
+           AND (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+           AND v.material ILIKE :mat
+    """, {"mat": f"%{mat}%"})
+    if row2 and row2["p"] is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(row2["p"]), 4),
+            "source": "vendor_direct",
+            "notes": "Vendor-blended latest ($/lb) from vendor_quotes (direct material match)."
+        }
+
+    # 3) Fallback to existing COMEX/LME internal calc (compute_material_price),
+    # but wrapped so we never throw a 500.
+    try:
+        price = await compute_material_price(_fetch_base, category, mat)
+    except Exception as e:
+        try:
+            logger.warn("pricing_compute_error", category=category, material=mat, err=str(e))
+        except Exception:
+            pass
+        price = None
+
+    if price is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(price), 4),
+            "source": "reference",
+            "notes": "Internal-only COMEX/LME-based calc (e.g., Cu rule COMEX − $0.10)."
+        }
+
+    # Nothing hit: return a clean 404 instead of 500
+    raise HTTPException(status_code=404, detail="No price available for that category/material")
 
 @router_fc.post("/run", summary="Run nightly forecast for all symbols")
 async def run_forecast_now():
