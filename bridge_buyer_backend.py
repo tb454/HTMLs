@@ -5369,18 +5369,102 @@ async def run_indices_now():
 
 @router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
 async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    """
+    v2: Build BR-Index history directly from reference_prices + bridge_index_definitions.
+
+    For each day in [start, end]:
+      - For each definition in bridge_index_definitions (enabled = TRUE):
+          close_price = factor * base_symbol_price_on_that_day
+          → upsert into bridge_index_history(symbol, dt).
+    """
     try:
+        # 1) Ensure bridge_index_history exists (in case bootstrap didn't run in this env)
+        await run_ddl_multi("""
+        CREATE TABLE IF NOT EXISTS bridge_index_history (
+          id          BIGSERIAL PRIMARY KEY,
+          symbol      TEXT NOT NULL,
+          dt          DATE NOT NULL,
+          close_price NUMERIC(16,6) NOT NULL,
+          unit        TEXT DEFAULT 'USD/lb',
+          currency    TEXT DEFAULT 'USD',
+          source_note TEXT,
+          created_at  TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(symbol, dt)
+        );
+        """)
+
+        # 2) Load index definitions (e.g. BR-CU-#1, BR-CU-BB, etc.)
+        defs = await database.fetch_all("""
+          SELECT symbol, factor, base_symbol
+          FROM bridge_index_definitions
+          WHERE enabled = TRUE
+        """)
+        if not defs:
+            return {"ok": False, "skipped": True, "note": "no bridge_index_definitions rows found"}
+
+        def_rows = [dict(r) for r in defs]
+
         day = start
         n = 0
+
         while day <= end:
-            await indices_generate_snapshot(snapshot_date=day)
+            # For each base index root (COMEX_CU, etc.) pull that day’s price
+            # We'll cache base prices per day in-memory for this loop.
+            base_cache: dict[str, float] = {}
+
+            for dfn in def_rows:
+                base_symbol = dfn["base_symbol"]
+                if base_symbol not in base_cache:
+                    row = await database.fetch_one("""
+                      SELECT price
+                      FROM reference_prices
+                      WHERE symbol = :sym
+                        AND ts_market::date = :d
+                      ORDER BY ts_market DESC
+                      LIMIT 1
+                    """, {"sym": base_symbol, "d": day})
+                    if not row or row["price"] is None:
+                        # No price for this base symbol on this day – skip all indices that depend on it.
+                        base_cache[base_symbol] = None  # type: ignore[assignment]
+                    else:
+                        base_cache[base_symbol] = float(row["price"])
+
+            # upsert each index row for this date
+            for dfn in def_rows:
+                base_symbol = dfn["base_symbol"]
+                base_price = base_cache.get(base_symbol)
+                if base_price is None:
+                    continue  # nothing for this base on this day
+
+                factor = float(dfn["factor"])
+                idx_sym = dfn["symbol"]
+                px = base_price * factor
+
+                await database.execute("""
+                  INSERT INTO bridge_index_history(symbol, dt, close_price, unit, currency, source_note)
+                  VALUES (:sym, :dt, :px, 'USD/lb', 'USD', 'seed_csv + factor')
+                  ON CONFLICT (symbol, dt) DO UPDATE
+                    SET close_price = EXCLUDED.close_price,
+                        unit        = EXCLUDED.unit,
+                        currency    = EXCLUDED.currency,
+                        source_note = EXCLUDED.source_note
+                """, {"sym": idx_sym, "dt": day, "px": px})
+
             day += timedelta(days=1)
             n += 1
-        return {"ok": True, "days_processed": n, "from": start.isoformat(), "to": end.isoformat()}
+
+        return {
+            "ok": True,
+            "days_processed": n,
+            "from": start.isoformat(),
+            "to": end.isoformat()
+        }
     except Exception as e:
-        try: logger.warn("indices_backfill_failed", err=str(e))
-        except: pass
-        return {"ok": False, "skipped": True}
+        try:
+            logger.warn("indices_backfill_failed_v2", err=str(e))
+        except Exception:
+            pass
+        return {"ok": False, "skipped": True, "error": str(e)}
 
 @router_idx.get("/history", summary="Historical closes for an index symbol")
 async def history(symbol: str, start: date | None = None, end: date | None = None):
