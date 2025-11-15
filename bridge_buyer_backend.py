@@ -5403,6 +5403,30 @@ async def universe():
     from indices_builder import DEFAULT_INDEX_SET
     return [{"symbol": d["symbol"], "method": d["method"], "factor": d["factor"], "base_symbol": d["base_symbol"], "enabled": True} for d in DEFAULT_INDEX_SET]
 
+
+@router_idx.post("/seed_copper_indices", summary="Seed copper factor indices into bridge_index_definitions (idempotent)")
+async def seed_copper_indices():
+    rows = [
+        # symbol,      method,        factor, base_symbol, notes
+        ("BR-CU-BB",    "FACTOR_ON_BASE", 0.94, "COMEX_CU", "Bare Bright"),
+        ("BR-CU-#1",    "FACTOR_ON_BASE", 0.91, "COMEX_CU", "#1 Copper (Berry & Candy)"),
+        ("BR-CU-#2",    "FACTOR_ON_BASE", 0.85, "COMEX_CU", "#2 Copper (Birch & Cliff)"),
+        ("BR-CU-SHEET", "FACTOR_ON_BASE", 0.83, "COMEX_CU", "Sheet Copper"),
+    ]
+    q = """
+    INSERT INTO bridge_index_definitions(symbol, method, factor, base_symbol, notes, enabled)
+    VALUES (:s, :m, :f, :b, :n, TRUE)
+    ON CONFLICT (symbol) DO UPDATE
+       SET method = EXCLUDED.method,
+           factor = EXCLUDED.factor,
+           base_symbol = EXCLUDED.base_symbol,
+           notes = EXCLUDED.notes,
+           enabled = TRUE
+    """
+    vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
+    await database.execute_many(q, vals)
+    return {"ok": True, "seeded": [r[0] for r in rows]}
+
 app.include_router(router_idx)
 app.include_router(router_fc)
 # --- Generic reference price ingesters (CSV / Excel) ------------------
@@ -5578,29 +5602,6 @@ async def rp_debug_day(symbol: str, d: _date):
 app.include_router(router_prices)
 # -----------------------------------------------------------------------
 app.include_router(router_pricing)
-
-@router_idx.post("/seed_copper_indices", summary="Seed copper factor indices into bridge_index_definitions (idempotent)")
-async def seed_copper_indices():
-    rows = [
-        # symbol,      method,        factor, base_symbol, notes
-        ("BR-CU-BB",    "FACTOR_ON_BASE", 0.94, "COMEX_CU", "Bare Bright"),
-        ("BR-CU-#1",    "FACTOR_ON_BASE", 0.91, "COMEX_CU", "#1 Copper (Berry & Candy)"),
-        ("BR-CU-#2",    "FACTOR_ON_BASE", 0.85, "COMEX_CU", "#2 Copper (Birch & Cliff)"),
-        ("BR-CU-SHEET", "FACTOR_ON_BASE", 0.83, "COMEX_CU", "Sheet Copper"),
-    ]
-    q = """
-    INSERT INTO bridge_index_definitions(symbol, method, factor, base_symbol, notes, enabled)
-    VALUES (:s, :m, :f, :b, :n, TRUE)
-    ON CONFLICT (symbol) DO UPDATE
-       SET method = EXCLUDED.method,
-           factor = EXCLUDED.factor,
-           base_symbol = EXCLUDED.base_symbol,
-           notes = EXCLUDED.notes,
-           enabled = TRUE
-    """
-    vals = [{"s": s, "m": m, "f": f, "b": b, "n": n} for (s,m,f,b,n) in rows]
-    await database.execute_many(q, vals)
-    return {"ok": True, "seeded": [r[0] for r in rows]}
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
