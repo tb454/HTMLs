@@ -5128,7 +5128,24 @@ except Exception:
 
 # -------- Pricing & Indices Routers (drop-in) -------------------------
 async def _fetch_base(symbol: str):
-    return await latest_price(app.state.db_pool, symbol)
+    """
+    Same selection logic as /reference_prices/latest:
+    prefer seed_csv rows, then fall back to any source.
+    Used by the pricing engine to compute scrap from COMEX/LME.
+    """
+    row = await app.state.db_pool.fetchrow(
+        """
+        SELECT symbol, price, ts_market, ts_server, source
+        FROM reference_prices
+        WHERE symbol = $1
+        ORDER BY
+          (source = 'seed_csv') DESC,
+          COALESCE(ts_market, ts_server) DESC
+        LIMIT 1
+        """,
+        symbol,
+    )
+    return row
 
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
@@ -5207,10 +5224,26 @@ async def pull_now_all():
 
 @router_prices.get("/latest", summary="Get latest stored reference price")
 async def get_latest(symbol: str):
-    row = await latest_price(app.state.db_pool, symbol)
+    """
+    Prefer seeded CSV history first (source='seed_csv'), then fall back
+    to any other source (scraper, manual, etc.), ordered by ts_market/ts_server.
+    This prevents bad scraper rows like price=1.0 from masking real data.
+    """
+    row = await app.state.db_pool.fetchrow(
+        """
+        SELECT symbol, price, ts_market, ts_server, source
+        FROM reference_prices
+        WHERE symbol = $1
+        ORDER BY
+          (source = 'seed_csv') DESC,
+          COALESCE(ts_market, ts_server) DESC
+        LIMIT 1
+        """,
+        symbol,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="No price yet for symbol")
-    return row
+    return dict(row)
 
 @router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
 async def pull_home():
