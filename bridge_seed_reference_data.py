@@ -14,6 +14,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AL_PATH_DEFAULT = os.path.join(BASE_DIR, "Aluminum Futures Historical Data(in).csv")
 CU_PATH_DEFAULT = os.path.join(BASE_DIR, "Copper Futures Historical Data(in).csv")
 INV_PATH_DEFAULT = os.path.join(BASE_DIR, "qbo_out", "bridge_invoices.csv")
+GOLD_PATH_DEFAULT      = os.path.join(BASE_DIR, "Gold Futures Historical Data(in).csv")
+SILVER_PATH_DEFAULT    = os.path.join(BASE_DIR, "Silver Futures Historical Data(in).csv")
+PLATINUM_PATH_DEFAULT  = os.path.join(BASE_DIR, "Platinum Futures Historical Data(in).csv")
+PALLADIUM_PATH_DEFAULT = os.path.join(BASE_DIR, "Palladium Futures Historical Data(in).csv")
 
 # --- 1) Raw futures time series (kept if you want them) ---
 FUTURES_DDL = """
@@ -324,6 +328,18 @@ async def main():
 
         # Copper CSV → futures_prices symbol 'HG', reference_prices symbol 'COMEX_CU'
         await ingest_futures_file(db, CU_PATH_DEFAULT, "HG", "COMEX_CU")
+
+        # Gold CSV → futures_prices symbol 'GC', reference_prices symbol 'COMEX_AU'
+        await ingest_futures_file(db, GOLD_PATH_DEFAULT, "GC", "COMEX_AU")
+
+        # Silver CSV → futures_prices symbol 'SI', reference_prices symbol 'COMEX_AG'
+        await ingest_futures_file(db, SILVER_PATH_DEFAULT, "SI", "COMEX_AG")
+
+        # Platinum CSV → futures_prices symbol 'PL', reference_prices symbol 'COMEX_PL'
+        await ingest_futures_file(db, PLATINUM_PATH_DEFAULT, "PL", "COMEX_PL")
+
+        # Palladium CSV → futures_prices symbol 'PA', reference_prices symbol 'COMEX_PA'
+        await ingest_futures_file(db, PALLADIUM_PATH_DEFAULT, "PA", "COMEX_PA")
 
         # Legacy invoices (Winski + others) into legacy_invoices
         await ingest_invoices(db, INV_PATH_DEFAULT)

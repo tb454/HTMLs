@@ -8687,6 +8687,35 @@ async def webhook_replay(request: Request, limit: int = 100):
     return {"replayed_ok": ok, "failed": fail}
 # ------- Webhook DLQ replayer -------
 
+@startup
+async def _ensure_dossier_ingest_queue():
+    """
+    Atlas / Dossier ingest rail queue.
+    One row per event we want to push into Dossier HR.
+
+    Status:
+      - pending: ready to send
+      - sent:    successfully delivered
+      - failed:  last attempt failed; will be retried by admin batch
+    """
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS dossier_ingest_queue (
+      id            BIGSERIAL PRIMARY KEY,
+      source_system TEXT NOT NULL DEFAULT 'bridge',
+      source_table  TEXT NOT NULL,
+      source_id     TEXT NOT NULL,
+      event_type    TEXT NOT NULL,           -- CONTRACT_CREATED, BOL_SIGNED, DEFAULT_EVENT, etc.
+      payload       JSONB,
+      status        TEXT NOT NULL DEFAULT 'pending',  -- pending|sent|failed
+      attempts      INT  NOT NULL DEFAULT 0,
+      last_error    TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at       TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dossier_q_status_time
+      ON dossier_ingest_queue(status, created_at DESC);
+    """)
 
 #------- Dossier HR ingest queue & sync -------
 @startup
