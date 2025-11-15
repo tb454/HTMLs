@@ -7329,166 +7329,6 @@ async def list_listings():
     """)
     return {"listings": [dict(r) for r in rows]}
 # ===== FUTURES endpoints =====
-
-# -------- Futures (admin create/update) --------
-from fastapi import Body
-from pydantic import BaseModel, Field
-from datetime import datetime, date
-import os
-
-futures_admin = APIRouter(prefix="/admin/futures", tags=["Futures (Admin)"])
-
-@startup
-async def _ddl_futures_admin():
-    await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS futures_products(
-        id            BIGSERIAL PRIMARY KEY,
-        symbol        TEXT UNIQUE NOT NULL,   -- e.g., BR-AL6063
-        name          TEXT NOT NULL,
-        unit          TEXT NOT NULL DEFAULT 'LB',   -- LB / TON etc
-        currency      TEXT NOT NULL DEFAULT 'USD',
-        tick_size     NUMERIC NOT NULL DEFAULT 0.01,
-        active        BOOLEAN NOT NULL DEFAULT TRUE,
-        inserted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS futures_pricing_params(
-        id            BIGSERIAL PRIMARY KEY,
-        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
-        pricing_model  TEXT NOT NULL DEFAULT 'vwap',  -- vwap/manual/formula
-        vendor_weight  NUMERIC NOT NULL DEFAULT 0.30,
-        bench_weight   NUMERIC NOT NULL DEFAULT 0.70,
-        metadata       JSONB NOT NULL DEFAULT '{}'::jsonb,
-        inserted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS futures_series(
-        id            BIGSERIAL PRIMARY KEY,
-        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
-        contract_month DATE NOT NULL,                 -- use first of month
-        status        TEXT NOT NULL DEFAULT 'Draft',  -- Draft/Listed/Expired
-        UNIQUE(product_symbol, contract_month)
-    );
-
-    CREATE TABLE IF NOT EXISTS futures_marks(
-        id            BIGSERIAL PRIMARY KEY,
-        product_symbol TEXT NOT NULL REFERENCES futures_products(symbol) ON DELETE CASCADE,
-        contract_month DATE NOT NULL,
-        ts            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        method        TEXT NOT NULL DEFAULT 'Manual', -- Manual/VWAP
-        price         NUMERIC NOT NULL,
-        note          TEXT,
-        UNIQUE(product_symbol, contract_month, ts)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_fut_series_prod_month ON futures_series(product_symbol, contract_month);
-    CREATE INDEX IF NOT EXISTS idx_fut_marks_prod_month ON futures_marks(product_symbol, contract_month, ts DESC);
-    """)
-
-class FutProductIn(BaseModel):
-    symbol: str = Field(..., examples=["BR-AL6063"])
-    name: str
-    unit: str = "LB"
-    currency: str = "USD"
-    tick_size: float = 0.01
-    active: bool = True
-
-@futures_admin.post("/products", summary="Create/Upsert futures product")
-async def create_or_upsert_product(p: FutProductIn):
-    q = """
-    INSERT INTO futures_products(symbol, name, unit, currency, tick_size, active)
-    VALUES(:symbol, :name, :unit, :currency, :tick_size, :active)
-    ON CONFLICT(symbol) DO UPDATE SET
-        name=EXCLUDED.name,
-        unit=EXCLUDED.unit,
-        currency=EXCLUDED.currency,
-        tick_size=EXCLUDED.tick_size,
-        active=EXCLUDED.active,
-        updated_at=NOW()
-    RETURNING *;
-    """
-    row = await database.fetch_one(query=q, values=p.model_dump())
-    return row
-
-class FutPricingIn(BaseModel):
-    product_symbol: str
-    pricing_model: str = "vwap"         # vwap/manual/formula
-    vendor_weight: float = 0.30
-    bench_weight: float = 0.70
-    metadata: dict = {}
-
-@futures_admin.post("/pricing", summary="Set pricing parameters for product")
-async def set_pricing(params: FutPricingIn):
-    # simple guard
-    if params.vendor_weight + params.bench_weight == 0:
-        raise HTTPException(status_code=400, detail="Both weights are zero.")
-    q = """
-    INSERT INTO futures_pricing_params(product_symbol, pricing_model, vendor_weight, bench_weight, metadata)
-    VALUES(:product_symbol, :pricing_model, :vendor_weight, :bench_weight, :metadata)
-    RETURNING *;
-    """
-    row = await database.fetch_one(query=q, values=params.model_dump())
-    return row
-
-class FutSeriesGenIn(BaseModel):
-    product_symbol: str
-    start_month: date         # use YYYY-MM-01
-    months: int = 12          # how many months to generate
-    list_immediately: bool = False
-
-@futures_admin.post("/series/generate", summary="Generate monthly series")
-async def generate_series(inp: FutSeriesGenIn):
-    created = 0
-    status = "Listed" if inp.list_immediately else "Draft"
-    month = date(inp.start_month.year, inp.start_month.month, 1)
-    for i in range(inp.months):
-        q = """
-        INSERT INTO futures_series(product_symbol, contract_month, status)
-        VALUES(:ps, :cm, :st)
-        ON CONFLICT(product_symbol, contract_month) DO NOTHING;
-        """
-        vals = {"ps": inp.product_symbol, "cm": month, "st": status}
-        await database.execute(query=q, values=vals)
-        created += 1
-        # roll 1 month
-        if month.month == 12:
-            month = date(month.year + 1, 1, 1)
-        else:
-            month = date(month.year, month.month + 1, 1)
-    return {"created": created, "status": status}
-
-class FutPublishMarkIn(BaseModel):
-    product_symbol: str
-    contract_month: date      # YYYY-MM-01
-    method: str = "Manual"    # Manual/VWAP
-    price: float
-    note: str | None = None
-    list_if_draft: bool = True
-
-@futures_admin.post("/marks/publish", summary="Publish a settlement/mark and (optionally) list series")
-async def publish_mark(inp: FutPublishMarkIn):
-    # write mark
-    q1 = """
-    INSERT INTO futures_marks(product_symbol, contract_month, method, price, note)
-    VALUES(:ps, :cm, :m, :p, :n)
-    RETURNING *;
-    """
-    mark = await database.fetch_one(query=q1, values={
-        "ps": inp.product_symbol, "cm": inp.contract_month,
-        "m": inp.method, "p": inp.price, "n": inp.note
-    })
-    # flip Draft -> Listed if requested
-    if inp.list_if_draft:
-        await database.execute(
-            "UPDATE futures_series SET status='Listed' WHERE product_symbol=:ps AND contract_month=:cm AND status='Draft'",
-            {"ps": inp.product_symbol, "cm": inp.contract_month}
-        )
-    return {"mark": mark}
-
-# mount
-app.include_router(futures_admin)
-# ------- Futures (admin create/update) -------
  
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
@@ -7824,7 +7664,7 @@ async def _ensure_inventory_schema():
     ]
     for stmt in ddl:
         try:
-            await database.execute(stmt)
+            await run_ddl_multi(stmt) 
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 # ===== INVENTORY schema bootstrap (idempotent) =====
@@ -9534,20 +9374,6 @@ async def _ensure_ice_delivery_log():
       response    TEXT,
       pdf_sha256  TEXT
     );
-
-    /* legacy: rename bol_uuid -> bol_id if it exists */
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema='public'
-          AND table_name='ice_delivery_log'
-          AND column_name='bol_uuid'
-      ) THEN
-        EXECUTE 'ALTER TABLE public.ice_delivery_log RENAME COLUMN bol_uuid TO bol_id';
-      END IF;
-    END $$;
 
     /* add columns if an older, skinnier table exists */
     ALTER TABLE public.ice_delivery_log
@@ -13225,29 +13051,6 @@ async def _ensure_tenant_schema():
     ALTER TABLE IF EXISTS warrants
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """,)
-
-@startup
-async def _ensure_inventory_movements_table():
-    """
-    Ensure inventory_movements exists with the columns used by _manual_upsert_absolute_tx.
-    This is safe to run repeatedly in CI and prod.
-    """
-    try:
-        await database.execute("""
-        CREATE TABLE IF NOT EXISTS inventory_movements (
-          id            BIGSERIAL PRIMARY KEY,
-          seller        TEXT NOT NULL,
-          sku           TEXT NOT NULL,
-          movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
-          qty           NUMERIC NOT NULL,
-          ref_contract  TEXT,
-          meta          JSONB,
-          tenant_id     UUID,
-          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        """)
-    except Exception:
-        pass
 # ------ Tenant Applications ------
 
 # ---- Multi-tenant yard configuration ----
@@ -13288,7 +13091,8 @@ async def _ensure_multitenant_schema() -> None:
     ALTER TABLE receipts ADD COLUMN IF NOT EXISTS tenant_id UUID;
     ALTER TABLE warrants ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    -- Helpful indexes (if table exists, index will succeed; otherwise our
+    -- Helpful indexes (if table exists, index will succeed; 
+    -- otherwise our
     -- run_ddl_multi wrapper will log and move on)
     CREATE INDEX IF NOT EXISTS idx_contracts_tenant            ON contracts(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_bols_tenant                 ON bols(tenant_id);
@@ -13510,9 +13314,7 @@ async def _ddl_admin_ice():
         payload       JSONB,
         error         TEXT,
         ts            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_ice_logs_ts ON ice_delivery_logs(ts DESC);
+    );    
 
     CREATE TABLE IF NOT EXISTS ice_secrets(
         id            BIGSERIAL PRIMARY KEY,
