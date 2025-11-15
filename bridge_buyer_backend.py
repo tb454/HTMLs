@@ -425,11 +425,12 @@ async def prices_copper_last():
       1) rows where source = 'seed_csv' (your futures CSVs / bridge_seed_reference_data)
       2) any other source, newest ts_market/ts_server
 
-    Uses the async `database` client instead of app.state.db_pool to avoid pool/attribute issues.
+    Uses the async `database` client so it never depends on app.state.db_pool.
+    Never throws a 500 – always falls back to a static default.
     """
     now = _t.time()
 
-    # 1) in-memory cache, 5-minute TTL
+    # 0) L1 in-process cache (5-minute TTL)
     if _PRICE_CACHE["copper_last"] and now - _PRICE_CACHE["ts"] < PRICE_TTL_SEC:
         last = _PRICE_CACHE["copper_last"]
         return {
@@ -438,7 +439,26 @@ async def prices_copper_last():
             "source": "cache",
         }
 
-    # 2) pull latest from reference_prices, preferring seed_csv
+    # 0.5) Make sure the async DB client is connected; if this fails, we still fall back.
+    try:
+        if not database.is_connected:
+            await database.connect()
+    except Exception as e:
+        try:
+            logger.warn("prices_copper_last_connect_error", err=str(e))
+        except Exception:
+            pass
+        last = 4.25
+        _PRICE_CACHE["copper_last"] = last
+        _PRICE_CACHE["ts"] = now
+        return {
+            "last": last,
+            "base_minus_025": round(last - 0.25, 4),
+            "source": "fallback",
+            "note": "db connect failed; using static default",
+        }
+
+    # 1) Pull latest COMEX_CU from reference_prices, preferring seed_csv
     try:
         row = await database.fetch_one(
             """
@@ -470,7 +490,7 @@ async def prices_copper_last():
         except Exception:
             pass
 
-    # 3) if DB is empty or the query blew up: safe static fallback, never 500
+    # 2) If DB is empty or query explodes → safe static fallback, never 500
     last = 4.25
     _PRICE_CACHE["copper_last"] = last
     _PRICE_CACHE["ts"] = now
