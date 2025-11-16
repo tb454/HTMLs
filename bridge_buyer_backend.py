@@ -9244,7 +9244,7 @@ async def _ddl_rfq():
 
     CREATE TABLE IF NOT EXISTS rfq_quotes(
         id           BIGSERIAL PRIMARY KEY,
-        rfq_id       BIGINT NOT NULL REFERENCES rfq(id) ON DELETE CASCADE,
+        rfq_id       BIGINT NOT NULL,
         seller       TEXT NOT NULL,
         price_per_lb NUMERIC NOT NULL,
         notes        TEXT,
@@ -9253,8 +9253,8 @@ async def _ddl_rfq():
 
     CREATE TABLE IF NOT EXISTS rfq_awards(
         id           BIGSERIAL PRIMARY KEY,
-        rfq_id       BIGINT NOT NULL REFERENCES rfq(id) ON DELETE CASCADE,
-        quote_id     BIGINT NOT NULL REFERENCES rfq_quotes(id) ON DELETE CASCADE,
+        rfq_id       BIGINT NOT NULL,
+        quote_id     BIGINT NOT NULL,
         awarded_by   TEXT NOT NULL,
         awarded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -14678,12 +14678,11 @@ async def _flywheel_anomaly_cron():
                     }
 
                     try:
-                        # Supabase shape (id BIGSERIAL PK) is fine with plain INSERT,
-                        # and your managed schema already exists (BRIDGE_BOOTSTRAP_DDL=0).
+                        # Supabase shape managed schema already exists (BRIDGE_BOOTSTRAP_DDL=0).
                         await database.execute(
                             """
                             INSERT INTO anomaly_scores(member, symbol, as_of, score, features)
-                            VALUES (:m, :s, :d, :sc, :feat::jsonb)
+                            VALUES (:m, :s, :d, :sc, :features)
                             """,
                             {
                                 "m": member,
