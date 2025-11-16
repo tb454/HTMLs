@@ -7672,35 +7672,28 @@ async def _ensure_inventory_schema():
 # ------ RECEIPTS schema bootstrap (idempotent) =====
 @startup
 async def _ensure_receipts_schema():
-    # Same pattern as anomaly_scores: when we are pointing at a managed DB
-    # (Supabase), we do NOT want to redefine the receipts table. Set
-    # BRIDGE_BOOTSTRAP_DDL=0 in prod to skip this block entirely.
+    # When pointing at Supabase/managed DB, skip DDL entirely.
     if not BOOTSTRAP_DDL:
         return
 
     ddl = """
-CREATE TABLE IF NOT EXISTS public.receipts (
-  receipt_id      UUID PRIMARY KEY,
-  seller          TEXT,
-  sku             TEXT,
-  qty_tons        NUMERIC,
-  status          TEXT NOT NULL DEFAULT 'created',
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  consumed_at     TIMESTAMPTZ,
-  consumed_bol_id UUID,
-  provenance      JSONB NOT NULL DEFAULT '{}'::jsonb
-...
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS sku TEXT;
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS symbol    TEXT;
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS location  TEXT;
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS qty_lots  NUMERIC;
-ALTER TABLE public.receipts ADD COLUMN IF NOT EXISTS lot_size  NUMERIC;
+    CREATE TABLE IF NOT EXISTS public.receipts (
+      id              UUID PRIMARY KEY,
+      status          TEXT NOT NULL,
+      consumed_at     TIMESTAMPTZ,
+      consumed_bol_id UUID,
+      symbol          TEXT,
+      location        TEXT,
+      qty_lots        NUMERIC,
+      lot_size        NUMERIC,
+      sku             TEXT,
+      qty_tons        NUMERIC,
+      tenant_id       UUID
+    );
 
-CREATE OR REPLACE VIEW public.receipts_live AS
-  SELECT * FROM public.receipts
-  WHERE consumed_at IS NULL AND status IN ('created','pledged');
-"""
+    CREATE INDEX IF NOT EXISTS idx_receipts_status ON public.receipts(status);
+    CREATE INDEX IF NOT EXISTS idx_receipts_symbol_location ON public.receipts(symbol, location);
+    """
     try:
         await run_ddl_multi(ddl)
     except Exception as e:
@@ -7841,15 +7834,18 @@ async def _ensure_warrant_schema():
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     """)
+
     # 2) Add FK separately, guarded (idempotent-ish)
     try:
-        await database.execute("""
-          ALTER TABLE public.warrants
-          ADD CONSTRAINT fk_warrants_receipt
-          FOREIGN KEY (receipt_id)
-          REFERENCES public.receipts(receipt_id)
-          ON DELETE CASCADE
-        """)
+        await database.execute(
+            """
+            ALTER TABLE public.warrants
+            ADD CONSTRAINT fk_warrants_receipt
+            FOREIGN KEY (receipt_id)
+            REFERENCES public.receipts(id)
+            ON DELETE CASCADE
+            """
+        )
     except Exception:
         # already exists or receipts not ready yet in this boot — safe to ignore
         pass
@@ -7955,10 +7951,17 @@ def _to_tons(qty: float, uom: str | None) -> float:
     return q  # assume tons by default
 
 async def _manual_upsert_absolute_tx(
-    *, seller: str, sku: str, qty_on_hand_tons: float,
-    uom: str | None = "ton", location: str | None = None,
-    description: str | None = None, source: str | None = None,
-    movement_reason: str = "manual_add", idem_key: str | None = None,
+    *,
+    seller: str,
+    sku: str,
+    qty_on_hand_tons: float,
+    uom: str | None = "ton",
+    location: str | None = None,
+    description: str | None = None,
+    source: str | None = None,
+    movement_reason: str = "manual_add",
+    idem_key: str | None = None,
+    tenant_id: str | None = None,
 ):
     s, k = seller.strip(), sku.strip()
     k_norm = k.upper()
@@ -7969,13 +7972,21 @@ async def _manual_upsert_absolute_tx(
     )
     if cur is None:
         await database.execute("""
-          INSERT INTO inventory_items (seller, sku, description, uom, location,
-                                       qty_on_hand, qty_reserved, qty_committed, source, updated_at)
-          VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW())
+          INSERT INTO inventory_items (
+            seller, sku, description, uom, location,
+            qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
+          )
+          VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW(),:tenant_id)
           ON CONFLICT (seller, sku) DO NOTHING
-        """, {"s": s, "k": k_norm, "d": description, "u": (uom or "ton"),
-                "loc": location, "src": source or "manual"}
-        )
+        """, {
+            "s": s,
+            "k": k_norm,
+            "d": description,
+            "u": (uom or "ton"),
+            "loc": location,
+            "src": source or "manual",
+            "tenant_id": tenant_id,
+        })
         cur = await database.fetch_one(
             "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
             {"s": s, "k": k_norm}
@@ -7987,25 +7998,43 @@ async def _manual_upsert_absolute_tx(
 
     await database.execute("""
       UPDATE inventory_items
-         SET qty_on_hand=:new, updated_at=NOW(),
-             uom=:u, location=COALESCE(:loc, location),
-             description=COALESCE(:desc, description),
-             source=COALESCE(:src, source)
+         SET qty_on_hand = :new,
+             updated_at  = NOW(),
+             uom         = :u,
+             location    = COALESCE(:loc, location),
+             description = COALESCE(:desc, description),
+             source      = COALESCE(:src, source),
+             tenant_id   = COALESCE(tenant_id, :tenant_id)
        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-    """, {"new": new_qty, "u": (uom or "ton"), "loc": location, "desc": description,
-          "src": (source or "manual"), "s": s, "k": k_norm})
+    """, {
+        "new": new_qty,
+        "u": (uom or "ton"),
+        "loc": location,
+        "desc": description,
+        "src": (source or "manual"),
+        "tenant_id": tenant_id,
+        "s": s,
+        "k": k_norm,
+    })
 
-    meta_json = json.dumps({"from": old, "to": new_qty, "reason": movement_reason, "idem_key": idem_key})
+    meta_json = json.dumps(
+        {"from": old, "to": new_qty, "reason": movement_reason, "idem_key": idem_key},
+        default=str,
+    )
     try:
         await database.execute("""
-          INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-          VALUES (:s,:k,'upsert',:q,NULL, :m::jsonb)
-        """, {"s": s, "k": k, "q": delta, "m": meta_json})
+          INSERT INTO inventory_movements (
+            seller, sku, movement_type, qty, ref_contract, meta, tenant_id
+          )
+          VALUES (:s,:k,'upsert',:q,NULL,:m::jsonb,:tenant_id)
+        """, {"s": s, "k": k, "q": delta, "m": meta_json, "tenant_id": tenant_id})
     except Exception:
         await database.execute("""
-          INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-          VALUES (:s,:k,'upsert',:q,NULL, :m)
-        """, {"s": s, "k": k, "q": delta, "m": meta_json})
+          INSERT INTO inventory_movements (
+            seller, sku, movement_type, qty, ref_contract, meta, tenant_id
+          )
+          VALUES (:s,:k,'upsert',:q,NULL,:m,:tenant_id)
+        """, {"s": s, "k": k, "q": delta, "m": meta_json, "tenant_id": tenant_id})
 
     # --- webhook emit (inventory.movement)
     try:
@@ -8014,6 +8043,7 @@ async def _manual_upsert_absolute_tx(
             "sku": k,
             "delta": delta,
             "new_qty": new_qty,
+            "tenant_id": tenant_id,
             "timestamp": utcnow().isoformat(),
         })
     except Exception:
@@ -8113,15 +8143,30 @@ async def list_inventory(
     seller: str = Query(..., description="Seller name"),
     sku: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    tenant_scoped: bool = Query(
+        True,
+        description="If true, restrict results to current tenant when tenant_id can be inferred."
+    ),
+    request: Request = None,
 ):
+    # Infer tenant for this request (if any)
+    tenant_id = await current_tenant_id(request) if request is not None else None
+
     q = "SELECT * FROM inventory_available WHERE LOWER(seller) = LOWER(:seller)"
-    vals = {"seller": seller}
+    vals: Dict[str, Any] = {"seller": seller}
+
     if sku:
         q += " AND LOWER(sku) = LOWER(:sku)"
         vals["sku"] = sku
+
+    if tenant_scoped and tenant_id:
+        q += " AND tenant_id = :tenant_id"
+        vals["tenant_id"] = tenant_id
+
     q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
     vals["limit"], vals["offset"] = limit, offset
+
     rows = await database.fetch_all(q, vals)
     return [InventoryRowOut(**dict(r)) for r in rows]
 
@@ -8139,17 +8184,36 @@ async def list_movements(
     end: Optional[datetime] = Query(None),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    tenant_scoped: bool = Query(
+        True,
+        description="If true, restrict results to current tenant when tenant_id can be inferred."
+    ),
+    request: Request = None,
 ):
+    tenant_id = await current_tenant_id(request) if request is not None else None
+
     q = "SELECT * FROM inventory_movements WHERE LOWER(seller)=LOWER(:seller)"
-    vals = {"seller": seller, "limit": limit, "offset": offset}
+    vals: Dict[str, Any] = {"seller": seller, "limit": limit, "offset": offset}
+
     if sku:
-        q += " AND LOWER(sku)=LOWER(:sku)"; vals["sku"] = sku.upper()
+        q += " AND LOWER(sku)=LOWER(:sku)"
+        vals["sku"] = sku.upper()
+
     if movement_type:
-        q += " AND movement_type=:mt"; vals["mt"] = movement_type
+        q += " AND movement_type=:mt"
+        vals["mt"] = movement_type
+
     if start:
-        q += " AND created_at >= :start"; vals["start"] = start
+        q += " AND created_at >= :start"
+        vals["start"] = start
     if end:
-        q += " AND created_at <= :end"; vals["end"] = end
+        q += " AND created_at <= :end"
+        vals["end"] = end
+
+    if tenant_scoped and tenant_id:
+        q += " AND tenant_id = :tenant_id"
+        vals["tenant_id"] = tenant_id
+
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
@@ -8194,13 +8258,21 @@ class FinishedRow(BaseModel):
     response_model=List[FinishedRow],
     status_code=200,
 )
-async def finished_goods(seller: str = Query(..., description="Seller (yard) name")):
+async def finished_goods(
+    seller: str = Query(..., description="Seller (yard) name"),
+    tenant_scoped: bool = Query(
+        True,
+        description="If true, restrict results to current tenant when tenant_id can be inferred.",
+    ),
+    request: Request = None,
+):
     """
     Available finished = max(qty_on_hand - qty_reserved - qty_committed, 0) in TONS → return as POUNDS.
     wip_lbs is 0 until you split WIP tracking.
     """
-    rows = await database.fetch_all(
-        """
+    tenant_id = await current_tenant_id(request) if request is not None else None
+
+    base_sql = """
         SELECT
             sku,
             0::int AS wip_lbs,
@@ -8212,10 +8284,16 @@ async def finished_goods(seller: str = Query(..., description="Seller (yard) nam
             NULL::float AS avg_cost_per_lb
         FROM inventory_items
         WHERE LOWER(seller) = LOWER(:seller)
-        ORDER BY sku;
-        """,
-        {"seller": seller},
-    )
+    """
+    params: Dict[str, Any] = {"seller": seller}
+
+    if tenant_scoped and tenant_id:
+        base_sql += " AND tenant_id = :tenant_id"
+        params["tenant_id"] = tenant_id
+
+    base_sql += " ORDER BY sku"
+
+    rows = await database.fetch_all(base_sql, params)
 
     return [
         FinishedRow(
@@ -8377,12 +8455,17 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     _harvester_guard()
     key = _idem_key(request)
     hit = await idem_get(key) if key else None
-    if hit: return hit   
+    if hit: 
+        return hit   
+
     source = (body.get("source") or "").strip()
     seller = (body.get("seller") or "").strip()
     items  = body.get("items") or []
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload: require source, seller, items[]")
+
+    # Resolve tenant once per batch
+    tenant_id = await current_tenant_id(request)
 
     raw = await request.body()
     sig = request.headers.get("X-Signature", "")    
@@ -8413,14 +8496,20 @@ async def inventory_bulk_upsert(body: dict, request: Request):
             qty_tons = _to_tons(qty_raw, uom)
 
             await _manual_upsert_absolute_tx(
-                seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
-                uom=uom, location=loc, description=desc,
-                source=source, movement_reason="bulk_upsert",
-                idem_key=it.get("idem_key")
+                seller=seller,
+                sku=sku,
+                qty_on_hand_tons=qty_tons,
+                uom=uom,
+                location=loc,
+                description=desc,
+                source=source,
+                movement_reason="bulk_upsert",
+                idem_key=it.get("idem_key"),
+                tenant_id=tenant_id,
             )
             upserted += 1
 
-        # success ingest log
+        # success ingest log (we keep this non-tenant-specific)
         try:
             await database.execute("""
               INSERT INTO inventory_ingest_log (source, seller, item_count, idem_key, sig_present, sig_valid, remote_addr, user_agent)
@@ -8466,6 +8555,7 @@ async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_p
     key = _idem_key(request)
     if key and key in _idem_cache:
         return _idem_cache[key]   
+
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
 
@@ -8482,13 +8572,31 @@ async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_p
     qty_raw = float(payload.get("qty_on_hand") or 0.0)
     qty_tons = _to_tons(qty_raw, uom)
 
+    tenant_id = await current_tenant_id(request)
+
     async with database.transaction():
         old, new_qty, delta = await _manual_upsert_absolute_tx(
-            seller=seller, sku=sku, qty_on_hand_tons=qty_tons,
-            uom=uom, location=loc, description=desc, source=source,
-            movement_reason="manual_add", idem_key=idem
+            seller=seller,
+            sku=sku,
+            qty_on_hand_tons=qty_tons,
+            uom=uom,
+            location=loc,
+            description=desc,
+            source=source,
+            movement_reason="manual_add",
+            idem_key=idem,
+            tenant_id=tenant_id,
         )
-    resp = {"ok": True, "seller": seller, "sku": sku, "from": old, "to": new_qty, "delta": delta, "uom": "ton"}
+
+    resp = {
+        "ok": True,
+        "seller": seller,
+        "sku": sku,
+        "from": old,
+        "to": new_qty,
+        "delta": delta,
+        "uom": "ton",
+    }
     return await _idem_guard(request, key, resp)           # manual_add
 
 # -------- Inventory: CSV template --------
@@ -8511,9 +8619,10 @@ async def inventory_import_csv(
     request: Request = None,
     _=Depends(csrf_protect)
 ):
-    
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
+
+    tenant_id = await current_tenant_id(request) if request is not None else None
 
     text = (await file.read()).decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
@@ -8532,12 +8641,15 @@ async def inventory_import_csv(
                 qty_tons = _to_tons(qty_raw, uom)
 
                 await _manual_upsert_absolute_tx(
-                    seller=s, sku=k, qty_on_hand_tons=qty_tons,
+                    seller=s,
+                    sku=k,
+                    qty_on_hand_tons=qty_tons,
                     uom=uom,
                     location=row.get("location"),
                     description=row.get("description"),
                     source="import_csv",
-                    movement_reason="import_csv"
+                    movement_reason="import_csv",
+                    tenant_id=tenant_id,
                 )
                 upserted += 1
             except Exception as e:
@@ -8556,6 +8668,8 @@ async def inventory_import_excel(
 ):
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
+
+    tenant_id = await current_tenant_id(request) if request is not None else None
 
     try:
         import pandas as pd  # openpyxl required underneath
@@ -8587,12 +8701,15 @@ async def inventory_import_excel(
                 qty_tons = _to_tons(float(qty_raw or 0.0), uom)
 
                 await _manual_upsert_absolute_tx(
-                    seller=s, sku=k, qty_on_hand_tons=qty_tons,
+                    seller=s,
+                    sku=k,
+                    qty_on_hand_tons=qty_tons,
                     uom=uom,
                     location=rec.get("location") or rec.get("Location"),
                     description=rec.get("description") or rec.get("Description"),
                     source="import_excel",
-                    movement_reason="import_excel"
+                    movement_reason="import_excel",
+                    tenant_id=tenant_id,
                 )
                 upserted += 1
             except Exception as e:
@@ -10221,6 +10338,60 @@ def _org_from_request(request: Request) -> Optional[str]:
     except Exception:
         return None
 
+# -------- Tenant / member helpers --------
+def _slugify_member(member: str) -> str:
+    """
+    Very simple slug for tenants: 'Winski Brothers' -> 'winski-brothers'.
+    Keep it stable; DB rows in tenants.slug should use this.
+    """
+    m = (member or "").strip().lower()
+    # collapse spaces and punctuation to '-'
+    m = re.sub(r"[^a-z0-9]+", "-", m)
+    return m.strip("-") or m
+
+def current_member_from_request(request: Request) -> Optional[str]:
+    """
+    Best-effort member/org resolution from the request/session.
+    Priority:
+      1) explicit ?member= query param
+      2) session['member'] / session['org'] / session['yard_name']
+      3) session['seller'] as a last resort
+    """
+    # query params first
+    for key in ("member", "org", "yard_name", "seller"):
+        v = request.query_params.get(key)
+        if v:
+            return v.strip()
+    # session hints
+    if hasattr(request, "session"):
+        for key in ("member", "org", "yard_name", "seller"):
+            v = request.session.get(key)
+            if v:
+                return str(v).strip()
+    return None
+
+async def current_tenant_id(request: Request) -> Optional[str]:
+    """
+    Resolve a tenant_id UUID for this request, based on the inferred member key.
+    Returns string UUID or None if no matching tenant row exists.
+    """
+    member = current_member_from_request(request)
+    if not member:
+        return None
+    slug = _slugify_member(member)
+    try:
+        row = await database.fetch_one(
+            "SELECT id FROM tenants WHERE slug = :slug",
+            {"slug": slug},
+        )
+        if row and row["id"]:
+            return str(row["id"])
+    except Exception:
+        # Don't block the request on mapping issues
+        return None
+    return None
+# -------- /Tenant / member helpers --------
+
 async def _org_plan(org: Optional[str]) -> str:
     # Swap for real org→plan mapping if you store it; default NONMEM unless you signal MEMBER.
     return "MEMBER" if org else "NONMEM"
@@ -10941,25 +11112,28 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
         receipt_id = str(uuid.uuid4())
         status = "created"
 
-        await database.execute("""
+        await database.execute(
+            """
             INSERT INTO public.receipts(
-                receipt_id, seller, sku, qty_tons, status,
-                symbol, location, qty_lots, lot_size, created_at, updated_at
+                id, seller, sku, qty_tons, status,
+                symbol, location, qty_lots, lot_size
             ) VALUES (
                 :id, :seller, :sku, :qty_tons, :status,
-                :symbol, :location, :qty_lots, :lot_size, NOW(), NOW()
+                :symbol, :location, :qty_lots, :lot_size
             )
-        """, {
-            "id": receipt_id,
-            "seller": body.seller.strip(),
-            "sku": body.sku.strip(),
-            "qty_tons": float(body.qty_tons),
-            "status": status,
-            "symbol": symbol,
-            "location": (body.location or "UNKNOWN").strip(),
-            "qty_lots": qty_lots,
-            "lot_size": lot_size,
-        })
+            """,
+            {
+                "id": receipt_id,
+                "seller": body.seller.strip(),
+                "sku": body.sku.strip(),
+                "qty_tons": float(body.qty_tons),
+                "status": status,
+                "symbol": symbol,
+                "location": (body.location or "UNKNOWN").strip(),
+                "qty_lots": qty_lots,
+                "lot_size": lot_size,
+            },
+        )
 
         resp = ReceiptCreateOut(
             receipt_id=receipt_id,
@@ -10979,23 +11153,25 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
         try: logger.warn("receipt_create_failed", err=str(e))
         except: pass
         raise HTTPException(400, "invalid receipt payload or schema not initialized")
-#-------- Receipts lifecycle --------
 
 @app.post("/receipts/{receipt_id}/consume", tags=["Receipts"], summary="Auto-expire at melt")
 async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: ReceiptProvenance = ReceiptProvenance()):
-    r = await database.fetch_one("SELECT 1 FROM public.receipts WHERE receipt_id=:id", {"id": receipt_id})
+    r = await database.fetch_one("SELECT 1 FROM public.receipts WHERE id=:id", {"id": receipt_id})
     if not r:
         raise HTTPException(404, "receipt not found")
 
-    await database.execute("""
-      UPDATE public.receipts
-         SET consumed_at=NOW(),
-             consumed_bol_id=:bol,
-             provenance=:prov::jsonb,
-             status='delivered',
-             updated_at=NOW()
-       WHERE receipt_id=:id AND consumed_at IS NULL
-    """, {"id":receipt_id, "bol":bol_id, "prov": json.dumps(prov.dict())})
+    await database.execute(
+        """
+        UPDATE public.receipts
+           SET consumed_at    = NOW(),
+               consumed_bol_id = :bol,
+               provenance     = :prov::jsonb,
+               status         = 'delivered',
+               updated_at     = NOW()
+         WHERE id = :id AND consumed_at IS NULL
+        """,
+        {"id": receipt_id, "bol": bol_id, "prov": json.dumps(prov.dict())},
+    )
 
     try:
         await audit_append("system", "receipt.consume", "receipt", receipt_id, {"bol_id": bol_id})
@@ -11045,7 +11221,7 @@ class ReceivableIn(BaseModel):
 
 @app.post("/finance/receivable", tags=["Finance"], summary="Mint receivable from a live receipt")
 async def receivable_create(r: ReceivableIn):
-    rec = await database.fetch_one("SELECT * FROM public.receipts WHERE receipt_id=:id", {"id": r.receipt_id})
+    rec = await database.fetch_one("SELECT * FROM public.receipts WHERE id=:id", {"id": r.receipt_id})
     if not rec:
         raise HTTPException(404, "Receipt not found")
     if rec.get("consumed_at"):
@@ -11151,10 +11327,20 @@ async def get_all_bols_pg(
     end: Optional[datetime] = Query(None),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    tenant_scoped: bool = Query(
+        True,
+        description="If true, restrict results to the current tenant (when a tenant_id can be inferred).",
+    ),
     response: Response = None,
+    request: Request = None,
 ):
     q = "SELECT * FROM bols"
     cond, vals = [], {}
+
+    tenant_id = await current_tenant_id(request) if request is not None else None
+    if tenant_scoped and tenant_id:
+        cond.append("tenant_id = :tenant_id")
+        vals["tenant_id"] = tenant_id
 
     if buyer:
         cond.append("buyer ILIKE :buyer");         vals["buyer"] = f"%{buyer}%"
@@ -11275,8 +11461,14 @@ async def get_all_contracts(
     ),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    tenant_scoped: bool = Query(
+        True,
+        description="If true, restrict results to the current tenant (when a tenant_id can be inferred).",
+    ),
     response: Response = None,   # lets us set X-Total-Count
+    request: Request = None,
 ):
+
     # normalize inputs
     buyer    = buyer.strip()    if isinstance(buyer, str) else buyer
     seller   = seller.strip()   if isinstance(seller, str) else seller
@@ -11285,9 +11477,15 @@ async def get_all_contracts(
     reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
     reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
 
+    tenant_id = await current_tenant_id(request) if request is not None else None
+
     # base query
     query = "SELECT * FROM contracts"
     conditions, values = [], {}
+
+    if tenant_scoped and tenant_id:
+        conditions.append("tenant_id = :tenant_id")
+        values["tenant_id"] = tenant_id
 
     if buyer:
         conditions.append("buyer ILIKE :buyer");               values["buyer"] = f"%{buyer}%"
@@ -12513,6 +12711,7 @@ class ContractInExtended(ContractIn):
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
+    tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     if key:
         hit = await idem_get(key)
@@ -12525,6 +12724,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     qty    = float(contract.weight_tons)
     seller = (contract.seller or "").strip()
     sku    = (contract.material or "").strip()
+    # resolve tenant from request (if any)
+    tenant_id = await current_tenant_id(request)
 
     # ---------- best-effort reference price (NO transaction, tiny timeout) ----------
     if not (contract.reference_price and contract.reference_source):
@@ -12545,7 +12746,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     # -------- historical mode detection + created_at override -----------
     import_mode = request.headers.get("X-Import-Mode", "").lower() == "historical"
     if os.getenv("ENV", "").lower() == "production" and import_mode:
-        pass  # TEMP: allow historical import without admin during backfill
+        pass  # allow historical import without admin during backfill
 
     created_at_override: datetime | None = None
     if import_mode:
@@ -12586,6 +12787,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "reference_source": contract.reference_source,
                 "reference_timestamp": contract.reference_timestamp,
                 "currency": contract.currency or "USD",
+                "tenant_id": tenant_id,
             }
 
             if created_at_override is not None:
@@ -12593,12 +12795,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     INSERT INTO contracts (
                         id,buyer,seller,material,weight_tons,price_per_ton,status,
                         pricing_formula,reference_symbol,reference_price,reference_source,
-                        reference_timestamp,currency,created_at
+                        reference_timestamp,currency,tenant_id,created_at
                     )
                     VALUES (
                         :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
                         :pricing_formula,:reference_symbol,:reference_price,:reference_source,
-                        :reference_timestamp,:currency,:created_at
+                        :reference_timestamp,:currency,:tenant_id,:created_at
                     )
                     RETURNING *
                 """, {**payload, "created_at": created_at_override})
@@ -12607,12 +12809,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     INSERT INTO contracts (
                         id,buyer,seller,material,weight_tons,price_per_ton,status,
                         pricing_formula,reference_symbol,reference_price,reference_source,
-                        reference_timestamp,currency
+                        reference_timestamp,currency,tenant_id
                     )
                     VALUES (
                         :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
                         :pricing_formula,:reference_symbol,:reference_price,:reference_source,
-                        :reference_timestamp,:currency
+                        :reference_timestamp,:currency,:tenant_id
                     )
                     RETURNING *
                 """, payload)
@@ -12686,18 +12888,19 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     "reference_source": contract.reference_source,
                     "reference_timestamp": contract.reference_timestamp,
                     "currency": contract.currency or "USD",
+                    "tenant_id": tenant_id,
                 }
 
                 row = await database.fetch_one("""
                     INSERT INTO contracts (
                         id,buyer,seller,material,weight_tons,price_per_ton,status,
                         pricing_formula,reference_symbol,reference_price,reference_source,
-                        reference_timestamp,currency
+                        reference_timestamp,currency,tenant_id
                     )
                     VALUES (
                         :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
                         :pricing_formula,:reference_symbol,:reference_price,:reference_source,
-                        :reference_timestamp,:currency
+                        :reference_timestamp,:currency,:tenant_id
                     )
                     RETURNING *
                 """, payload)
@@ -12787,12 +12990,19 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             pass
         try:
             await database.execute("""
-                INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'))
+                INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
                 ON CONFLICT (id) DO NOTHING
-            """, {"id": cid, "buyer": contract.buyer, "seller": contract.seller,
-                  "material": contract.material, "wt": contract.weight_tons,
-                  "ppt": quantize_money(contract.price_per_ton), "ccy": contract.currency})
+            """, {
+                "id": cid,
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "wt": contract.weight_tons,
+                "ppt": quantize_money(contract.price_per_ton),
+                "ccy": contract.currency,
+                "tenant_id": tenant_id,
+            })
             row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
             if row:
                 return await _idem_guard(request, key, row)
@@ -13432,6 +13642,7 @@ async def export_applications_csv():
 # -------- BOLs (with PDF generation) --------
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
+    tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     hit = await idem_get(key) if key else None
     if hit:
@@ -13441,6 +13652,9 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     bol_id = uuid5(NAMESPACE_URL, f"bol:{key}") if key else uuid4()
     bol_id_str = str(bol_id)
 
+    # resolve tenant for this BOL
+    tenant_id = await current_tenant_id(request)
+
     # Try to insert; if it already exists (same key), fetch the existing row
     row = await database.fetch_one("""
         INSERT INTO bols (
@@ -13449,7 +13663,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             carrier_name, carrier_driver, carrier_truck_vin,
             pickup_signature_base64, pickup_signature_time,
             pickup_time, status,
-            origin_country, destination_country, port_code, hs_code, duty_usd, tax_pct
+            origin_country, destination_country, port_code, hs_code, duty_usd, tax_pct,
+            tenant_id
         )
         VALUES (
             :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
@@ -13457,7 +13672,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             :carrier_name, :carrier_driver, :carrier_truck_vin,
             :pickup_sig_b64, :pickup_sig_time,
             :pickup_time, 'Scheduled',
-            :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct
+            :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct,
+            :tenant_id
         )
         ON CONFLICT (bol_id) DO NOTHING
         RETURNING *
@@ -13472,6 +13688,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "origin_country": bol.origin_country, "destination_country": bol.destination_country,
         "port_code": bol.port_code, "hs_code": bol.hs_code,
         "duty_usd": bol.duty_usd, "tax_pct": bol.tax_pct,
+        "tenant_id": tenant_id,
     })    
     we_created = row is not None
     if row is None:
@@ -14574,37 +14791,41 @@ class AnomIn(BaseModel):
 @app.post("/ml/anomaly", tags=["Surveillance"])
 async def ml_anomaly(a: AnomIn):
     try:
-        score = min(1.0, max(0.0, (a.features.get("cancel_rate", 0)*0.6 + a.features.get("gps_var", 0)*0.4)))
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS public.anomaly_scores (
-            member  TEXT NOT NULL,
-            symbol  TEXT NOT NULL,
-            as_of   DATE NOT NULL,
-            score   NUMERIC NOT NULL,
-            features JSONB NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (member, symbol, as_of)
-          );
-        """)
-        await database.execute("""
-          INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
-          VALUES (:m, :s, :d, :sc, :f::jsonb)
-        """, {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)})
+        score = min(
+            1.0,
+            max(
+                0.0,
+                (a.features.get("cancel_rate", 0) * 0.6 + a.features.get("gps_var", 0) * 0.4),
+            ),
+        )
+        # Table schema is managed by migrations / Supabase. Just insert.
+        await database.execute(
+            """
+            INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
+            VALUES (:m, :s, :d, :sc, :f::jsonb)
+            """,
+            {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)},
+        )
 
         if score > 0.85:
             try:
-                await surveil_create(AlertIn(
-                    rule="ml_anomaly_high",
-                    subject=a.member,
-                    data={"symbol": a.symbol, "score": score, "features": a.features},
-                    severity="high"
-                ))
+                await surveil_create(
+                    AlertIn(
+                        rule="ml_anomaly_high",
+                        subject=a.member,
+                        data={"symbol": a.symbol, "score": score, "features": a.features},
+                        severity="high",
+                    )
+                )
             except Exception:
                 pass
+
         return {"score": score}
     except Exception as e:
-        try: logger.warn("ml_anomaly_failed", err=str(e))
-        except: pass
+        try:
+            logger.warn("ml_anomaly_failed", err=str(e))
+        except Exception:
+            pass
         raise HTTPException(400, "ml anomaly failed")
     
 @startup
