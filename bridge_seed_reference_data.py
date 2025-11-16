@@ -274,14 +274,8 @@ async def ingest_invoices(db: Database, path: str) -> int:
                 if inv_date is None:
                     print(f"WARN: bad invoice_date '{row.get('invoice_date')}' → skipping row")
                     continue                
-                svc_date = _parse_iso_date(row.get("service_date"))
-                if svc_date is None:
-                    print(f"WARN: bad service_date '{row.get('service_date')}' → skipping row")
-                    continue
+                svc_date = _parse_iso_date(row.get("service_date"))                
                 ship_date = _parse_iso_date(row.get("ship_date"))
-                if ship_date is None:
-                    print(f"WARN: bad ship_date '{row.get('ship_date')}' → skipping row")
-                    continue
                 
                 qty = _parse_decimal(row.get("qty"))
                 unit_price = _parse_decimal(row.get("unit_price"))
