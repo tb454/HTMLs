@@ -113,12 +113,40 @@ def _parse_us_date(s: str) -> dt.date:
 
 
 def _parse_iso_date(s) -> dt.date | None:
-    if s is None:
+    """
+    Try to parse a date from various common formats.
+    On failure, return None instead of throwing.
+    """
+    if not s:
         return None
+
     s = str(s).strip()
     if not s:
         return None
-    return dt.date.fromisoformat(s)
+
+    # 1) Direct ISO date: YYYY-MM-DD
+    try:
+        return dt.date.fromisoformat(s)
+    except Exception:
+        pass
+
+    # 2) Full ISO datetime: 2024-01-02T15:04:05Z or similar
+    try:
+        return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+    except Exception:
+        pass
+
+    # 3) Common US formats from CSV/QBO: 01/31/2024 or 1/31/24
+    for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return dt.datetime.strptime(s, fmt).date()
+        except Exception:
+            continue
+
+    # If we get here, treat as invalid and let caller decide to skip/keep
+    print(f"WARN: bad invoice_date '{s}' → using None")
+    return None
+
 
 
 async def _ensure_schema(db: Database) -> None:
@@ -243,9 +271,18 @@ async def ingest_invoices(db: Database, path: str) -> int:
                 invoice_id = row.get("invoice_id")
                 invoice_number = row.get("invoice_number")
                 inv_date = _parse_iso_date(row.get("invoice_date"))
+                if inv_date is None:
+                    print(f"WARN: bad invoice_date '{row.get('invoice_date')}' → skipping row")
+                    continue                
                 svc_date = _parse_iso_date(row.get("service_date"))
+                if svc_date is None:
+                    print(f"WARN: bad service_date '{row.get('service_date')}' → skipping row")
+                    continue
                 ship_date = _parse_iso_date(row.get("ship_date"))
-
+                if ship_date is None:
+                    print(f"WARN: bad ship_date '{row.get('ship_date')}' → skipping row")
+                    continue
+                
                 qty = _parse_decimal(row.get("qty"))
                 unit_price = _parse_decimal(row.get("unit_price"))
                 line_amount = _parse_decimal(row.get("line_amount"))
