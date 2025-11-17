@@ -7855,12 +7855,13 @@ class WarrantIn(BaseModel):
     holder: str
 
 @app.post("/warrants/mint", tags=["Warehousing"])
-async def warrant_mint(w: WarrantIn):
+async def warrant_mint(w: WarrantIn, request: Request):
     wid = str(uuid.uuid4())
+    tenant_id = await current_tenant_id(request)
     await database.execute("""
-      INSERT INTO public.warrants(warrant_id,receipt_id,holder)
-      VALUES (:w,:r,:h)
-    """, {"w": wid, "r": w.receipt_id, "h": w.holder})
+      INSERT INTO public.warrants(warrant_id,receipt_id,holder,tenant_id)
+      VALUES (:w,:r,:h,:tid)
+    """, {"w": wid, "r": w.receipt_id, "h": w.holder, "tid": tenant_id})
     return {"warrant_id": wid, "status": "on_warrant"}
 
 @app.post("/warrants/transfer", tags=["Warehousing"])
@@ -8895,7 +8896,7 @@ async def _ensure_dossier_ingest_queue():
 @startup
 async def _ensure_dossier_ingest_queue_schema():
     """
-    Queue for per-event ingestion into Dossier/Atlas.
+    Queue for per-event ingestion into Dossier.
 
     Safe in CI/prod (IF NOT EXISTS). We also expose admin APIs to inspect
     and drain this queue into the Dossier HR ingest endpoint.
@@ -8918,10 +8919,10 @@ async def _ensure_dossier_ingest_queue_schema():
       ON dossier_ingest_queue(status, created_at);
     """)
 
-# Primary ingest endpoint / secret for Atlas/Dossier
-ATLAS_INGEST_URL    = (os.getenv("ATLAS_INGEST_URL", "").strip()
+# Primary ingest endpoint / secret for Dossier
+DOSSIER_INGEST_URL    = (os.getenv("DOSSIER_INGEST_URL", "").strip()
                        or os.getenv("DOSSIER_ENDPOINT", "").strip())
-ATLAS_INGEST_SECRET = os.getenv("ATLAS_INGEST_SECRET", "").strip()
+DOSSIER_INGEST_SECRET = os.getenv("DOSSIER_INGEST_SECRET", "").strip()
 
 @startup
 async def _nightly_dossier_sync():
@@ -9044,30 +9045,32 @@ async def _nightly_dossier_sync():
     t = asyncio.create_task(_runner())
     app.state._bg_tasks.append(t)
 
-async def enqueue_atlas_event(
+async def enqueue_dossier_event(
     source_table: str,
     source_id: str,
     event_type: str,
     payload: Optional[Dict[str, Any]] = None,
     source_system: str = "bridge",
+    tenant_id: Optional[str] = None
 ) -> None:
     """
-    Best-effort: stage an event into the Dossier/Atlas ingest queue.
+    Best-effort: stage an event into the Dossier ingest queue.
     This must never fail hot-path requests; callers should generally
     wrap it in a try/except and ignore errors.
     """
     try:
         await database.execute("""
           INSERT INTO dossier_ingest_queue(
-            source_system, source_table, source_id, event_type, payload
+            source_system, source_table, source_id, event_type, payload, tenant_id
           )
-          VALUES (:sys, :tbl, :sid, :evt, :payload::jsonb)
+          VALUES (:sys, :tbl, :sid, :evt, :payload::jsonb, :tenant)
         """, {
             "sys": source_system,
             "tbl": source_table,
             "sid": str(source_id),
             "evt": event_type,
             "payload": json.dumps(payload or {}, default=str),
+            "tenant": tenant_id
         })
     except Exception as e:
         try:
@@ -9170,18 +9173,17 @@ async def retry_failed_dossier():
     )
     return {"ok": True, "message": "Retry triggered", "updated": count}
 
-@admin_dossier_router.post("/run_batch", summary="Drain pending Dossier/Atlas ingest queue")
+@admin_dossier_router.post("/run_batch", summary="Drain pending Dossier ingest queue")
 async def run_dossier_ingest_batch(limit: int = 100):
     """
     Pull up to `limit` pending rows from dossier_ingest_queue, POST them to
-    ATLAS_INGEST_URL (or DOSSIER_ENDPOINT), and mark each as sent/failed.
-
+    DOSSIER_INGEST_URL, and mark each as sent/failed.
     This is idempotent per row: status transitions are:
       pending -> sent   (on 2xx)
       pending -> failed (on non-2xx or network error)
     """
-    if not ATLAS_INGEST_URL:
-        return {"ok": False, "sent": 0, "failed": 0, "reason": "ATLAS_INGEST_URL (or DOSSIER_ENDPOINT) not configured"}
+    if not DOSSIER_INGEST_URL:
+        return {"ok": False, "sent": 0, "failed": 0, "reason": "DOSSIER_INGEST_URL not configured"}
 
     rows = await database.fetch_all("""
       SELECT id, source_system, source_table, source_id, event_type, payload
@@ -9207,20 +9209,20 @@ async def run_dossier_ingest_batch(limit: int = 100):
         }
         raw = json.dumps(body, separators=(",", ":"), default=str).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        if ATLAS_INGEST_SECRET:
+        if DOSSIER_INGEST_SECRET:
             ts = str(int(time.time()))
-            mac = hmac.new(ATLAS_INGEST_SECRET.encode("utf-8"),
+            mac = hmac.new(DOSSIER_INGEST_SECRET.encode("utf-8"),
                            ts.encode("utf-8") + b"." + raw,
                            hashlib.sha256).hexdigest()
-            headers["X-Atlas-Timestamp"] = ts
-            headers["X-Atlas-Signature"] = mac
+            headers["X-Dossier-Timestamp"] = ts
+            headers["X-Dossier-Signature"] = mac
         return headers, raw
 
     async with httpx.AsyncClient(timeout=15) as client:
         for r in rows:
             try:
                 headers, raw = await _headers_and_body(r)
-                resp = await client.post(ATLAS_INGEST_URL, headers=headers, content=raw)
+                resp = await client.post(DOSSIER_INGEST_URL, headers=headers, content=raw)
                 ok = 200 <= resp.status_code < 300
                 if ok:
                     sent += 1
@@ -10338,6 +10340,42 @@ def _org_from_request(request: Request) -> Optional[str]:
     except Exception:
         return None
 
+@startup
+async def _ensure_multitenant_columns():
+    """
+    Ensure core business tables all have a tenant_id column so the new
+    tenant_scoped filters and ingestion paths can safely write to it.
+
+    Safe + idempotent: uses ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+    In single-tenant/dev it’s harmless; in production it enables per-tenant scoping.
+    """
+    if os.getenv("ENV", "").lower() not in {"production", "staging", "ci", "test", "testing"}:
+        # Still run in dev, but you can guard if you want.
+        pass
+
+    await run_ddl_multi("""
+    ALTER TABLE IF NOT EXISTS contracts
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS bols
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS inventory_items
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS inventory_movements
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS public.receipts
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS buyer_positions
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+
+    ALTER TABLE IF NOT EXISTS dossier_ingest_queue
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    """)
+
 # -------- Tenant / member helpers --------
 def _slugify_member(member: str) -> str:
     """
@@ -11097,6 +11135,9 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
         if hit:
             return hit
 
+        # Resolve tenant (optional; None in single-tenant/dev)
+        tenant_id = await current_tenant_id(request)
+
         """
         Populates symbol, lot_size, qty_lots, location at write time.
         """
@@ -11116,10 +11157,10 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
             """
             INSERT INTO public.receipts(
                 id, seller, sku, qty_tons, status,
-                symbol, location, qty_lots, lot_size
+                symbol, location, qty_lots, lot_size, tenant_id
             ) VALUES (
                 :id, :seller, :sku, :qty_tons, :status,
-                :symbol, :location, :qty_lots, :lot_size
+                :symbol, :location, :qty_lots, :lot_size, :tenant_id
             )
             """,
             {
@@ -11132,6 +11173,7 @@ async def receipt_create(body: ReceiptCreateIn, request: Request) -> ReceiptCrea
                 "location": (body.location or "UNKNOWN").strip(),
                 "qty_lots": qty_lots,
                 "lot_size": lot_size,
+                "tenant_id": tenant_id,
             },
         )
 
@@ -11220,7 +11262,7 @@ class ReceivableIn(BaseModel):
     debtor: str  # buyer name/id
 
 @app.post("/finance/receivable", tags=["Finance"], summary="Mint receivable from a live receipt")
-async def receivable_create(r: ReceivableIn):
+async def receivable_create(r: ReceivableIn, request: Request):
     rec = await database.fetch_one("SELECT * FROM public.receipts WHERE id=:id", {"id": r.receipt_id})
     if not rec:
         raise HTTPException(404, "Receipt not found")
@@ -11228,10 +11270,11 @@ async def receivable_create(r: ReceivableIn):
         raise HTTPException(409, "Receipt already consumed")
 
     rid = str(uuid.uuid4())
+    tenant_id = await current_tenant_id(request)
     await database.execute("""
-      INSERT INTO public.receivables (id, receipt_id, face_value_usd, due_date, debtor, status, created_at)
-      VALUES (:id, :rid, :fv, :dd, :deb, 'open', NOW())
-    """, {"id": rid, "rid": r.receipt_id, "fv": r.face_value_usd, "dd": r.due_date, "deb": r.debtor})
+      INSERT INTO public.receivables (id, receipt_id, face_value_usd, due_date, debtor, status, created_at, tenant_id)
+      VALUES (:id, :rid, :fv, :dd, :deb, 'open', NOW(), :tid)
+    """, {"id": rid, "rid": r.receipt_id, "fv": r.face_value_usd, "dd": r.due_date, "deb": r.debtor, "tid": tenant_id})
 
     try:
         await audit_append("system", "receivable.create", "receivable", rid, r.dict())
@@ -11612,13 +11655,21 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         if hit:
             return hit
 
+        # Resolve tenant once for the whole purchase flow
+        tenant_id = await current_tenant_id(request)
+
         async with database.transaction():
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
                 WHERE id = :id AND status = :expected
-                RETURNING id, buyer, seller, material, weight_tons, price_per_ton
+                RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id, "expected": body.expected_status})
+
+            # If the contract already has a tenant, prefer that over request inference
+            if row and row.get("tenant_id"):
+                tenant_id = str(row["tenant_id"])
+
             if not row:
                 raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
 
@@ -11648,10 +11699,16 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                         WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
                     """, {"short": short, "s": seller, "k": sku})
                     await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                        VALUES (:s,:k,'reserve',:q,:cid,:m)
-                    """, {"s": seller, "k": sku, "q": short, "cid": contract_id,
-                          "m": json.dumps({"reason":"auto_topup_for_purchase"})})
+                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta, tenant_id)
+                        VALUES (:s,:k,'reserve',:q,:cid,:m,:tenant_id)
+                    """, {
+                        "s": seller,
+                        "k": sku,
+                        "q": short,
+                        "cid": contract_id,
+                        "m": json.dumps({"reason": "auto_topup_for_purchase"}),
+                        "tenant_id": tenant_id,
+                    })
                     reserved += short
                     available -= short
                 else:
@@ -11666,10 +11723,16 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             """, {"q": qty, "seller": seller, "sku": sku})
 
             await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller, :sku, 'commit', :q, :ref_contract, :meta)
-            """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
-                  "meta": json.dumps({"reason": "purchase"})})
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta, tenant_id)
+                VALUES (:seller, :sku, 'commit', :q, :ref_contract, :meta, :tenant_id)
+            """, {
+                "seller": seller,
+                "sku": sku,
+                "q": qty,
+                "ref_contract": contract_id,
+                "meta": json.dumps({"reason": "purchase"}),
+                "tenant_id": tenant_id,
+            })
 
             bol_id = str(uuid.uuid4())
             await database.fetch_one("""
@@ -11678,14 +11741,16 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                     price_per_unit, total_value,
                     carrier_name, carrier_driver, carrier_truck_vin,
                     pickup_signature_base64, pickup_signature_time,
-                    pickup_time, status
+                    pickup_time, status,
+                    tenant_id
                 )
                 VALUES (
                     :bol_id, :contract_id, :buyer, :seller, :material, :tons,
                     :ppu, :total,
                     :cname, :cdriver, :cvin,
                     :ps_b64, :ps_time,
-                    :pickup_time, 'Scheduled'
+                    :pickup_time, 'Scheduled',
+                    :tenant_id
                 )
                 RETURNING bol_id
             """, {
@@ -11699,16 +11764,17 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                 "total": qty * float(row["price_per_ton"]),
                 "cname": "TBD", "cdriver": "TBD", "cvin": "TBD",
                 "ps_b64": None, "ps_time": None,
-                "pickup_time": utcnow()
+                "pickup_time": utcnow(),
+                "tenant_id": tenant_id,
             })
 
             try:
                 await database.execute("""
                 INSERT INTO buyer_positions(
                     position_id, contract_id, buyer, seller, material,
-                    weight_tons, price_per_ton, currency, status, purchased_at
+                    weight_tons, price_per_ton, currency, status, purchased_at, tenant_id
                 )
-                VALUES (:id, :cid, :b, :s, :m, :wt, :ppt, COALESCE(:ccy,'USD'), 'Open', NOW())
+                VALUES (:id, :cid, :b, :s, :m, :wt, :ppt, COALESCE(:ccy,'USD'), 'Open', NOW(), :tenant_id)
                 """, {
                     "id": str(uuid.uuid4()),
                     "cid": contract_id,
@@ -11718,6 +11784,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                     "wt": qty,
                     "ppt": float(row["price_per_ton"]),
                     "ccy": "USD",
+                    "tenant_id": tenant_id,
                 })
             except Exception:
                 pass
@@ -12938,11 +13005,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         except Exception:
             pass
 
-         # Dossier / Atlas ingest: stage a CONTRACT_CREATED event (best-effort)
+         # Dossier ingest: stage a CONTRACT_CREATED event (best-effort)
         try:
             d = dict(row)
             created_ts = d.get("created_at")
-            await enqueue_atlas_event(
+            await enqueue_dossier_event(
                 source_table="contracts",
                 source_id=d.get("id"),
                 event_type="CONTRACT_CREATED",
@@ -12957,6 +13024,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     "status": d.get("status"),
                     "created_at": created_ts.isoformat() if isinstance(created_ts, datetime) else None,
                 },
+                tenant_id=str(d.get("tenant_id")) if d.get("tenant_id") else None,
             )
         except Exception:
             pass
@@ -13648,6 +13716,30 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     if hit:
         return hit
 
+    # Auto-resolve duty/tax from export_rules when hs_code + destination are present,
+    # but allow explicit values in the payload to override.
+    duty_usd = bol.duty_usd
+    tax_pct  = bol.tax_pct
+    hs   = (bol.hs_code or "").strip()
+    dest = (bol.export_country or bol.destination_country or "").upper()
+    if hs and dest and (duty_usd is None or tax_pct is None):
+        try:
+            row = await database.fetch_one("""
+              SELECT duty_usd, tax_pct
+                FROM export_rules
+               WHERE :hs LIKE hs_prefix || '%' AND dest = :dest
+               ORDER BY length(hs_prefix) DESC
+               LIMIT 1
+            """, {"hs": hs, "dest": dest})
+            if row:
+                if duty_usd is None and row["duty_usd"] is not None:
+                    duty_usd = float(row["duty_usd"])
+                if tax_pct is None and row["tax_pct"] is not None:
+                    tax_pct = float(row["tax_pct"])
+        except Exception:
+            # Never break BOL creation on export_rules lookup issues
+            pass
+
     # Deterministic UUID when an Idempotency-Key is present
     bol_id = uuid5(NAMESPACE_URL, f"bol:{key}") if key else uuid4()
     bol_id_str = str(bol_id)
@@ -13687,7 +13779,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "pickup_time": bol.pickup_time,
         "origin_country": bol.origin_country, "destination_country": bol.destination_country,
         "port_code": bol.port_code, "hs_code": bol.hs_code,
-        "duty_usd": bol.duty_usd, "tax_pct": bol.tax_pct,
+        "duty_usd": duty_usd, "tax_pct": tax_pct,
         "tenant_id": tenant_id,
     })    
     we_created = row is not None
@@ -13736,11 +13828,11 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_signature": None,
         "delivery_time": None,
     }
-    # Dossier / Atlas ingest: BOL_SCHEDULED
+    # Dossier ingest: BOL_SCHEDULED
     try:
         if row:
             d = dict(row)
-            await enqueue_atlas_event(
+            await enqueue_dossier_event(
                 source_table="bols",
                 source_id=d.get("bol_id"),
                 event_type="BOL_SCHEDULED",
@@ -13754,6 +13846,7 @@ async def create_bol_pg(bol: BOLIn, request: Request):
                     "status": d.get("status"),
                     "pickup_time": d["pickup_time"].isoformat() if d.get("pickup_time") else None,
                 },
+                tenant_id=str(d.get("tenant_id")) if d.get("tenant_id") else None,
             )
     except Exception:
         pass
@@ -13771,7 +13864,7 @@ async def bols_mark_delivered(
          SET status = 'Delivered',
              delivery_time = COALESCE(delivery_time, NOW())
        WHERE bol_id = :id
-       RETURNING bol_id, contract_id
+       RETURNING bol_id, contract_id, tenant_id
     """, {"id": bol_id})
     if not bol:
         raise HTTPException(404, "BOL not found")
@@ -13826,9 +13919,9 @@ async def bols_mark_delivered(
     except Exception:
         pass
 
-    # Dossier / Atlas ingest: BOL_DELIVERED
+    # Dossier ingest: BOL_DELIVERED
     try:
-        await enqueue_atlas_event(
+        await enqueue_dossier_event(
             source_table="bols",
             source_id=bol_id,
             event_type="BOL_DELIVERED",
@@ -13836,6 +13929,7 @@ async def bols_mark_delivered(
                 "bol_id": bol_id,
                 "contract_id": str(contract_id),
                 "receipts": [str(x) for x in (receipt_ids or [])],
+                "tenant_id": str(bol.get("tenant_id")) if bol.get("tenant_id") else None,
             },
         )
     except Exception:
