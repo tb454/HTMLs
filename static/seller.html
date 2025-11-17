@@ -641,17 +641,16 @@ onReady(async () => {
       const kpiCanvas = document.getElementById('kpiChart');
       if (kpiCanvas) {
         const ctxKPI = kpiCanvas.getContext('2d');
-        kpiChartLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const d1 = [100,120,130,110,140,150,180,200,175,185,120,100];
-        const d2 = [50,60,55,70,65,80,90,110,100,70,50,50];
-        const d3 = [80,90,85,95,100,105,120,140,110,75,90,80];
         kpiChart = new Chart(ctxKPI, {
           type: 'bar',
-          data: { labels: kpiChartLabels, datasets: [
-            { label:'Electric Motors', data:d1, backgroundColor:'rgba(52,152,219,0.6)' },
-            { label:'Brass',           data:d2, backgroundColor:'rgba(46,204,113,0.6)' },
-            { label:'Insulated Wire',  data:d3, backgroundColor:'rgba(231,76,60,0.6)' }
-          ]},
+          data: {
+            labels: kpiChartLabels,
+            datasets: [
+              { label:'Tons',          data: [], backgroundColor:'rgba(52,152,219,0.6)' },
+              { label:'Notional ($k)', data: [], backgroundColor:'rgba(46,204,113,0.6)' },
+              { label:'Contracts',     data: [], backgroundColor:'rgba(231,76,60,0.6)' }
+            ]
+          },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -661,6 +660,25 @@ onReady(async () => {
       }
 
       refreshFinishedFromInputs();
+
+      // Prime summary widgets once the seller (if any) is set
+      try {
+        loadActiveContractsSummary();
+        loadSellerKPIs();
+        loadTradeLog();
+        loadMetalsOverview();
+      } catch {}
+      
+      // Refresh summary + trade log every 60s when page visible
+      setInterval(() => {
+        if (document.hidden) return;
+        try {
+          loadActiveContractsSummary();
+          loadSellerKPIs();
+          loadTradeLog();
+        } catch {}
+      }, 60000);
+
     });
 
     // Pricing widget
@@ -691,36 +709,290 @@ onReady(async () => {
     function updatePurchaseValues() {
       const table = document.getElementById('greenspark-table');
       const rows = table.querySelectorAll('tbody tr.group-sub');
-      let sumWIP=0,sumFinished=0,sumTotal=0,sumPurchase=0;
+      let sumWIP = 0, sumFinished = 0, sumTotal = 0, sumPurchase = 0;
+
       rows.forEach(row => {
         const cells = row.getElementsByTagName('td');
         if (cells.length >= 6) {
-          const wip = parseFloat(cells[1].textContent.replace(/,/g,''))||0;
-          const finished = parseFloat(cells[2].textContent.replace(/,/g,''))||0;
-          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g,''))||0;
-          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g,''))||0;
+          const wip = parseFloat(cells[1].textContent.replace(/,/g,'')) || 0;
+          const finished = parseFloat(cells[2].textContent.replace(/,/g,'')) || 0;
+          const totalLbs = parseFloat(cells[3].textContent.replace(/,/g,'')) || 0;
+          const avgCost = parseFloat(cells[4].textContent.replace(/[^0-9.]/g,'')) || 0;
           const purchaseValue = totalLbs * avgCost;
-          sumWIP += wip; sumFinished += finished; sumTotal += totalLbs; sumPurchase += purchaseValue;
-          cells[5].textContent = '$'+purchaseValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+          sumWIP += wip;
+          sumFinished += finished;
+          sumTotal += totalLbs;
+          sumPurchase += purchaseValue;
+          cells[5].textContent = '$' + purchaseValue.toLocaleString(
+            undefined,
+            { minimumFractionDigits:2, maximumFractionDigits:2 }
+          );
         }
       });
+
       document.getElementById('total-wip').textContent = sumWIP.toLocaleString();
       document.getElementById('total-finished').textContent = sumFinished.toLocaleString();
       document.getElementById('total-total').textContent = sumTotal.toLocaleString();
-      document.getElementById('total-purchase').textContent = '$'+sumPurchase.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      document.getElementById('total-purchase').textContent = '$' + sumPurchase.toLocaleString(
+        undefined,
+        { minimumFractionDigits:2, maximumFractionDigits:2 }
+      );
 
       const info = document.getElementById('finishedGoodsInfo');
       if (info) {
-        const totalTons = sumTotal/2000;
-        const contractsAvailable = Math.floor(sumFinished/20000);
+        const totalTons = sumTotal / 2000;
+        const contractsAvailable = Math.floor(sumFinished / 20000);
         info.innerHTML = `<div>${contractsAvailable} Contracts Available</div><div>~${totalTons.toFixed(1)} Total Tons</div>`;
         if (finishedGoodsChart) {
           const now = _fmtDate(new Date());
           finishedGoodsChartLabels.push(now);
           finishedGoodsChartData.push(totalTons);
-          if (finishedGoodsChartData.length > 10) { finishedGoodsChartLabels.shift(); finishedGoodsChartData.shift(); }
+          if (finishedGoodsChartData.length > 10) {
+            finishedGoodsChartLabels.shift();
+            finishedGoodsChartData.shift();
+          }
           finishedGoodsChart.update();
         }
+      }
+    }
+
+    // ========= Active contracts summary for the seller =========
+    let __lastActiveNotional = 0;
+
+    async function loadActiveContractsSummary() {
+      const seller = (document.getElementById('sellerName')?.value || '').trim();
+      if (!seller) return;
+
+      const secEl = document.getElementById('active-contracts-secured');
+      const mEl   = document.getElementById('active-contracts-margin');
+      const chgEl = document.getElementById('active-contracts-change');
+
+      try {
+        const qs = new URLSearchParams({ seller, limit: '1000', offset: '0' });
+        const res  = await api(`/contracts?${qs.toString()}`);
+        const rows = await res.json();
+
+        let secured = 0;
+        let notional = 0;
+        for (const r of rows) {
+          const tons  = Number(r.weight_tons ?? 0);
+          const price = Number(r.price_per_ton ?? 0);
+          notional += tons * price;
+
+          const st = (r.status || '').toLowerCase();
+          if (st && st !== 'cancelled') secured += 1;
+        }
+
+        const fmtUsd = (n) => '$' + Number(n || 0).toLocaleString(
+          undefined,
+          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+        );
+
+        if (secEl) secEl.textContent = `${secured} Secured`;
+        if (mEl)   mEl.textContent   = `Notional: ${fmtUsd(notional)}`;
+
+        const delta = (__lastActiveNotional === 0) ? 0 : (notional - __lastActiveNotional);
+        __lastActiveNotional = notional;
+        if (chgEl) chgEl.textContent = `Total Change: ${fmtUsd(delta)}`;
+
+        if (activeContractsChart) {
+          const label = _fmtDate(new Date());
+          activeContractsChartLabels.push(label);
+          activeContractsChangeHistory.push(Number(delta.toFixed(2)));
+          if (activeContractsChangeHistory.length > 20) {
+            activeContractsChangeHistory.shift();
+            activeContractsChartLabels.shift();
+          }
+          activeContractsChart.update();
+        }
+      } catch (e) {
+        // api() already toasts
+      }
+    }
+
+    // ========= KPIs from real contracts (last 12 months) =========
+    async function loadSellerKPIs() {
+      const seller = (document.getElementById('sellerName')?.value || '').trim();
+      if (!seller || !window.Chart || !kpiChart) return;
+
+      const now = new Date();
+      const start = new Date(now);
+      start.setMonth(start.getMonth() - 11);
+
+      const qs = new URLSearchParams({
+        seller,
+        limit: '2000',
+        offset: '0',
+        start: start.toISOString()
+      });
+
+      try {
+        const res  = await api(`/contracts?${qs.toString()}`);
+        const rows = await res.json();
+
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const buckets = {};
+
+        for (let i = 0; i < 12; i++) {
+          const d = new Date(start);
+          d.setMonth(start.getMonth() + i);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          buckets[key] = {
+            label: `${monthNames[d.getMonth()]} '${String(d.getFullYear()).slice(-2)}`,
+            tons: 0,
+            notional: 0,
+            count: 0
+          };
+        }
+
+        for (const r of rows) {
+          if (!r.created_at) continue;
+          const d = new Date(r.created_at);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (!buckets[key]) continue;
+          const tons  = Number(r.weight_tons ?? 0);
+          const price = Number(r.price_per_ton ?? 0);
+          buckets[key].tons     += tons;
+          buckets[key].notional += tons * price;
+          buckets[key].count    += 1;
+        }
+
+        const labels       = [];
+        const tonsData     = [];
+        const notionalData = [];
+        const countData    = [];
+
+        const keysSorted = Object.keys(buckets).sort();
+        for (const k of keysSorted) {
+          const b = buckets[k];
+          labels.push(b.label);
+          tonsData.push(Number(b.tons.toFixed(2)));
+          notionalData.push(Number((b.notional / 1000).toFixed(2))); // $k
+          countData.push(b.count);
+        }
+
+        kpiChartLabels = labels;
+        kpiChart.data.labels = labels;
+        kpiChart.data.datasets[0].data = tonsData;
+        kpiChart.data.datasets[1].data = notionalData;
+        kpiChart.data.datasets[2].data = countData;
+        kpiChart.update();
+      } catch (e) {
+        // ignore; api() toasts
+      }
+    }
+
+    // ========= Trade log from real contracts =========
+    async function loadTradeLog() {
+      const seller = (document.getElementById('sellerName')?.value || '').trim();
+      if (!seller) return;
+
+      const tbody = document.querySelector('#trade-log-table tbody');
+      if (!tbody) return;
+
+      tbody.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">Loading…</td></tr>`;
+
+      try {
+        const qs = new URLSearchParams({ seller, limit: '50', offset: '0' });
+        const res  = await api(`/contracts?${qs.toString()}`);
+        const rows = await res.json();
+
+        if (!rows.length) {
+          tbody.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">No trades yet for this seller.</td></tr>`;
+          return;
+        }
+
+        const fmtUsd = (n) => '$' + Number(n || 0).toLocaleString(
+          undefined,
+          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+        );
+
+        rows.sort((a,b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+        tbody.innerHTML = rows.map(r => {
+          const tons  = Number(r.weight_tons ?? 0);
+          const price = Number(r.price_per_ton ?? 0);
+          const total = tons * price;
+          const when  = r.created_at ? _fmtDate(r.created_at) : '—';
+          return `
+            <tr>
+              <td>${when}</td>
+              <td>${r.material || ''}</td>
+              <td>${tons || ''}</td>
+              <td>${price || ''}</td>
+              <td>${fmtUsd(total)}</td>
+              <td>—</td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-muted text-center py-2">Failed to load: ${e.message || 'error'}</td></tr>`;
+      }
+    }
+
+    // ========= Metals table from reference_prices =========
+    async function loadMetalsOverview() {
+      const table = document.getElementById('metals-market-table');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      if (!tbody) return;
+
+      const symbols = [
+        { sym: 'COMEX_CU', label: 'COMEX Copper',    code: 'HGCOP' },
+        { sym: 'LME_AL',   label: 'LME Aluminum',    code: 'ALU'   },
+        { sym: 'COMEX_AU', label: 'COMEX Gold',      code: 'GC'    },
+        { sym: 'COMEX_AG', label: 'COMEX Silver',    code: 'SI'    },
+        { sym: 'COMEX_PA', label: 'COMEX Palladium', code: 'PA'    },
+      ];
+
+      try {
+        const rows = [];
+        for (const s of symbols) {
+          try {
+            const r  = await api(`/reference_prices/latest?symbol=${encodeURIComponent(s.sym)}`);
+            const j  = await r.json();
+            const px = Number(j.price || j.price_close || j.last || 0);
+            const ts = j.ts_market || j.as_of || '';
+            if (!px) continue;
+            rows.push({
+              symbol: s.code,
+              name:   s.label,
+              last:   px,
+              change: j.change ?? 0,
+              open:   j.open   ?? '',
+              high:   j.high   ?? '',
+              low:    j.low    ?? '',
+              vol:    j.volume ?? '',
+              time:   ts || '—'
+            });
+          } catch {
+            // skip bad row
+          }
+        }
+
+        if (!rows.length) return; // keep static demo if API fails
+
+        const fmtNum = (n, dp=2) =>
+          Number(n || 0).toLocaleString(
+            undefined,
+            { minimumFractionDigits: dp, maximumFractionDigits: dp }
+          );
+
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.symbol}</td>
+            <td>${r.name}</td>
+            <td>${fmtNum(r.last)}</td>
+            <td>${r.change >= 0 ? '+'+fmtNum(r.change) : fmtNum(r.change)}</td>
+            <td>${r.open || '—'}</td>
+            <td>${r.high || '—'}</td>
+            <td>${r.low  || '—'}</td>
+            <td>${r.vol  || '—'}</td>
+            <td>${r.time}</td>
+          </tr>
+        `).join('');
+      } catch {
+        // leave static rows alone on error
       }
     }
 
@@ -932,14 +1204,26 @@ onReady(async () => {
         const onSellerChange = async () => {
           offset = 0;
           refreshFinishedFromInputs();
-          try { await listContracts(); } catch {}
+          try {
+            await listContracts();
+            await loadActiveContractsSummary();
+            await loadSellerKPIs();
+            await loadTradeLog();
+          } catch {}
         };
         sellerInput.addEventListener('change', onSellerChange);
         sellerInput.addEventListener('blur', onSellerChange);
         sellerInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') onSellerChange(); });
       }
 
-      setTimeout(listContracts, 200);
+      setTimeout(() => {
+        try {
+          listContracts();
+          loadActiveContractsSummary();
+          loadSellerKPIs();
+          loadTradeLog();
+        } catch {}
+      }, 200);
     }
 
     async function uploadInvFile() {

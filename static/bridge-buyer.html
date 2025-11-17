@@ -84,6 +84,54 @@
     <!-- Timezone hint -->
     <div class="small text-muted mb-2" id="tzHint"></div>
 
+    <!-- Buyer overview: positions, BOLs, billing, market -->
+    <div class="row mb-3" id="buyerOverviewRow">
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">My Positions</h5>
+          <div class="small text-muted mb-2">
+            Contracts you have purchased and still hold.
+          </div>
+          <div id="buyerPositionsBody" class="small">
+            Loading positions…
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">My BOLs</h5>
+          <div class="small text-muted mb-2">
+            Recent Bills of Lading where you are the buyer.
+          </div>
+          <div id="buyerBolsBody" class="small">
+            Loading BOLs…
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="buyerSecondaryRow">
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">Plan &amp; Billing</h5>
+          <div id="buyerBillingBody" class="small">
+            Loading billing summary…
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">Market Snapshot</h5>
+          <div id="buyerMarketBody" class="small">
+            Loading market snapshot…
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /Buyer overview -->
+
     <!-- Controls -->
     <div class="d-flex gap-2 mb-3 align-items-end">
       <div class="flex-grow-1">
@@ -253,6 +301,22 @@
     // ---- Timezone toggle (UTC vs local) ----
     let useUTC = localStorage.getItem('buyer.useUTC') === '1';
 
+    // Buyer/member context (from bridgeUser blob set at login)
+    const storedUser = (() => {
+      try { return JSON.parse(localStorage.getItem('bridgeUser') || '{}'); }
+      catch { return {}; }
+    })();
+
+    // Best-effort mapping; adjust in backend or login writer if needed
+    let buyerKey  = storedUser.buyer  || storedUser.member || storedUser.org || storedUser.company || storedUser.username || '';
+    let memberKey = storedUser.member || storedUser.org    || storedUser.company || buyerKey || '';
+
+    function _formatTons(v){
+      const n = Number(v || 0);
+      if (!isFinite(n) || !n) return '—';
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
     function _fmtDate(d){
       const dt = new Date(d);
       return useUTC
@@ -282,6 +346,225 @@
     }
 
     function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+        // ---- Buyer-side widgets: positions, BOLs, billing, market ----
+
+    async function loadBuyerPositions(){
+      const body = document.getElementById('buyerPositionsBody');
+      if (!body) return;
+      if (!buyerKey) {
+        body.textContent = 'No buyer context detected. Log in again or contact support.';
+        return;
+      }
+      body.textContent = 'Loading positions…';
+      try{
+        const res = await api(`/buyer_positions?buyer=${encodeURIComponent(buyerKey)}`);
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0){
+          body.textContent = 'No open positions yet.';
+          return;
+        }
+        const ul = document.createElement('ul');
+        ul.className = 'list-unstyled mb-0';
+
+        rows.slice(0, 10).forEach(p => {
+          const li = document.createElement('li');
+          li.className = 'small mb-1';
+          const sym  = p.symbol || p.material || p.sku || 'Position';
+          const tons = _formatTons(p.net_tons ?? p.quantity_tons ?? p.weight_tons);
+          const avg  = Number(p.avg_price_per_ton ?? p.price_per_ton ?? p.last_price_per_ton ?? 0);
+          const avgStr = avg
+            ? `$${avg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/ton`
+            : '—';
+          const status = (p.status || p.side || '').toString();
+          li.textContent = `${sym} · ${tons} tons${avg ? ' @ ' + avgStr : ''}${status ? ' · ' + status : ''}`;
+          ul.appendChild(li);
+        });
+
+        body.innerHTML = '';
+        body.appendChild(ul);
+
+        if (rows.length > 10){
+          const more = document.createElement('div');
+          more.className = 'small text-muted mt-1';
+          more.textContent = `Showing first 10 of ${rows.length} positions.`;
+          body.appendChild(more);
+        }
+      }catch(e){
+        body.textContent = 'Could not load positions.';
+      }
+    }
+
+    async function loadBuyerBols(){
+      const body = document.getElementById('buyerBolsBody');
+      if (!body) return;
+      if (!buyerKey) {
+        body.textContent = 'No buyer context detected. Log in again or contact support.';
+        return;
+      }
+      body.textContent = 'Loading BOLs…';
+      try{
+        const res = await api(`/bols?buyer=${encodeURIComponent(buyerKey)}`);
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0){
+          body.textContent = 'No BOLs found for this buyer.';
+          return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-sm mb-0 align-middle';
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>BOL</th><th>Status</th><th>Weight (t)</th><th>Updated</th></tr>';
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        rows.slice(0, 10).forEach(b => {
+          const tr = document.createElement('tr');
+
+          const idCell = document.createElement('td');
+          idCell.textContent = b.id ?? b.bol_id ?? '—';
+
+          const statusCell = document.createElement('td');
+          statusCell.textContent = b.status || '—';
+
+          const wtCell = document.createElement('td');
+          wtCell.textContent = _formatTons(b.weight_tons ?? b.gross_tons ?? b.net_tons);
+
+          const ts = b.updated_at || b.delivered_at || b.created_at;
+          const tsCell = document.createElement('td');
+          tsCell.textContent = ts ? _fmtDate(ts) : '—';
+
+          tr.append(idCell, statusCell, wtCell, tsCell);
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        body.innerHTML = '';
+        body.appendChild(table);
+
+        if (rows.length > 10){
+          const more = document.createElement('div');
+          more.className = 'small text-muted mt-1';
+          more.textContent = `Showing first 10 of ${rows.length} BOLs.`;
+          body.appendChild(more);
+        }
+      }catch(e){
+        body.textContent = 'Could not load BOLs.';
+      }
+    }
+
+    async function loadBuyerBilling(){
+      const body = document.getElementById('buyerBillingBody');
+      if (!body) return;
+      if (!memberKey) {
+        body.textContent = 'No member context detected. Billing may not be available.';
+        return;
+      }
+      body.textContent = 'Loading billing summary…';
+      try{
+        const res = await api(`/billing/member_summary?member=${encodeURIComponent(memberKey)}`);
+        const j = await res.json();
+
+        const plan   = j.plan_name || j.plan || j.tier || '—';
+        const status = j.status || j.state || '';
+        const limitTons = j.contract_limit_tons ?? j.included_tons_per_month ?? null;
+        const usedTons  = j.used_tons_this_month ?? j.consumed_tons ?? null;
+        const nextInvoice = j.next_invoice_date || j.next_bill_at || '';
+        const lastAmt = j.last_invoice_amount ?? j.last_amount ?? null;
+        const cur = j.currency || 'USD';
+
+        const frag = document.createDocumentFragment();
+        const mkLine = (label, value) => {
+          if (value == null || value === '') return;
+          const div = document.createElement('div');
+          div.className = 'small';
+          div.textContent = `${label}: ${value}`;
+          frag.appendChild(div);
+        };
+
+        mkLine('Plan', plan);
+        mkLine('Status', status);
+        if (limitTons != null){
+          mkLine('Tons/month included', _formatTons(limitTons));
+        }
+        if (usedTons != null){
+          mkLine('Tons used this month', _formatTons(usedTons));
+        }
+        if (nextInvoice){
+          mkLine('Next invoice', nextInvoice);
+        }
+        if (lastAmt != null){
+          mkLine('Last invoice amount', `${cur} ${Number(lastAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+        }
+
+        if (!frag.childNodes.length){
+          mkLine('Billing', 'No billing summary available.');
+        }
+
+        body.innerHTML = '';
+        body.appendChild(frag);
+      }catch(e){
+        body.textContent = 'Could not load billing summary.';
+      }
+    }
+
+    async function loadMarketSnapshot(){
+      const body = document.getElementById('buyerMarketBody');
+      if (!body) return;
+      body.textContent = 'Loading market snapshot…';
+      try{
+        const [idxRes, cuRes] = await Promise.allSettled([
+          api('/indices/latest'),
+          api('/prices/copper_last')
+        ]);
+
+        const lines = [];
+
+        if (idxRes.status === 'fulfilled'){
+          const j = await idxRes.value.json();
+          const primary = Array.isArray(j) ? j[0] : j;
+          if (primary){
+            const name = primary.name || primary.index || 'Scrap Index';
+            const val  = primary.value ?? primary.level ?? null;
+            if (val != null){
+              lines.push(`${name}: ${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+            }
+          }
+        }
+
+        if (cuRes.status === 'fulfilled'){
+          const j = await cuRes.value.json();
+          const last = Number(j.last ?? j.price ?? j.value ?? 0);
+          const chg  = Number(j.change ?? j.change_abs ?? 0);
+          if (last){
+            let s = `COMEX Copper: $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb`;
+            if (chg){
+              s += ` (${chg > 0 ? '+' : ''}${chg.toFixed(4)})`;
+            }
+            lines.push(s);
+          }
+        }
+
+        if (!lines.length){
+          body.textContent = 'No market data available.';
+          return;
+        }
+
+        body.innerHTML = '';
+        const ul = document.createElement('ul');
+        ul.className = 'list-unstyled mb-0';
+        for (const l of lines){
+          const li = document.createElement('li');
+          li.className = 'small mb-1';
+          li.textContent = l;
+          ul.appendChild(li);
+        }
+        body.appendChild(ul);
+      }catch(e){
+        body.textContent = 'Could not load market data.';
+      }
+    }
+    // ---- /Buyer-side widgets ----
 
     function _syncQuery(params){
       const u = new URL(location.href);
@@ -431,6 +714,9 @@
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
         loadOpenContracts();
+        // keep buyer widgets in sync after purchase
+        loadBuyerPositions();
+        loadBuyerBols();
       } catch(e) {
         // api() already toasted details
         toast('Purchase failed');
@@ -510,13 +796,22 @@
   
     // Initial load + keep refreshing in the background 
     loadOpenContracts();
+    onReady(() => {
+      // Buyer-facing widgets
+      loadBuyerPositions();
+      loadBuyerBols();
+      loadBuyerBilling();
+      loadMarketSnapshot();
+    });
 
-    // Refresh every 45s, but do NOT clear the table first.
+    // Refresh every 5 minutes, but do NOT clear the table first.
     setInterval(() => {
       if (!paused && !document.hidden) {
         loadOpenContracts();
+        // Light refresh of market snapshot; positions/BOLs/billing can stay as-once per load
+        loadMarketSnapshot();
       }
-    }, 45000);
+    }, 300000);
   </script>
 
   <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
