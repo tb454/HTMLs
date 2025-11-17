@@ -438,9 +438,13 @@ onReady(async function(){
 <script nonce="{{NONCE}}">
 (async function(){
   try {
-    const res = await fetch('/vendor_quotes/latest', { credentials: 'same-origin' });
+    // 1) Use the same API helper (auth + CSRF + 401 → login)
+    const res  = await api('/vendor_quotes/latest');
     const rows = await res.json();
+
     const tbody = document.querySelector('#vendor-latest tbody');
+    if (!tbody) return;
+
     tbody.innerHTML = rows.map(r => `
       <tr>
         <td>${r.vendor||''}</td>
@@ -451,7 +455,24 @@ onReady(async function(){
         <td>${r.sheet_date||''}</td>
       </tr>`).join('');
 
-    // quick material average chart (top 10 by avg $/lb)
+    // 2) Wait for Chart.js to exist 
+    if (!window.Chart) {
+      let tries = 0;
+      await new Promise((resolve) => {
+        const iv = setInterval(() => {
+          if (window.Chart || tries++ > 100) { // ~3s max (100 * 30ms)
+            clearInterval(iv);
+            resolve();
+          }
+        }, 30);
+      });
+    }
+    if (!window.Chart) {
+      console.warn('Chart.js still unavailable; skipping vendor chart.');
+      return;
+    }
+
+    // 3) Aggregate vendor sheet into avg $/lb per material
     const agg = {};
     for (const r of rows) {
       if (r.unit_raw && ['LB','LBS','POUND','POUNDS',''].includes(String(r.unit_raw).toUpperCase()) && r.price_per_lb != null) {
@@ -460,22 +481,45 @@ onReady(async function(){
       }
     }
     const labels = [];
-    const data = [];
-    Object.entries(agg).forEach(([mat, arr])=>{
-      const avg = arr.reduce((a,b)=>a+b,0)/arr.length;
-      labels.push(mat); data.push(+avg.toFixed(4));
+    const data   = [];
+    Object.entries(agg).forEach(([mat, arr]) => {
+      const avg = arr.reduce((a,b)=>a+b,0) / arr.length;
+      labels.push(mat);
+      data.push(+avg.toFixed(4));
     });
-    // top 10
-    const idx = data.map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,10).map(x=>x[1]);
-    const topLabels = idx.map(i=>labels[i]);
-    const topData = idx.map(i=>data[i]);
 
-    new Chart(document.getElementById('vendorChart').getContext('2d'), {
+    // Top 10 by price
+    const idx = data
+      .map((v,i)=>[v,i])
+      .sort((a,b)=>b[0]-a[0])
+      .slice(0,10)
+      .map(x=>x[1]);
+    const topLabels = idx.map(i=>labels[i]);
+    const topData   = idx.map(i=>data[i]);
+
+    const canvas = document.getElementById('vendorChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    new Chart(ctx, {
       type: 'line',
-      data: { labels: topLabels, datasets: [{ label: 'Avg $/lb (latest)', data: topData }] },
-      options: { responsive: true, scales: { y: { beginAtZero: false } } }
+      data: {
+        labels: topLabels,
+        datasets: [
+          { label: 'Avg $/lb (latest)', data: topData }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: false }
+        }
+      }
     });
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error(e);
+  }
 })();
 </script>
 
@@ -740,9 +784,9 @@ onReady(async function(){
     const $ = (id)=>document.getElementById(id);
     const qs = new URLSearchParams(location.search);
 
-    // Top-level pager (next to Tons table)
-    const prevBtn = document.getElementById("prevBtn");
-    const nextBtn = document.getElementById("nextBtn");
+    // Pager buttons specifically for Contracts tab
+    const cPrevBtn = document.getElementById("cPrev");
+    const cNextBtn = document.getElementById("cNext");
 
     // state
     let cLimit  = +(qs.get("c_limit")  || 25);
@@ -839,21 +883,32 @@ onReady(async function(){
     }
 
     // wire
-    $("cPrev")?.addEventListener("click", ()=>{ cOffset = Math.max(0, cOffset - cLimit); loadContracts(); });
-    $("cNext")?.addEventListener("click", ()=>{ cOffset = cOffset + cLimit; loadContracts(); });
-    $("cApply")?.addEventListener("click", ()=>{ cOffset = 0; loadContracts(); });
+    cPrevBtn?.addEventListener("click", ()=>{
+      cOffset = Math.max(0, cOffset - cLimit);
+      loadContracts();
+    });
+    cNextBtn?.addEventListener("click", ()=>{
+      cOffset = cOffset + cLimit;
+      loadContracts();
+    });
+    $("cApply")?.addEventListener("click", ()=>{
+      cOffset = 0;
+      loadContracts();
+    });
     $("cClear")?.addEventListener("click", ()=>{
       if ($("cStatus")) $("cStatus").value = "all";
       if ($("cYard"))   $("cYard").value   = "";
       if ($("cFrom"))   $("cFrom").value   = "";
       if ($("cTo"))     $("cTo").value     = "";
-      cOffset = 0; loadContracts();
+      cOffset = 0;
+      loadContracts();
     });
-    // only fetch when the tab is shown
+
+    // only fetch when the Contracts tab is shown
     const tab = document.getElementById("contracts-tab");
     tab?.addEventListener("shown.bs.tab", loadContracts);
 
-    // if Contracts is the default active (rare), load immediately
+    // if Contracts pane is already active (deep link), load immediately
     if (document.getElementById("contracts-pane")?.classList.contains("show")) {
       loadContracts();
     }
