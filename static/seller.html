@@ -101,7 +101,7 @@
         <div class="card-custom">
           <div><strong>Active Contracts</strong></div>
           <div id="active-contracts-secured">0 Secured</div>
-          <div id="active-contracts-margin">Margin: $0.00</div>
+          <div id="active-contracts-margin">Notional: $0.00</div>
           <div id="active-contracts-change">Total Change: $0.00</div>
           <div class="chart-container h-220">
             <canvas id="activeContractsChart"></canvas>
@@ -614,7 +614,7 @@ onReady(async () => {
     let activeContractsChart, finishedGoodsChart, kpiChart;
     const activeContractsChangeHistory = [], activeContractsChartLabels = [];
     let finishedGoodsChartLabels = [], finishedGoodsChartData = [];
-    let kpiChartLabels = [], kpiChartData = [];
+    let kpiChartLabels = [];
 
             onReady(() => {
       // ensure buttons are wired:

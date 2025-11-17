@@ -80,7 +80,7 @@ document.getElementById("loginForm").addEventListener("submit", async function (
   loginBtn.disabled = true; loginBtn.textContent = "Signing in…";
 
   try {
-    const res = await api("/login" + (next ? `?next=${encodeURIComponent(next)}` : ""), {
+    const res = await api("/login", {
       method: "POST",
       body: JSON.stringify({ username, password })
     });
@@ -98,15 +98,26 @@ document.getElementById("loginForm").addEventListener("submit", async function (
     if (role === "yard") role = "seller";
     localStorage.setItem("bridgeUser", JSON.stringify({ role }));
 
-    // Prefer server-provided redirect
-    if (data.redirect) { window.location.href = data.redirect; return; }
+    // 1) If ?next= is present (e.g. /trader), always honor that first,
+    //    but only if it's an internal path
+    let target = null;
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      target = next;
+    }
 
-    // If server didn't redirect, honor ?next= first
-    if (next) { window.location.href = next; return; }
+    // 2) Else, prefer server-provided redirect
+    if (!target && data.redirect) {
+      target = data.redirect;
+    }
 
-    // Fallback by role
-    window.location.href = role === "admin" ? "/admin"
-                         : role ? `/${role}` : "/buyer";
+    // 3) Else, fallback by role
+    if (!target) {
+      target = role === "admin" ? "/admin"
+            : role ? `/${role}` : "/buyer";
+    }
+
+    window.location.href = target;
+    
   } catch (err) {
     errBox.textContent = "Network error. Please try again.";
     errBox.classList.remove("hidden");

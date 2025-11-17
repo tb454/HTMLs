@@ -544,8 +544,41 @@ async def ice_status():
 
 # ---- Trader page ----
 @app.get("/trader", include_in_schema=False)
-async def _trader_page():
-    return FileResponse("static/trader.html")
+async def trader_page(request: Request):
+    """
+    Dynamic Trader page, same pattern as /buyer, /seller, /admin:
+    - Injects CSP nonce into {{NONCE}}
+    - Mints XSRF-TOKEN cookie for GET → POST flows
+    """
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
+    html = _TRADER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
+
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV", "").lower() == "production"
+
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob: https://*.stripe.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-{nonce}'; "
+        "style-src-attr 'self'; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
+        "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
+        "form-action 'self'"
+    )
+
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    resp.set_cookie(
+        "XSRF-TOKEN",
+        token,
+        httponly=False,
+        samesite="lax",
+        secure=prod,
+        path="/",
+    )
+    return resp
 
 trader_router = APIRouter(prefix="/trader", tags=["Trader"])
 
@@ -3365,6 +3398,26 @@ async def billing_member_summary(
     }
 # ----- /Billing plans + member summary -----
 
+# ------- billing member alias -----
+from typing import Optional
+from fastapi import Query
+
+@app.get(
+    "/billing/member_summary",
+    tags=["Billing"],
+    summary="Alias to /fees/member/summary"
+)
+async def billing_member_summary_alias(
+    member: str = Query(..., description="Tenant/org key used in member_plans"),
+    month: Optional[str] = Query(
+        None,
+        description="Billing month in YYYY-MM; defaults to current calendar month.",
+    ),
+):
+    # reuse the already-implemented logic
+    return await billing_member_summary(member=member, month=month)
+# ------- billing member alias -----
+
 # ----- billing contacts and email logs -----
 @startup
 async def _ensure_billing_contacts_and_email_logs():
@@ -4780,7 +4833,7 @@ async def root(request: Request):
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
 
-# --- Dynamic buyer page with per-request nonce + strict CSP ---
+# --- Dynamic pages with per-request nonce + strict CSP ---
 with open("static/bridge-buyer.html", "r", encoding="utf-8") as f:
     _BUYER_HTML_TEMPLATE = f.read()
 
@@ -4790,6 +4843,8 @@ with open("static/seller.html", "r", encoding="utf-8") as f:
 with open("static/bridge-admin-dashboard.html", "r", encoding="utf-8") as f:
     _ADMIN_HTML_TEMPLATE = f.read()
 
+with open("static/trader.html", "r", encoding="utf-8") as f:
+    _TRADER_HTML_TEMPLATE = f.read()
 
 @app.get("/buyer", include_in_schema=False)
 async def buyer_page_dynamic(request: Request):

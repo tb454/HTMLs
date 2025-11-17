@@ -514,7 +514,7 @@
       body.textContent = 'Loading market snapshot…';
       try{
         const [idxRes, cuRes] = await Promise.allSettled([
-          api('/indices/latest'),
+          api('/indices/latest?symbol=BR-CU-#1'),
           api('/prices/copper_last')
         ]);
 

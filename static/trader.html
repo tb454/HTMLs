@@ -5,6 +5,42 @@
   <meta http-equiv="x-ua-compatible" content="ie=edge"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Trader</title>
+
+<script nonce="{{NONCE}}">
+  function onReady(fn){
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn);
+    } else {
+      try { fn(); } catch(e){ console.error(e); }
+    }
+  }
+
+  (async () => {
+    try {
+      // warm CSRF + session
+      await fetch('/health', { credentials: 'include' });
+
+      const r = await fetch('/me', {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!r.ok) throw new Error('no session');
+      const me = await r.json(); // { username, role }
+
+      const role = (me.role || '').toLowerCase();
+      // For now: Trader = admin-only
+      if (role !== 'admin') {
+        const next = encodeURIComponent('/trader');
+        location.href = `/static/bridge-login.html?next=${next}`;
+        return;
+      }
+    } catch {
+      const next = encodeURIComponent('/trader');
+      location.href = `/static/bridge-login.html?next=${next}`;
+    }
+  })();
+</script>
+
 </head>
 <body class="min-h-screen" style="font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;">
 
@@ -21,7 +57,7 @@
         <a class="nav-link" href="/static/admin-compliance.html">Compliance</a>
         <a class="nav-link" href="/static/admin-tenants.html">Tenants</a>
         <a class="nav-link" href="/static/indices.html">Indices</a>
-        <a class="nav-link active" href="/static/trader.html">Trader</a>
+        <a class="nav-link active" href="/trader">Trader</a>
       </nav>
     </div>
   </header>
@@ -195,10 +231,42 @@
   <script defer nonce="{{NONCE}}">
   (function(){
     // helpers
-    async function api(path){
-      const r = await fetch(path, { credentials: 'same-origin' });
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      return r.json();
+    function _cookie(name){
+      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,'\\$1')+'=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+
+    async function api(path, opts = {}){
+      const url    = path.startsWith('http') ? path : path;  // relative → same origin
+      const method = (opts.method || 'GET').toUpperCase();
+      const headers = { 'Accept':'application/json', ...(opts.headers || {}) };
+
+      // CSRF for unsafe methods
+      if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
+        headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
+      }
+
+      const res = await fetch(url, {
+        credentials: 'include',
+        ...opts,
+        headers
+      });
+
+      if (res.status === 401){
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = `/static/bridge-login.html?next=${next}`;
+        throw new Error('Unauthorized');
+      }
+
+      if (!res.ok){
+        let msg = 'Request failed';
+        try { msg = (await res.clone().json()).detail || msg; }
+        catch { try { msg = await res.clone().text() || msg; } catch(_) {}
+        }
+        throw new Error(msg);
+      }
+
+      try { return await res.json(); } catch { return {}; }
     }
 
     const symbolSel = document.getElementById('symbolSel');
@@ -264,7 +332,14 @@
         drawChart(rows.slice().reverse()); // ascending for chart aesthetics
         if(rows.length){
           const last = rows[0];
-          idxMeta.textContent = `Latest: ${last.price} @ ${last.ts} (region: ${last.region})`;
+          if (rows.length) {
+            const last = rows[0];
+            const px = last.close_price ?? last.price;
+            const ts = last.dt ?? last.date ?? last.ts ?? '';
+            idxMeta.textContent = `Latest: ${px} @ ${ts}`;
+          } else {
+            idxMeta.textContent = 'No data for this symbol yet.';
+          }
         } else {
           idxMeta.textContent = 'No data for this symbol yet.';
         }
@@ -278,10 +353,17 @@
       quoteOut.textContent = '';
       quoteErr.textContent = '';
       const material = (matInput.value || '').trim();
-      if(!material){ quoteErr.textContent = 'Enter a material name.'; return; }
+      if(!material){ 
+        quoteErr.textContent = 'Enter a material name.'; 
+        return; 
+      }
       try {
-        const q = await api(`/pricing/quote?material=${encodeURIComponent(material)}`);
-        quoteOut.textContent = `${q.material}: $${q.price_per_lb.toFixed ? q.price_per_lb.toFixed(4) : q.price_per_lb} per lb (source: ${q.source})`;
+        const q = await api(
+          `/pricing/quote?category=${encodeURIComponent('Misc Product')}` +
+          `&material=${encodeURIComponent(material)}`
+        );
+        const px = Number(q.price_per_lb);
+        quoteOut.textContent = `${q.material}: $${px.toFixed(4)} per lb (source: ${q.source})`;
       } catch(e){
         quoteErr.textContent = 'No quote found (try a different material or ensure reference/vendor data is loaded).';
       }
@@ -348,21 +430,16 @@
 
       try {
         setOrdMsg('Submitting…', true);
-        const r = await fetch('/clob/orders', {
+
+        const j = await api('/clob/orders', {
           method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': (crypto.randomUUID && crypto.randomUUID()) || String(Date.now())
+          },
           body: JSON.stringify(body)
         });
-        if (!r.ok){
-          let detail = 'HTTP ' + r.status;
-          try {
-            const j = await r.json();
-            detail = j.detail || j.error || detail;
-          } catch(_) {}
-          throw new Error(detail);
-        }
-        const j = await r.json();
+
         const oid = j.order_id || j.id || 'ok';
         setOrdMsg(`Order accepted (ID: ${oid})`, true);
 
