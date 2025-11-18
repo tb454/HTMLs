@@ -15189,7 +15189,7 @@ async def _flywheel_anomaly_cron():
                                 "s": symbol,
                                 "d": as_of,
                                 "sc": score,
-                                "feat": json.dumps(features),
+                                "features": json.dumps(features),
                             },
                         )
                     except Exception as e:
