@@ -102,7 +102,7 @@ async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
   showSkeleton(tbody, 8);
   try{
-    universe = await getJSON('/indices/universe');
+    universe = await getJSON('/indices/universe?page=1&page_size=500');
     const note = document.getElementById('detailNote');
     if (note){
       note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d. Universe loaded ' +

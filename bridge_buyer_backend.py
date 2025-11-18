@@ -3013,6 +3013,136 @@ app.include_router(inventory_log_router)
 app.include_router(keys_router)
 # ----- Integrations, Logs, Keys -----
 
+# ----- Materials Benchmark ------
+from pydantic import BaseModel
+from decimal import Decimal
+from typing import List, Optional
+
+class MaterialBenchmark(BaseModel):
+    symbol: str
+    name: str
+    category: str
+    unit: str
+    last: Decimal
+    change: Optional[Decimal] = None
+
+class MaterialBenchmarkPage(BaseModel):
+    items: List[MaterialBenchmark]
+    page: int
+    page_size: int
+    total: int
+
+from fastapi import APIRouter, Query
+from math import ceil
+
+benchmarks_router = APIRouter(prefix="/benchmarks", tags=["Benchmarks"])
+
+@benchmarks_router.get(
+    "/materials",
+    response_model=MaterialBenchmarkPage,
+    summary="Paged material benchmarks (BR-Index)",
+    description="Returns derived benchmark prices for all materials using internal pricing logic."
+)
+async def get_material_benchmarks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    vendor: Optional[str] = Query(None, description="Optional filter, e.g. 'C&Y Global'")
+):
+    """
+    - uses vendor_quotes (Jimmy sheets + others)
+    - latest quote per material
+    - change vs previous quote
+    - prices converted to USD/ton from normalized $/lb
+    """
+    # filter by Jimmy only if you ever want that:
+    vendor_filter = ""
+    params = {
+        "limit": page_size,
+        "offset": (page - 1) * page_size,
+    }
+    if vendor:
+        vendor_filter = "WHERE vendor = :vendor"
+        params["vendor"] = vendor
+
+    # latest + previous per material
+    latest_cte = f"""
+    WITH latest AS (
+      SELECT
+        vendor,
+        material,
+        category,
+        price_per_lb,
+        inserted_at,
+        lag(price_per_lb) OVER (
+          PARTITION BY vendor, material ORDER BY inserted_at
+        ) AS prev_price
+      FROM vendor_quotes
+      {vendor_filter}
+    ),
+    latest_only AS (
+      SELECT DISTINCT ON (material)
+        material,
+        category,
+        price_per_lb,
+        prev_price
+      FROM latest
+      ORDER BY material, inserted_at DESC
+    )
+    """
+
+    # total count for pagination
+    total_query = latest_cte + """
+    SELECT COUNT(*) AS total FROM latest_only;
+    """
+
+    # page data
+    page_query = latest_cte + """
+    SELECT
+      material,
+      category,
+      price_per_lb,
+      prev_price
+    FROM latest_only
+    ORDER BY material
+    LIMIT :limit OFFSET :offset;
+    """
+
+    total_row = await database.fetch_one(total_query, params)
+    total = int(total_row["total"]) if total_row and total_row["total"] is not None else 0
+
+    rows = await database.fetch_all(page_query, params)
+
+    items: List[MaterialBenchmark] = []
+    for r in rows:
+        price_lb = r["price_per_lb"]
+        prev_lb = r["prev_price"]
+
+        # 🔁 DROP YOUR REAL PRICING FORMULA HERE IF YOU WANT
+        # price_lb = await compute_internal_price_for_material(r["material"])
+
+        price_ton = (price_lb * Decimal("2000")).quantize(Decimal("0.01"))
+        change_ton = None
+        if prev_lb is not None:
+            change_ton = ((price_lb - prev_lb) * Decimal("2000")).quantize(Decimal("0.01"))
+
+        items.append(MaterialBenchmark(
+            symbol=r["material"],      # you can swap to a short code later
+            name=r["material"],
+            category=r["category"],
+            unit="USD/ton",
+            last=price_ton,
+            change=change_ton
+        ))
+
+    return MaterialBenchmarkPage(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
+app.include_router(benchmarks_router)
+# ------ Materials Benchmark ------
+
 # ----- Products & Settlements -----
 products_router    = APIRouter(prefix="/products", tags=["Products"])
 settlements_router = APIRouter(prefix="/settlements", tags=["Settlements"])

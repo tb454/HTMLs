@@ -190,6 +190,15 @@
           <button class="btn btn-primary btn-sm" id="btnPullRefs">Pull Reference Prices</button>
           <button class="btn btn-primary btn-sm" id="btnBuildIndices">Build Today's Indices</button>
           <button class="btn btn-primary btn-sm" id="btnRunForecasts">Run Forecasts</button>
+
+          <div class="btn-group btn-group-sm ms-2" id="manualRefGroup" aria-label="Manual reference prices">
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="COMEX_CU">Cu</button>
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="LME_AL">Al</button>
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="COMEX_AU">Au</button>
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="COMEX_AG">Ag</button>
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="COMEX_PL">Pt</button>
+            <button class="btn btn-outline-secondary" type="button" data-ref-symbol="COMEX_PA">Pd</button>
+          </div>
         </div>
         <div id="idxCtlMsg" class="mt-2 small text-muted"></div>
       </div>
@@ -242,6 +251,55 @@
             if (j && j.ok === false) toast(JSON.stringify(j));
           }).catch(e=> el.textContent = '✗ Failed: ' + (e?.message || 'error'));
         };
+
+        // Manual reference price overrides (Cu/Al/Au/Ag/Pt/Pd)
+        (function wireManualRefs(){
+          const group = document.getElementById('manualRefGroup');
+          if (!group) return;
+
+          const LABELS = {
+            COMEX_CU: 'Copper (COMEX_CU)',
+            LME_AL:   'Aluminum (LME_AL)',
+            COMEX_AU: 'Gold (COMEX_AU)',
+            COMEX_AG: 'Silver (COMEX_AG)',
+            COMEX_PL: 'Platinum (COMEX_PL)',
+            COMEX_PA: 'Palladium (COMEX_PA)'
+          };
+
+          group.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('button[data-ref-symbol]');
+            if (!btn) return;
+            if (btn.dataset.busy === '1') return;
+
+            const symbol = btn.getAttribute('data-ref-symbol');
+            const label  = LABELS[symbol] || symbol;
+
+            const raw = prompt(`Enter official close for ${label} in USD/lb:`);
+            if (!raw) return;
+
+            const price = Number(raw);
+            if (!Number.isFinite(price) || price <= 0) {
+              toast('Invalid price.');
+              return;
+            }
+
+            const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+            btn.dataset.busy = '1';
+
+            try {
+              await api(`/reference_prices/override_close?symbol=${encodeURIComponent(symbol)}&d=${today}&price=${encodeURIComponent(price)}&source=manual_admin`, {
+                method: 'POST'
+              });
+              toast(`✓ ${label} set to ${price.toFixed(4)} USD/lb (manual)`);
+              const el = document.getElementById('idxCtlMsg');
+              if (el) el.textContent = `Manual override: ${label} = ${price.toFixed(4)} USD/lb. Click "Build Today's Indices" to propagate.`;
+            } catch (e) {
+              toast(e?.message || `Failed to set ${label}.`);
+            } finally {
+              btn.dataset.busy = '0';
+            }
+          });
+        })();
       </script>
 
 <h5 class="mt-3">Tons / Month by Yard</h5>

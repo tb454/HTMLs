@@ -109,20 +109,22 @@
         </div>
         <div class="card-custom">
           <div class="d-flex align-items-center justify-content-center gap-2">
-            <strong class="me-2">Market Snapshot</strong>
-            <span id="copperBaseBadge" class="badge bg-info text-dark"></span>
+            <strong class="me-2">Market Snapshot (Top 10)</strong>
           </div>
-          <div id="price-Copper">Copper: —</div>
-          <div id="price-BushelingSteel">Busheling Steel: —</div>
-          <div id="price-Brass">Brass: —</div>
-          <div id="price-Aluminum">Aluminum: —</div>
-          <div id="price-ElectricMotors">Electric Motors: —</div>
-          <div id="price-InsulatedCopperWire">Insulated Copper Wire: —</div>
-          <div id="price-Lead">Lead: —</div>
-          <div id="price-HMSSteel2">HMS Steel #2: —</div>
-          <div id="price-CuRadiator50Cu50Brass">Cu Radiator (50Cu/50Brass): —</div>
-          <div id="price-Carbide">Carbide: —</div>
-          <div id="price-StainlessSteel">Stainless Steel: —</div>
+          <div class="table-responsive mt-2">
+            <table class="table table-sm mb-0">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Material</th>
+                  <th class="text-end">Last (USD/ton)</th>
+                </tr>
+              </thead>
+              <tbody id="market-snapshot-body">
+                <!-- filled by JS -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -436,11 +438,11 @@
       </table>
     </section>
 
-    <!-- Metals Market Overview (static demo) -->
+    <!--BR-Index-->
     <section class="section">
-      <div class="section-title">Metals Market Overview</div>
+      <div class="section-title">BR-Index</div>
       <table id="metals-market-table" class="table table-striped table-hover align-middle">
-        <caption class="visually-hidden">Metals market overview</caption>
+        <caption class="visually-hidden">BR-Index Overview</caption>
         <thead class="sticky"><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
         <tbody>
           <tr><td>GCJ25</td><td>Gold (Apr '25)</td><td>2,953.25</td><td>-2.90</td><td>2,957.50</td><td>2,964.70</td><td>2,920.00</td><td>155,552</td><td>02/21/25</td></tr>
@@ -448,6 +450,34 @@
           <tr><td>HGG25</td><td>High Grade Copper (May '25)</td><td>4.6155</td><td>-0.0050</td><td>4,590.00</td><td>4,669.0</td><td>4,580.00</td><td>36,500</td><td>02/21/25</td></tr>
         </tbody>
       </table>
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Material</th>
+            <th>Category</th>
+            <th class="text-end">Last (USD/ton)</th>
+            <th class="text-end">Change</th>
+          </tr>
+        </thead>
+        <tbody id="materials-table-body">
+          <!-- rows will be filled by JS -->
+        </tbody>
+      </table>
+
+      <div class="d-flex justify-content-between align-items-center">
+        <span id="materials-page-label" class="small text-muted"></span>
+        <div>
+          <button id="materials-prev" class="btn btn-sm btn-outline-secondary me-1">Prev</button>
+          <button id="materials-next" class="btn btn-sm btn-outline-secondary">Next</button>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-end mt-2">
+        <a href="/static/materials-benchmarks.html" class="btn btn-link btn-sm">
+          View all materials
+        </a>
+      </div>
     </section>
 
     <!-- KPIs -->
@@ -527,6 +557,9 @@
     integrity="sha384-ENjdO4Dr2bkBIFxQpeoTz1HIcje39Wm4jDKdf19U8Y5nUj0v+0U5r2Xq5PW9KSkP"
     crossorigin="anonymous"
   ></script>
+
+  <!-- seller-specific helpers (BR-Index, snapshot, etc.) -->
+  <script defer nonce="{{NONCE}}" src="/static/seller.js"></script>
 
   <script nonce="{{NONCE}}">
     // endpoint + api + toast + health
@@ -667,6 +700,11 @@ onReady(async () => {
         loadSellerKPIs();
         loadTradeLog();
         loadMetalsOverview();
+        loadMarketSnapshot();          // top 10 card
+        loadMaterialBenchmarks(1);     // BR-Index table, 50 at a time
+        if (typeof initMaterialBenchmarksPaging === 'function') {
+          initMaterialBenchmarksPaging();
+        }
       } catch {}
       
       // Refresh summary + trade log every 60s when page visible
@@ -938,11 +976,11 @@ onReady(async () => {
       if (!tbody) return;
 
       const symbols = [
-        { sym: 'COMEX_CU', label: 'COMEX Copper',    code: 'HGCOP' },
-        { sym: 'LME_AL',   label: 'LME Aluminum',    code: 'ALU'   },
-        { sym: 'COMEX_AU', label: 'COMEX Gold',      code: 'GC'    },
-        { sym: 'COMEX_AG', label: 'COMEX Silver',    code: 'SI'    },
-        { sym: 'COMEX_PA', label: 'COMEX Palladium', code: 'PA'    },
+        { sym: 'BR-CU', label: 'Bare Bright Copper',    code: 'BBCOP' },
+        { sym: 'BR-AL',   label: 'Base Aluminum',    code: 'ALU'   },
+        { sym: 'BR-AU', label: 'Gold',      code: 'GC'    },
+        { sym: 'BR-AG', label: 'Silver',    code: 'SI'    },
+        { sym: 'BR-PA', label: 'Palladium', code: 'PA'    },
       ];
 
       try {
