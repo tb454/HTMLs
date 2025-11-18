@@ -28,12 +28,15 @@
       const me = await r.json(); // { username, role }
 
       const role = (me.role || '').toLowerCase();
-      // For now: Trader = admin-only
-      if (role !== 'admin') {
+      // Allowed roles for Trader view
+      const allowed = ['admin','buyer','seller','yard'];
+
+      if (!role || !allowed.includes(role)) {
         const next = encodeURIComponent('/trader');
         location.href = `/static/bridge-login.html?next=${next}`;
         return;
       }
+      // otherwise: logged in and allowed → stay on Trader
     } catch {
       const next = encodeURIComponent('/trader');
       location.href = `/static/bridge-login.html?next=${next}`;

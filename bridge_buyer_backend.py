@@ -4064,7 +4064,7 @@ async def finalize_subscription_from_session(sess: str, member: Optional[str] = 
         sub_id = (sub.get("id") if isinstance(sub, dict) else sub) or None
         if sub_id:
             await database.execute("""
-              ALTER TABLE IF NOT EXISTS member_plans
+              ALTER TABLE member_plans
               ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT
             """)
             await database.execute("""
@@ -10539,25 +10539,25 @@ async def _ensure_multitenant_columns():
         pass
 
     await run_ddl_multi("""
-    ALTER TABLE IF NOT EXISTS contracts
+    ALTER TABLE contracts
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS bols
+    ALTER TABLE bols
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS inventory_items
+    ALTER TABLE inventory_items
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS inventory_movements
+    ALTER TABLE inventory_movements
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS public.receipts
+    ALTER TABLE public.receipts
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS buyer_positions
+    ALTER TABLE buyer_positions
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
-    ALTER TABLE IF NOT EXISTS dossier_ingest_queue
+    ALTER TABLE dossier_ingest_queue
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
 
@@ -15081,9 +15081,9 @@ async def ml_anomaly(a: AnomIn):
         await database.execute(
             """
             INSERT INTO public.anomaly_scores(member, symbol, as_of, score, features)
-            VALUES (:m, :s, :d, :sc, :f::jsonb)
+            VALUES (:m, :s, :d, :sc, :feat::jsonb)
             """,
-            {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "f": json.dumps(a.features)},
+            {"m": a.member, "s": a.symbol, "d": a.as_of, "sc": score, "feat": json.dumps(a.features)},
         )
 
         if score > 0.85:
