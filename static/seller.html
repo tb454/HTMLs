@@ -441,15 +441,27 @@
     <!--BR-Index-->
     <section class="section">
       <div class="section-title">BR-Index</div>
+
       <table id="metals-market-table" class="table table-striped table-hover align-middle">
         <caption class="visually-hidden">BR-Index Overview</caption>
-        <thead class="sticky"><tr><th>Symbol</th><th>Contract Name</th><th>Last</th><th>Change</th><th>Open</th><th>High</th><th>Low</th><th>Volume</th><th>Time</th></tr></thead>
+        <thead class="sticky">
+          <tr>
+            <th>Symbol</th>
+            <th>Contract Name</th>
+            <th>Last</th>
+            <th>Change</th>
+            <th>Open</th>
+            <th>High</th>
+            <th>Low</th>
+            <th>Volume</th>
+            <th>Time</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr><td>GCJ25</td><td>Gold (Apr '25)</td><td>2,953.25</td><td>-2.90</td><td>2,957.50</td><td>2,964.70</td><td>2,920.00</td><td>155,552</td><td>02/21/25</td></tr>
-          <tr><td>ICWR25</td><td>Insulated Copper Wire (Apr '25)</td><td>23.95</td><td>+0.10</td><td>23.85</td><td>24.20</td><td>23.65</td><td>80,334</td><td>02/21/25</td></tr>
-          <tr><td>HGG25</td><td>High Grade Copper (May '25)</td><td>4.6155</td><td>-0.0050</td><td>4,590.00</td><td>4,669.0</td><td>4,580.00</td><td>36,500</td><td>02/21/25</td></tr>
+          <!-- Filled dynamically by loadMetalsOverview() using BR-Index data -->
         </tbody>
       </table>
+
       <table class="table table-sm align-middle">
         <thead>
           <tr>
