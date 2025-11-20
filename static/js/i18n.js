@@ -6,14 +6,25 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
-// Apply translations to any element with data-i18n-key="<key>"
+// Apply translations to any element with data-i18n="<key>"
 function applyTranslations(strings) {
   if (!strings || typeof strings !== "object") return;
-  document.querySelectorAll("[data-i18n-key]").forEach(el => {
-    const key = el.getAttribute("data-i18n-key");
+
+  // Text content
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
     const val = strings[key];
     if (typeof val === "string") {
       el.textContent = val;
+    }
+  });
+
+  // Placeholders (e.g., timezone input)
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+    const key = el.getAttribute("data-i18n-ph");
+    const val = strings[key];
+    if (typeof val === "string") {
+      el.setAttribute("placeholder", val);
     }
   });
 }

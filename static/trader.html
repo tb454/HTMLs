@@ -43,9 +43,27 @@
     }
   })();
 </script>
-
+  <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
+  <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
 </head>
 <body class="min-h-screen" style="font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;">
+
+  <!-- Locale strip -->
+  <div class="container mt-2 d-flex align-items-center gap-2 flex-wrap">
+    <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
+    <select id="lang-select" class="form-select form-select-sm w-auto">
+      <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
+    </select>
+    <label class="form-label m-0 ms-2" for="tz-select" data-i18n="timezone">Timezone</label>
+    <input id="tz-select" class="form-control form-control-sm w-220" list="tz-list" placeholder="America/Phoenix" data-i18n-ph="timezone"/>
+    <datalist id="tz-list">
+      <option value="America/Phoenix"></option><option value="America/New_York"></option>
+      <option value="America/Chicago"></option><option value="America/Los_Angeles"></option>
+      <option value="UTC"></option><option value="Europe/London"></option><option value="Asia/Shanghai"></option>
+    </datalist>
+    <button id="save-locale" class="btn btn-outline-secondary btn-sm ms-1"><span data-i18n="save">Save</span></button>
+    <small class="text-muted ms-auto" id="local-time"></small>
+  </div>
 
   <!-- Admin Navbar -->
   <header class="border-bottom mb-3 bg-light">
