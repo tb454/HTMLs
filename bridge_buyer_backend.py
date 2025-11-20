@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-import re, time as _t
+import re, time as _time_mod
 import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
@@ -428,7 +428,7 @@ async def prices_copper_last():
     Uses the async `database` client so it never depends on app.state.db_pool.
     Never throws a 500 – always falls back to a static default.
     """
-    now = _t.time()
+    now = _time_mod.time()
 
     # 0) L1 in-process cache (5-minute TTL)
     if _PRICE_CACHE["copper_last"] and now - _PRICE_CACHE["ts"] < PRICE_TTL_SEC:
@@ -5514,6 +5514,15 @@ async def _fetch_base(symbol: str):
         symbol,
     )
     return row
+# Customer-facing alias → backend reference symbol
+REF_SYMBOL_ALIASES = {
+    "BR-CU": "COMEX_CU",  # copper
+    "BR-AL": "LME_AL",    # aluminum
+    "BR-AU": "COMEX_AU",  # gold
+    "BR-AG": "COMEX_AG",  # silver
+    "BR-PA": "COMEX_PA",  # palladium
+    #  extend later as needed
+}
 
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
@@ -5595,8 +5604,13 @@ async def get_latest(symbol: str):
     """
     Prefer seeded CSV history first (source='seed_csv'), then fall back
     to any other source (scraper, manual, etc.), ordered by ts_market/ts_server.
-    This prevents bad scraper rows like price=1.0 from masking real data.
+    Supports customer-facing BR-* aliases (BR-CU, BR-AL, etc.) which map to
+    backend symbols like COMEX_CU, LME_AL.
     """
+    # Normalize & map BR-* → underlying reference symbol
+    requested = (symbol or "").upper()
+    backend_symbol = REF_SYMBOL_ALIASES.get(requested, requested)
+
     row = await app.state.db_pool.fetchrow(
         """
         SELECT symbol, price, ts_market, ts_server, source
@@ -5607,11 +5621,16 @@ async def get_latest(symbol: str):
           COALESCE(ts_market, ts_server) DESC
         LIMIT 1
         """,
-        symbol,
+        backend_symbol,
     )
     if not row:
         raise HTTPException(status_code=404, detail="No price yet for symbol")
-    return dict(row)
+
+    d = dict(row)
+    # Always return the customer-facing symbol if it was an alias,
+    # so the UI never sees COMEX/LME symbols.
+    d["symbol"] = requested
+    return d
 
 @router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
 async def pull_home():
