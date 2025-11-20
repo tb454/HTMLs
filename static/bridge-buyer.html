@@ -538,10 +538,13 @@
           const j = await cuRes.value.json();
           const last = Number(j.last ?? j.price ?? j.value ?? 0);
           const chg  = Number(j.change ?? j.change_abs ?? 0);
-          if (last){
-            let s = `COMEX Copper: $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb`;
-            if (chg){
-              s += ` (${chg > 0 ? '+' : ''}${chg.toFixed(4)})`;
+          if (!Number.isFinite(last) || !last) {
+            // nothing usable
+          } else {
+            let s = `BR-CU (Copper) $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb`;
+            if (Number.isFinite(chg) && chg !== 0) {
+              const sign = chg > 0 ? '+' : '';
+              s += ` (${sign}${chg.toFixed(4)})`;
             }
             lines.push(s);
           }

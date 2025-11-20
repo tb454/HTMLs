@@ -5638,11 +5638,11 @@ async def get_latest(symbol: str):
     if not row:
         raise HTTPException(status_code=404, detail="No price yet for symbol")
 
-    d = dict(row)
+    data = dict(row)
     # Always return the customer-facing symbol if it was an alias,
     # so the UI never sees COMEX/LME symbols.
-    d["symbol"] = requested
-    return d
+    data["symbol"] = requested
+    return data
 
 @router_prices.post("/pull_home", summary="Pull COMEX homepage snapshot (best-effort)")
 async def pull_home():
@@ -12249,7 +12249,15 @@ async def analytics_prices_over_time(material: str, window: str = "1M"):
     ORDER BY d
     """
     rows = await database.fetch_all(q, {"m": material, "days": days})
-    return [{"date": str(r["d"]), "avg_price": float(r["avg_price"]), "volume": float(r["volume_tons"])} for r in rows]
+    return [
+        {
+            "date": str(r["d"]),
+            "avg_price": float(r["avg_price"]) if r["avg_price"] is not None else 0.0,
+            "volume": float(r["volume_tons"] or 0)
+        }
+        for r in rows
+    ]
+
 
 @app.post("/indices/run", tags=["Indices"], summary="Refs + Vendor + Blended")
 async def indices_run():

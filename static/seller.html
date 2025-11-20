@@ -29,22 +29,39 @@
     try {
       // optional: warm cookies
       await fetch('/health', { credentials: 'include' });
-      const r = await fetch('/me', { credentials: 'include', headers: { 'Accept': 'application/json' }});
+      const r = await fetch('/me', {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
       if (!r.ok) throw new Error('no session');
       const me = await r.json(); // expect: { username, role }
       window.__bridgeUser = me;
-      if (!me?.role || !['seller','yard','admin','buyer'].includes((me.role||'').toLowerCase())) {
+
+      const role = (me.role || '').toLowerCase();
+      if (!role || !['seller', 'yard', 'admin', 'buyer'].includes(role)) {
         location.href = '/static/bridge-login.html';
         return;
       }
-      // UI role gates
+
+      // UI role gates + propagate into seller dashboard once DOM is ready
       onReady(() => {
-        const role = (me.role||'').toLowerCase();
         const userEl = document.getElementById('current-user');
         if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
-        document.querySelectorAll('[data-role="admin"]').forEach(el => el.hidden = role!=='admin');
-        document.querySelectorAll('[data-role="seller"]').forEach(el => el.hidden = !(role==='seller'||role==='admin'||role==='yard'));
-        document.querySelectorAll('[data-role="buyer"]').forEach(el => el.hidden = role!=='buyer');
+
+        document.querySelectorAll('[data-role="admin"]').forEach(el => {
+          el.hidden = (role !== 'admin');
+        });
+        document.querySelectorAll('[data-role="seller"]').forEach(el => {
+          el.hidden = !(role === 'seller' || role === 'admin' || role === 'yard');
+        });
+        document.querySelectorAll('[data-role="buyer"]').forEach(el => {
+          el.hidden = (role !== 'buyer');
+        });
+
+        // Once the seller dashboard wiring exists, kick it so the page isn't "dead"
+        if (window.wireSellerUI) {
+          try { window.wireSellerUI(); } catch (e) { console.error(e); }
+        }
       });
     } catch {
       location.href = '/static/bridge-login.html';
@@ -680,12 +697,10 @@ onReady(async () => {
     let finishedGoodsChartLabels = [], finishedGoodsChartData = [];
     let kpiChartLabels = [];
 
-            onReady(() => {
-      // ensure buttons are wired:
-      try { wireSellerUI(); } catch {}
-
-      const hd = document.getElementById('header-date'); if (hd) hd.textContent = _fmtDate(new Date());
-
+    onReady(() => {
+      const hd = document.getElementById('header-date');
+      if (hd) hd.textContent = _fmtDate(new Date());
+      
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
@@ -1241,14 +1256,31 @@ onReady(async () => {
     }
 
     function wireSellerUI() {
-      const userEl = document.getElementById("current-user");
+      const userEl   = document.getElementById("current-user");
       const sellerEl = document.getElementById("sellerName");
-      if (userEl && sellerEl) {
-        const u = userEl.textContent?.replace("User:", "").trim();
-        if (u && u !== "Guest") sellerEl.value = u;
+
+      // Prefer the session user from /me if available
+      let username = "";
+      try {
+        if (window.__bridgeUser && window.__bridgeUser.username) {
+          username = String(window.__bridgeUser.username).trim();
+        } else if (userEl && userEl.textContent) {
+          const raw = userEl.textContent.replace("User:", "").trim();
+          if (raw && raw.toLowerCase() !== "guest") {
+            username = raw;
+          }
+        }
+      } catch (e) {
+        console.warn("wireSellerUI username resolve failed", e);
       }
 
+      if (sellerEl && username && !sellerEl.value) {
+        sellerEl.value = username;
+      }
+
+      // Wire buttons/filters once (idempotent)
       document.getElementById("createContractBtn")?.addEventListener("click", createContract);
+
       document.getElementById("refreshContractsBtn")?.addEventListener("click", () => {
         offset = 0;
         _syncQuery({
@@ -1259,18 +1291,38 @@ onReady(async () => {
         });
         listContracts();
       });
-      document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
-        document.getElementById("filterStatus").value = "";
-        document.getElementById("filterStart").value  = "";
-        document.getElementById("filterEnd").value    = "";
-        offset = 0; _syncQuery({status:'',start:'',end:'',page:1}); listContracts();
-      });
-      document.getElementById("prevBtn")?.addEventListener("click", () => { offset = Math.max(0, offset - limit); const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
-      document.getElementById("nextBtn")?.addEventListener("click", () => { offset += limit; const page = Math.floor(offset/limit)+1; _syncQuery({ page }); listContracts(); });
 
-      const sellerInput = document.getElementById('sellerName');
+      document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
+        const fs  = document.getElementById("filterStatus");
+        const fst = document.getElementById("filterStart");
+        const fe  = document.getElementById("filterEnd");
+        if (fs)  fs.value  = "";
+        if (fst) fst.value = "";
+        if (fe)  fe.value  = "";
+        offset = 0;
+        _syncQuery({ status: "", start: "", end: "", page: 1 });
+        listContracts();
+      });
+
+      document.getElementById("prevBtn")?.addEventListener("click", () => {
+        offset = Math.max(0, offset - limit);
+        const page = Math.floor(offset / limit) + 1;
+        _syncQuery({ page });
+        listContracts();
+      });
+
+      document.getElementById("nextBtn")?.addEventListener("click", () => {
+        offset += limit;
+        const page = Math.floor(offset / limit) + 1;
+        _syncQuery({ page });
+        listContracts();
+      });
+
+      const sellerInput = document.getElementById("sellerName");
       if (sellerInput) {
         const onSellerChange = async () => {
+          const val = sellerInput.value.trim();
+          if (!val) return;
           offset = 0;
           refreshFinishedFromInputs();
           try {
@@ -1278,21 +1330,31 @@ onReady(async () => {
             await loadActiveContractsSummary();
             await loadSellerKPIs();
             await loadTradeLog();
-          } catch {}
+          } catch (e) {
+            console.warn("seller onChange refresh failed", e);
+          }
         };
-        sellerInput.addEventListener('change', onSellerChange);
-        sellerInput.addEventListener('blur', onSellerChange);
-        sellerInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') onSellerChange(); });
+        sellerInput.addEventListener("change", onSellerChange);
+        sellerInput.addEventListener("blur", onSellerChange);
+        sellerInput.addEventListener("keyup", (e) => {
+          if (e.key === "Enter") onSellerChange();
+        });
       }
 
-      setTimeout(() => {
+      // If we already know the seller, kick off the initial loads now
+      if (sellerEl && sellerEl.value.trim()) {
+        refreshFinishedFromInputs();
         try {
           listContracts();
           loadActiveContractsSummary();
           loadSellerKPIs();
           loadTradeLog();
-        } catch {}
-      }, 200);
+        } catch (e) {
+          console.warn("initial seller loads failed", e);
+        }
+      } else {
+        console.info("wireSellerUI: no seller yet; waiting for user context.");
+      }
     }
 
     async function uploadInvFile() {
@@ -1332,26 +1394,27 @@ onReady(async () => {
       refreshFinishedFromInputs();
     }
 
-        onReady(() => {
-      const userEl = document.getElementById("current-user");
-      const sellerEl = document.getElementById("sellerName");
-      if (userEl && sellerEl) {
-        const u = (userEl.textContent || '').replace("User:", "").trim();
-        if (u && u !== "Guest") sellerEl.value = u;
-      }
+    onReady(() => {
       // hydrate filters from URL
       const q = new URL(location.href).searchParams;
-      const s = q.get('status') || ''; const st = q.get('start') || ''; const en = q.get('end') || '';
-      const page = +(q.get('page')||'1');
-      document.getElementById("filterStatus").value = s;
-      document.getElementById("filterStart").value  = st;
-      document.getElementById("filterEnd").value    = en;
-      offset = Math.max(0,(page-1))*limit;
+      const s = q.get('status') || '';
+      const st = q.get('start') || '';
+      const en = q.get('end') || '';
+      const page = +(q.get('page') || '1');
+
+      const fs  = document.getElementById("filterStatus");
+      const fst = document.getElementById("filterStart");
+      const fe  = document.getElementById("filterEnd");
+      if (fs)  fs.value  = s;
+      if (fst) fst.value = st;
+      if (fe)  fe.value  = en;
+
+      offset = Math.max(0, (page - 1)) * limit;
 
       refreshFinishedFromInputs();
       document.getElementById('uploadInvBtn')?.addEventListener('click', uploadInvFile);
       document.getElementById('manualAddBtn')?.addEventListener('click', manualAddInventory);
-          });
+    });
 
     // Login modal + focus restore
     let loginTriggerBtn = null;
