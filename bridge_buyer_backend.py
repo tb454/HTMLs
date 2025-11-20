@@ -125,7 +125,19 @@ import sentry_sdk
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
-_FX = {"USD": 1.0, "EUR": 0.92, "RMB": 7.10}
+# Approximate FX: units of that currency per 1 USD.
+# Used only for internal convenience / display, NOT as a pricing oracle.
+_FX = {
+    "USD": 1.0,    # 1 USD = 1.00 USD
+    "EUR": 0.92,   # 1 USD ≈ 0.92 EUR
+    "GBP": 0.79,   # 1 USD ≈ 0.79 GBP
+    "JPY": 150.0,  # 1 USD ≈ 150 JPY
+    "CNY": 7.10,   # 1 USD ≈ 7.10 CNY (RMB)
+    "RMB": 7.10,   # alias for CNY
+    "CAD": 1.36,   # 1 USD ≈ 1.36 CAD
+    "AUD": 1.50,   # 1 USD ≈ 1.50 AUD
+    "MXN": 18.0,   # 1 USD ≈ 18 MXN
+}
 
 _KILL_SWITCH: Dict[str, bool] = defaultdict(bool)          # member_id -> True/False
 _PRICE_BANDS: Dict[str, Tuple[float, float]] = {}          # symbol -> (lower, upper)
