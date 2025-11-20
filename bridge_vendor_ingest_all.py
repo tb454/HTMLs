@@ -185,6 +185,12 @@ async def ingest_one_file(db: Database, path: str, vendor: str, since: Optional[
                 price_lb = (val / Decimal(2000)).quantize(Decimal("0.0001"))
             else:
                 price_lb = val.quantize(Decimal("0.0001"))
+
+            # Heuristic: ICW / E-scrap “cents as dollars” fix
+            u_name = name.upper()
+            if u_name in {"ICW#1", "ICW#2", "ICW LOW GRADE", "E SCRAP-OTHERS"} and price_lb >= Decimal("10"):
+                price_lb = (price_lb / Decimal("100")).quantize(Decimal("0.0001"))
+
             rows.append({
                 "material": name,
                 "category": _categorize(u),
@@ -228,6 +234,12 @@ async def ingest_one_file(db: Database, path: str, vendor: str, since: Optional[
                 price_lb = (val / Decimal(2000)).quantize(Decimal("0.0001"))
             else:
                 price_lb = val.quantize(Decimal("0.0001"))
+
+            # Heuristic: ICW / E-scrap “cents as dollars” fix
+            u_name = name.upper()
+            if u_name in {"ICW#1", "ICW#2", "ICW LOW GRADE", "E SCRAP-OTHERS"} and price_lb >= Decimal("10"):
+                price_lb = (price_lb / Decimal("100")).quantize(Decimal("0.0001"))
+
             rows.append({
                 "material": name,
                 "category": _categorize(u),
