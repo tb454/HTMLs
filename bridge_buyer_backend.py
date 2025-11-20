@@ -61,7 +61,7 @@ def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
 
-from datetime import date as _date, date, timedelta, datetime, timezone
+from datetime import date as _date, date, timedelta, datetime, timezone 
 import asyncio
 import inspect
 from fastapi import Request
@@ -2055,6 +2055,157 @@ async def anomalies_recent(limit: int = 25):
     )
     return [AnomalyRow(**dict(r)) for r in rows]
 # --- Recent Anomalies ----
+
+# ---- BR Indices ----
+from pydantic import BaseModel
+from typing import List, Optional
+
+class BRIndexRow(BaseModel):
+    instrument_code: str
+    core_code: str
+    material_canonical: str
+    vendor_count: int
+    px_min: Decimal
+    px_max: Decimal
+    px_avg: Decimal
+    px_median: Decimal
+
+class BRIndexHistoryRow(BaseModel):
+    sheet_date: date
+    instrument_code: str
+    core_code: str
+    material_canonical: str
+    px_min: Decimal
+    px_max: Decimal
+    px_avg: Decimal
+    px_median: Decimal
+    points: int
+
+@app.get("/api/br-index/current", response_model=List[BRIndexRow])
+async def get_br_index_current():
+    """
+    Live BR-Index per instrument, derived from latest vendor_quotes rows
+    that have a mapping into scrap_instrument.
+    """
+    rows = await database.fetch_all("""
+        WITH latest_vendor_instr AS (
+            SELECT
+                vq.vendor,
+                vq.price_per_lb,
+                vq.sheet_date,
+                vmm.instrument_code,
+                si.core_code,
+                si.material_canonical,
+                ROW_NUMBER() OVER (
+                    PARTITION BY vq.vendor, vmm.instrument_code
+                    ORDER BY vq.sheet_date DESC NULLS LAST,
+                             vq.inserted_at DESC
+                ) AS rn
+            FROM vendor_quotes vq
+            JOIN vendor_material_map vmm
+              ON vq.vendor   = vmm.vendor
+             AND vq.material = vmm.material_vendor
+            JOIN scrap_instrument si
+              ON vmm.instrument_code = si.instrument_code
+            WHERE vq.sheet_date IS NOT NULL
+              AND vq.unit_raw IN ('LB','LBS')
+        ),
+        dedup AS (
+            SELECT *
+            FROM latest_vendor_instr
+            WHERE rn = 1
+        )
+        SELECT
+            instrument_code,
+            core_code,
+            material_canonical,
+            COUNT(*)                    AS vendor_count,
+            MIN(price_per_lb)           AS px_min,
+            MAX(price_per_lb)           AS px_max,
+            AVG(price_per_lb)           AS px_avg,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_per_lb) AS px_median
+        FROM dedup
+        GROUP BY instrument_code, core_code, material_canonical
+        ORDER BY core_code, instrument_code;
+    """)
+
+    return [
+        BRIndexRow(
+            instrument_code=r["instrument_code"],
+            core_code=r["core_code"],
+            material_canonical=r["material_canonical"],
+            vendor_count=r["vendor_count"],
+            px_min=r["px_min"],
+            px_max=r["px_max"],
+            px_avg=r["px_avg"],
+            px_median=r["px_median"],
+        )
+        for r in rows
+    ]
+
+@app.get("/api/br-index/history", response_model=List[BRIndexHistoryRow])
+async def get_br_index_history(
+    instrument: Optional[str] = None,
+    core: Optional[str] = None,
+    days: int = 90,
+):
+    """
+    Daily BR-Index history for charts.
+    You can filter by instrument_code or core_code; defaults to last 90 days.
+    """
+    if days <= 0 or days > 365:
+        days = 90
+
+    params = {"days": days}
+    filter_sql = ""
+
+    if instrument:
+        filter_sql += " AND vmm.instrument_code = :instrument"
+        params["instrument"] = instrument
+    if core:
+        filter_sql += " AND si.core_code = :core"
+        params["core"] = core
+
+    rows = await database.fetch_all(f"""
+        SELECT
+            vq.sheet_date,
+            vmm.instrument_code,
+            si.core_code,
+            si.material_canonical,
+            COUNT(*)          AS points,
+            MIN(vq.price_per_lb) AS px_min,
+            MAX(vq.price_per_lb) AS px_max,
+            AVG(vq.price_per_lb) AS px_avg,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY vq.price_per_lb) AS px_median
+        FROM vendor_quotes vq
+        JOIN vendor_material_map vmm
+          ON vq.vendor   = vmm.vendor
+         AND vq.material = vmm.material_vendor
+        JOIN scrap_instrument si
+          ON vmm.instrument_code = si.instrument_code
+        WHERE vq.sheet_date IS NOT NULL
+          AND vq.unit_raw IN ('LB','LBS')
+          AND vq.sheet_date >= CURRENT_DATE - INTERVAL ':days days'
+          {filter_sql}
+        GROUP BY vq.sheet_date, vmm.instrument_code, si.core_code, si.material_canonical
+        ORDER BY vq.sheet_date;
+    """, params)
+
+    return [
+        BRIndexHistoryRow(
+            sheet_date=r["sheet_date"],
+            instrument_code=r["instrument_code"],
+            core_code=r["core_code"],
+            material_canonical=r["material_canonical"],
+            px_min=r["px_min"],
+            px_max=r["px_max"],
+            px_avg=r["px_avg"],
+            px_median=r["px_median"],
+            points=r["points"],
+        )
+        for r in rows
+    ]
+# ---- BR Indices ----
 
 # ---- Recent Surveillance ----
 class SurveilRow(BaseModel):

@@ -1,123 +1,113 @@
+// ========================================
+// BR-INDEX SNAPSHOT + MATERIALS TABLE
+// ========================================
+
+// one clean definition — no duplicates
 const MATERIALS_PAGE_SIZE = 50;
 let materialsPage = 1;
-let materialsTotal = 0;
+let BRINDEX_ROWS = [];
 
-// Top-10 Market Snapshot card
+// ----------------------------------------
+// TOP 10 MARKET SNAPSHOT (USD/ton)
+// ----------------------------------------
 async function loadMarketSnapshot() {
   const tbody = document.getElementById('market-snapshot-body');
   if (!tbody) return;
 
   try {
-    // top 10 from BR-Index
-    const resp = await fetch('/benchmarks/materials?page=1&page_size=10', {
-      credentials: 'include'
-    });
-    if (!resp.ok) {
-      console.error('Failed to load market snapshot', resp.status);
-      return;
-    }
+    const resp = await fetch('/api/br-index/current', { credentials: 'include' });
+    const rows = await resp.json();
 
-    const payload = await resp.json();
-    const rows = Array.isArray(payload) ? payload : (payload.items || []);
+    const top10 = rows
+      .map(r => ({
+        symbol: r.instrument_code,
+        name: r.material_canonical,
+        last_ton: Number(r.px_avg) * 2000
+      }))
+      .sort((a, b) => b.last_ton - a.last_ton)
+      .slice(0, 10);
 
-    tbody.innerHTML = '';
+    tbody.innerHTML = top10.map(r => `
+      <tr>
+        <td>${r.symbol}</td>
+        <td>${r.name}</td>
+        <td class="text-end">${r.last_ton.toFixed(2)}</td>
+      </tr>
+    `).join('');
 
-    rows.forEach(row => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${row.symbol}</td>
-        <td>${row.name}</td>
-        <td class="text-end">${Number(row.last).toFixed(2)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
   } catch (err) {
-    console.error('Error fetching market snapshot', err);
+    console.error('Error loading BR-Index snapshot:', err);
   }
 }
 
-// BR-Index table (50 at a time)
+// ----------------------------------------
+// FULL MATERIALS BENCHMARK TABLE
+// ----------------------------------------
 async function loadMaterialBenchmarks(page = 1) {
   const tbody = document.getElementById('materials-table-body');
   const label = document.getElementById('materials-page-label');
-  const prevBtn = document.getElementById('materials-prev');
-  const nextBtn = document.getElementById('materials-next');
   if (!tbody) return;
 
   try {
-    const resp = await fetch(`/benchmarks/materials?page=${page}&page_size=${MATERIALS_PAGE_SIZE}`, {
-      credentials: 'include'
-    });
-    if (!resp.ok) {
-      console.error('Failed to load material benchmarks', resp.status);
-      return;
+    // fetch once
+    if (BRINDEX_ROWS.length === 0) {
+      const resp = await fetch('/api/br-index/current', { credentials: 'include' });
+      const data = await resp.json();
+
+      BRINDEX_ROWS = data.map(r => ({
+        symbol: r.instrument_code,
+        name: r.material_canonical,
+        category: r.core_code,
+        last_ton: Number(r.px_avg) * 2000,
+        last_lb: Number(r.px_avg)
+      }));
     }
 
-    const payload = await resp.json();
-    const rows = Array.isArray(payload) ? payload : (payload.items || []);
+    const total = BRINDEX_ROWS.length;
+    const maxPage = Math.max(1, Math.ceil(total / MATERIALS_PAGE_SIZE));
 
-    materialsPage = Array.isArray(payload) ? page : (payload.page || page);
-    materialsTotal = Array.isArray(payload) ? rows.length : (payload.total || rows.length);
+    materialsPage = Math.min(Math.max(page, 1), maxPage);
 
-    tbody.innerHTML = '';
+    const start = (materialsPage - 1) * MATERIALS_PAGE_SIZE;
+    const end = Math.min(start + MATERIALS_PAGE_SIZE, total);
+    const rows = BRINDEX_ROWS.slice(start, end);
 
-    rows.forEach(row => {
-      const tr = document.createElement('tr');
-
-      let changeText = '—';
-      if (row.change !== null && row.change !== undefined) {
-        const val = Number(row.change);
-        const sign = val > 0 ? '+' : (val < 0 ? '−' : '');
-        changeText = `${sign}${Math.abs(val).toFixed(2)}`;
-      }
-
-      tr.innerHTML = `
-        <td>${row.symbol}</td>
-        <td>${row.name}</td>
-        <td>${row.category}</td>
-        <td class="text-end">${Number(row.last).toFixed(2)}</td>
-        <td class="text-end">${changeText}</td>
-      `;
-      tbody.appendChild(tr);
-    });
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.symbol}</td>
+        <td>${r.name}</td>
+        <td>${r.category}</td>
+        <td class="text-end">${r.last_ton.toFixed(2)}</td>
+        <td class="text-end text-muted">${r.last_lb.toFixed(4)} / lb</td>
+      </tr>
+    `).join('');
 
     if (label) {
-      if (!materialsTotal) {
-        label.textContent = 'No materials found';
-      } else {
-        const from = (materialsPage - 1) * MATERIALS_PAGE_SIZE + 1;
-        const to = Math.min(materialsPage * MATERIALS_PAGE_SIZE, materialsTotal);
-        label.textContent = `Showing ${from}–${to} of ${materialsTotal} materials`;
-      }
+      label.textContent = `Showing ${start + 1}–${end} of ${total} materials`;
     }
 
-    const lastPage = Math.max(1, Math.ceil((materialsTotal || 1) / MATERIALS_PAGE_SIZE));
-    if (prevBtn) prevBtn.disabled = materialsPage <= 1;
-    if (nextBtn) nextBtn.disabled = materialsPage >= lastPage;
+    const prevBtn = document.getElementById('materials-prev');
+    const nextBtn = document.getElementById('materials-next');
+
+    if (prevBtn) prevBtn.disabled = (materialsPage <= 1);
+    if (nextBtn) nextBtn.disabled = (materialsPage >= maxPage);
 
   } catch (err) {
-    console.error('Error fetching material benchmarks', err);
+    console.error('Error loading BR-Index materials:', err);
   }
 }
 
+// ----------------------------------------
+// PAGING BUTTONS 
+// ----------------------------------------
 function initMaterialBenchmarksPaging() {
   const prevBtn = document.getElementById('materials-prev');
   const nextBtn = document.getElementById('materials-next');
 
   if (prevBtn) {
-    prevBtn.addEventListener('click', () => {
-      if (materialsPage > 1) {
-        loadMaterialBenchmarks(materialsPage - 1);
-      }
-    });
+    prevBtn.onclick = () => loadMaterialBenchmarks(materialsPage - 1);
   }
-
   if (nextBtn) {
-    nextBtn.addEventListener('click', () => {
-      const lastPage = Math.max(1, Math.ceil((materialsTotal || 1) / MATERIALS_PAGE_SIZE));
-      if (materialsPage < lastPage) {
-        loadMaterialBenchmarks(materialsPage + 1);
-      }
-    });
+    nextBtn.onclick = () => loadMaterialBenchmarks(materialsPage + 1);
   }
 }
