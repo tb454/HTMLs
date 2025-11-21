@@ -170,7 +170,7 @@ async function viewSymbol(sym){
 
   // forecast overlay
   if(showForecast){
-    const fc = await getJSON(`/forecasts/forecast?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
+    const fc = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
     const series = fc.map(r=>({dt:r.forecast_date, value:+r.predicted_price}));
     const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.conf_low ?? r.predicted_price), high:+(r.conf_high ?? r.predicted_price)}));
     $('#forecastChart').classList.remove('hidden');   // was style.display = ''
@@ -234,7 +234,7 @@ document.getElementById('exportHistory')?.addEventListener('click', async ()=>{
 });
 document.getElementById('exportForecast')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast('Select a ticker first.');
-  const rows = await getJSON(`/forecasts/forecast?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
+  const rows = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
   csvDownload(`${selectedSymbol}_forecast90.csv`, rows);
 });
 
