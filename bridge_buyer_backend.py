@@ -14348,7 +14348,30 @@ async def list_bols_admin(
     tenant_id = await current_tenant_id(request)
 
     where = ["1=1"]
-    params: dict[str, object] = {"limit": limit, "offset": offset}
+    base_params: dict[str, object] = {}
+    # ... add your filter params into base_params only ...
+    where_sql = " AND ".join(where)
+
+    # ✅ COUNT uses ONLY filter params
+    total_row = await database.fetch_one(
+        f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
+        base_params
+    )
+
+    # ✅ DATA query uses filter params + limit/offset
+    data_params = dict(base_params)
+    data_params.update({"limit": limit, "offset": offset})
+
+    rows = await database.fetch_all(
+        f"""
+        SELECT *
+        FROM contracts
+        WHERE {where_sql}
+        ORDER BY created_at DESC
+        LIMIT :limit OFFSET :offset
+        """,
+        data_params
+    )
 
     if tenant_id:
         where.append("tenant_id = :tenant_id")

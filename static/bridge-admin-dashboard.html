@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="/static/app.css?v=20251111">
   <link rel="icon" href="/static/favicon.ico" />
 
+  <!-- Scripts (defer + nonce) -->
+  <script defer nonce="{{NONCE}}" src="/static/js/vendor/chart.4.4.1.min.js"></script>
+  <script defer nonce="{{NONCE}}" src="/static/js/admin.js?v=20251121"></script>
+
+  <!-- tiny boot: remove loading class and ping health -->
+  <script nonce="{{NONCE}}">
+    (function boot(){
+      document.documentElement.classList.remove('loading');
+      try { fetch('/health', {credentials:'include'}); } catch (e) {}
+    })();
+  </script>
+
   <script defer nonce="{{NONCE}}" src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <script nonce="{{NONCE}}">

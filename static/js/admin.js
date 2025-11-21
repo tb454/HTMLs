@@ -1,5 +1,12 @@
 // /static/js/admin.js 
 
+// ---- API base (single source of truth)
+window.endpoint = (function () {
+  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';  
+  const localPort = 8000; // <--- change if yours differs
+  return isLocal ? `http://localhost:${localPort}` : location.origin;
+})();
+
 (function () {
   const $ = sel => document.querySelector(sel);
   const $$ = sel => Array.from(document.querySelectorAll(sel));
