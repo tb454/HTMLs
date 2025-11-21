@@ -107,7 +107,7 @@ async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
   showSkeleton(tbody, 8);
   try{
-    universe = await getJSON('/br-index/universe?page=1&page_size=500');
+    universe = await getJSON('/indices/universe?page=1&page_size=500');
     const note = document.getElementById('detailNote');
     if (note){
       note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d. Universe loaded ' +
@@ -128,7 +128,7 @@ async function loadUniverse(){
       const sym = row.symbol;
       let last=null, prev=null, updated=null;
       try{
-        const hist = await getJSON(`/br-index/history?symbol=${encodeURIComponent(sym)}`);
+        const hist = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
         if(hist.length){
           last = hist[hist.length-1]?.close_price;
           if(hist.length>1) prev = hist[hist.length-2]?.close_price;
@@ -164,13 +164,13 @@ async function viewSymbol(sym){
   const note  = $('#detailNote');  if (note)  note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d.';
 
   // history for chart
-  const histAll = await getJSON(`/br-index/history?symbol=${encodeURIComponent(sym)}`);
+  const histAll = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
   const trim = histAll.slice(-historyDays).map(r=>({dt:r.dt, value:+r.close_price}));
   drawLine($('#chart'), trim, {color:'#111827'});
 
   // forecast overlay
   if(showForecast){
-    const fc = await getJSON(`/br-index/forecast?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
+    const fc = await getJSON(`/forecasts/forecast?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
     const series = fc.map(r=>({dt:r.forecast_date, value:+r.predicted_price}));
     const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.conf_low ?? r.predicted_price), high:+(r.conf_high ?? r.predicted_price)}));
     $('#forecastChart').classList.remove('hidden');   // was style.display = ''
@@ -229,12 +229,12 @@ document.getElementById('exportUniverse')?.addEventListener('click', ()=>{
 });
 document.getElementById('exportHistory')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast('Select a ticker first.');
-  const rows = await getJSON(`/br-index/history?symbol=${encodeURIComponent(selectedSymbol)}`);
+  const rows = await getJSON(`/indices/history?symbol=${encodeURIComponent(selectedSymbol)}`);
   csvDownload(`${selectedSymbol}_history.csv`, rows);
 });
 document.getElementById('exportForecast')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast('Select a ticker first.');
-  const rows = await getJSON(`/br-index/forecast?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
+  const rows = await getJSON(`/forecasts/forecast?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
   csvDownload(`${selectedSymbol}_forecast90.csv`, rows);
 });
 
@@ -254,10 +254,10 @@ function onceBusy(btn, fn){
   Promise.resolve(fn()).finally(()=> setBusy(btn, false));
 }
 document.getElementById('runIndices')?.addEventListener('click', e =>
-  onceBusy(e.target, () => api('/br-index/run',{method:'POST'}).then(()=> { toast('✓ Indices built'); if(selectedSymbol) viewSymbol(selectedSymbol); }))
+  onceBusy(e.target, () => api('/indices/run',{method:'POST'}).then(()=> { toast('✓ Indices built'); if(selectedSymbol) viewSymbol(selectedSymbol); }))
 );
 document.getElementById('runForecasts')?.addEventListener('click', e =>
-  onceBusy(e.target, () => api('/br-index/forecast/run',{method:'POST'}).then(()=> { toast('✓ Forecasts complete'); if(selectedSymbol) viewSymbol(selectedSymbol); }))
+  onceBusy(e.target, () => api('/forecasts/run',{method:'POST'}).then(()=> { toast('✓ Forecasts complete'); if(selectedSymbol) viewSymbol(selectedSymbol); }))
 );
 
 // filter
