@@ -2047,6 +2047,57 @@ async def usage_by_member_current_cycle():
     return list(usage.values())
 # ---- Usage By Member ----
 
+# ---- Prices Over Time ----
+@analytics_router.get("/prices_over_time", summary="Daily average $/ton for a material over a rolling window")
+async def prices_over_time(material: str, window: str = "1M"):
+    """
+    Uses contracts as the source of truth:
+      - Filters by material ILIKE
+      - Groups by contract created_at::date
+      - Returns [{"date":"YYYY-MM-DD","avg_price": <float>}]
+    window: "1M","3M","6M","1Y" -> limits the lookback.
+    """
+    lookbacks = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+    days = lookbacks.get((window or "1M").upper(), 30)
+    rows = await database.fetch_all("""
+      SELECT
+        created_at::date AS d,
+        AVG(price_per_ton) AS avg_ton
+      FROM contracts
+      WHERE material ILIKE :m
+        AND created_at >= NOW() - make_interval(days => :days)
+      GROUP BY d
+      ORDER BY d
+    """, {"m": f"%{material}%", "days": days})
+    return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
+# ---- Prices Over Time ----
+
+# ---- Tons by Yard This Month ----
+@analytics_router.get("/tons_by_yard_this_month", summary="Delivered tons by seller (current month)")
+async def tons_by_yard_this_month():
+    """
+    Returns [{"yard_id": <seller>, "tons_month": <float>}...] for the current calendar month,
+    using BOLs delivered in the window.
+    """
+    from datetime import date as _d
+    today = _d.today()
+    start = _d(today.year, today.month, 1)
+    end   = _d(today.year + (today.month // 12), (today.month % 12) + 1, 1)
+
+    rows = await database.fetch_all("""
+      SELECT seller AS yard_id,
+             COALESCE(SUM(weight_tons),0) AS tons_month
+        FROM bols
+       WHERE delivery_time IS NOT NULL
+         AND delivery_time::date >= :start
+         AND delivery_time::date <  :end
+       GROUP BY seller
+       ORDER BY seller
+    """, {"start": start, "end": end})
+
+    return [{"yard_id": r["yard_id"], "tons_month": float(r["tons_month"] or 0.0)} for r in rows]
+# ---- Tons by Yard This Month ----
+
 # --- Recent Anomalies ----
 class AnomalyRow(BaseModel):
     member: str
@@ -2068,7 +2119,7 @@ async def anomalies_recent(limit: int = 25):
     return [AnomalyRow(**dict(r)) for r in rows]
 # --- Recent Anomalies ----
 
-@app.get("/vendor_quotes/latest", tags=["VendorQuotes"], summary="Latest vendor quotes (all vendors)", status_code=200)
+@app.get("/vendor_quotes/latest_all", tags=["VendorQuotes"], summary="Latest vendor quotes (all vendors)", status_code=200)
 async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)):
     """
     Return the latest vendor_quotes rows for the most recent sheet_date.
@@ -5246,6 +5297,16 @@ async def indices_page(request: Request):
     resp = FileResponse("static/indices.html")
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
+
+@app.get("/static/indices.html", include_in_schema=False)
+async def indices_legacy(request: Request):
+    return await indices_page(request)
+
+@app.get("/indices", include_in_schema=False)
+async def indices_alias(request: Request):
+    # Serve the same static indices page the admin links to.
+    return await indices_page(request)
+
 # -------- Static HTML --------
 
 # alias: support any old links that hit /yard
@@ -9930,6 +9991,60 @@ async def _ensure_ice_delivery_log():
     """)
 # ------ ICE delivery log ------
 
+# ---- ICE delivery admin APIs (used by Admin modal) ----
+@app.get("/admin/ice/logs", tags=["Admin"], summary="Delivery log for a BOL")
+async def admin_ice_logs(bol_id: str, request: Request = None):
+    # Gate only in production
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+    rows = await database.fetch_all("""
+      SELECT when_utc, http_status, ms, response, pdf_sha256
+        FROM public.ice_delivery_log
+       WHERE bol_id = :b
+       ORDER BY when_utc DESC
+       LIMIT 200
+    """, {"b": bol_id})
+    delivered = sum(1 for r in rows if (r["http_status"] or 0) in (200, 201, 202))
+    failed    = sum(1 for r in rows if (r["http_status"] or 0) >= 400)
+    pending   = max(0, len(rows) - delivered - failed)
+    first_sha = next((r["pdf_sha256"] for r in rows if r.get("pdf_sha256")), None)
+    return {
+        "bol_id": bol_id,
+        "delivered_count": delivered,
+        "failed_count": failed,
+        "pending_count": pending,
+        "pdf_sha256": first_sha,
+        "entries": [
+            {
+              "when_utc": (r["when_utc"].isoformat() if r.get("when_utc") else None),
+              "http_status": r["http_status"],
+              "ms": r["ms"],
+              "response": (r["response"] or "")[:200]
+            } for r in rows
+        ]
+    }
+
+@app.post("/admin/ice/resend", tags=["Admin"], summary="Re-send latest delivery (stub)")
+async def admin_ice_resend(bol_id: str, request: Request = None):
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+    # TODO: enqueue a resend job; stubbed OK for now
+    return {"ok": True, "bol_id": bol_id, "queued": True}
+
+@app.post("/admin/ice/test_ping", tags=["Admin"], summary="Test ping for a BOL (stub)")
+async def admin_ice_test_ping(bol_id: str, request: Request = None):
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+    return {"ok": True, "bol_id": bol_id, "note": "pong"}
+
+@app.post("/admin/ice/rotate_secret", tags=["Admin"], summary="Rotate ICE secret (stub)")
+async def admin_ice_rotate_secret(request: Request = None):
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+    # In real impl: write to key_registry / env
+    return {"ok": True, "rotated": True}
+# ---- ICE delivery admin APIs ----
+
 # ------ Statements router ------
 @startup
 async def _ensure_statements_schema():
@@ -12315,6 +12430,17 @@ async def analytics_prices_over_time(material: str, window: str = "1M"):
         for r in rows
     ]
 
+@app.get("/analytics/contracts_by_day", tags=["Analytics"], summary="Contract count per day")
+async def analytics_contracts_by_day(days: int = 30):
+    rows = await database.fetch_all("""
+      SELECT (created_at AT TIME ZONE 'utc')::date AS day,
+             COUNT(*) AS count
+        FROM contracts
+       WHERE created_at >= NOW() - make_interval(days => :days)
+       GROUP BY day
+       ORDER BY day
+    """, {"days": days})
+    return [{"day": str(r["day"]), "count": int(r["count"] or 0)} for r in rows]
 
 @app.post("/indices/run", tags=["Indices"], summary="Refs + Vendor + Blended")
 async def indices_run():
