@@ -14,8 +14,9 @@
 
   <!-- Styles -->
   <link rel="stylesheet" href="/static/app.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  <script src="/static/js/locale.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4" defer nonce="{{NONCE}}"></script>
+  <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
+  <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
 </head>
 <body>
 
@@ -96,9 +97,8 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <!-- Shared helpers: defines window.endpoint, api(), toast() -->
-<script src="/static/js/app.js" defer></script>
-
-<script src="/static/js/indices.js" defer></script>
+<script src="/static/js/app.js?v=20251111" defer nonce="{{NONCE}}"></script>
+<script src="/static/js/indices.js" defer nonce="{{NONCE}}"></script>
 
 <footer class="muted mt-20 fs-12 text-center">
   BR-Index values are produced by Atlas IP Holdings using the published methodology.
