@@ -597,11 +597,20 @@
       const seller = document.createElement('div'); seller.className='text-muted small'; seller.textContent = `Seller: ${r?.seller ?? ''}`;
       const buyer  = document.createElement('div'); buyer .className='text-muted small'; buyer .textContent = `Buyer: ${r?.buyer ?? ''}`;
 
-      const wt = Number(r?.weight_tons ?? 0);
-      const pt = Number(r?.price_per_ton ?? 0);
-      const total = wt * pt;
-      const line = document.createElement('div'); line.className='small';
-      line.textContent = `Tons: ${wt} @ $${pt}/ton · Total $${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+        const wt = Number(r?.weight_tons ?? 0);
+        const pt = Number(r?.price_per_ton ?? 0);
+        const total = wt * pt;
+
+        const cur = (r?.currency || 'USD').toString().toUpperCase();
+        const tax = (r?.tax_percent ?? r?.tax_pct);
+        const taxStr = (tax !== null && tax !== undefined && !Number.isNaN(Number(tax)))
+          ? ` · Tax ${Number(tax).toFixed(2)}%`
+          : '';
+
+        const line = document.createElement('div');
+        line.className='small';
+        line.textContent =
+          `Tons: ${wt} @ ${cur} $${pt}/ton · Total ${cur} $${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}${taxStr}`;
 
       const created = document.createElement('div'); created.className='small text-muted';
       if (r?.created_at) created.textContent = `Created: ${_fmtDate(r.created_at)}`;

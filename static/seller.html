@@ -450,9 +450,17 @@
   <caption class="visually-hidden">Contracts list with filters and paging</caption>
           <thead class="sticky">
             <tr>
-              <th>ID</th><th>Buyer</th><th>Material</th><th>Tons</th><th>$/ton</th><th>Status</th><th>Created</th>
+              <th>ID</th>
+              <th>Buyer</th>
+              <th>Material</th>
+              <th>Tons</th>
+              <th>$/ton</th>
+              <th>Currency</th>
+              <th>Tax %</th>
+              <th>Status</th>
+              <th>Created</th>
             </tr>
-          </thead>
+          </thead>  
           <tbody></tbody>
         </table>
       </div>
@@ -700,7 +708,7 @@ onReady(async () => {
     onReady(() => {
       const hd = document.getElementById('header-date');
       if (hd) hd.textContent = _fmtDate(new Date());
-      
+
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
@@ -1218,18 +1226,26 @@ onReady(async () => {
       tbody.innerHTML = "";
       if (!rows.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="7" class="text-muted text-center py-3">No contracts match your filters.</td>`;
+        tr.innerHTML = `<td colspan="9" class="text-muted text-center py-3">No contracts match your filters.</td>`;
         tbody.appendChild(tr);
       } else {
         rows.forEach(r => {
           const tr = document.createElement("tr");
           const created = r.created_at ? _fmtDate(r.created_at) : "";
+          const cur = (r.currency || 'USD').toString().toUpperCase();
+          const tax = (r.tax_percent ?? r.tax_pct);
+          const taxStr = (tax !== null && tax !== undefined && !Number.isNaN(Number(tax)))
+            ? Number(tax).toFixed(2)
+            : '';
+
           tr.innerHTML = `
             <td>${r.id}</td>
             <td>${r.buyer}</td>
             <td>${r.material}</td>
             <td>${r.weight_tons ?? ""}</td>
             <td>${r.price_per_ton ?? ""}</td>
+            <td>${cur}</td>
+            <td>${taxStr}</td>
             <td>${r.status ?? ""}</td>
             <td>${created}</td>`;
           tbody.appendChild(tr);
@@ -1469,6 +1485,97 @@ onReady(async () => {
         try { console.log(await r.json()); } catch {}
       };
     });
+  </script>
+
+  <!-- Policy Acceptance Modal -->
+  <div class="modal fade" id="policyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Policy Update</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" disabled></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted mb-2" id="policySummary">
+            You must accept the current Terms / Rulebook to create contracts and BOLs.
+          </p>
+          <p class="small">
+            View full documents:
+            <a href="/legal/terms.html" target="_blank" rel="noopener noreferrer">Terms</a> ·
+            <a href="/legal/eula.html" target="_blank" rel="noopener noreferrer">EULA</a> ·
+            <a href="/legal/fees.html" target="_blank" rel="noopener noreferrer">Fees</a> ·
+            <a href="/legal/rulebook.html" target="_blank" rel="noopener noreferrer">Rulebook</a>
+          </p>
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="policyAgreeChkSeller">
+            <label class="form-check-label small" for="policyAgreeChkSeller">
+              I have read and agree to the current Terms, Rulebook, Fee Schedule, and Policies.
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="policyAcceptBtnSeller" type="button" class="btn btn-primary" disabled>Accept &amp; Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script nonce="{{NONCE}}">
+  // Seller/Yard: policy gating
+  (function(){
+    async function checkPolicies(){
+      try{
+        const res = await api('/policies/status');
+        const j = await res.json();
+        if (j.accepted) return;
+
+        let summary = 'You must accept the current Terms / Rulebook to create contracts and BOLs.';
+        try{
+          const r2 = await api('/policies/current');
+          const p = await r2.json();
+          if (p && p.version){
+            summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to create contracts and BOLs.`;
+          }
+        }catch{}
+
+        const sEl = document.getElementById('policySummary');
+        if (sEl) sEl.textContent = summary;
+
+        const modalEl = document.getElementById('policyModal');
+        if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
+
+        const modal = new bootstrap.Modal(modalEl, { backdrop:'static', keyboard:false });
+        modal.show();
+
+        const chk = document.getElementById('policyAgreeChkSeller');
+        const btn = document.getElementById('policyAcceptBtnSeller');
+
+        chk?.addEventListener('change', () => {
+          btn.disabled = !chk.checked;
+        });
+
+        btn?.addEventListener('click', async () => {
+          btn.disabled = true;
+          try{
+            await api('/policies/accept', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ key:'rulebook', version: null })
+            });
+            modal.hide();
+            toast('Policy accepted.');
+          }catch(e){
+            toast(e.message || 'Could not record acceptance');
+            btn.disabled = false;
+          }
+        });
+      }catch{
+        // If policies endpoints fail, backend still enforces on write; do nothing here.
+      }
+    }
+
+    onReady(checkPolicies);
+  })();
   </script>
 
   <footer class="legal-footer">
