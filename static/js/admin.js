@@ -14,8 +14,8 @@ window.endpoint = (function () {
   // Utility: simple JSON fetch with credentials
   async function jget(url) {
     const full = url.startsWith('http') ? url : (window.endpoint + url);
-    const r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) throw new Error(url + ' -> ' + r.status);
+    const r = await fetch(full, { credentials: 'include' });
+    if (!r.ok) throw new Error(full + ' -> ' + r.status);
     return r.json();
   }
 
@@ -139,7 +139,7 @@ window.endpoint = (function () {
     try {
       wireTabs();
       await Promise.all([ loadContracts(), loadBOLs() ]);
-      await loadAdminChart(); // soft-fail if Chart.js storage blocked by browser
+      // await loadAdminChart(); // disabled (draw bolsByDay later on page)
     } catch (e) {
       console.error(e);
     }

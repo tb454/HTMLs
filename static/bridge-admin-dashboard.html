@@ -19,9 +19,7 @@
       try { fetch('/health', {credentials:'include'}); } catch (e) {}
     })();
   </script>
-
-  <script defer nonce="{{NONCE}}" src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
+ 
   <script nonce="{{NONCE}}">
     document.addEventListener('DOMContentLoaded', async () => {
       try { await fetch('/health', { credentials: 'include' }); } catch (e) { console.warn('Health init failed', e); }
@@ -359,7 +357,9 @@ onReady(async function loadTons(){
 });
 </script>
 
-<canvas id="bolsByDay" height="120" class="mb-3"></canvas>
+<div class="chart-container h-220">
+  <canvas id="bolsByDay"></canvas>
+</div>
 <script nonce="{{NONCE}}">
 onReady(async function(){
   try{
@@ -378,6 +378,8 @@ onReady(async function(){
     const data = await res.json();
     const el   = document.getElementById('bolsByDay');
     if (!el) return;
+    el.removeAttribute('height');
+    el.removeAttribute('width');
     const ctx  = el.getContext('2d');
 
     new Chart(ctx, {
