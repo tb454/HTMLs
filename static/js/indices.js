@@ -13,7 +13,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 })();
 
 // Shortcuts
-const $ = sel => document.querySelector(sel);
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 
 function csvDownload(filename, rows){

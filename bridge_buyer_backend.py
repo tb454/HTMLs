@@ -7696,7 +7696,23 @@ async def list_listings():
     """)
     return {"listings": [dict(r) for r in rows]}
 # ===== FUTURES endpoints =====
- 
+
+# ------ Admin dashboard -------
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+templates = Jinja2Templates(directory="HTMLs")  # or whatever dir contains bridge-admin-dashboard.html
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    nonce = request.state.csp_nonce  # however you're already creating it
+    return templates.TemplateResponse(
+        "bridge-admin-dashboard.html",
+        {"request": request, "NONCE": nonce},
+    )
+# ------ Admin dashboard -------
+
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
 def dr_objectives():

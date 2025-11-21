@@ -140,7 +140,7 @@
         <span class="fw-semibold">BRidge Admin</span>
       </div>
       <nav class="nav nav-pills small">
-        <a class="nav-link active" href="/static/bridge-admin-dashboard.html">Dashboard</a>
+        <a class="nav-link active" href="/admin">Dashboard</a>
         <a class="nav-link" href="/static/admin-billing.html">Billing</a>
         <a class="nav-link" href="/static/admin-compliance.html">Compliance</a>
         <a class="nav-link" href="/static/admin-tenants.html">Tenants</a>
@@ -157,7 +157,7 @@
         <h2 class="mb-0">📊 BRidge Admin Dashboard</h2>
         <div class="d-flex align-items-center gap-1">
           <label for="tenantSelect" class="small text-muted mb-0">Tenant</label>
-          <select id="tenantSelect" class="form-select form-select-sm" style="min-width:160px">
+          <select id="tenantSelect" class="form-select form-select-sm tenant-min">
             <option value="">(all)</option>
           </select>
         </div>
@@ -332,7 +332,7 @@ onReady(async function(){
         }, 30);
       });
     }
-    if (!window.Chart) return;
+    if (!window.Chart) return;    
 
     const res  = await api("/analytics/prices_over_time?material=Shred%20Steel&window=1M");
     const data = await res.json();

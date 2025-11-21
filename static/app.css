@@ -10,6 +10,10 @@ body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"S
 .rounded-pill{border-radius:50rem!important}
 .btn-outline-primary,.btn-outline-secondary{--bs-btn-border-color:#cfd6df}
 
+/* Admin tenant dropdown min width (replaces inline style) */
+.tenant-min {
+  min-width: 160px;
+}
 /* Buyer/Seller cards + health */
 .cardy{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
 .health-badge{font:12px/1 system-ui;color:#6b7280}
