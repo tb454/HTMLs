@@ -1308,9 +1308,13 @@ onReady(async function(){
       });
     }
 
-    // Init loads
-    loadBOLsAdmin();
-    setInterval(loadBOLsAdmin, 10000);
+    // Init loads on DOM ready so #bol-table & filters exist for sure
+    onReady(() => {
+      loadBOLsAdmin().catch(() => {});
+      setInterval(() => {
+        loadBOLsAdmin().catch(() => {});
+      }, 10000);
+    });
 
     (function ensureFuturesInit(){
       let futuresLoadedOnce = false;
