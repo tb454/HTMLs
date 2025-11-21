@@ -38,11 +38,11 @@
 
   <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
-  <script defer nonce="{{NONCE}}" src="/static/js/admin.js?v=20251121"></script>
+  
   
   <script nonce="{{NONCE}}">
     // Single source of truth for API base
-    window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
+    window.endpoint = window.endpoint || location.origin;
 
     function _cookie(name){
       const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,'\\$1')+'=([^;]*)'));
