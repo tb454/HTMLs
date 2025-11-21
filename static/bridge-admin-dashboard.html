@@ -83,13 +83,24 @@
   </script>
 
   <script nonce="{{NONCE}}">
-    // Remove the 'loading' class and any preloader overlay if you use one
-    window.hideLoading = function(){
-      try { document.documentElement.classList.remove('loading'); } catch {}
-      try { document.body.classList.add('loaded'); } catch {}
-      const overlay = document.getElementById('preload') || document.getElementById('loading-overlay');
-      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    };
+    // Idempotent, never-throw global
+    (function(){
+      function _hide(){
+        try { document.documentElement.classList.remove('loading'); } catch {}
+        try { document.body.classList.add('loaded'); } catch {}
+        try {
+          const overlay = document.getElementById('preload') || document.getElementById('loading-overlay');
+          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        } catch {}
+      }
+      if (!window.hideLoading) {
+        window.hideLoading = _hide;
+      } else {
+        const prev = window.hideLoading;
+        window.hideLoading = function(){ try { prev(); } catch {} _hide(); };
+      }
+      window.addEventListener('load', () => { try { window.hideLoading(); } catch {} });
+    })();
   </script>
 
   <script nonce="{{NONCE}}">
@@ -916,29 +927,42 @@ onReady(async function(){
 
       skeleton();
 
-      const res = await api(url, { headers:{ "Accept":"application/json" }});
-      const total = +(res.headers.get("X-Total-Count") || 0);
-      const data = await res.json();
+      try {
+        const res = await api(url, { headers:{ "Accept":"application/json" }});
+        const total = +(res.headers.get("X-Total-Count") || 0);
+        const data = await res.json();
 
-      render(Array.isArray(data.items) ? data.items : data);
-      try { window.hideLoading(); } catch {}
+        render(Array.isArray(data.items) ? data.items : data);
+        try { window.hideLoading(); } catch {}
 
-      // pager UI
-      $("cPrev").disabled = (cOffset <= 0);
-      $("cNext").disabled = ((Array.isArray(data.items)?data.items.length:data.length) < cLimit);
-      const from = total ? Math.min(cOffset+1, total) : 0;
-      const to   = total ? Math.min(cOffset + (Array.isArray(data.items)?data.items.length:data.length), total) : 0;
-      $("cInfo").textContent = total ? `${from}–${to} of ${total}` : "";
+        // pager UI
+        $("cPrev").disabled = (cOffset <= 0);
+        $("cNext").disabled = ((Array.isArray(data.items)?data.items.length:data.length) < cLimit);
+        const from = total ? Math.min(cOffset+1, total) : 0;
+        const to   = total ? Math.min(cOffset + (Array.isArray(data.items)?data.items.length:data.length), total) : 0;
+        $("cInfo").textContent = total ? `${from}–${to} of ${total}` : "";
 
-      // reflect URL (namespaced keys so it doesn't clash with BOLs)
-      const nextQS = new URLSearchParams(location.search);
-      nextQS.set("c_limit",  String(cLimit));
-      nextQS.set("c_offset", String(cOffset));
-      const kv = Object.fromEntries(new URLSearchParams(fqs));
-      ["status","seller","start","end"].forEach(k=>{
-        if (kv[k]) nextQS.set(k, kv[k]); else nextQS.delete(k);
-      });
-      history.replaceState(null, "", `?${nextQS.toString()}`);
+        // reflect URL (namespaced keys so it doesn't clash with BOLs)
+        const nextQS = new URLSearchParams(location.search);
+        nextQS.set("c_limit",  String(cLimit));
+        nextQS.set("c_offset", String(cOffset));
+        const kv = Object.fromEntries(new URLSearchParams(fqs));
+        ["status","seller","start","end"].forEach(k=>{
+          if (kv[k]) nextQS.set(k, kv[k]); else nextQS.delete(k);
+        });
+        history.replaceState(null, "", `?${nextQS.toString()}`);
+      } catch (e) {
+        const tbody = document.querySelector("#contracts-table tbody");
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="text-center text-muted py-3">
+                Failed to load contracts: ${e?.message || 'error'}
+              </td>
+            </tr>`;
+        }
+        console.warn('loadContracts failed', e);
+      }
     }
 
     // wire
@@ -1055,7 +1079,17 @@ onReady(async function(){
           : `Page ${Math.floor(aOffset/aLimit)+1} • ${rows.length} rows`;
 
       } catch(e){
-        toast(e.message||'Load failed');
+        // Replace skeleton with an explicit error row so it doesn't look like it's still loading forever.
+        const tbody = document.querySelector("#bol-table tbody");
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="11" class="text-center text-muted py-3">
+                Failed to load BOLs: ${e?.message || 'error'}
+              </td>
+            </tr>`;
+        }
+        toast(e.message || 'Load failed');
       } finally {
         clearTimeout(_timer);
         clearBusy('#bol-table');
