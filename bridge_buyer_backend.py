@@ -7781,44 +7781,6 @@ async def admin_dossier_retry_failed():
 
 # --- ZIP export (all core data) ---
 
-# ===== FUTURES endpoints =====
-@app.get("/admin/futures/products", tags=["Futures"], summary="List futures products")
-async def list_products():
-    await _ensure_futures_tables_if_missing()
-    rows = await database.fetch_all("""
-        SELECT
-          id::text        AS id,
-          symbol_root,
-          material,
-          delivery_location,
-          contract_size_tons,
-          tick_size,
-          currency,
-          price_method
-        FROM futures_products
-        ORDER BY symbol_root ASC
-    """)
-    return {"products": [dict(r) for r in rows]}
-
-@app.get("/admin/futures/listings", tags=["Futures"], summary="List futures listings")
-async def list_listings():
-    await _ensure_futures_tables_if_missing()
-    rows = await database.fetch_all("""
-        SELECT
-          id::text        AS id,
-          product_id::text AS product_id,
-          contract_month,
-          contract_year,
-          expiry_date,
-          first_notice_date,
-          last_trade_date,
-          status
-        FROM futures_listings
-        ORDER BY expiry_date DESC
-    """)
-    return {"listings": [dict(r) for r in rows]}
-# ===== FUTURES endpoints =====
-
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
 def dr_objectives():
@@ -12025,10 +11987,10 @@ async def public_ticker(listing_id: str):
  
 # ------ Contracts --------
 @app.get(
-    "/contracts",
+    "/contracts/search",
     response_model=List[ContractOut],
     tags=["Contracts"],
-    summary="List Contracts",
+    summary="Search Contracts",
     description="Retrieve contracts with optional filters: buyer, seller, material, status, created_at date range.",
     status_code=200
 )
@@ -14353,7 +14315,13 @@ async def export_applications_csv():
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
 # -------- BOLs (with PDF generation) --------
-@app.get("/bols", response_model=List[BOLOut], tags=["BOLs"], summary="List BOLs (admin)", status_code=200)
+@app.get(
+    "/bols/search",
+    response_model=List[BOLOut],
+    tags=["BOLs"],
+    summary="Search BOLs",
+    description="General BOL search: buyer, seller, material, status, contract_id, pickup_time window, tenant_scoped, etc.",
+)
 async def list_bols_admin(
     request: Request,
     response: Response,

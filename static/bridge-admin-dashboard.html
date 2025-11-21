@@ -871,9 +871,9 @@ onReady(async function(){
     // hydrate controls from URL if present
     (function hydrate(){
       const status = qs.get("status") || "all";
-      const yard   = qs.get("yard_id") || "";
-      const from   = qs.get("date_from") || "";
-      const to     = qs.get("date_to") || "";
+      const yard   = qs.get("seller") || "";
+      const from   = qs.get("start")  || "";
+      const to     = qs.get("end")    || "";
       if ($("cStatus")) $("cStatus").value = status;
       if ($("cYard"))   $("cYard").value   = yard;
       if ($("cFrom"))   $("cFrom").value   = from;
@@ -1052,8 +1052,11 @@ onReady(async function(){
     function clearBusy(tableSel){ setBusy(tableSel, false); }
 
     function downloadCSV(){
-      const paths = [ "/admin/exports/contracts.csv", "/contracts/export_csv" ];
-      window.location.assign(`${window.endpoint}${paths[0]}`);
+      // example; adjust paths to whatever your BOL export is
+      _tryDownload([
+        "/admin/exports/bols.csv",
+        "/bols/export_csv"
+      ]);
     }
     function downloadAll(){ _tryDownload([ "/admin/exports/all.zip", "/admin/export_all", "/admin/export_all.zip" ]); }
     function openOpenAPI(){ window.open(`${window.endpoint}/docs`, "_blank", "noopener,noreferrer"); }
