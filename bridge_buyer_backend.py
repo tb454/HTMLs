@@ -13341,8 +13341,12 @@ async def list_contracts_admin(
         params["end"] = datetime.combine(end, datetime.max.time()).astimezone(timezone.utc)
 
     where_sql = " AND ".join(where)
-
-    total_row = await database.fetch_one(f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}", params)
+    
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    total_row = await database.fetch_one(
+        f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
+        count_params,
+    )
     total = int(total_row["c"] or 0) if total_row else 0
     response.headers["X-Total-Count"] = str(total)
 
@@ -14314,6 +14318,7 @@ async def export_applications_csv():
     return StreamingResponse(io.BytesIO(data), media_type="text/csv", headers={
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
+
 # -------- BOLs (with PDF generation) --------
 @app.get(
     "/bols/search",
@@ -14363,8 +14368,12 @@ async def list_bols_admin(
 
     where_sql = " AND ".join(where)
 
-    # total count header for pagination
-    total_row = await database.fetch_one(f"SELECT COUNT(*) AS c FROM bols WHERE {where_sql}", params)
+    # total count header for pagination (no limit/offset here)
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    total_row = await database.fetch_one(
+        f"SELECT COUNT(*) AS c FROM bols WHERE {where_sql}",
+        count_params,
+    )
     total = int(total_row["c"] or 0) if total_row else 0
     response.headers["X-Total-Count"] = str(total)
 
