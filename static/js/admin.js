@@ -23,19 +23,7 @@ window.endpoint = (function () {
   // Tabs (if you use Bootstrap tabs or custom nav)
   // ----------------------------
   function wireTabs() {
-    const links = $$('.nav-link[data-target]');
-    links.forEach(a => {
-      a.addEventListener('click', (e) => {
-        e.preventDefault();
-        const target = a.getAttribute('data-target');
-        $$('.nav-link').forEach(x => x.classList.remove('active'));
-        a.classList.add('active');
-        $$('.tab-pane').forEach(p => p.classList.add('d-none'));
-        $(target)?.classList.remove('d-none');
-      });
-    });
-    // default: first tab active
-    if (links.length) links[0].click();
+    // No-op: Bootstrap 5 controls tabs with data-bs-toggle="tab".
   }
 
   // ----------------------------
@@ -137,9 +125,11 @@ window.endpoint = (function () {
   // ----------------------------
   async function init() {
     try {
-      wireTabs();
-      await Promise.all([ loadContracts(), loadBOLs() ]);
-      // await loadAdminChart(); // disabled (draw bolsByDay later on page)
+      // wireTabs(); // Bootstrap handles tabs via data-bs-toggle
+      // Legacy loaders rendered to #contracts-tbody / #bols-tbody which this page doesn't use.
+      // The page-specific loaders are defined inline in admin dashboard HTML.
+      // await Promise.all([ loadContracts(), loadBOLs() ]);
+      // await loadAdminChart(); // still disabled (chart rendered later on page)
     } catch (e) {
       console.error(e);
     }

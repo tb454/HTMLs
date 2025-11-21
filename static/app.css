@@ -1,5 +1,5 @@
 /* --- Global tokens / shared --- */
-:root { --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); }
+:root { --card-bg:#fff; --bg:#f4f6f8; --fg:#0b1220; --muted:#6b7280; --shadow:0 0 10px rgba(0,0,0,.06); --bs-body-bg:#fff; --bs-body-color:#212529; }
 body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
 
 /* Admin table/card polish */
