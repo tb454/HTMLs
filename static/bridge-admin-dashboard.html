@@ -144,8 +144,8 @@
         <a class="nav-link" href="/static/admin-billing.html">Billing</a>
         <a class="nav-link" href="/static/admin-compliance.html">Compliance</a>
         <a class="nav-link" href="/static/admin-tenants.html">Tenants</a>
-        <a class="nav-link active" href="/static/indices.html">Indices</a>
-        <a class="nav-link active" href="/static/trader.html">Trader</a>
+        <a class="nav-link" href="/static/indices.html">Indices</a>
+        <a class="nav-link" href="/static/trader.html">Trader</a>
       </nav>
     </div>
   </header>
@@ -1673,37 +1673,6 @@ Object.assign(window, {
     });
   })();
   </script>
-
-<script nonce="{{NONCE}}">
-onReady(() => {
-  const tabButtons = document.querySelectorAll('#adminTabs button[data-bs-toggle="tab"]');
-  const tabPanes   = document.querySelectorAll('#adminTabsContent .tab-pane');
-
-  if (!tabButtons.length || !tabPanes.length) return;
-
-  function activateTab(btn) {
-    const targetSelector = btn.getAttribute('data-bs-target');
-    if (!targetSelector) return;
-    const pane = document.querySelector(targetSelector);
-    if (!pane) return;
-
-    // Deactivate all
-    tabButtons.forEach(b => b.classList.remove('active'));
-    tabPanes.forEach(p => p.classList.remove('show', 'active'));
-
-    // Activate selected
-    btn.classList.add('active');
-    pane.classList.add('show', 'active');
-  }
-
-  tabButtons.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();      // don’t let Bootstrap be the only one in charge
-      activateTab(btn);
-    });
-  });
-});
-</script>
 
 </body>
 </html>
