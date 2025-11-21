@@ -9,21 +9,18 @@
   <link rel="icon" href="/static/favicon.ico" />
   
   <script nonce="{{NONCE}}">
-    function onReady(fn){
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', fn);
-      } else {
-        try { fn(); } catch(e){ console.error(e); }
-      }
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      await fetch('/health', { credentials: 'include' });
+    } catch (e) {
+        console.warn('Health init failed', e);
     }
-    // Mint XSRF-TOKEN early so POST/PUT/PATCH/DELETE have a header to echo
-    onReady(async () => { try { await fetch('/health', { credentials:'include' }); } catch {} });
-    // If any script errors or unhandled promise rejections happen, don't hang the loader
-    window.addEventListener('error', () => { try { window.hideLoading(); } catch {} });
-    window.addEventListener('unhandledrejection', () => { try { window.hideLoading(); } catch {} });
-    // Clear after 3s no matter what
-    setTimeout(() => { try { window.hideLoading(); } catch {} }, 3000);
-  </script>
+
+    try {
+        document.documentElement.classList.remove('loading');
+    } catch {}
+});
+</script>
   
   <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
@@ -236,7 +233,7 @@
           return fn().finally(()=>{ btn.disabled=false; btn.removeAttribute('aria-busy'); });
         }
 
-        // CSRF cookie is minted earlier via /health; handlers below just show exact errors.
+        // CSRF cookie is minted earlier via /health; handlers below show exact errors.
         document.getElementById('btnPullRefs').onclick = function(){
           const el = document.getElementById('idxCtlMsg'); el.textContent='Pulling reference prices...';
           guard(this, async ()=>{
@@ -317,24 +314,48 @@
 <h5 class="mt-3">Tons / Month by Yard</h5>
 <table class="table table-sm" id="tonsTbl">
   <thead><tr><th>Yard</th><th>Tons (month)</th></tr></thead>
-  <tbody></tbody>
+  <tbody>
+    <tr><td colspan="2" class="text-muted text-center py-2">Loading…</td></tr>
+  </tbody>
 </table>
 <script nonce="{{NONCE}}">
-(async function loadTons(){
+onReady(async function loadTons(){
   try{
-    const res = await api("/analytics/tons_by_yard_this_month");
+    const res  = await api("/analytics/tons_by_yard_this_month");
     const data = await res.json();
+    const tb   = document.querySelector("#tonsTbl tbody");
+    if (!tb || !Array.isArray(data)) return;
+
+    if (!data.length){
+      tb.innerHTML = `<tr><td colspan="2" class="text-muted text-center py-2">No data yet.</td></tr>`;
+      return;
+    }
+
+    tb.innerHTML = data.map(r => `
+      <tr>
+        <td>${r.yard_id ?? ''}</td>
+        <td>${r.tons_month ?? 0}</td>
+      </tr>
+    `).join("");
+  }catch(e){
     const tb = document.querySelector("#tonsTbl tbody");
-    tb.innerHTML = data.map(r=>`<tr><td>${r.yard_id}</td><td>${r.tons_month}</td></tr>`).join("");
-  }catch(e){ /* optional toast */ }
-})();
+    if (tb){
+      tb.innerHTML = `
+        <tr>
+          <td colspan="2" class="text-muted text-center py-2">
+            Failed to load: ${e?.message || 'error'}
+          </td>
+        </tr>`;
+    }
+  }
+});
 </script>
 
 <canvas id="bolsByDay" height="120" class="mb-3"></canvas>
 <script nonce="{{NONCE}}">
 onReady(async function(){
   try{
-    // Wait until Chart.js is available (it’s loaded later on the page)
+    // Wait until Chart.js is available (loaded later on the page)
     if (!window.Chart) {
       let tries = 0;
       await new Promise((resolve) => {
