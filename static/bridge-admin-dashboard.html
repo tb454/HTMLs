@@ -21,7 +21,17 @@
     } catch {}
 });
 </script>
-  
+
+<script nonce="{{NONCE}}">
+window.onReady = function(fn){
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fn);
+  } else {
+    try { fn(); } catch(e){ console.error(e); }
+  }
+};
+</script>
+
   <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
   
@@ -95,27 +105,8 @@
       } else {
         const prev = window.hideLoading;
         window.hideLoading = function(){ try { prev(); } catch {} _hide(); };
-      }
-      window.addEventListener('load', () => { try { window.hideLoading(); } catch {} });
+      }      
     })();
-  </script>
-
-  <script nonce="{{NONCE}}">
-    // If DOMContentLoaded doesn't fire, still clear the loader.
-    setTimeout(() => { try { window.hideLoading && window.hideLoading(); } catch {} }, 2500);
-  </script>
-  
-  <script nonce="{{NONCE}}">
-    // Belt-and-suspenders: if something above fails, end loading.
-    window.addEventListener('DOMContentLoaded', () => {
-      try { window.hideLoading && window.hideLoading(); } catch(_) {}
-      try {
-        const f = document.querySelector('footer.legal-footer');
-        if (f) f.classList.remove('invisible');
-      } catch(_) {}
-      // If DOMContentLoaded fired but something still blocked earlier scripts, re-clear in a microtask
-      queueMicrotask(() => { try { window.hideLoading && window.hideLoading(); } catch {} });
-    });
   </script>
   </head>
 
