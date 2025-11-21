@@ -2068,6 +2068,30 @@ async def anomalies_recent(limit: int = 25):
     return [AnomalyRow(**dict(r)) for r in rows]
 # --- Recent Anomalies ----
 
+@app.get("/vendor_quotes/latest", tags=["VendorQuotes"], summary="Latest vendor quotes (all vendors)", status_code=200)
+async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)):
+    """
+    Return the latest vendor_quotes rows for the most recent sheet_date.
+    Used by the admin dashboard Vendor Pricing card.
+    """
+    # Find the latest sheet_date in vendor_quotes
+    row = await database.fetch_one("SELECT MAX(sheet_date) AS d FROM vendor_quotes")
+    if not row or not row["d"]:
+        return []
+
+    latest_date = row["d"]
+    rows = await database.fetch_all(
+        """
+        SELECT vendor, category, material, price_per_lb, unit_raw, sheet_date
+        FROM vendor_quotes
+        WHERE sheet_date = :d
+        ORDER BY vendor, category, material
+        LIMIT :lim
+        """,
+        {"d": latest_date, "lim": limit_per_vendor},
+    )
+    return [dict(r) for r in rows]
+
 # ---- BR Indices ----
 from pydantic import BaseModel
 from typing import List, Optional
@@ -7657,6 +7681,39 @@ async def admin_export_behavior():
       "contracts": [dict(x) for x in contracts],
       "bols": [dict(x) for x in bols],
     }
+
+@app.get("/admin/dossier/queue", tags=["Admin"], summary="Dossier ingest queue (recent)", status_code=200)
+async def admin_dossier_queue(limit: int = Query(40, ge=1, le=500)):
+    """
+    Return recent rows from dossier_ingest_queue for the admin dashboard.
+    """
+    rows = await database.fetch_all(
+        """
+        SELECT id, source_system, source_table, event_type, status,
+               attempts, last_error, created_at
+        FROM dossier_ingest_queue
+        ORDER BY created_at DESC
+        LIMIT :lim
+        """,
+        {"lim": limit},
+    )
+    return [dict(r) for r in rows]
+
+
+@app.post("/admin/dossier/retry_failed", tags=["Admin"], summary="Retry failed Dossier ingest events", status_code=200)
+async def admin_dossier_retry_failed():
+    """
+    Mark failed rows in dossier_ingest_queue back to pending so the worker can retry them.
+    """
+    await database.execute(
+        """
+        UPDATE dossier_ingest_queue
+        SET status = 'pending', attempts = 0
+        WHERE status = 'failed'
+        """
+    )
+    return {"message": "Retry triggered."}
+
 # --- ZIP export (all core data) ---
 
 # ===== FUTURES endpoints =====
@@ -13151,6 +13208,89 @@ class ContractInExtended(ContractIn):
     reference_timestamp: Optional[datetime] = None
     currency: Optional[str] = "USD"
 
+@app.get("/contracts", response_model=List[ContractOut], tags=["Contracts"], summary="List Contracts (admin)", status_code=200)
+async def list_contracts_admin(
+    request: Request,
+    response: Response,
+    limit: int = Query(25, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+):
+    """
+    Paginated contract listing for the admin dashboard.
+
+    Filters:
+    - status: exact match ('Pending','Signed','Dispatched','Fulfilled','Cancelled')
+    - seller: case-insensitive substring match
+    - start/end: filter by created_at date (UTC, inclusive)
+    """
+    tenant_id = await current_tenant_id(request)
+
+    where = ["1=1"]
+    params: dict[str, object] = {"limit": limit, "offset": offset}
+
+    if tenant_id:
+        where.append("tenant_id = :tenant_id")
+        params["tenant_id"] = tenant_id
+    if status and status.lower() != "all":
+        where.append("status = :status")
+        params["status"] = status
+    if seller:
+        where.append("seller ILIKE :seller")
+        params["seller"] = f"%{seller}%"
+    if start:
+        where.append("created_at >= :start")
+        params["start"] = datetime.combine(start, datetime.min.time()).astimezone(timezone.utc)
+    if end:
+        where.append("created_at <= :end")
+        params["end"] = datetime.combine(end, datetime.max.time()).astimezone(timezone.utc)
+
+    where_sql = " AND ".join(where)
+
+    total_row = await database.fetch_one(f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}", params)
+    total = int(total_row["c"] or 0) if total_row else 0
+    response.headers["X-Total-Count"] = str(total)
+
+    rows = await database.fetch_all(
+        f"""
+        SELECT *
+        FROM contracts
+        WHERE {where_sql}
+        ORDER BY created_at DESC, id DESC
+        LIMIT :limit OFFSET :offset
+        """,
+        params,
+    )
+
+    out: List[ContractOut] = []
+    for r in rows:
+        d = dict(r)
+        out.append(
+            ContractOut(
+                id=d["id"],
+                buyer=d["buyer"],
+                seller=d["seller"],
+                material=d["material"],
+                weight_tons=float(d["weight_tons"]),
+                price_per_ton=d["price_per_ton"],
+                currency=d.get("currency") or "USD",
+                tax_percent=d.get("tax_percent"),
+                status=d.get("status") or "Pending",
+                created_at=d.get("created_at"),
+                signed_at=d.get("signed_at"),
+                signature=d.get("signature"),
+                pricing_formula=d.get("pricing_formula"),
+                reference_symbol=d.get("reference_symbol"),
+                reference_price=d.get("reference_price"),
+                reference_source=d.get("reference_source"),
+                reference_timestamp=d.get("reference_timestamp"),
+            )
+        )
+    return out
+
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
     tenant_id = await current_tenant_id(request)
@@ -14083,6 +14223,129 @@ async def export_applications_csv():
         "Content-Disposition": "attachment; filename=tenant_applications.csv"
     })
 # -------- BOLs (with PDF generation) --------
+@app.get("/bols", response_model=List[BOLOut], tags=["BOLs"], summary="List BOLs (admin)", status_code=200)
+async def list_bols_admin(
+    request: Request,
+    response: Response,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    buyer: Optional[str] = Query(None),
+    material: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+):
+    """
+    Paginated BOL listing for the admin dashboard.
+
+    Filters:
+    - buyer: case-insensitive substring match on buyer
+    - material: case-insensitive substring match on material
+    - start/end: filter by pickup_time window (inclusive)
+    """
+    tenant_id = await current_tenant_id(request)
+
+    where = ["1=1"]
+    params: dict[str, object] = {"limit": limit, "offset": offset}
+
+    if tenant_id:
+        where.append("tenant_id = :tenant_id")
+        params["tenant_id"] = tenant_id
+    if buyer:
+        where.append("buyer ILIKE :buyer")
+        params["buyer"] = f"%{buyer}%"
+    if material:
+        where.append("material ILIKE :material")
+        params["material"] = f"%{material}%"
+    if start:
+        where.append("pickup_time >= :start")
+        params["start"] = start
+    if end:
+        where.append("pickup_time <= :end")
+        params["end"] = end
+
+    where_sql = " AND ".join(where)
+
+    # total count header for pagination
+    total_row = await database.fetch_one(f"SELECT COUNT(*) AS c FROM bols WHERE {where_sql}", params)
+    total = int(total_row["c"] or 0) if total_row else 0
+    response.headers["X-Total-Count"] = str(total)
+
+    rows = await database.fetch_all(
+        f"""
+        SELECT *
+        FROM bols
+        WHERE {where_sql}
+        ORDER BY pickup_time DESC NULLS LAST, created_at DESC NULLS LAST, bol_id DESC
+        LIMIT :limit OFFSET :offset
+        """,
+        params,
+    )
+
+    out: List[BOLOut] = []
+    for r in rows:
+        d = dict(r)
+
+        carrier = CarrierInfo(
+            name=d.get("carrier_name") or "",
+            driver=d.get("carrier_driver") or "",
+            truck_vin=d.get("carrier_truck_vin") or "",
+        )
+
+        pickup_sig = Signature(
+            base64=d.get("pickup_signature_base64") or "",
+            timestamp=(
+                d.get("pickup_signature_time")
+                or d.get("pickup_time")
+                or datetime.utcnow()
+            ),
+        )
+
+        bol_in = BOLIn(
+            contract_id=d["contract_id"],
+            buyer=d.get("buyer") or "",
+            seller=d.get("seller") or "",
+            material=d.get("material") or "",
+            weight_tons=float(d.get("weight_tons") or 0),
+            price_per_unit=float(d.get("price_per_unit") or 0),
+            total_value=float(d.get("total_value") or 0),
+            carrier=carrier,
+            pickup_signature=pickup_sig,
+            pickup_time=d.get("pickup_time") or d.get("created_at") or datetime.utcnow(),
+            carbon_intensity_kgco2e=d.get("carbon_intensity_kgco2e"),
+            offset_kgco2e=d.get("offset_kgco2e"),
+            esg_cert_id=d.get("esg_cert_id"),
+            origin_country=d.get("origin_country"),
+            destination_country=d.get("destination_country"),
+            port_code=d.get("port_code"),
+            hs_code=d.get("hs_code"),
+            duty_usd=d.get("duty_usd"),
+            tax_pct=d.get("tax_pct"),
+            country_of_origin=d.get("country_of_origin"),
+            export_country=d.get("export_country"),
+        )
+
+        delivery_sig = None
+        if d.get("delivery_signature_base64") or d.get("delivery_signature_time"):
+            delivery_sig = Signature(
+                base64=d.get("delivery_signature_base64") or "",
+                timestamp=(
+                    d.get("delivery_signature_time")
+                    or d.get("delivery_time")
+                    or datetime.utcnow()
+                ),
+            )
+
+        out.append(
+            BOLOut(
+                **bol_in.model_dump(),
+                bol_id=d["bol_id"],
+                status=d.get("status") or "Scheduled",
+                delivery_signature=delivery_sig,
+                delivery_time=d.get("delivery_time"),
+            )
+        )
+    return out
+
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
     tenant_id = await current_tenant_id(request)
