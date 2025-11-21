@@ -5459,7 +5459,11 @@ async def health_alias(request: Request):
     can read it and send 'X-CSRF' on subsequent requests.
     """
     # 1) issue CSRF token bound to the session    
-    token = _csrf_get_or_create(request)
+    try:
+        token = _csrf_get_or_create(request)  # your helper
+    except NameError:
+        import secrets
+        token = secrets.token_urlsafe(16)
 
     # 2) do the same health check you already had
     try:
