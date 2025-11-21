@@ -13,6 +13,7 @@ window.endpoint = (function () {
 
   // Utility: simple JSON fetch with credentials
   async function jget(url) {
+    const full = url.startsWith('http') ? url : (window.endpoint + url);
     const r = await fetch(url, { credentials: 'include' });
     if (!r.ok) throw new Error(url + ' -> ' + r.status);
     return r.json();
@@ -83,7 +84,7 @@ window.endpoint = (function () {
         <td>${r.carrier || '-'}</td>
         <td>${r.status || '-'}</td>
         <td>
-          <a class="btn btn-sm btn-outline-secondary" href="/bol/${r.id}/pdf" target="_blank">PDF</a>
+          <a class="btn btn-sm btn-outline-secondary" href="${window.endpoint}/bol/${r.id}/pdf" target="_blank">PDF</a>
         </td>
       </tr>
     `).join('') || `<tr><td colspan="5" class="text-muted">No BOLs found.</td></tr>`;
