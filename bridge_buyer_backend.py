@@ -321,11 +321,16 @@ async def _utf8_and_cache_headers(request, call_next):
     if ctype.startswith("application/json") and "charset=" not in ctype.lower():
         resp.headers["content-type"] = "application/json; charset=utf-8"
 
-    # 2) Add safe cache headers for dynamic endpoints
+    # 2) Add revalidation cache headers for dynamic endpoints (preferred over no-store)
     path = request.url.path
     if path in ("/health", "/healthz") or path.startswith(("/bols", "/contracts", "/analytics", "/admin")):
-        resp.headers.setdefault("Cache-Control", "no-store")
-
+        # Ensure clients/proxies always revalidate but allow caching layers to exist safely
+        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        # Back-compat for old proxies (optional)
+        resp.headers.setdefault("Pragma", "no-cache")
+        # Auth-aware variance (optional but smart if endpoints can be user-specific)
+        if request.headers.get("authorization"):
+            resp.headers.setdefault("Vary", "Authorization")
     return resp
 
 instrumentator = Instrumentator()
