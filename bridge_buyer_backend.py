@@ -2,6 +2,10 @@ from __future__ import annotations
 import sys, pathlib
 import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
+from fastapi.responses import JSONResponse
+
+class JSONResponseUTF8(JSONResponse):
+    media_type = "application/json; charset=utf-8"
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse, JSONResponse, PlainTextResponse
@@ -285,9 +289,11 @@ async def _check_contract_quota():
     )
     if int(row["c"]) >= MAX_CONTRACTS_PER_DAY:
         raise HTTPException(429, "daily contract quota exceeded; contact sales")
-# -------------------------------------
+# ----------------------------------
 
+# ---- Cache + UTF-8 middleware ----
 app = FastAPI(
+    default_response_class=JSONResponseUTF8,
     lifespan=lifespan,
     title="BRidge API",
     description="A secure, auditable contract and logistics platform for real-world commodity trading. Built for ICE, Nasdaq, and global counterparties.",
@@ -295,12 +301,37 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url=None,
     openapi_url="/openapi.json",
-    contact={"name":"Atlas IP Holdings","url":"https://scrapfutures.com","email":"info@atlasipholdingsllc.com"},
-    license_info={"name":"Proprietary — Atlas IP Holdings","url":"https://scrapfutures.com/legal"},
+    contact={
+        "name": "Atlas IP Holdings",
+        "url": "https://scrapfutures.com",
+        "email": "info@atlasipholdingsllc.com",
+    },
+    license_info={
+        "name": "Proprietary — Atlas IP Holdings",
+        "url": "https://scrapfutures.com/legal",
+    },
 )
+
+@app.middleware("http")
+async def _utf8_and_cache_headers(request, call_next):
+    resp = await call_next(request)
+
+    # 1) Ensure JSON responses include an explicit UTF-8 charset
+    ctype = resp.headers.get("content-type", "")
+    if ctype.startswith("application/json") and "charset=" not in ctype.lower():
+        resp.headers["content-type"] = "application/json; charset=utf-8"
+
+    # 2) Add safe cache headers for dynamic endpoints
+    path = request.url.path
+    if path in ("/health", "/healthz") or path.startswith(("/bols", "/contracts", "/analytics", "/admin")):
+        resp.headers.setdefault("Cache-Control", "no-store")
+
+    return resp
+
 instrumentator = Instrumentator()
 instrumentator.instrument(app).expose(app, include_in_schema=False)
 instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
+# ---- Cache + UTF-8 middleware ----
 
 # === QBO OAuth Relay • Config ===
 QBO_RELAY_AUTH = os.getenv("QBO_RELAY_AUTH", "").strip()  # shared secret for /admin/qbo/peek
