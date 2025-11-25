@@ -1763,6 +1763,47 @@ Object.assign(window, {
     });
   })();
   </script>
+<script nonce="{{NONCE}}">
+(function () {
+  // Ensure [hidden] actually hides in all CSS stacks
+  try { 
+    if (!document.getElementById('__hidden-style')) {
+      const s = document.createElement('style');
+      s.id = '__hidden-style';
+      s.textContent = "[hidden]{display:none!important}";
+      document.head.appendChild(s);
+    }
+  } catch {}
+
+  // Toggle a11y attributes in sync with Bootstrap modal events
+  function wireModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Initial closed state (no focusable descendants)
+    el.setAttribute('hidden', '');
+    el.setAttribute('inert', '');
+    el.setAttribute('aria-hidden', 'true');
+
+    el.addEventListener('show.bs.modal', () => {
+      el.removeAttribute('hidden');
+      el.removeAttribute('inert');
+      el.setAttribute('aria-hidden', 'false');
+    });
+
+    el.addEventListener('hidden.bs.modal', () => {
+      el.setAttribute('aria-hidden', 'true');
+      el.setAttribute('hidden', '');
+      el.setAttribute('inert', '');
+    });
+  }
+
+  // Wire all modals here
+  wireModal('deliveryLogModal');
+  wireModal('policyModal');
+  // wireModal('anotherModalId'); // add more if needed
+})();
+</script>
 
 </body>
 </html>
