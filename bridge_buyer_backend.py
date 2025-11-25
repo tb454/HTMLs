@@ -1054,24 +1054,37 @@ async def nonce_mint_mw(request: Request, call_next):
     request.state.csp_nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     return await call_next(request)
 
-async def security_headers_mw(request, call_next):
-    resp: Response = await call_next(request)
+# Domains allowed to embed your app (adjust if you want to allow none)
+_FRAME_ANCESTORS = (
+    "frame-ancestors 'self' https://scrapfutures.com https://www.scrapfutures.com "
+    "https://bridge.scrapfutures.com https://bridge-buyer.onrender.com"
+)
 
-    # Safe defaults
+async def security_headers_mw(request: Request, call_next):
+    resp: Response = await call_next(request)
     h = resp.headers
+
+    # Safe defaults (no deprecated X-Frame-Options)
     h["X-Content-Type-Options"] = "nosniff"
-    h["X-Frame-Options"] = "DENY"
     h["Referrer-Policy"] = "strict-origin-when-cross-origin"
     h["Cross-Origin-Opener-Policy"] = "same-origin"
     h["Cross-Origin-Embedder-Policy"] = "credentialless"
     h["X-Permitted-Cross-Domain-Policies"] = "none"
     h["X-Download-Options"] = "noopen"
     h["Permissions-Policy"] = "geolocation=()"
-    path = request.url.path or "/"    
+
+    # Ensure we do not emit X-Frame-Options at all
+    if "X-Frame-Options" in h:
+        del h["X-Frame-Options"]
+
+    path = request.url.path or "/"
+
+    # Swagger /docs: relaxed but safe CSP; use frame-ancestors instead of XFO
     if path.startswith("/docs"):
         h["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "base-uri 'self'; object-src 'none'; "
+            f"{_FRAME_ANCESTORS}; "
             "img-src 'self' data:; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline'; "
@@ -1080,12 +1093,14 @@ async def security_headers_mw(request, call_next):
             "connect-src 'self'"
         )
         return resp
-    # Only set CSP here if the route didn't set one explicitly
+
+    # App CSP (set only if not already set by the route)
     if "Content-Security-Policy" not in h:
         nonce = getattr(request.state, "csp_nonce", "")
         h["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "base-uri 'self'; object-src 'none'; "
+            f"{_FRAME_ANCESTORS}; "
             "img-src 'self' data: blob: https://*.stripe.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
@@ -1096,7 +1111,6 @@ async def security_headers_mw(request, call_next):
         )
 
     return resp
-
 
 app.middleware("http")(security_headers_mw)
 
