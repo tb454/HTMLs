@@ -321,39 +321,16 @@ async def _utf8_and_cache_headers(request, call_next):
     if ctype.startswith("application/json") and "charset=" not in ctype.lower():
         resp.headers["content-type"] = "application/json; charset=utf-8"
 
-    # 2) Cache + security headers for dynamic API endpoints
-    path = requests.url.path
+    # 2) Add revalidation cache headers for dynamic endpoints (preferred over no-store)
+    path = request.url.path
     if path in ("/health", "/healthz") or path.startswith(("/bols", "/contracts", "/analytics", "/admin")):
-        # Softer policy (lint-friendly): always revalidate; no must-revalidate; no Pragma
-        resp.headers["Cache-Control"] = "no-cache"
-
-        # Auth-aware variance (if responses can differ by user)
+        # Ensure clients/proxies always revalidate but allow caching layers to exist safely
+        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        # Back-compat for old proxies (optional)
+        resp.headers.setdefault("Pragma", "no-cache")
+        # Auth-aware variance (optional but smart if endpoints can be user-specific)
         if request.headers.get("authorization"):
-            # Merge with any existing Vary
-            prev_vary = resp.headers.get("Vary")
-            if prev_vary:
-                if "Authorization" not in prev_vary:
-                    resp.headers["Vary"] = prev_vary + ", Authorization"
-            else:
-                resp.headers["Vary"] = "Authorization"
-
-        # Remove deprecated/request-only Pragma if present
-        try:
-            del resp.headers["Pragma"]
-        except Exception:
-            pass
-
-        # Prefer CSP frame-ancestors over X-Frame-Options
-        try:
-            del resp.headers["x-frame-options"]
-        except Exception:
-            pass
-
-        # Minimal CSP for API responses (no framing). Safe to set on JSON/API.
-        # (Your HTML pages can send a richer CSP with nonces; this is API-only here.)
-        csp = resp.headers.get("Content-Security-Policy")
-        if not csp:
-            resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+            resp.headers.setdefault("Vary", "Authorization")
     return resp
 
 instrumentator = Instrumentator()
