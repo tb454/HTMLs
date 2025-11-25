@@ -325,9 +325,10 @@ async def _utf8_and_cache_headers(request, call_next):
     path = request.url.path
     if path in ("/health", "/healthz") or path.startswith(("/bols", "/contracts", "/analytics", "/admin")):
         # Ensure clients/proxies always revalidate but allow caching layers to exist safely
-        resp.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
-        # Back-compat for old proxies (optional)
-        resp.headers.setdefault("Pragma", "no-cache")
+        resp.headers["Cache-Control"] = "no-store"
+        # drop legacy pragma header; not needed with Cache-Control
+        if "Pragma" in resp.headers:
+            del resp.headers["Pragma"]
         # Auth-aware variance (optional but smart if endpoints can be user-specific)
         if request.headers.get("authorization"):
             resp.headers.setdefault("Vary", "Authorization")
