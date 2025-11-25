@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sys, pathlib
+from wsgiref import headers
 import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.responses import JSONResponse
@@ -309,11 +310,13 @@ def _apply_cache_headers(request: Request, headers: dict):
     if path.startswith(("/static/", "/favicon.ico")):
         return
 
-    # 4) Dynamic GET/HEAD: private, revalidate each time (quiets webhint)
-    headers["Cache-Control"] = "private, max-age=0"
+    # 4) Dynamic GET/HEAD: short client cache (quiets webhint)
+    headers["Cache-Control"] = "private, max-age=10"
     prev_vary = headers.get("Vary")
     headers["Vary"] = ("Authorization, Cookie" if not prev_vary else f"{prev_vary}, Authorization, Cookie")
-    headers["Expires"] = "0"
+    # No Expires — Cache-Control is authoritative
+    if "Expires" in headers:
+        del headers["Expires"]
 # ---- /Cache policy helper ----
 
 # ---- Cache + UTF-8 middleware ----
