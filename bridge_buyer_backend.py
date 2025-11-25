@@ -291,6 +291,31 @@ async def _check_contract_quota():
         raise HTTPException(429, "daily contract quota exceeded; contact sales")
 # ----------------------------------
 
+# ---- Cache policy helper (safe & webhint-friendly) ----
+def _apply_cache_headers(request: Request, headers: dict):
+    path = request.url.path or "/"
+
+    # 1) Never cache state-changing or auth/session-y endpoints
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} or path.startswith(("/login", "/logout", "/session")):
+        headers["Cache-Control"] = "no-store"
+        return
+
+    # 2) Health probes: also no-store (avoids stale health in any layer)
+    if path in ("/health", "/healthz"):
+        headers["Cache-Control"] = "no-store"
+        return
+
+    # 3) Don’t touch static assets; Starlette/StaticFiles sets strong caching/Etag
+    if path.startswith(("/static/", "/favicon.ico")):
+        return
+
+    # 4) Dynamic GET/HEAD: private, revalidate each time (quiets webhint)
+    headers["Cache-Control"] = "private, max-age=0"
+    prev_vary = headers.get("Vary")
+    headers["Vary"] = ("Authorization, Cookie" if not prev_vary else f"{prev_vary}, Authorization, Cookie")
+    headers["Expires"] = "0"
+# ---- /Cache policy helper ----
+
 # ---- Cache + UTF-8 middleware ----
 app = FastAPI(
     default_response_class=JSONResponseUTF8,
@@ -321,17 +346,12 @@ async def _utf8_and_cache_headers(request, call_next):
     if ctype.startswith("application/json") and "charset=" not in ctype.lower():
         resp.headers["content-type"] = "application/json; charset=utf-8"
 
-    # 2) Add revalidation cache headers for dynamic endpoints (preferred over no-store)
-    path = request.url.path
-    if path in ("/health", "/healthz") or path.startswith(("/bols", "/contracts", "/analytics", "/admin")):
-        # Ensure clients/proxies always revalidate but allow caching layers to exist safely
-        resp.headers["Cache-Control"] = "no-store"
-        # drop legacy pragma header; not needed with Cache-Control
-        if "Pragma" in resp.headers:
-            del resp.headers["Pragma"]
-        # Auth-aware variance (optional but smart if endpoints can be user-specific)
-        if request.headers.get("authorization"):
-            resp.headers.setdefault("Vary", "Authorization")
+    # 2) Apply cache policy
+    _apply_cache_headers(request, resp.headers)
+
+    # Drop legacy pragma if present
+    if "Pragma" in resp.headers:
+        del resp.headers["Pragma"]
     return resp
 
 instrumentator = Instrumentator()
