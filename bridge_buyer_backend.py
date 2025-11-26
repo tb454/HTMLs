@@ -349,19 +349,23 @@ app = FastAPI(
     },
 )
 
+# ---- Ensure Cache-Control exists on every GET/HEAD -------
 @app.middleware("http")
-async def _static_cache_control(request, call_next):
+async def _ensure_cache_control_header(request: Request, call_next):
     resp = await call_next(request)
-    p = request.url.path or "/"
-    # Only if missing/empty
-    if p.startswith("/static/") and not (resp.headers.get("Cache-Control") or "").strip():
-        # Versioned assets → 1 year immutable; else 1 hour
-        resp.headers["Cache-Control"] = (
-            "public, max-age=31536000, immutable"
-            if "v=" in (request.url.query or "")
-            else "public, max-age=3600"
-        )
+    if request.method in ("GET","HEAD"):
+        if not (resp.headers.get("Cache-Control") or "").strip():
+            p = request.url.path or "/"
+            if p.startswith("/static/") or p == "/favicon.ico":
+                resp.headers["Cache-Control"] = (
+                    "public, max-age=31536000, immutable"
+                    if "v=" in (request.url.query or "")
+                    else "public, max-age=3600"
+                )
+            else:
+                resp.headers["Cache-Control"] = "private, max-age=10"
     return resp
+
 
 @app.middleware("http")
 async def _utf8_and_cache_headers(request, call_next):
@@ -383,7 +387,7 @@ async def _utf8_and_cache_headers(request, call_next):
 instrumentator = Instrumentator()
 instrumentator.instrument(app).expose(app, include_in_schema=False)
 instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
-# ---- Cache + UTF-8 middleware ----
+# ---- Ensure Cache-Control exists on every GET/HEAD -------
 
 # === QBO OAuth Relay • Config ===
 QBO_RELAY_AUTH = os.getenv("QBO_RELAY_AUTH", "").strip()  # shared secret for /admin/qbo/peek
@@ -1159,6 +1163,14 @@ async def security_headers_mw(request: Request, call_next):
     return resp
 
 app.middleware("http")(security_headers_mw)
+
+@app.middleware("http")
+async def _ensure_x_content_type_options(request: Request, call_next):
+    resp = await call_next(request)
+    # Guarantee nosniff even if an upstream/route forgot to set it
+    if not (resp.headers.get("X-Content-Type-Options") or "").strip():
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
 
 @app.middleware("http")
 async def hsts_middleware(request: Request, call_next):
@@ -5422,6 +5434,10 @@ async def yard_alias_slash():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
+    from pathlib import Path
+    p = Path("static/favicon.ico")
+    if p.exists():
+        return FileResponse(str(p))
     return Response(status_code=204)
 
 # -------- Risk controls (kill switch, price bands, entitlements) --------
@@ -13437,10 +13453,10 @@ async def list_contracts_admin(
         params["seller"] = f"%{seller}%"
     if start:
         where.append("created_at >= :start")
-        params["start"] = datetime.combine(start, datetime.min.time()).astimezone(timezone.utc)
+        params["start"] = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
     if end:
         where.append("created_at <= :end")
-        params["end"] = datetime.combine(end, datetime.max.time()).astimezone(timezone.utc)
+        params["end"] = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
 
     where_sql = " AND ".join(where)
     
@@ -13451,6 +13467,7 @@ async def list_contracts_admin(
     )
     total = int(total_row["c"] or 0) if total_row else 0
     response.headers["X-Total-Count"] = str(total)
+    response.headers["Cache-Control"] = "private, max-age=10"
 
     rows = await database.fetch_all(
         f"""
