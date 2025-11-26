@@ -915,9 +915,9 @@ onReady(async () => {
 
       const qs = new URLSearchParams({
         seller,
-        limit: '2000',
+        limit: '1000',
         offset: '0',
-        start: start.toISOString().slice(0, 10)  // YYYY-MM-DD
+        start: toISOStringDateStart(start)  // full ISO, UTC midnight
       });
 
       try {
@@ -1208,6 +1208,20 @@ onReady(async () => {
       refreshFinishedFromInputs();
     }
 
+    function toISOStringDateStart(v){
+      if (!v) return "";
+      const d = new Date(v);
+      if (Number.isNaN(d)) return "";
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0)).toISOString();
+    }
+    function toISOStringDateEnd(v){
+      if (!v) return "";
+      const d = new Date(v);
+      if (Number.isNaN(d)) return "";
+      const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0));
+      return end.toISOString();
+    }
+
     async function listContracts() {
       const seller = document.getElementById("sellerName").value.trim();
       if (!seller) return;
@@ -1215,10 +1229,10 @@ onReady(async () => {
       const start  = document.getElementById("filterStart").value;
       const end    = document.getElementById("filterEnd").value;
 
-      const qs = new URLSearchParams({ seller, limit, offset });
+      const qs = new URLSearchParams({ seller, limit: String(limit), offset: String(offset) });
       if (status) qs.set("status", status);
-      if (start)  qs.set("start", start);
-      if (end)    qs.set("end",   end);
+      if (start)  qs.set("start", toISOStringDateStart(start));  // ISO UTC start-of-day
+      if (end)    qs.set("end",   toISOStringDateEnd(end));      // ISO UTC (exclusive) end
 
       const tbody = document.querySelector("#sellerContractsTable tbody");      
       const res = await api(`/contracts?${qs.toString()}`);
