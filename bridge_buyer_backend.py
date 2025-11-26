@@ -306,8 +306,16 @@ def _apply_cache_headers(request: Request, headers: dict):
         headers["Cache-Control"] = "no-store"
         return
 
-    # 3) Don’t touch static assets; Starlette/StaticFiles sets strong caching/Etag
-    if path.startswith(("/static/", "/favicon.ico")):
+    # 3) Static assets: ensure Cache-Control even when served via FileResponse routes
+    if path.startswith("/static/") or path == "/favicon.ico":
+        # Only set if missing (StaticFiles already sets this)
+        cc = (headers.get("Cache-Control") or "").strip()
+        if not cc:
+            q = (request.url.query or "")
+            # Versioned assets → long immutable cache; otherwise a short hour cache
+            headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable" if "v=" in q else "public, max-age=3600"
+            )
         return
 
     # 4) Dynamic GET/HEAD: short client cache (quiets webhint)
@@ -5260,7 +5268,12 @@ async def _spec_nonferrous():
 async def _contract_specs():
     return _static_or_placeholder("contract-specs.html", "Contract Specifications")
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# 1 year for versioned static files
+app.mount(
+    "/static",
+    StaticFiles(directory="static", html=False, check_dir=True, max_age=31536000),
+    name="static",
+)
 # -------- /Static HTML --------
 
 @app.get("/", include_in_schema=False)

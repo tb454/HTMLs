@@ -311,3 +311,18 @@ tbody tr:hover{background:rgba(15,98,254,.04)}
 .maxw-680{max-width:680px}
 .w-auto{width:auto}
 .w-220{width:220px}
+
+/* --- Standards fallbacks for Bootstrap vendor-specific rules --- */
+
+/* Webhint: add the standard property alongside -webkit-text-size-adjust */
+html, body {
+  text-size-adjust: 100%;
+}
+
+/* Webhint: add Safari's standard value next to -webkit-match-parent */
+th {
+  text-align: match-parent;
+}
+
+.is-clickable { cursor: pointer; }
+

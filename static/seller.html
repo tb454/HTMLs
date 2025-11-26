@@ -302,7 +302,7 @@
       <div class="section-title">Price This Material</div>
       <div class="card mt-12 p-12">
         <label>Category:
-          <select id="catSel" class="form-select maxw-220" style="display:inline-block; margin-right:8px;">
+          <select id="catSel" class="form-select maxw-220 d-inline-block me-2">
             <option>Copper</option><option>Aluminum</option><option>Brass</option>
             <option>Insulated Wire</option><option>Misc Product</option><option>Radiator Product</option>
             <option>Lead</option><option>Stainless</option>
@@ -312,7 +312,7 @@
           <input id="matInput" class="form-control maxw-260 di ib-mx" placeholder="e.g., #1 or AL6063_OldExtrusion"/>
         </label>
         <button type="button" class="btn btn-primary" id="btnQuote">Quote</button>
-        <div id="quoteOut" class="text-muted" style="margin-top:8px;"></div>
+        <div id="quoteOut" class="text-muted mt-2"></div>
       </div>
     </section>
 
@@ -411,11 +411,11 @@
       <!-- RFQ (two-click) -->
       <div class="card p-3 mt-3 maxw-520" data-role="buyer">
         <div class="d-flex gap-2">
-          <select id="rfqSym" class="form-select">
+          <select id="rfqSym" class="form-select" aria-label="RFQ symbol" title="RFQ symbol">
             <option>CU-SHRED-1M</option>
             <option>AL-6061-1M</option>
           </select>
-          <select id="rfqSide" class="form-select">
+          <select id="rfqSide" class="form-select" aria-label="RFQ side" title="RFQ side">
             <option>buy</option>
             <option>sell</option>
           </select>
@@ -681,7 +681,7 @@ onReady(async () => {
       if (!el) return;
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
       el.title = `Times shown in ${__useUTC ? 'UTC' : tz} — click to toggle`;
-      el.style.cursor = 'pointer';
+      el.classList.add('is-clickable');
       el.onclick = () => {
         __useUTC = !__useUTC;
         localStorage.setItem('seller.useUTC', __useUTC ? '1':'0');
@@ -698,7 +698,7 @@ onReady(async () => {
     onReady(_renderTZHintSeller);
 // ---- /Timezone toggle ----
 
-    document.querySelectorAll('.section-title').forEach(el => { el.style.borderColor = accentColor; el.style.color = accentColor; });
+    /* colors handled by CSS; no inline styles */
 
     let activeContractsChart, finishedGoodsChart, kpiChart;
     const activeContractsChangeHistory = [], activeContractsChartLabels = [];
