@@ -316,14 +316,14 @@ tbody tr:hover{background:rgba(15,98,254,.04)}
 
 /* Webhint: add the standard property alongside -webkit-text-size-adjust */
 html, body {
-  -webkit-text-size-adjust: 100%;  /* older WebKit */
-  text-size-adjust: 100%;          /* standard */
+  -webkit-text-size-adjust: 100%; 
+  text-size-adjust: 100%;          
 }
 
 /* Webhint: add Safari's standard value next to -webkit-match-parent */
 th {
-  text-align: -webkit-match-parent; /* Chrome/Edge/WebKit */
-  text-align: match-parent;         /* Safari 15.4+ */
+  text-align: -webkit-match-parent;
+  text-align: match-parent;
 }
 
 .is-clickable { cursor: pointer; }
