@@ -306,16 +306,17 @@ def _apply_cache_headers(request: Request, headers: dict):
         headers["Cache-Control"] = "no-store"
         return
 
-    # 3) Static assets: ensure Cache-Control even when served via FileResponse routes
+    # 3) Static assets: ensure Cache-Control even when served by FileResponse routes
     if path.startswith("/static/") or path == "/favicon.ico":
-        # Only set if missing (StaticFiles already sets this)
+        # only set if missing/empty
         cc = (headers.get("Cache-Control") or "").strip()
         if not cc:
-            q = (request.url.query or "")
-            # Versioned assets → long immutable cache; otherwise a short hour cache
-            headers["Cache-Control"] = (
-                "public, max-age=31536000, immutable" if "v=" in q else "public, max-age=3600"
-            )
+            # versioned assets → long immutable cache
+            if "v=" in (request.url.query or ""):
+                headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                # 1 hour for unversioned
+                headers["Cache-Control"] = "public, max-age=3600"
         return
 
     # 4) Dynamic GET/HEAD: short client cache (quiets webhint)
