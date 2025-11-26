@@ -350,6 +350,20 @@ app = FastAPI(
 )
 
 @app.middleware("http")
+async def _static_cache_control(request, call_next):
+    resp = await call_next(request)
+    p = request.url.path or "/"
+    # Only if missing/empty
+    if p.startswith("/static/") and not (resp.headers.get("Cache-Control") or "").strip():
+        # Versioned assets → 1 year immutable; else 1 hour
+        resp.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable"
+            if "v=" in (request.url.query or "")
+            else "public, max-age=3600"
+        )
+    return resp
+
+@app.middleware("http")
 async def _utf8_and_cache_headers(request, call_next):
     resp = await call_next(request)
 
