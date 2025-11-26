@@ -13406,7 +13406,7 @@ class ContractInExtended(ContractIn):
 async def list_contracts_admin(
     request: Request,
     response: Response,
-    limit: int = Query(25, ge=1, le=500),
+    limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
