@@ -13426,9 +13426,38 @@ async def list_contracts_admin(
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
-    start: Optional[date] = Query(None),
-    end: Optional[date] = Query(None),
+    start: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
+    end: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
 ):
+    # --- tolerant ISO date parser (accepts 'YYYY-MM-DD', 'YYYY-MM-DDTHH:mm:ss[Z|±hh:mm]', or with spaces) ---
+    def _parse_dt_start(v: Optional[str]) -> Optional[datetime]:
+        if not v: return None
+        s = v.strip().replace(" ", "T")
+        try:
+            if len(s) == 10 and s.count("-") == 2:
+                y, m, d = map(int, s.split("-"))
+                return datetime(y, m, d, tzinfo=timezone.utc)
+            if s.endswith("Z"): s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+        except Exception:
+            raise HTTPException(400, "Invalid 'start' date. Use YYYY-MM-DD or ISO 8601.")
+
+    def _parse_dt_end(v: Optional[str]) -> Optional[datetime]:
+        if not v: return None
+        s = v.strip().replace(" ", "T")
+        try:
+            if len(s) == 10 and s.count("-") == 2:
+                y, m, d = map(int, s.split("-"))
+                # exclusive end: next day 00:00Z
+                return datetime(y, m, d, tzinfo=timezone.utc) + timedelta(days=1)
+            if s.endswith("Z"): s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            dt = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+            # make it exclusive if caller passed a bare date-time (keep their time)
+            return dt
+        except Exception:
+            raise HTTPException(400, "Invalid 'end' date. Use YYYY-MM-DD or ISO 8601.")
     """
     Paginated contract listing for the admin dashboard.
 
@@ -13451,12 +13480,16 @@ async def list_contracts_admin(
     if seller:
         where.append("seller ILIKE :seller")
         params["seller"] = f"%{seller}%"
-    if start:
+    start_dt = _parse_dt_start(start)
+    end_dt   = _parse_dt_end(end)
+
+    if start_dt is not None:
         where.append("created_at >= :start")
-        params["start"] = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
-    if end:
-        where.append("created_at <= :end")
-        params["end"] = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+        params["start"] = start_dt
+    if end_dt is not None:
+        # Treat end as EXCLUSIVE if it was given as a plain date (we already bumped +1d)
+        where.append("created_at < :end")
+        params["end"] = end_dt
 
     where_sql = " AND ".join(where)
     
