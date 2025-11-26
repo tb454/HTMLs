@@ -5271,7 +5271,7 @@ async def _contract_specs():
 # 1 year for versioned static files
 app.mount(
     "/static",
-    StaticFiles(directory="static", html=False, check_dir=True, max_age=31536000),
+    StaticFiles(directory="static", html=False, check_dir=True),
     name="static",
 )
 # -------- /Static HTML --------
