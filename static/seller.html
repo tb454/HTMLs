@@ -658,10 +658,15 @@ async function api(path, opt = {}) {
     throw new Error('Unauthorized');
   }
   if (!res.ok) {
-    let m = 'Request failed';
-    try { m = (await res.clone().json()).detail || m; }
-    catch { m = await res.text() || m; }
-    toast(m); throw new Error(m);
+    let msg = 'Request failed';
+    try {
+      const j = await res.clone().json();
+      msg = j?.detail || JSON.stringify(j);
+    } catch {
+      try { msg = await res.text() || msg; } catch {}
+    }
+    toast(msg);
+    throw new Error(msg);
   }
   return res;
 }
@@ -1191,10 +1196,10 @@ onReady(async () => {
     }
 
     async function createContract() {
-      const seller = document.getElementById("sellerName").value.trim();
-      const buyer  = document.getElementById("buyerName").value.trim();
+      const seller   = document.getElementById("sellerName").value.trim();
+      const buyer    = document.getElementById("buyerName").value.trim();
       const material = document.getElementById("material").value.trim();
-      const weight_tons = parseFloat(document.getElementById("tons").value);
+      const weight_tons   = parseFloat(document.getElementById("tons").value);
       const price_per_ton = parseFloat(document.getElementById("price").value);
 
       if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
@@ -1202,10 +1207,25 @@ onReady(async () => {
         return;
       }
 
+      // send sane defaults many schemas require
+      const body = {
+        seller,
+        buyer,
+        material,
+        weight_tons,
+        price_per_ton,
+        currency: "USD",
+        tax_percent: null,   // if your column is tax_pct, rename this key to tax_pct
+        status: "Pending"    // ensure this matches your enum
+      };
+
       const res = await api(`/contracts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now())) },
-        body: JSON.stringify({ seller, buyer, material, weight_tons, price_per_ton })
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now()))
+        },
+        body: JSON.stringify(body)
       });
 
       toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
