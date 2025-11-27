@@ -515,8 +515,24 @@ async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "sup
 
 
 # --- Safe latest index handler (idempotent empty state) ---
-@app.get("/indices/latest", tags=["Indices"], summary="Get latest index record")
-async def indices_latest(symbol: str):
+@app.get(
+    "/indices/latest",
+    tags=["Indices"],
+    summary="Get latest index record",
+)
+async def indices_latest(
+    symbol: str = Query(..., description="Index symbol, e.g. BR-CU-#1")
+):
+    fallback = {
+        "symbol": symbol,
+        "name": symbol,
+        "value": None,
+        "unit": None,
+        "currency": None,
+        "as_of": None,
+        "source_note": "No index history yet",
+    }
+
     try:
         row = await database.fetch_one(
             """
@@ -528,19 +544,29 @@ async def indices_latest(symbol: str):
             """,
             {"s": symbol},
         )
+
         if not row:
-            raise HTTPException(status_code=404, detail="No index history yet")
-        return dict(row)
-    except HTTPException:
-        raise
+            # No history yet: return an empty-but-200 payload so UI just says "No market data"
+            return fallback
+
+        # Shape it the way the frontend expects
+        return {
+            "symbol": symbol,
+            "name": symbol,
+            "value": row["close_price"],
+            "unit": row["unit"],
+            "currency": row["currency"],
+            "as_of": row["as_of"],
+            "source_note": row["source_note"],
+        }
+
     except Exception as e:
-        # dev-safe: if table not present yet, or any other transient error,
-        # report as "no history" instead of 500
         try:
             logger.warn("indices_latest_error", err=str(e))
         except Exception:
             pass
-        raise HTTPException(status_code=404, detail="No index history yet")
+        # On error, behave like "no history" instead of 500/404
+        return fallback
 # --- Safe latest index handler ---
 
 # === Prices endpoint ===
@@ -1164,9 +1190,10 @@ async def security_headers_mw(request: Request, call_next):
         del h["X-Frame-Options"]
 
     path = request.url.path or "/"
+    ctype = (h.get("content-type") or "").lower()
 
-    # Swagger /docs: relaxed but safe CSP; use frame-ancestors instead of XFO
-    if path.startswith("/docs"):
+    # Swagger /docs: relaxed but safe CSP; only if it's actually HTML
+    if path.startswith("/docs") and "text/html" in ctype:
         h["Content-Security-Policy"] = (
             "default-src 'self'; "
             "base-uri 'self'; object-src 'none'; "
@@ -1179,6 +1206,24 @@ async def security_headers_mw(request: Request, call_next):
             "connect-src 'self'"
         )
         return resp
+
+    # App CSP (only for HTML, and only if NOT already set by route)
+    if "text/html" in ctype and "Content-Security-Policy" not in h:
+        nonce = getattr(request.state, "csp_nonce", "")
+        h["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; object-src 'none'; "
+            f"{_FRAME_ANCESTORS}; "
+            "img-src 'self' data: blob: https://*.stripe.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
+            "style-src-attr 'self'; "
+            f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
+            "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
+            "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
+        )
+
+    return resp
 
     # App CSP (set only if not already set by the route)
     if "Content-Security-Policy" not in h:

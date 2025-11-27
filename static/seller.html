@@ -548,7 +548,11 @@
   </div>
 
   <!-- KPI Detail Modal -->
-  <div class="modal fade" id="kpiDetailModal" tabindex="-1" aria-labelledby="kpiDetailModalLabel" aria-hidden="true">
+  <div class="modal fade" id="kpiDetailModal"
+     tabindex="-1"
+     aria-labelledby="kpiDetailModalLabel"
+     role="dialog"
+     aria-modal="true">
     <div class="modal-dialog"><div class="modal-content">
       <div class="modal-header"><h5 class="modal-title" id="kpiDetailModalLabel">KPI Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
       <div class="modal-body"><p>Detailed analysis of monthly revenue, cost savings, and trade volume trends.</p></div>
@@ -557,7 +561,11 @@
   </div>
 
   <!-- Login Modal -->
-  <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginModalLabel" aria-hidden="true">
+  <div class="modal fade" id="loginModal"
+       tabindex="-1"
+       aria-labelledby="loginModalLabel"
+       role="dialog"
+       aria-modal="true">
     <div class="modal-dialog">
       <div class="modal-content">
         <form id="login-form" autocomplete="on">
@@ -1504,11 +1512,15 @@ onReady(async () => {
   </script>
 
   <!-- Policy Acceptance Modal -->
-  <div class="modal fade" id="policyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="policyModal"
+       tabindex="-1"
+       aria-labelledby="policyModalLabel"
+       role="dialog"
+       aria-modal="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Policy Update</h5>
+          <h5 class="modal-title" id="policyModalLabel">Policy Update</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" disabled></button>
         </div>
         <div class="modal-body">

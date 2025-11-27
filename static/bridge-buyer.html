@@ -40,7 +40,7 @@
 </head>
 <body>
   <!-- Locale strip -->
-  <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap">
+  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
   <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
   <select id="lang-select" class="form-select form-select-sm w-auto">
     <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
@@ -74,7 +74,7 @@
     <!-- Auth/health banner -->
     <div id="authBanner" class="mb-2">
       <strong>Status:</strong> <span id="authMsg">Checking…</span>
-      <a href="/static/bridge-login.html" style="margin-left:10px">Re-authenticate</a>
+      <a href="/static/bridge-login.html" class="ms-2">Re-authenticate</a>
     </div>
 
     <!-- Compliance cues -->
@@ -145,7 +145,7 @@
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
-      <select id="sortBy" class="form-select form-select-sm" style="width:auto">
+      <select id="sortBy" class="form-select form-select-sm w-auto">
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
         <option value="price_per_ton_desc">Price ↓</option>
@@ -160,7 +160,7 @@
     <!-- RFQ (two-click) -->
     <div class="cardy" id="rfqCard">
       <div class="d-flex gap-2 align-items-end maxw-620">
-        <div style="flex:1">
+        <div class="flex-grow-1">
           <label class="form-label mb-1" for="rfqSym">Symbol</label>
           <select id="rfqSym" class="form-select">
             <option>CU-SHRED-1M</option>
@@ -194,7 +194,7 @@
       <button class="btn btn-secondary btn-sm" id="prevBtn" type="button" aria-label="Previous page">◀ Prev</button>
       <button class="btn btn-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
       <label class="small text-muted mb-0" for="pageSize">Rows:</label>
-      <select id="pageSize" class="form-select form-select-sm" style="width:auto">
+      <select id="pageSize" class="form-select form-select-sm w-auto">
         <option>25</option><option selected>100</option><option>200</option>
       </select>
       <span class="small text-muted" id="pageInfo" aria-live="polite"></span>
@@ -516,7 +516,7 @@
       body.textContent = 'Loading market snapshot…';
       try{
         const [idxRes, cuRes] = await Promise.allSettled([
-          api('/indices/latest?symbol=BR-CU-#1'),
+          api('/indices/latest?symbol=' + encodeURIComponent('BR-CU-#1')),
           api('/prices/copper_last')
         ]);
 
