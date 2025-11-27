@@ -13499,7 +13499,15 @@ class ContractInExtended(ContractIn):
     reference_timestamp: Optional[datetime] = None
     currency: Optional[str] = "USD"
 
-@app.get("/contracts", response_model=List[ContractOut], tags=["Contracts"], summary="List Contracts (admin)", status_code=200)
+from datetime import datetime, timedelta, timezone as _tz
+
+@app.get(
+    "/contracts",
+    response_model=List[ContractOut],
+    tags=["Contracts"],
+    summary="List Contracts (admin)",
+    status_code=200,
+)
 async def list_contracts_admin(
     request: Request,
     response: Response,
@@ -13507,46 +13515,39 @@ async def list_contracts_admin(
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
-    start: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
-    end: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
+    start: Optional[str] = Query(
+        None,
+        description="YYYY-MM-DD or any ISO8601; time part is ignored and day is used.",
+    ),
+    end: Optional[str] = Query(
+        None,
+        description="YYYY-MM-DD or any ISO8601; treated as inclusive day.",
+    ),
 ):
-    # --- tolerant ISO date parser (accepts 'YYYY-MM-DD', 'YYYY-MM-DDTHH:mm:ss[Z|±hh:mm]', or with spaces) ---
-    def _parse_dt_start(v: Optional[str]) -> Optional[datetime]:
-        if not v: return None
-        s = v.strip().replace(" ", "T")
+    """
+    Admin contracts list with safe date filters:
+
+    - Accepts full ISO strings like '2024-12-27T00:00:00.000Z'
+    - Only uses the **date** portion (YYYY-MM-DD)
+    - Never 500s on weird date input – just ignores a bad start/end
+    """
+
+    def _parse_date_only(v: Optional[str]) -> Optional[datetime]:
+        if not v:
+            return None
+        s = v.strip()
+        if len(s) >= 10:
+            s = s[:10]  # '2024-12-27T00:00:00Z' -> '2024-12-27'
         try:
-            if len(s) == 10 and s.count("-") == 2:
-                y, m, d = map(int, s.split("-"))
-                return datetime(y, m, d, tzinfo=timezone.utc)
-            if s.endswith("Z"): s = s[:-1] + "+00:00"
-            dt = datetime.fromisoformat(s)
-            return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+            y, m, d = map(int, s.split("-"))
+            return datetime(y, m, d, tzinfo=_tz.utc)
         except Exception:
             return None
 
-    def _parse_dt_end(v: Optional[str]) -> Optional[datetime]:
-        if not v: return None
-        s = v.strip().replace(" ", "T")
-        try:
-            if len(s) == 10 and s.count("-") == 2:
-                y, m, d = map(int, s.split("-"))
-                # exclusive end: next day 00:00Z
-                return datetime(y, m, d, tzinfo=timezone.utc) + timedelta(days=1)
-            if s.endswith("Z"): s = s[:-1] + "+00:00"
-            dt = datetime.fromisoformat(s)
-            dt = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
-            # make it exclusive if caller passed a bare date-time (keep their time)
-            return dt
-        except Exception:
-            return None
-    """
-    Paginated contract listing for the admin dashboard.
+    start_dt = _parse_date_only(start)
+    end_start = _parse_date_only(end)
+    end_dt = end_start + timedelta(days=1) if end_start else None  # exclusive end
 
-    Filters:
-    - status: exact match ('Pending','Signed','Dispatched','Fulfilled','Cancelled')
-    - seller: case-insensitive substring match
-    - start/end: filter by created_at date (UTC, inclusive)
-    """
     tenant_id = await current_tenant_id(request)
 
     where = ["1=1"]
@@ -13555,35 +13556,37 @@ async def list_contracts_admin(
     if tenant_id:
         where.append("tenant_id = :tenant_id")
         params["tenant_id"] = tenant_id
+
     if status and status.lower() != "all":
         where.append("status = :status")
         params["status"] = status
+
     if seller:
         where.append("seller ILIKE :seller")
         params["seller"] = f"%{seller}%"
-    start_dt = _parse_dt_start(start)
-    end_dt   = _parse_dt_end(end)
 
     if start_dt is not None:
         where.append("created_at >= :start")
         params["start"] = start_dt
+
     if end_dt is not None:
-        # Treat end as EXCLUSIVE if it was given as a plain date (we already bumped +1d)
         where.append("created_at < :end")
         params["end"] = end_dt
 
     where_sql = " AND ".join(where)
-    
+
+    # ---- total count (NO limit/offset in params here) ----
     count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
     total_row = await database.fetch_one(
         f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
         count_params,
     )
-    total = int(total_row["c"] or 0) if total_row else 0
+    total = int(total_row["c"] or 0) if total_row and total_row["c"] is not None else 0
     response.headers["X-Total-Count"] = str(total)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "private, max-age=10"
 
+    # ---- data page ----
     rows = await database.fetch_all(
         f"""
         SELECT *
@@ -13606,7 +13609,7 @@ async def list_contracts_admin(
                 material=d["material"],
                 weight_tons=float(d["weight_tons"]),
                 price_per_ton=d["price_per_ton"],
-                currency=d.get("currency") or "USD",
+                currency=(d.get("currency") or "USD"),
                 tax_percent=d.get("tax_percent"),
                 status=d.get("status") or "Pending",
                 created_at=d.get("created_at"),
@@ -13619,9 +13622,9 @@ async def list_contracts_admin(
                 reference_timestamp=d.get("reference_timestamp"),
             )
         )
+
     response.headers["Cache-Control"] = "private, max-age=10"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    
     return out
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
