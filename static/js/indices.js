@@ -92,6 +92,28 @@ function drawLine(canvas, series, options={}){
   }
 }
 
+function sanitizeUniverseRows(rows){
+  return (rows||[]).map(r=>{
+    const o = {...r};
+    delete o.method;
+    delete o.factor;
+    delete o.base_symbol;
+    delete o.reference_source;
+    delete o.reference_symbol;
+    delete o.source;
+    return o;
+  });
+}
+function bleachExchangeText(root=document){
+  const re = /(COMEX|LME|CME)/ig;
+  root.querySelectorAll('#universeTbl td, #universeTbl th, #detailNote, #methodLine, [title], [aria-label], [data-title]').forEach(el=>{
+    ['title','aria-label','data-title'].forEach(a=>{
+      const v = el.getAttribute?.(a); if(v && re.test(v)) el.setAttribute(a, v.replace(re,'BR-Index'));
+    });
+    if (re.test(el.textContent)) el.textContent = el.textContent.replace(re,'BR-Index');
+  });
+}
+
 // state
 let universe = [];
 let selectedSymbol = null;
@@ -109,9 +131,9 @@ async function getJSON(url) {
 
 async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
-  showSkeleton(tbody, 8);
+  showSkeleton(tbody, 5);
   try{
-    universe = await getJSON('/indices/universe?page=1&page_size=500');
+    universe = sanitizeUniverseRows(await getJSON('/indices/universe?page=1&page_size=500'));
     const note = document.getElementById('detailNote');
     if (note){
       note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d. Universe loaded ' +
@@ -124,8 +146,7 @@ async function loadUniverse(){
     const filter = (row) => {
       if(!q) return true;
       const sym = (row.symbol||'').toLowerCase();
-      const meth = (row.method||'').toLowerCase();
-      return sym.includes(q) || meth.includes(q);
+      return sym.includes(q);
     };
 
     for (const row of universe.filter(filter)){
@@ -143,24 +164,23 @@ async function loadUniverse(){
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><b>${sym}</b></td>
-        <td>${row.method}</td>
-        <td>${(+row.factor).toFixed(4)}</td>
-        <td>${row.base_symbol}</td>
         <td>${last!=null ? (+last).toFixed(4) : '-'}</td>
         <td class="${delta>0?'positive':delta<0?'negative':''}">${delta!=null ? (delta>0?'+':'')+delta.toFixed(4) : '-'}</td>
         <td class="muted">${updated || '-'}</td>
         <td><button class="btn" data-view="${sym}">View</button></td>
       `;
+
       tbody.appendChild(tr);
     }
     if (!tbody.children.length){
-      tbody.innerHTML = `<tr><td colspan="8" class="muted">No rows match your filter.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="muted">No rows match your filter.</td></tr>`;
     }
-  }catch(e){
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">Failed to load universe.</td></tr>`;
-    toast('Could not load index universe');
-  }
-}
+    bleachExchangeText(document);
+      }catch(e){
+        tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load universe.</td></tr>`;
+        toast('Could not load index universe');
+      }
+    }
 
 async function viewSymbol(sym){
   selectedSymbol = sym;
@@ -186,9 +206,7 @@ async function viewSymbol(sym){
   // provenance (as-of, method, integrity hash)
   try {
     const latest = histAll[histAll.length-1];
-    const asof = latest ? latest.dt : null;
-    const uniRow = (universe || []).find(u => u.symbol === sym);
-    const method = uniRow ? uniRow.method : '—';
+    const asof = latest ? latest.dt : null;    
 
     const enc = new TextEncoder();
     const data = JSON.stringify(histAll.slice(-historyDays));
@@ -199,7 +217,7 @@ async function viewSymbol(sym){
     const methodLine = document.getElementById('methodLine');
     const hashLine   = document.getElementById('hashLine');
     if (asofLine)   asofLine.textContent   = `As of: ${asof || '—'} (UTC)`;
-    if (methodLine) methodLine.textContent = `Method: ${method}`;
+    if (methodLine) methodLine.textContent = '';
     if (hashLine)   hashLine.textContent   = `Hash: ${hash}`;
   } catch {}
 }
@@ -228,7 +246,7 @@ document.getElementById('toggleForecast')?.addEventListener('click', (ev)=>{
 
 // exports
 document.getElementById('exportUniverse')?.addEventListener('click', ()=>{
-  const rows = universe.map(r=>({symbol:r.symbol, method:r.method, factor:r.factor, base_symbol:r.base_symbol}));
+  const rows = universe.map(r=>({symbol:r.symbol}));
   csvDownload('bridge_index_universe.csv', rows);
 });
 document.getElementById('exportHistory')?.addEventListener('click', async ()=>{
@@ -270,6 +288,7 @@ document.getElementById('filterInput')?.addEventListener('input', ()=>{ loadUniv
 // init
 document.getElementById('refreshAll')?.addEventListener('click', loadUniverse);
 loadUniverse().then(()=>{
+  bleachExchangeText(document);
   const first = universe[0]?.symbol; if(first) viewSymbol(first);
 });
 
