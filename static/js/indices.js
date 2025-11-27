@@ -107,7 +107,6 @@ async function getJSON(url) {
   return res.json();
 }
 
-
 async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
   showSkeleton(tbody, 8);
