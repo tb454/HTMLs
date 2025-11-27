@@ -352,19 +352,22 @@ app = FastAPI(
 )
 
 # -----  Apply Page Relaxed for Stripe Access ----
-APPLY_PATH = Path("/static/apply.html")
+BASE_DIR = Path(__file__).resolve().parent
+APPLY_PATH = (BASE_DIR / "static" / "apply.html")
 
 @app.get("/apply", include_in_schema=False)
 def apply_page():
-    html = APPLY_PATH.read_text(encoding="utf-8")
+    try:
+        html = APPLY_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"[apply] not found at: {APPLY_PATH}")  # quick debug breadcrumb
+        raise HTTPException(status_code=404, detail="static/apply.html not found")
+
     return HTMLResponse(
         content=html,
         headers={
-            # Let third-party iframes/scripts load without CORP (no cookies)
             "Cross-Origin-Embedder-Policy": "credentialless",
-            # Keep Stripe popups/redirects working
             "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
-            # Good hygiene for your own resource
             "Cross-Origin-Resource-Policy": "same-site",
         },
     )
