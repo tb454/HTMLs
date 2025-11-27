@@ -98,9 +98,15 @@ let selectedSymbol = null;
 let historyDays = 30;
 let showForecast = false;
 
-async function getJSON(url){  
-  return api(url);
+async function getJSON(url) {
+  const res = await api(url);
+  if (!res.ok) {
+    console.error('getJSON error', url, res.status);
+    throw new Error(`Request failed ${res.status}`);
+  }
+  return res.json();
 }
+
 
 async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
