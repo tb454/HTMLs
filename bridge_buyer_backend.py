@@ -355,15 +355,22 @@ class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         resp = await call_next(request)
 
-        # 1) Guarantee Cache-Control everywhere (covers /contracts JSON)
-        cc = (resp.headers.get("Cache-Control") or "").strip()
-        if not cc:
+        path = request.url.path or "/"
+
+        # 1) FORCE Cache-Control for /contracts ( GET & others )
+        if path.startswith("/contracts"):
             if request.method in ("GET", "HEAD"):
-                # JSON/API like /contracts → short-lived private cache
                 resp.headers["Cache-Control"] = "private, max-age=10"
             else:
-                # POST/PUT/DELETE, webhooks, etc. → never cache
                 resp.headers["Cache-Control"] = "no-store"
+        else:
+            # Generic fallback: ensure Cache-Control isn't missing/empty
+            cc = (resp.headers.get("Cache-Control") or "").strip()
+            if not cc:
+                if request.method in ("GET", "HEAD"):
+                    resp.headers["Cache-Control"] = "private, max-age=10"
+                else:
+                    resp.headers["Cache-Control"] = "no-store"
 
         # 2) Force X-Content-Type-Options: nosniff on ALL responses
         resp.headers["X-Content-Type-Options"] = "nosniff"
@@ -13529,6 +13536,7 @@ async def list_contracts_admin(
     )
     total = int(total_row["c"] or 0) if total_row else 0
     response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "private, max-age=10"
 
     rows = await database.fetch_all(
