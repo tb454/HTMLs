@@ -13619,6 +13619,9 @@ async def list_contracts_admin(
                 reference_timestamp=d.get("reference_timestamp"),
             )
         )
+    response.headers["Cache-Control"] = "private, max-age=10"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
     return out
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
