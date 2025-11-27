@@ -370,8 +370,8 @@ class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
 
         # 3) Strip CSP from non-HTML responses (JSON, CSV, etc.)
         ctype = (resp.headers.get("content-type") or "").lower()
-        if "text/html" not in ctype:
-            resp.headers.pop("Content-Security-Policy", None)
+        if "text/html" not in ctype and "Content-Security-Policy" in resp.headers:
+            del resp.headers["Content-Security-Policy"]
 
         return resp
 
