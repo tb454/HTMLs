@@ -13547,14 +13547,8 @@ async def list_contracts_admin(
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
-    start: Optional[str] = Query(
-        None,
-        description="YYYY-MM-DD or any ISO8601; time part is ignored and day is used.",
-    ),
-    end: Optional[str] = Query(
-        None,
-        description="YYYY-MM-DD or any ISO8601; treated as inclusive day.",
-    ),
+    start: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
+    end: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
 ):
     """
     Admin contracts list with safe date filters:
