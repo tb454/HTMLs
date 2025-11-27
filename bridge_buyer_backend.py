@@ -868,6 +868,8 @@ async def trader_positions(username: str = Depends(get_username)):
         TraderPosition(symbol_root=r["symbol_root"], net_lots=float(r["net_qty"] or 0))
         for r in rows
     ]
+
+app.include_router(trader_router)
 # ---- Trader page ----
 
 
@@ -9916,7 +9918,7 @@ app.include_router(admin_dossier_router)
 #------- /Dossier HR Sync -------
 
 #------- RFQs -------
-rfq_router = APIRouter(prefix="/rfqs", tags=["RFQ"])
+rfqs_router = APIRouter(prefix="/rfqs", tags=["RFQ"])
 
 class RfqOut(BaseModel):
     rfq_id: str
@@ -9925,7 +9927,7 @@ class RfqOut(BaseModel):
     quantity_lots: float
     expires_at: datetime
 
-@rfq_router.get("", response_model=List[RfqOut])
+@rfqs_router.get("", response_model=List[RfqOut])
 async def list_rfqs(scope: Optional[str] = None, username: str = Depends(get_username)):
     """
     If scope=mine, return RFQs created by this user; otherwise global (or stub).
@@ -10106,7 +10108,8 @@ async def award_rfq(rfq_id: int, ain: RFQAwardIn):
     return {"award": award}
 
 # mount
-app.include_router(rfq_router)
+app.include_router(rfqs_router)   
+app.include_router(rfq_router)   
 # -------- RFQ (create/quote/award) --------
 
 # ------ Contracts refs index ------
