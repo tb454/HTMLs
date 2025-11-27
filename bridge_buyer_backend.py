@@ -355,7 +355,7 @@ app = FastAPI(
 BASE_DIR = Path(__file__).resolve().parent
 APPLY_PATH = (BASE_DIR / "static" / "apply.html")
 
-@app.get("/apply", include_in_schema=False)
+@app.get("/apply.html", include_in_schema=False)
 def apply_page():
     try:
         html = APPLY_PATH.read_text(encoding="utf-8")
