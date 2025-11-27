@@ -10,7 +10,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (e) {
     console.error('health check failed', e);
   }
-})();
+});
 
 // Shortcuts
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }

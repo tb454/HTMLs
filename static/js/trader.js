@@ -1,268 +1,418 @@
-// static/js/trader.js
+// /static/js/trader.js
+// Trader page: BR-Index chart, quotes, order book, ticket, positions & RFQs.
 
 (function () {
-  const symbolInput   = document.getElementById("symbolInput");
-  const symbolForm    = document.getElementById("symbolForm");
-  const bidsBody      = document.getElementById("bidsBody");
-  const asksBody      = document.getElementById("asksBody");
-  const bookMeta      = document.getElementById("bookMeta");
-
-  const orderForm     = document.getElementById("orderForm");
-  const orderSymbol   = document.getElementById("orderSymbol");
-  const orderSide     = document.getElementById("orderSide");
-  const orderTif      = document.getElementById("orderTif");
-  const orderPrice    = document.getElementById("orderPrice");
-  const orderQty      = document.getElementById("orderQty");
-  const orderStatus   = document.getElementById("orderStatus");
-  const refreshAllBtn = document.getElementById("refreshAllBtn");
-
-  const positionsBody = document.getElementById("positionsBody");
-  const futOrdersBody = document.getElementById("futOrdersBody");
-
-  function setStatus(el, msg, ok = true) {
-    if (!el) return;
-    el.innerHTML = "";
-    const div = document.createElement("div");
-    div.className = ok ? "alert alert-success py-1 px-2 mb-0" : "alert alert-danger py-1 px-2 mb-0";
-    div.textContent = msg;
-    el.appendChild(div);
+  // helpers
+  function _cookie(name) {
+    const m = document.cookie.match(
+      new RegExp('(?:^|; )' + name.replace(/([.*+?^${}()|[\\]\\])/g, '\\$1') + '=([^;]*)')
+    );
+    return m ? decodeURIComponent(m[1]) : '';
   }
 
-  function clearTableBody(tbody, colSpan) {
-    if (!tbody) return;
-    tbody.innerHTML = "";
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = colSpan;
-    td.className = "text-muted small";
-    td.textContent = "No data";
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-  }
+  async function api(path, opts = {}) {
+    const url = path.startsWith('http') ? path : path; // relative → same origin
+    const method = (opts.method || 'GET').toUpperCase();
+    const headers = { Accept: 'application/json', ...(opts.headers || {}) };
 
-  async function fetchJSON(url, opts = {}) {
-    const res = await fetch(url, {
-      credentials: "include",
-      ...opts,
-      headers: {
-        "Accept": "application/json",
-        ...(opts.headers || {}),
-      },
-    });
-    if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        const j = await res.json();
-        detail = j.detail || j.error || detail;
-      } catch (_) {}
-      throw new Error(`HTTP ${res.status}: ${detail}`);
+    // CSRF for unsafe methods
+    if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
+      headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
     }
-    return res.json();
+
+    const res = await fetch(url, {
+      credentials: 'include',
+      ...opts,
+      headers
+    });
+
+    if (res.status === 401) {
+      const next = encodeURIComponent(location.pathname + location.search);
+      location.href = `/static/bridge-login.html?next=${next}`;
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      let msg = 'Request failed';
+      try {
+        msg = (await res.clone().json()).detail || msg;
+      } catch {
+        try {
+          msg = (await res.clone().text()) || msg;
+        } catch (_) {}
+      }
+      throw new Error(msg);
+    }
+
+    try {
+      return await res.json();
+    } catch {
+      return {};
+    }
   }
 
-  // ---- BOOK ----
+  const symbolSel = document.getElementById('symbolSel');
+  const limitSel = document.getElementById('limitSel');
+  const loadBtn = document.getElementById('loadBtn');
+  const matInput = document.getElementById('matInput');
+  const quoteBtn = document.getElementById('quoteBtn');
+  const quoteOut = document.getElementById('quoteOut');
+  const quoteErr = document.getElementById('quoteErr');
+  const idxMeta = document.getElementById('idxMeta');
+  const chartCanvas = document.getElementById('idxChart');
+  const ctx = chartCanvas ? chartCanvas.getContext('2d') : null;
+
+  let chart;
+  // Order ticket elements
+  const ordSymbol = document.getElementById('ordSymbol');
+  const ordSide = document.getElementById('ordSide');
+  const ordTif = document.getElementById('ordTif');
+  const ordPrice = document.getElementById('ordPrice');
+  const ordQty = document.getElementById('ordQty');
+  const ordMsg = document.getElementById('ordMsg');
+  const ordSubmitBtn = document.getElementById('ordSubmitBtn');
+
+  function setOrdMsg(msg, ok) {
+    if (!ordMsg) return;
+    ordMsg.style.color = ok ? '#0a7b34' : '#b00020';
+    ordMsg.textContent = msg || '';
+  }
+
+  let ordersLoaded = false;
+  let positionsLoaded = false;
+  let rfqsLoaded = false;
+
+  function drawChart(points) {
+    if (!ctx) return;
+    const labels = points.map((p) => p.ts || p.time || p.date || p.dt || '');
+    const data = points.map((p) => +(p.price ?? p.close_price ?? 0));
+
+    if (chart) {
+      chart.destroy();
+    }
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Price', data }] },
+      options: { responsive: true, animation: false, scales: { y: { beginAtZero: false } } }
+    });
+  }
+
+  async function loadUniverse() {
+    if (!symbolSel) return;
+    try {
+      const syms = await api('/indices/universe');
+      symbolSel.innerHTML = (syms || [])
+        .map((row) => {
+          const sym = typeof row === 'string' ? row : row.symbol;
+          return `<option value="${sym}">${sym}</option>`;
+        })
+        .join('');
+    } catch (e) {
+      console.error(e);
+      symbolSel.innerHTML = `<option disabled>Failed to load</option>`;
+    }
+  }
+
+  async function loadHistory() {
+    if (!symbolSel || !limitSel || !idxMeta) return;
+    const symbol = symbolSel.value;
+    const limit = +limitSel.value || 500;
+    idxMeta.textContent = '';
+    try {
+      const rows = await api(
+        `/indices/history?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
+      );
+      const data = (rows || []).slice().reverse(); // ascending for chart aesthetics
+      drawChart(data);
+      if (rows && rows.length) {
+        const last = rows[0];
+        const px = last.close_price ?? last.price;
+        const ts = last.dt ?? last.date ?? last.ts ?? '';
+        idxMeta.textContent = `Latest: ${px} @ ${ts}`;
+      } else {
+        idxMeta.textContent = 'No data for this symbol yet.';
+      }
+    } catch (e) {
+      console.error(e);
+      idxMeta.textContent = 'Failed to load history.';
+    }
+  }
+
+  async function getQuote() {
+    if (!matInput || !quoteOut || !quoteErr) return;
+    quoteOut.textContent = '';
+    quoteErr.textContent = '';
+    const material = (matInput.value || '').trim();
+    if (!material) {
+      quoteErr.textContent = 'Enter a material name.';
+      return;
+    }
+    try {
+      const q = await api(
+        `/pricing/quote?category=${encodeURIComponent('Misc Product')}` +
+          `&material=${encodeURIComponent(material)}`
+      );
+      const px = Number(q.price_per_lb);
+      quoteOut.textContent = `${q.material}: $${px.toFixed(4)} per lb (source: ${q.source})`;
+    } catch (e) {
+      quoteErr.textContent =
+        'No quote found (try a different material or ensure reference/vendor data is loaded).';
+    }
+  }
+
   async function loadBook() {
-    const sym = (symbolInput.value || "").trim();
+    const symbolRootInput = document.getElementById('bookSymbolRoot');
+    const symRoot = (symbolRootInput && symbolRootInput.value || '').trim();
+    const fallback = (symbolSel && symbolSel.value || '').trim();
+    const sym = symRoot || fallback;
     if (!sym) return;
     try {
-      bookMeta.textContent = "Loading order book...";
-      const data = await fetchJSON(`/trader/book?symbol=${encodeURIComponent(sym)}`);
-      renderBook(data);
-      bookMeta.textContent = `Symbol: ${data.symbol}`;
-    } catch (err) {
-      console.error(err);
-      clearTableBody(bidsBody, 2);
-      clearTableBody(asksBody, 2);
-      bookMeta.textContent = `Error loading book: ${err.message}`;
-    }
-  }
-
-  function renderBook(data) {
-    const bids = data.bids || [];
-    const asks = data.asks || [];
-
-    // bids
-    bidsBody.innerHTML = "";
-    if (!bids.length) {
-      clearTableBody(bidsBody, 2);
-    } else {
-      bids.forEach((lvl) => {
-        const tr = document.createElement("tr");
-        const tdP = document.createElement("td");
-        const tdQ = document.createElement("td");
-        tdP.textContent = lvl.price.toFixed(2);
-        tdQ.textContent = lvl.qty_lots != null ? Number(lvl.qty_lots).toFixed(2) : "-";
-        tdQ.className = "text-end";
-        tr.appendChild(tdP);
-        tr.appendChild(tdQ);
-        bidsBody.appendChild(tr);
-      });
-    }
-
-    // asks
-    asksBody.innerHTML = "";
-    if (!asks.length) {
-      clearTableBody(asksBody, 2);
-    } else {
-      asks.forEach((lvl) => {
-        const tr = document.createElement("tr");
-        const tdP = document.createElement("td");
-        const tdQ = document.createElement("td");
-        tdP.textContent = lvl.price.toFixed(2);
-        tdQ.textContent = lvl.qty_lots != null ? Number(lvl.qty_lots).toFixed(2) : "-";
-        tdQ.className = "text-end";
-        tr.appendChild(tdP);
-        tr.appendChild(tdQ);
-        asksBody.appendChild(tr);
-      });
-    }
-  }
-
-  // ---- POSITIONS ----
-  async function loadPositions() {
-    try {
-      const rows = await fetchJSON("/trader/positions");
-      positionsBody.innerHTML = "";
-      if (!rows.length) {
-        clearTableBody(positionsBody, 2);
-        return;
+      const book = await api(`/trader/book?symbol=${encodeURIComponent(sym)}`);
+      const bidsBody = document.querySelector('#bookBids tbody');
+      const asksBody = document.querySelector('#bookAsks tbody');
+      function renderSide(rows, body) {
+        if (!body) return;
+        if (!rows || !rows.length) {
+          body.innerHTML = `<tr><td colspan="2" style="opacity:.6; padding:4px;">No depth</td></tr>`;
+          return;
+        }
+        body.innerHTML = rows
+          .map(
+            (r) => `
+            <tr>
+              <td>${r.price}</td>
+              <td style="text-align:right;">${r.qty_lots}</td>
+            </tr>
+          `
+          )
+          .join('');
       }
-      rows.forEach((r) => {
-        const tr = document.createElement("tr");
-        const tdSym = document.createElement("td");
-        const tdNet = document.createElement("td");
-        tdSym.textContent = r.symbol_root;
-        tdNet.textContent = Number(r.net_lots || 0).toFixed(2);
-        tdNet.className = "text-end";
-        tr.appendChild(tdSym);
-        tr.appendChild(tdNet);
-        positionsBody.appendChild(tr);
-      });
-    } catch (err) {
-      console.error(err);
-      clearTableBody(positionsBody, 2);
+      renderSide(book.bids || [], bidsBody);
+      renderSide(book.asks || [], asksBody);
+    } catch (e) {
+      console.error(e);
     }
   }
 
-  // ---- FUTURES ORDERS ----
-  async function loadFuturesOrders() {
-    try {
-      const rows = await fetchJSON("/trader/orders");
-      futOrdersBody.innerHTML = "";
-      if (!rows.length) {
-        clearTableBody(futOrdersBody, 4);
-        return;
-      }
-      rows.forEach((r) => {
-        const tr = document.createElement("tr");
-        const tdRoot = document.createElement("td");
-        const tdSide = document.createElement("td");
-        const tdPx   = document.createElement("td");
-        const tdQ    = document.createElement("td");
+  async function submitOrder() {
+    if (!ordQty) return;
 
-        tdRoot.textContent = r.symbol_root || r.symbol || "";
-        tdSide.textContent = (r.side || "").toUpperCase();
-        tdPx.textContent   = r.price != null ? Number(r.price).toFixed(2) : "-";
-        tdQ.textContent    = r.qty_open != null ? Number(r.qty_open).toFixed(2) : "-";
+    const symFromTicket = (ordSymbol && ordSymbol.value || '').trim();
+    const symFromBook = (document.getElementById('bookSymbolRoot')?.value || '').trim();
+    const sym = symFromTicket || symFromBook || (symbolSel && symbolSel.value || '').trim();
 
-        tdPx.className = "text-end";
-        tdQ.className  = "text-end";
-
-        tr.appendChild(tdRoot);
-        tr.appendChild(tdSide);
-        tr.appendChild(tdPx);
-        tr.appendChild(tdQ);
-        futOrdersBody.appendChild(tr);
-      });
-    } catch (err) {
-      console.error(err);
-      clearTableBody(futOrdersBody, 4);
-    }
-  }
-
-  // ---- CLOB ORDER SUBMIT ----
-  async function submitClobOrder(ev) {
-    ev.preventDefault();
-    const sym = (orderSymbol.value || "").trim();
-    const side = orderSide.value || "buy";
-    const tif  = orderTif.value || "day";
+    const side = (ordSide && ordSide.value) || 'buy';
+    const tif = (ordTif && ordTif.value) || 'day';
+    const qty = parseFloat(ordQty.value || '0');
 
     if (!sym) {
-      setStatus(orderStatus, "Symbol is required", false);
+      setOrdMsg('Enter a symbol (e.g., CU-SHRED-1M).', false);
       return;
     }
-
-    const qty = parseFloat(orderQty.value || "0");
     if (!qty || qty <= 0) {
-      setStatus(orderStatus, "Qty must be > 0", false);
+      setOrdMsg('Qty must be > 0.', false);
       return;
     }
 
-    // LIMIT vs MARKET (for MARKET, leave price undefined)
-    const priceRaw = orderPrice.value;
+    const priceRaw = ordPrice && ordPrice.value;
     const body = {
       symbol: sym,
       side: side,
-      price: priceRaw !== "" ? Number(priceRaw) : undefined,
       qty_lots: qty,
-      tif: tif,
+      tif: tif
     };
+    if (priceRaw !== '' && priceRaw != null) {
+      body.price = Number(priceRaw);
+    }
 
     try {
-      setStatus(orderStatus, "Submitting order…", true);
-      const res = await fetchJSON("/clob/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      setOrdMsg('Submitting…', true);
+
+      const j = await api('/clob/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key':
+            (crypto.randomUUID && crypto.randomUUID()) || String(Date.now())
+        },
+        body: JSON.stringify(body)
       });
 
-      const id = res.order_id || res.id || "(unknown)";
-      setStatus(orderStatus, `Order accepted (ID: ${id})`, true);
+      const oid = j.order_id || j.id || 'ok';
+      setOrdMsg(`Order accepted (ID: ${oid})`, true);
 
-      // Reload book + positions (and futures orders if any)
-      await Promise.all([
-        loadBook(),
-        loadPositions(),
-        loadFuturesOrders(),
-      ]);
-    } catch (err) {
-      console.error(err);
-      setStatus(orderStatus, `Order failed: ${err.message}`, false);
+      // Keep symbol fields in sync
+      if (!symFromTicket && ordSymbol) ordSymbol.value = sym;
+      const bookSymInput = document.getElementById('bookSymbolRoot');
+      if (bookSymInput && !bookSymInput.value) bookSymInput.value = sym;
+
+      // Refresh panes
+      loadBook().catch(() => {});
+      loadOrders().catch(() => {});
+      loadPositions().catch(() => {});
+      loadRfqs().catch(() => {});
+    } catch (e) {
+      console.error(e);
+      setOrdMsg('Order failed: ' + (e.message || e), false);
     }
   }
 
-  async function refreshAll() {
-    await Promise.all([
-      loadBook(),
-      loadPositions(),
-      loadFuturesOrders(),
-    ]);
+  async function loadOrders() {
+    const body = document.querySelector('#ordersTbl tbody');
+    if (!body) return;
+
+    if (!ordersLoaded && !body.children.length) {
+      body.innerHTML =
+        `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+    }
+
+    try {
+      const rows = await api('/trader/orders');
+      if (!rows.length) {
+        body.innerHTML =
+          `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">No open orders.</td></tr>`;
+        ordersLoaded = true;
+        return;
+      }
+
+      body.innerHTML = rows
+        .map(
+          (r) => `
+          <tr>
+            <td>${r.symbol_root || r.symbol || ''}</td>
+            <td>${(r.side || '').toUpperCase()}</td>
+            <td>${r.price}</td>
+            <td>${r.qty_open ?? r.qty ?? ''}</td>
+            <td>${r.status || ''}</td>
+          </tr>
+        `
+        )
+        .join('');
+      ordersLoaded = true;
+    } catch (e) {
+      body.innerHTML =
+        `<tr><td colspan="5" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      ordersLoaded = true;
+    }
   }
 
+  async function loadPositions() {
+    const body = document.querySelector('#posTbl tbody');
+    if (!body) return;
+
+    if (!positionsLoaded && !body.children.length) {
+      body.innerHTML =
+        `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+    }
+
+    try {
+      const rows = await api('/trader/positions');
+      if (!rows.length) {
+        body.innerHTML =
+          `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">No positions.</td></tr>`;
+        positionsLoaded = true;
+        return;
+      }
+      body.innerHTML = rows
+        .map(
+          (r) => `
+          <tr>
+            <td>${r.symbol_root || r.symbol || ''}</td>
+            <td>${r.net_lots ?? r.net_qty ?? 0}</td>
+          </tr>
+        `
+        )
+        .join('');
+      positionsLoaded = true;
+    } catch (e) {
+      body.innerHTML =
+        `<tr><td colspan="2" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      positionsLoaded = true;
+    }
+  }
+
+  async function loadRfqs() {
+    const body = document.querySelector('#rfqTbl tbody');
+    if (!body) return;
+
+    if (!rfqsLoaded && !body.children.length) {
+      body.innerHTML =
+        `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Loading…</td></tr>`;
+    }
+
+    try {
+      const rows = await api('/rfqs?scope=mine');
+      if (!rows.length) {
+        body.innerHTML =
+          `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">No RFQs.</td></tr>`;
+        rfqsLoaded = true;
+        return;
+      }
+      body.innerHTML = rows
+        .map(
+          (r) => `
+          <tr>
+            <td>${r.symbol || ''}</td>
+            <td>${(r.side || '').toUpperCase()}</td>
+            <td>${r.quantity_lots ?? r.qty_lots ?? ''}</td>
+            <td>${r.expires_at || ''}</td>
+          </tr>
+        `
+        )
+        .join('');
+      rfqsLoaded = true;
+    } catch (e) {
+      body.innerHTML =
+        `<tr><td colspan="4" style="text-align:center; padding:6px; opacity:.6;">Failed: ${e.message || 'error'}</td></tr>`;
+      rfqsLoaded = true;
+    }
+  }
+
+  // events & init
   function init() {
-    if (!symbolForm) return;
+    if (loadBtn) loadBtn.addEventListener('click', loadHistory);
+    if (quoteBtn) quoteBtn.addEventListener('click', getQuote);
 
-    symbolForm.addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      loadBook();
-    });
+    document.getElementById('bookLoadBtn')?.addEventListener('click', loadBook);
 
-    orderForm.addEventListener("submit", submitClobOrder);
-    if (refreshAllBtn) {
-      refreshAllBtn.addEventListener("click", function () {
-        refreshAll();
+    if (ordSubmitBtn) {
+      ordSubmitBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        submitOrder().catch(() => {});
       });
     }
 
-    // sync ticket symbol w/ left pane
-    orderSymbol.value = symbolInput.value;
+    // Seed ticket symbol from current selection if empty
+    if (ordSymbol && !ordSymbol.value && symbolSel && symbolSel.value) {
+      ordSymbol.value = symbolSel.value;
+    }
 
-    // initial load
-    refreshAll().catch(console.error);
+    // Initial loads
+    loadUniverse()
+      .then(async () => {
+        if (symbolSel && symbolSel.options.length) {
+          await loadHistory();
+        }
+      })
+      .catch(() => {});
+
+    loadBook().catch(() => {});
+    loadOrders().catch(() => {});
+    loadPositions().catch(() => {});
+    loadRfqs().catch(() => {});
+
+    // Lightweight auto-refresh every ~45s when visible
+    function tick() {
+      if (document.hidden) return;
+      loadOrders().catch(() => {});
+      loadPositions().catch(() => {});
+      loadRfqs().catch(() => {});
+    }
+    setInterval(tick, 45000);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }

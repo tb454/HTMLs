@@ -1,7 +1,15 @@
-<div style="font-family: Arial, sans-serif; max-width: 100%; margin: auto; padding: 24px; background-color: #fdfdfd; border: 1px solid #ccc; border-radius: 10px; line-height: 1.6;">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BRidge Mixed-Material Futures Contract</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <div style="font-family: Arial, sans-serif; max-width: 100%; margin: auto; padding: 24px; background-color: #fdfdfd; border: 1px solid #ccc; border-radius: 10px; line-height: 1.6;">
     <h2 style="text-align:center; color: #003366;">BRidge Mixed-Material Futures Contract (Editable)</h2>
     <p style="text-align:center; color: red;" id="warning"></p>
-  
+
     <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
       <thead>
         <tr style="background-color: #e0e0e0;">
@@ -15,28 +23,108 @@
       </thead>
       <tbody id="contractTable">
         <tr>
-          <td><input type="text" value="Aluminum" onchange="recalculate()" /></td>
-          <td><input type="number" value="40" onchange="recalculate()" /></td>
-          <td><input type="number" value="8000" readonly /></td>
-          <td><input type="number" step="0.01" value="1.05" onchange="recalculate()" /></td>
+          <td>
+            <input
+              type="text"
+              name="material[]"
+              value="Aluminum"
+              placeholder="Material"
+              title="Material name"
+              aria-label="Material name"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              name="percent[]"
+              value="40"
+              placeholder="% of load"
+              title="% of load"
+              aria-label="% of load"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              name="recovered[]"
+              value="8000"
+              readonly
+              aria-label="Recovered weight in pounds"
+              title="Recovered weight in pounds"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              step="0.01"
+              name="price[]"
+              value="1.05"
+              placeholder="Price/lb"
+              title="Market price per pound"
+              aria-label="Market price per pound"
+            />
+          </td>
           <td class="totalValue">$8,400.00</td>
           <td></td>
         </tr>
         <tr>
-          <td><input type="text" value="Rubber" onchange="recalculate()" /></td>
-          <td><input type="number" value="60" onchange="recalculate()" /></td>
-          <td><input type="number" value="12000" readonly /></td>
-          <td><input type="number" step="0.01" value="0.35" onchange="recalculate()" /></td>
+          <td>
+            <input
+              type="text"
+              name="material[]"
+              value="Rubber"
+              placeholder="Material"
+              title="Material name"
+              aria-label="Material name"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              name="percent[]"
+              value="60"
+              placeholder="% of load"
+              title="% of load"
+              aria-label="% of load"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              name="recovered[]"
+              value="12000"
+              readonly
+              aria-label="Recovered weight in pounds"
+              title="Recovered weight in pounds"
+            />
+          </td>
+          <td>
+            <input
+              type="number"
+              step="0.01"
+              name="price[]"
+              value="0.35"
+              placeholder="Price/lb"
+              title="Market price per pound"
+              aria-label="Market price per pound"
+            />
+          </td>
           <td class="totalValue">$4,200.00</td>
           <td></td>
         </tr>
       </tbody>
     </table>
-  
-    <button onclick="addRow()" style="margin-top: 12px; padding: 6px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">+ Add Material</button>
-  
-    <br><br>
-  
+
+    <button
+      id="addMaterialBtn"
+      type="button"
+      style="margin-top: 12px; padding: 6px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
+    >
+      + Add Material
+    </button>
+
+    <br /><br />
+
     <table style="width: 100%; border-collapse: collapse; margin-top: 24px;">
       <thead>
         <tr style="background-color: #f0f0f0;">
@@ -47,11 +135,29 @@
       <tbody>
         <tr>
           <td style="padding: 8px;">Yard Margin (%)</td>
-          <td style="padding: 8px;"><input type="number" id="marginInput" value="5" onchange="recalculate()" />%</td>
+          <td style="padding: 8px;">
+            <input
+              type="number"
+              id="marginInput"
+              value="5"
+              placeholder="Margin %"
+              title="Yard margin percentage"
+              aria-label="Yard margin percentage"
+            />%
+          </td>
         </tr>
         <tr>
           <td style="padding: 8px;">Contract Fee ($)</td>
-          <td style="padding: 8px;"><input type="number" id="feeInput" value="50" onchange="recalculate()" /></td>
+          <td style="padding: 8px;">
+            <input
+              type="number"
+              id="feeInput"
+              value="50"
+              placeholder="Contract fee"
+              title="Contract fee in dollars"
+              aria-label="Contract fee in dollars"
+            />
+          </td>
         </tr>
         <tr>
           <td style="padding: 8px;"><strong>Raw Total Value ($)</strong></td>
@@ -68,80 +174,22 @@
       </tbody>
     </table>
   </div>
-  
-  <script>
-  const TOTAL_WEIGHT = 20000;
-  
-  function recalculate() {
-    const rows = document.querySelectorAll("#contractTable tr");
-    let rawTotal = 0;
-    let totalPercent = 0;
-  
-    rows.forEach(row => {
-      const percentInput = row.cells[1].querySelector("input");
-      const recoveredInput = row.cells[2].querySelector("input");
-      const priceInput = row.cells[3].querySelector("input");
-      const valueCell = row.querySelector(".totalValue");
-  
-      const percent = parseFloat(percentInput.value) || 0;
-      const price = parseFloat(priceInput.value) || 0;
-      const recovered = (percent / 100) * TOTAL_WEIGHT;
-      const total = recovered * price;
-  
-      recoveredInput.value = recovered.toFixed(2);
-      valueCell.textContent = `$${total.toFixed(2)}`;
-  
-      rawTotal += total;
-      totalPercent += percent;
-    });
-  
-    const warning = document.getElementById("warning");
-    warning.textContent = totalPercent > 100 ? "⚠️ Total % of Load exceeds 100%. Please adjust." : "";
-  
-    const marginPercent = parseFloat(document.getElementById("marginInput").value) || 0;
-    const contractFee = parseFloat(document.getElementById("feeInput").value) || 0;
-  
-    const afterMargin = rawTotal * (1 - marginPercent / 100);
-    const finalValue = afterMargin + contractFee;
-  
-    document.getElementById("rawValue").textContent = rawTotal.toFixed(2);
-    document.getElementById("afterMargin").textContent = afterMargin.toFixed(2);
-    document.getElementById("finalValue").textContent = finalValue.toFixed(2);
-  }
-  
-  function addRow() {
-    const table = document.getElementById("contractTable");
-    const row = table.insertRow();
-  
-    row.innerHTML = `
-      <td><input type="text" value="New Material" onchange="recalculate()" /></td>
-      <td><input type="number" value="0" onchange="recalculate()" /></td>
-      <td><input type="number" value="0" readonly /></td>
-      <td><input type="number" step="0.01" value="0.00" onchange="recalculate()" /></td>
-      <td class="totalValue">$0.00</td>
-      <td><button onclick="this.parentElement.parentElement.remove(); recalculate();" style="color: red; border: none; background: none; font-weight: bold;">✖</button></td>
-    `;
-    recalculate();
-  }
-  
-  recalculate();
-  </script>
 
-<div style="margin-top: 48px; padding: 24px; background-color: #f8f9fa; border: 1px solid #ccc; border-radius: 8px;">
+  <div style="margin-top: 48px; padding: 24px; background-color: #f8f9fa; border: 1px solid #ccc; border-radius: 8px;">
     <h3 style="color: #003366;">Contract Details</h3>
     <ul style="margin-top: 0;">
       <li><strong>Contract Unit:</strong> 20,000 pounds</li>
       <li><strong>Price Quotation:</strong> U.S. dollars and cents per pound</li>
       <li><strong>Trading Hours:</strong>
         <ul>
-          <li><strong>BRidge:</strong> Sunday - Friday 6:00 p.m. - 3:00 p.m. (7:00 p.m. - 4:00 p.m. CT)</li>          
+          <li><strong>BRidge:</strong> Sunday - Friday 6:00 p.m. - 3:00 p.m. (7:00 p.m. - 4:00 p.m. CT)</li>
         </ul>
       </li>
       <li><strong>Minimum Price Fluctuation:</strong> 0.0005 per pound = $10.00</li>
       <li><strong>TAS/TAM:</strong> Zero or ±10 ticks in the minimum tick increment of the outright; Spot TAS: Zero</li>
       <li><strong>Product Code:</strong>
         <ul>
-          <li><strong>BRidge:</strong> CUB</li>          
+          <li><strong>BRidge:</strong> CUB</li>
         </ul>
       </li>
       <li><strong>Listed Contracts:</strong> Monthly contracts listed for 56 consecutive months</li>
@@ -173,4 +221,8 @@
       <li><strong>Grade and Quality:</strong> Grade 1 Barley or as per ASTM/industry standards</li>
     </ul>
   </div>
-  
+
+  <!-- External JS (no inline, CSP-safe) -->
+  <script src="/static/js/mixed-load.js" defer nonce="{{NONCE}}"></script>
+</body>
+</html>
