@@ -658,13 +658,16 @@ async function api(path, opt = {}) {
     throw new Error('Unauthorized');
   }
   if (!res.ok) {
-    let msg = 'Request failed';
+    let status = res.status;
+    let bodyText = '';
     try {
       const j = await res.clone().json();
-      msg = j?.detail || JSON.stringify(j);
+      bodyText = j?.detail || JSON.stringify(j);
     } catch {
-      try { msg = await res.text() || msg; } catch {}
+      try { bodyText = await res.text(); } catch { bodyText = ''; }
     }
+    const msg = bodyText ? `HTTP ${status}: ${bodyText}` : `HTTP ${status}`;
+    console.error('API error:', { url, status, bodyText });
     toast(msg);
     throw new Error(msg);
   }
@@ -1215,8 +1218,7 @@ onReady(async () => {
         weight_tons,
         price_per_ton,
         currency: "USD",
-        tax_percent: null,   // if your column is tax_pct, rename this key to tax_pct
-        status: "Pending"    // ensure this matches your enum
+        tax_pct: null        
       };
 
       const res = await api(`/contracts`, {
