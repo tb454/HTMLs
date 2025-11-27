@@ -349,6 +349,33 @@ app = FastAPI(
     },
 )
 
+# ---- Final safety-net for Cache-Control + nosniff ----
+from starlette.middleware.base import BaseHTTPMiddleware  # already imported above
+
+class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        resp = await call_next(request)
+
+        # 1) Guarantee Cache-Control everywhere
+        cc = (resp.headers.get("Cache-Control") or "").strip()
+        if not cc:
+            if request.method in ("GET", "HEAD"):
+                # JSON/API like /contracts → short-lived private cache
+                resp.headers["Cache-Control"] = "private, max-age=10"
+            else:
+                # POST/PUT/DELETE, webhooks, etc. → never cache
+                resp.headers["Cache-Control"] = "no-store"
+
+        # 2) Guarantee X-Content-Type-Options: nosniff everywhere
+        xcto = (resp.headers.get("X-Content-Type-Options") or "").strip()
+        if not xcto:
+            resp.headers["X-Content-Type-Options"] = "nosniff"
+
+        return resp
+
+app.add_middleware(GlobalSecurityCacheMiddleware)
+# ---- Final safety-net ----
+
 # ---- Ensure Cache-Control exists on every GET/HEAD -------
 @app.middleware("http")
 async def _ensure_cache_control_header(request: Request, call_next):
