@@ -13054,8 +13054,6 @@ async def update_yard(yard_id: UUID, body: YardProfileUpdate):
 
 
 # ----- Yard Pricing Rules -----
-
-
 @app.get(
     "/yards/{yard_id}/pricing_rules",
     response_model=List[YardPricingRuleOut],
@@ -13188,8 +13186,6 @@ async def update_yard_pricing_rule(rule_id: UUID, body: YardPricingRuleUpdate):
 
 
 # ----- Yard Hedge Rules -----
-
-
 @app.get(
     "/yards/{yard_id}/hedge_rules",
     response_model=List[YardHedgeRuleOut],
@@ -13391,7 +13387,6 @@ async def quote_from_formula(body: PricingQuoteRequest):
 # ---------- Hedge Recommendation Endpoint ----------
 
 HEDGE_TAG = ["Hedge"]
-
 
 @app.get(
     "/hedge/recommendations/by_yard_id",
