@@ -144,8 +144,16 @@
         <label class="visually-hidden" for="materialFilter">Filter material/SKU</label>
         <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
       </div>
+
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
-      <select id="sortBy" class="form-select form-select-sm w-auto">
+
+      <!-- added accessible label + aria-label for sortBy -->
+      <label class="visually-hidden" for="sortBy">Sort contracts by</label>
+      <select
+        id="sortBy"
+        class="form-select form-select-sm w-auto"
+        aria-label="Sort contracts by"
+      >
         <option value="created_at_desc" selected>Newest</option>
         <option value="price_per_ton_asc">Price ↑</option>
         <option value="price_per_ton_desc">Price ↓</option>
