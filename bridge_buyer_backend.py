@@ -723,7 +723,7 @@ async def trader_page(request: Request):
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-{nonce}'; "
-        "style-src-attr 'self'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
         f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
@@ -1201,7 +1201,7 @@ async def security_headers_mw(request: Request, call_next):
             "img-src 'self' data:; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline'; "
-            "style-src-attr 'self'; "
+            "style-src-attr 'self' 'unsafe-inline'; "
             "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
             "connect-src 'self'"
         )
@@ -1217,7 +1217,7 @@ async def security_headers_mw(request: Request, call_next):
             "img-src 'self' data: blob: https://*.stripe.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
-            "style-src-attr 'self'; "
+            "style-src-attr 'self' 'unsafe-inline'; "
             f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
             "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
             "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
@@ -1235,7 +1235,7 @@ async def security_headers_mw(request: Request, call_next):
             "img-src 'self' data: blob: https://*.stripe.com; "
             "font-src 'self' https://fonts.gstatic.com data:; "
             f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
-            "style-src-attr 'self'; "
+            "style-src-attr 'self' 'unsafe-inline'; "
             f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
             "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
             "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
@@ -5424,7 +5424,7 @@ async def buyer_page_dynamic(request: Request):
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
-        "style-src-attr 'self'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
@@ -5451,7 +5451,7 @@ async def admin_page(request: Request):
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
-        "style-src-attr 'self'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
@@ -5475,7 +5475,7 @@ async def seller_page(request: Request):
         "img-src 'self' data: blob: https://*.stripe.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-" + nonce + "'; "
-        "style-src-attr 'self'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
         "script-src 'self' 'nonce-" + nonce + "' https://cdn.jsdelivr.net https://js.stripe.com; "
         "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com; "
@@ -13394,10 +13394,10 @@ HEDGE_TAG = ["Hedge"]
 
 
 @app.get(
-    "/hedge/recommendations",
+    "/hedge/recommendations/by_yard_id",
     response_model=List[HedgeRecommendationOut],
     tags=HEDGE_TAG,
-    summary="Hedge Recommendations for Yard",
+    summary="Hedge Recommendations for Yard (by yard_id)",
     description=(
         "Compute simple hedge recommendations per material for a yard, "
         "based on yard_hedge_rules and inventory_items. "
