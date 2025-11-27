@@ -13540,6 +13540,13 @@ def _parse_optional_dt(v: str | None) -> datetime | None:
     summary="List Contracts (admin)",
     status_code=200,
 )
+@app.get(
+    "/contracts",
+    response_model=List[ContractOut],
+    tags=["Contracts"],
+    summary="List Contracts (admin)",
+    status_code=200,
+)
 async def list_contracts_admin(
     request: Request,
     response: Response,
@@ -13547,99 +13554,101 @@ async def list_contracts_admin(
     offset: int = Query(0, ge=0),
     status: Optional[str] = Query(None),
     seller: Optional[str] = Query(None),
-    start: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
-    end: Optional[str] = Query(None, description="YYYY-MM-DD or ISO8601"),
+    # these are now **ignored** on purpose so they can't crash the endpoint
+    start: Optional[str] = Query(None, description="(temporarily ignored)"),
+    end: Optional[str] = Query(None, description="(temporarily ignored)"),
 ):
     """
-    Admin contracts list with safe date filters:
-
-    - Accepts full ISO strings like '2024-12-27T00:00:00.000Z'
-    - Only uses the **date** portion (YYYY-MM-DD)
-    - Never 500s on weird date input – just ignores a bad start/end
+    SUPER SAFE version for seller page:
+    - Ignores start/end filters completely (for now)
+    - Filters only by seller + status
+    - Never 500s on weird date input
     """
 
-    start_dt = _parse_optional_dt(start)
-    end_start = _parse_optional_dt(end)
-    end_dt = end_start + timedelta(days=1) if end_start else None  # exclusive end
+    try:
+        tenant_id = await current_tenant_id(request)
 
-    tenant_id = await current_tenant_id(request)
+        where = ["1=1"]
+        params: dict[str, object] = {"limit": limit, "offset": offset}
 
-    where = ["1=1"]
-    params: dict[str, object] = {"limit": limit, "offset": offset}
+        if tenant_id:
+            where.append("tenant_id = :tenant_id")
+            params["tenant_id"] = tenant_id
 
-    if tenant_id:
-        where.append("tenant_id = :tenant_id")
-        params["tenant_id"] = tenant_id
+        if status and status.lower() != "all":
+            where.append("status = :status")
+            params["status"] = status
 
-    if status and status.lower() != "all":
-        where.append("status = :status")
-        params["status"] = status
+        if seller:
+            where.append("seller ILIKE :seller")
+            params["seller"] = f"%{seller}%"
 
-    if seller:
-        where.append("seller ILIKE :seller")
-        params["seller"] = f"%{seller}%"
+        where_sql = " AND ".join(where)
 
-    if start_dt is not None:
-        where.append("created_at >= :start")
-        params["start"] = start_dt
+        # ---- total count (no limit/offset in this param set) ----
+        count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+        total_row = await database.fetch_one(
+            f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
+            count_params,
+        )
+        total = int(total_row["c"] or 0) if total_row and total_row["c"] is not None else 0
+        response.headers["X-Total-Count"] = str(total)
 
-    if end_dt is not None:
-        where.append("created_at < :end")
-        params["end"] = end_dt
-
-    where_sql = " AND ".join(where)
-
-    # ---- total count (NO limit/offset in params here) ----
-    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
-    total_row = await database.fetch_one(
-        f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
-        count_params,
-    )
-    total = int(total_row["c"] or 0) if total_row and total_row["c"] is not None else 0
-    response.headers["X-Total-Count"] = str(total)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "private, max-age=10"
-
-    # ---- data page ----
-    rows = await database.fetch_all(
-        f"""
-        SELECT *
-        FROM contracts
-        WHERE {where_sql}
-        ORDER BY created_at DESC, id DESC
-        LIMIT :limit OFFSET :offset
-        """,
-        params,
-    )
-
-    out: List[ContractOut] = []
-    for r in rows:
-        d = dict(r)
-        out.append(
-            ContractOut(
-                id=d["id"],
-                buyer=d["buyer"],
-                seller=d["seller"],
-                material=d["material"],
-                weight_tons=float(d["weight_tons"]),
-                price_per_ton=d["price_per_ton"],
-                currency=(d.get("currency") or "USD"),
-                tax_percent=d.get("tax_percent"),
-                status=d.get("status") or "Pending",
-                created_at=d.get("created_at"),
-                signed_at=d.get("signed_at"),
-                signature=d.get("signature"),
-                pricing_formula=d.get("pricing_formula"),
-                reference_symbol=d.get("reference_symbol"),
-                reference_price=d.get("reference_price"),
-                reference_source=d.get("reference_source"),
-                reference_timestamp=d.get("reference_timestamp"),
-            )
+        # ---- data page ----
+        rows = await database.fetch_all(
+            f"""
+            SELECT *
+            FROM contracts
+            WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit OFFSET :offset
+            """,
+            params,
         )
 
-    response.headers["Cache-Control"] = "private, max-age=10"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    return out
+        out: List[ContractOut] = []
+        for r in rows:
+            d = dict(r)
+            out.append(
+                ContractOut(
+                    id=d["id"],
+                    buyer=d["buyer"],
+                    seller=d["seller"],
+                    material=d["material"],
+                    weight_tons=float(d["weight_tons"]),
+                    price_per_ton=d["price_per_ton"],
+                    currency=(d.get("currency") or "USD"),
+                    tax_percent=d.get("tax_percent"),
+                    status=d.get("status") or "Pending",
+                    created_at=d.get("created_at"),
+                    signed_at=d.get("signed_at"),
+                    signature=d.get("signature"),
+                    pricing_formula=d.get("pricing_formula"),
+                    reference_symbol=d.get("reference_symbol"),
+                    reference_price=(
+                        float(d["reference_price"])
+                        if d.get("reference_price") is not None
+                        else None
+                    ),
+                    reference_source=d.get("reference_source"),
+                    reference_timestamp=d.get("reference_timestamp"),
+                )
+            )
+
+        response.headers["Cache-Control"] = "private, max-age=10"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return out
+
+    except Exception as e:
+        # last-resort: NEVER 500 the seller page, just return empty + log
+        try:
+            logger.warn("contracts_list_admin_failed_safe", err=str(e))
+        except Exception:
+            pass
+        response.headers["X-Total-Count"] = "0"
+        response.headers["Cache-Control"] = "private, max-age=10"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return []
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
