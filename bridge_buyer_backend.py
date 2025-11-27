@@ -350,6 +350,25 @@ app = FastAPI(
     },
 )
 
+# -----  Apply Page Relaxed for Stripe Access ----
+APPLY_PATH = Path("/static/apply.html")
+
+@app.get("/apply", include_in_schema=False)
+def apply_page():
+    html = APPLY_PATH.read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=html,
+        headers={
+            # Let third-party iframes/scripts load without CORP (no cookies)
+            "Cross-Origin-Embedder-Policy": "credentialless",
+            # Keep Stripe popups/redirects working
+            "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+            # Good hygiene for your own resource
+            "Cross-Origin-Resource-Policy": "same-site",
+        },
+    )
+# -----  Apply Page Relaxed for Stripe Access ----
+
 # ---- Final safety-net for Cache-Control + nosniff ----
 class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -1181,8 +1200,20 @@ async def security_headers_mw(request: Request, call_next):
     # Safe defaults (no deprecated X-Frame-Options)
     h["X-Content-Type-Options"] = "nosniff"
     h["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    h["Cross-Origin-Opener-Policy"] = "same-origin"
-    h["Cross-Origin-Embedder-Policy"] = "credentialless"
+    path = request.url.path or "/"
+
+    # Default: strict isolation sitewide
+    coop = "same-origin"
+    coep = "require-corp"
+
+    # Exception: Stripe needs credentialless on /apply
+    if path == "/apply":
+        coop = "same-origin-allow-popups"
+        coep = "credentialless"
+
+    h["Cross-Origin-Opener-Policy"] = coop
+    h["Cross-Origin-Embedder-Policy"] = coep
+
     h["X-Permitted-Cross-Domain-Policies"] = "none"
     h["X-Download-Options"] = "noopen"
     h["Permissions-Policy"] = "geolocation=()"
@@ -4456,8 +4487,8 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
         line_items=line_items,
         allow_promotion_codes=True,
         subscription_data={"metadata": {"member": member, "plan": plan}},
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?sub=cancel",
+        success_url=f"{STRIPE_RETURN_BASE}/apply?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/apply?sub=cancel",
         metadata={"member": member, "email": (email or row["email"] if row else "")},
     )
     return {"url": session.url}
@@ -4600,8 +4631,8 @@ async def pm_setup_session(member: str, email: str, _=Depends(csrf_protect)):
         mode="setup",
         customer=cust_id,
         payment_method_types=["card", "us_bank_account"],
-        success_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
-        cancel_url=f"{STRIPE_RETURN_BASE}/static/apply.html?pm=cancel",
+        success_url=f"{STRIPE_RETURN_BASE}/apply?pm=ok&sess={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
+        cancel_url=f"{STRIPE_RETURN_BASE}/apply?pm=cancel",
         metadata={"member": member, "email": email},
     )
     return {"url": session.url}
