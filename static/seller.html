@@ -1199,42 +1199,61 @@ onReady(async () => {
     }
 
     async function createContract() {
-      const seller   = document.getElementById("sellerName").value.trim();
-      const buyer    = document.getElementById("buyerName").value.trim();
-      const material = document.getElementById("material").value.trim();
-      const weight_tons   = parseFloat(document.getElementById("tons").value);
-      const price_per_ton = parseFloat(document.getElementById("price").value);
+    const seller   = document.getElementById("sellerName").value.trim();
+        const buyer    = document.getElementById("buyerName").value.trim();
+        const material = document.getElementById("material").value.trim();
+        const weight_tons   = parseFloat(document.getElementById("tons").value);
+        const price_per_ton = parseFloat(document.getElementById("price").value);
+        if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
+          toast("Fill all fields (seller, buyer, material, tons, $/ton).");
+          return;
+        }
 
-      if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
-        toast("Fill all fields (seller, buyer, material, tons, $/ton).");
-        return;
+        // 1) Pre-check finished goods for this seller/material to avoid 409s
+        try {
+          const invRes = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
+          const invRows = await invRes.json();
+          // match by exact sku OR case-insensitive
+          const row = (invRows || []).find(r => {
+            const sku = (r.sku || '').toString();
+            return sku === material || sku.toLowerCase() === material.toLowerCase();
+          });
+          const finished_lbs = row ? Number(row.finished_lbs || 0) : 0;
+          const available_tons = finished_lbs / 2000;
+          if (available_tons < weight_tons) {
+            toast(`Not enough inventory: available ${available_tons.toFixed(2)} ton(s) < requested ${weight_tons.toFixed(2)}.`);
+            return;
+          }
+        } catch {
+          // if inventory endpoint fails, let backend decide
+        }
+
+        // 2) Send safe defaults that most schemas accept
+        const body = {
+          seller,
+          buyer,
+          material,
+          weight_tons,
+          price_per_ton,
+          currency: "USD",
+          tax_pct: null,
+          status: "Open"   // <— if your enum is "Pending", switch to that; must match DB EXACTLY
+        };
+
+        const res = await api(`/contracts`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now()))
+          },
+          body: JSON.stringify(body)
+        });
+
+        toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
+        await listContracts();
+        renderRecentMovements(seller, material);
+        refreshFinishedFromInputs();
       }
-
-      // send sane defaults many schemas require
-      const body = {
-        seller,
-        buyer,
-        material,
-        weight_tons,
-        price_per_ton,
-        currency: "USD",
-        tax_pct: null        
-      };
-
-      const res = await api(`/contracts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now()))
-        },
-        body: JSON.stringify(body)
-      });
-
-      toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
-      await listContracts();
-      renderRecentMovements(seller, material);
-      refreshFinishedFromInputs();
-    }
 
     function toISOStringDateStart(v){
       if (!v) return "";
