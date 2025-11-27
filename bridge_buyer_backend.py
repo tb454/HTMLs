@@ -5349,15 +5349,19 @@ async def _ensure_qbo_oauth_events_table():
 
 # -------- Static HTML --------
 from pathlib import Path
-STATIC_DIR = Path(__file__).parent.resolve() / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 def _static_or_placeholder(filename: str, title: str):
+    """
+    Serve a static HTML file from /static. If it's missing, return a 404
+    instead of a placeholder page.
+    """
     p = STATIC_DIR / filename
     if not p.exists():
-        return HTMLResponse(
-            f"<h1>{title}</h1><p>Upload <code>/static/{filename}</code> to replace this placeholder.</p>"
-        )
+        # Fail loudly so you notice in logs, but no goofy placeholder message.
+        raise HTTPException(status_code=404, detail=f"{filename} not found")
     return FileResponse(str(p))
+
 # Ferrous
 @app.get("/static/spec-ferrous", include_in_schema=False)
 @app.get("/static/spec-ferrous.html", include_in_schema=False)
