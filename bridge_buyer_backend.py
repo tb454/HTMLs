@@ -59,6 +59,7 @@ from datetime import timedelta as _td
 from datetime import datetime as _dt, timezone as _tz
 from fastapi import Depends
 from uuid import UUID 
+from starlette.middleware.base import BaseHTTPMiddleware 
 
 # ---- Admin dependency helper (typed) ----
 from fastapi import Request as _FastAPIRequest
@@ -350,13 +351,11 @@ app = FastAPI(
 )
 
 # ---- Final safety-net for Cache-Control + nosniff ----
-from starlette.middleware.base import BaseHTTPMiddleware  # already imported above
-
 class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         resp = await call_next(request)
 
-        # 1) Guarantee Cache-Control everywhere
+        # 1) Guarantee Cache-Control everywhere (covers /contracts JSON)
         cc = (resp.headers.get("Cache-Control") or "").strip()
         if not cc:
             if request.method in ("GET", "HEAD"):
@@ -366,10 +365,13 @@ class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
                 # POST/PUT/DELETE, webhooks, etc. → never cache
                 resp.headers["Cache-Control"] = "no-store"
 
-        # 2) Guarantee X-Content-Type-Options: nosniff everywhere
-        xcto = (resp.headers.get("X-Content-Type-Options") or "").strip()
-        if not xcto:
-            resp.headers["X-Content-Type-Options"] = "nosniff"
+        # 2) Force X-Content-Type-Options: nosniff on ALL responses
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+
+        # 3) Strip CSP from non-HTML responses (JSON, CSV, etc.)
+        ctype = (resp.headers.get("content-type") or "").lower()
+        if "text/html" not in ctype:
+            resp.headers.pop("Content-Security-Policy", None)
 
         return resp
 
@@ -9810,8 +9812,8 @@ async def run_dossier_ingest_batch(limit: int = 100):
             mac = hmac.new(DOSSIER_INGEST_SECRET.encode("utf-8"),
                            ts.encode("utf-8") + b"." + raw,
                            hashlib.sha256).hexdigest()
-            headers["X-Dossier-Timestamp"] = ts
-            headers["X-Dossier-Signature"] = mac
+            headers["X-Atlas-Timestamp"] = ts
+            headers["X-Atlas-Signature"] = mac
         return headers, raw
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -13468,7 +13470,7 @@ async def list_contracts_admin(
             dt = datetime.fromisoformat(s)
             return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
         except Exception:
-            raise HTTPException(400, "Invalid 'start' date. Use YYYY-MM-DD or ISO 8601.")
+            return None
 
     def _parse_dt_end(v: Optional[str]) -> Optional[datetime]:
         if not v: return None
@@ -13484,7 +13486,7 @@ async def list_contracts_admin(
             # make it exclusive if caller passed a bare date-time (keep their time)
             return dt
         except Exception:
-            raise HTTPException(400, "Invalid 'end' date. Use YYYY-MM-DD or ISO 8601.")
+            return None
     """
     Paginated contract listing for the admin dashboard.
 
