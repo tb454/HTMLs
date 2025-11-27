@@ -355,6 +355,10 @@ app = FastAPI(
 BASE_DIR = Path(__file__).resolve().parent
 APPLY_PATH = (BASE_DIR / "static" / "apply.html")
 
+@app.get("/apply", include_in_schema=False)
+def apply_alias():
+    return apply_page()
+
 @app.get("/apply.html", include_in_schema=False)
 def apply_page():
     try:
@@ -402,6 +406,11 @@ class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
         ctype = (resp.headers.get("content-type") or "").lower()
         if "text/html" not in ctype and "Content-Security-Policy" in resp.headers:
             del resp.headers["Content-Security-Policy"]
+
+        # Default CORP unless already set by a route
+        if not (resp.headers.get("Cross-Origin-Resource-Policy") or "").strip():
+            # same-site is correct since everything serves from bridge.scrapfutures.com
+            resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
 
         return resp
 
@@ -1210,8 +1219,9 @@ async def security_headers_mw(request: Request, call_next):
     coop = "same-origin"
     coep = "require-corp"
 
-    # Exception: Stripe needs credentialless on /apply
-    if path == "/apply":
+    # Pages that load Stripe resources must use COEP: credentialless
+    _STRIPE_PAGES = ("/apply", "/apply.html", "/buyer", "/seller", "/admin", "/trader")
+    if path in _STRIPE_PAGES:
         coop = "same-origin-allow-popups"
         coep = "credentialless"
 
@@ -1246,24 +1256,6 @@ async def security_headers_mw(request: Request, call_next):
 
     # App CSP (only for HTML, and only if NOT already set by route)
     if "text/html" in ctype and "Content-Security-Policy" not in h:
-        nonce = getattr(request.state, "csp_nonce", "")
-        h["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "base-uri 'self'; object-src 'none'; "
-            f"{_FRAME_ANCESTORS}; "
-            "img-src 'self' data: blob: https://*.stripe.com; "
-            "font-src 'self' https://fonts.gstatic.com data:; "
-            f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{nonce}' 'unsafe-inline'; "
-            "style-src-attr 'self' 'unsafe-inline'; "
-            f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net https://js.stripe.com; "
-            "frame-src 'self' https://js.stripe.com https://checkout.stripe.com; "
-            "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://*.stripe.com"
-        )
-
-    return resp
-
-    # App CSP (set only if not already set by the route)
-    if "Content-Security-Policy" not in h:
         nonce = getattr(request.state, "csp_nonce", "")
         h["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -13568,13 +13560,6 @@ def _parse_optional_dt(v: str | None) -> datetime | None:
         # If it's trash, just ignore the filter
         return None
 
-@app.get(
-    "/contracts",
-    response_model=List[ContractOut],
-    tags=["Contracts"],
-    summary="List Contracts (admin)",
-    status_code=200,
-)
 @app.get(
     "/contracts",
     response_model=List[ContractOut],
