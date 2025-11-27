@@ -13496,6 +13496,36 @@ class ContractInExtended(ContractIn):
 
 from datetime import datetime, timedelta, timezone as _tz
 
+def _parse_optional_dt(v: str | None) -> datetime | None:
+    """
+    Best-effort parser for query-string dates:
+    - Accepts 'YYYY-MM-DD'
+    - Accepts full ISO strings (with or without 'Z')
+    - Ignores any junk after the date part
+    - Returns None instead of raising on garbage
+    """
+    if not v:
+        return None
+
+    s = v.strip().replace(" ", "T")
+
+    # If it looks like a date, keep only the YYYY-MM-DD part
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        s = s[:10]  # '2024-12-27T00:00:00.000Z' -> '2024-12-27'
+
+    # Handle trailing Z
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_tz.utc)
+        return dt
+    except Exception:
+        # If it's trash, just ignore the filter
+        return None
+
 @app.get(
     "/contracts",
     response_model=List[ContractOut],
@@ -13527,20 +13557,8 @@ async def list_contracts_admin(
     - Never 500s on weird date input – just ignores a bad start/end
     """
 
-    def _parse_date_only(v: Optional[str]) -> Optional[datetime]:
-        if not v:
-            return None
-        s = v.strip()
-        if len(s) >= 10:
-            s = s[:10]  # '2024-12-27T00:00:00Z' -> '2024-12-27'
-        try:
-            y, m, d = map(int, s.split("-"))
-            return datetime(y, m, d, tzinfo=_tz.utc)
-        except Exception:
-            return None
-
-    start_dt = _parse_date_only(start)
-    end_start = _parse_date_only(end)
+    start_dt = _parse_optional_dt(start)
+    end_start = _parse_optional_dt(end)
     end_dt = end_start + timedelta(days=1) if end_start else None  # exclusive end
 
     tenant_id = await current_tenant_id(request)
