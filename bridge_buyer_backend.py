@@ -5397,7 +5397,7 @@ async def root(request: Request):
     token = _csrf_get_or_create(request)
     prod = os.getenv("ENV","").lower() == "production"
     resp = FileResponse("static/bridge-login.html")
-    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=True, samesite="lax", secure=prod, path="/")
     return resp
 
 # --- Dynamic pages with per-request nonce + strict CSP ---
