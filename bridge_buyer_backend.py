@@ -3600,6 +3600,11 @@ async def get_material_benchmarks(
 app.include_router(benchmarks_router)
 # ------ Materials Benchmark ------
 
+# --- Admin exports router ---
+admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
+app.include_router(admin_exports)
+# --- Admin exports router ---
+
 # ----- Products & Settlements -----
 products_router    = APIRouter(prefix="/products", tags=["Products"])
 settlements_router = APIRouter(prefix="/settlements", tags=["Settlements"])
@@ -11673,6 +11678,60 @@ async def invites_accept_submit(token: str = Form(...), email: str = Form(...), 
         pass
 
     return RedirectResponse("/buyer", status_code=302)
+# ===== Link signing (itsdangerous) =====
+
+# --- Admin exports ---
+from fastapi import Response as _Resp
+from fastapi.responses import StreamingResponse
+
+@admin_exports.get("/bols.csv", summary="BOLs CSV (streamed)")
+async def admin_bols_csv():
+    rows = await database.fetch_all("""
+        SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
+               status, pickup_time, delivery_time, total_value
+        FROM bols
+        ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+    """)
+    import io, csv
+    out = io.StringIO(newline="")
+    w = csv.writer(out)
+    w.writerow(["bol_id","contract_id","buyer","seller","material","weight_tons",
+                "status","pickup_time","delivery_time","total_value"])
+    for r in rows:
+        w.writerow([
+            r["bol_id"], r["contract_id"], r["buyer"], r["seller"], r["material"],
+            float(r["weight_tons"] or 0), r["status"],
+            (r["pickup_time"].isoformat() if r["pickup_time"] else ""),
+            (r["delivery_time"].isoformat() if r["delivery_time"] else ""),
+            float(r["total_value"] or 0),
+        ])
+    return StreamingResponse(
+        iter([out.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="bols.csv"'}
+    )
+
+@admin_exports.head("/bols.csv")
+async def admin_bols_csv_head():
+    return _Resp(status_code=200, headers={
+        "Content-Disposition": 'attachment; filename="bols.csv"',
+        "Content-Type": "text/csv"
+    })
+
+@admin_exports.head("/all.zip")
+async def admin_all_zip_head():
+    return _Resp(status_code=200, headers={
+        "Content-Disposition": 'attachment; filename="bridge_export_all.zip"',
+        "Content-Type": "application/zip"
+    })
+
+@admin_exports.head("/contracts.csv")
+async def admin_contracts_csv_head():
+    return _Resp(status_code=200, headers={
+        "Content-Disposition": 'attachment; filename="contracts.csv"',
+        "Content-Type": "text/csv"
+    })
+# ---  Admin exports ----
 
 # -------- Documents: BOL PDF --------
 from pathlib import Path
@@ -15052,8 +15111,6 @@ async def create_bol_alias(request: Request):
 # -------- BOLs (with PDF generation) --------
 
 # =============== Admin Exports (core tables) ===============   
-admin_exports = APIRouter(prefix="/admin/exports", tags=["Admin"])
-
 @admin_exports.get("/contracts.csv", summary="Contracts CSV (streamed)")
 def export_contracts_csv_admin():
     with engine.begin() as conn:
@@ -15116,7 +15173,6 @@ def export_all_zip_admin():
             media_type="application/zip",
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
-app.include_router(admin_exports)
 # =============== Admin Exports (core tables) ===============
  
 # ---------------- Cancel Pending Contract ----------------

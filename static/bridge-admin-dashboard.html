@@ -1231,26 +1231,52 @@ onReady(async function(){
     // ----- FUTURES -----
     const apiBase = `${window.endpoint}/admin/futures`;
     let products = []; const productById = {}, productBySymbol = {};
-    const pricingSymbolSel = document.getElementById("pricingSymbol");
-    const seriesProductSel = document.getElementById("seriesProduct");
-    const filterSeriesProdSel = document.getElementById("filterSeriesProduct");
-    const filterSeriesStatus = document.getElementById("filterSeriesStatus");
-    const markDateInput = document.getElementById("markDate");
+    const pricingSymbolSel        = document.getElementById("pricingSymbol");
+    const seriesProductPricingSel = document.getElementById("seriesProductGenPricing");
+    const seriesProductSel        = document.getElementById("seriesProductGenSeries");
+    const filterSeriesProdSel     = document.getElementById("filterSeriesProduct");
+    const filterSeriesStatus      = document.getElementById("filterSeriesStatus");
+    const markDateInput           = document.getElementById("markDate");
+
 
     async function refreshProducts(){
-      try { products = await fetchJSON(`${apiBase}/products`); }
-      catch(e){ toast(e.message||'Products load failed'); return; }
+      try {
+        products = await fetchJSON(`${apiBase}/products`);
+      } catch(e) { toast(e.message || 'Products load failed'); return; }
+    
+      Object.keys(productById).forEach(k => delete productById[k]);
+      Object.keys(productBySymbol).forEach(k => delete productBySymbol[k]);
 
-      Object.keys(productById).forEach(k=>delete productById[k]);
-      Object.keys(productBySymbol).forEach(k=>delete productBySymbol[k]);
-      pricingSymbolSel.innerHTML=''; seriesProductSel.innerHTML=''; filterSeriesProdSel.innerHTML=`<option value="">(all products)</option>`;
+      // safely clear existing options
+      if (pricingSymbolSel)        pricingSymbolSel.innerHTML = '';
+      if (seriesProductPricingSel) seriesProductPricingSel.innerHTML = '';
+      if (seriesProductSel)        seriesProductSel.innerHTML = '';
+      if (filterSeriesProdSel)     filterSeriesProdSel.innerHTML = '<option value="">(all products)</option>';
 
-      products.forEach(p=>{
-        productById[p.id]=p; productBySymbol[p.symbol_root]=p;
-        const opt1=document.createElement('option'); opt1.value=p.symbol_root; opt1.textContent = `${p.symbol_root} — ${p.material}`;
-        const opt2=document.createElement('option'); opt2.value=p.id;          opt2.textContent = `${p.symbol_root} — ${p.material}`;
-        const opt3=document.createElement('option'); opt3.value=p.id;          opt3.textContent = `${p.symbol_root} — ${p.material}`;
-        pricingSymbolSel.appendChild(opt1); seriesProductSel.appendChild(opt2); filterSeriesProdSel.appendChild(opt3);
+      products.forEach(p => {
+        productById[p.id] = p;
+        productBySymbol[p.symbol_root] = p;
+
+        if (pricingSymbolSel) {
+          const opt1 = document.createElement('option');
+          opt1.value = p.symbol_root; opt1.textContent = `${p.symbol_root} — ${p.material}`;
+          pricingSymbolSel.appendChild(opt1);
+        }
+        if (seriesProductPricingSel) {
+          const opt2 = document.createElement('option');
+          opt2.value = p.id; opt2.textContent = `${p.symbol_root} — ${p.material}`;
+            seriesProductPricingSel.appendChild(opt2);
+        }
+        if (seriesProductSel) {
+          const opt3 = document.createElement('option');
+          opt3.value = p.id; opt3.textContent = `${p.symbol_root} — ${p.material}`;
+          seriesProductSel.appendChild(opt3);
+        }
+        if (filterSeriesProdSel) {
+          const opt4 = document.createElement('option');
+          opt4.value = p.id; opt4.textContent = `${p.symbol_root} — ${p.material}`;
+          filterSeriesProdSel.appendChild(opt4);
+        }
       });
     }
 
