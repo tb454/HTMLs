@@ -10190,60 +10190,6 @@ async def _ensure_ice_delivery_log():
     """)
 # ------ ICE delivery log ------
 
-# ---- ICE delivery admin APIs (used by Admin modal) ----
-@app.get("/admin/ice/logs", tags=["Admin"], summary="Delivery log for a BOL")
-async def admin_ice_logs(bol_id: str, request: Request = None):
-    # Gate only in production
-    if os.getenv("ENV","").lower() == "production":
-        _require_admin(request)
-    rows = await database.fetch_all("""
-      SELECT when_utc, http_status, ms, response, pdf_sha256
-        FROM public.ice_delivery_log
-       WHERE bol_id = :b
-       ORDER BY when_utc DESC
-       LIMIT 200
-    """, {"b": bol_id})
-    delivered = sum(1 for r in rows if (r["http_status"] or 0) in (200, 201, 202))
-    failed    = sum(1 for r in rows if (r["http_status"] or 0) >= 400)
-    pending   = max(0, len(rows) - delivered - failed)
-    first_sha = next((r["pdf_sha256"] for r in rows if r.get("pdf_sha256")), None)
-    return {
-        "bol_id": bol_id,
-        "delivered_count": delivered,
-        "failed_count": failed,
-        "pending_count": pending,
-        "pdf_sha256": first_sha,
-        "entries": [
-            {
-              "when_utc": (r["when_utc"].isoformat() if r.get("when_utc") else None),
-              "http_status": r["http_status"],
-              "ms": r["ms"],
-              "response": (r["response"] or "")[:200]
-            } for r in rows
-        ]
-    }
-
-@app.post("/admin/ice/resend", tags=["Admin"], summary="Re-send latest delivery (stub)")
-async def admin_ice_resend(bol_id: str, request: Request = None):
-    if os.getenv("ENV","").lower() == "production":
-        _require_admin(request)
-    # TODO: enqueue a resend job; stubbed OK for now
-    return {"ok": True, "bol_id": bol_id, "queued": True}
-
-@app.post("/admin/ice/test_ping", tags=["Admin"], summary="Test ping for a BOL (stub)")
-async def admin_ice_test_ping(bol_id: str, request: Request = None):
-    if os.getenv("ENV","").lower() == "production":
-        _require_admin(request)
-    return {"ok": True, "bol_id": bol_id, "note": "pong"}
-
-@app.post("/admin/ice/rotate_secret", tags=["Admin"], summary="Rotate ICE secret (stub)")
-async def admin_ice_rotate_secret(request: Request = None):
-    if os.getenv("ENV","").lower() == "production":
-        _require_admin(request)
-    # In real impl: write to key_registry / env
-    return {"ok": True, "rotated": True}
-# ---- ICE delivery admin APIs ----
-
 # ------ Statements router ------
 @startup
 async def _ensure_statements_schema():
@@ -14616,117 +14562,84 @@ async def list_bols_admin(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     buyer: Optional[str] = Query(None),
+    seller: Optional[str] = Query(None),
     material: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    contract_id: Optional[str] = Query(None),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+    tenant_scoped: bool = Query(True, description="Restrict to current tenant if known."),
 ):
-    """
-    Paginated BOL listing for the admin dashboard.
+    where = []
+    params: Dict[str, Any] = {}
 
-    Filters:
-    - buyer: case-insensitive substring match on buyer
-    - material: case-insensitive substring match on material
-    - start/end: filter by pickup_time window (inclusive)
-    """
     tenant_id = await current_tenant_id(request)
-
-    where = ["1=1"]
-    base_params: dict[str, object] = {}
-    # ... add your filter params into base_params only ...
-    where_sql = " AND ".join(where)
-
-    # ✅ COUNT uses ONLY filter params
-    total_row = await database.fetch_one(
-        f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
-        base_params
-    )
-
-    # ✅ DATA query uses filter params + limit/offset
-    data_params = dict(base_params)
-    data_params.update({"limit": limit, "offset": offset})
-
-    rows = await database.fetch_all(
-        f"""
-        SELECT *
-        FROM contracts
-        WHERE {where_sql}
-        ORDER BY created_at DESC
-        LIMIT :limit OFFSET :offset
-        """,
-        data_params
-    )
-
-    if tenant_id:
+    if tenant_scoped and tenant_id:
         where.append("tenant_id = :tenant_id")
         params["tenant_id"] = tenant_id
+
     if buyer:
-        where.append("buyer ILIKE :buyer")
-        params["buyer"] = f"%{buyer}%"
+        where.append("buyer ILIKE :buyer");       params["buyer"] = f"%{buyer}%"
+    if seller:
+        where.append("seller ILIKE :seller");     params["seller"] = f"%{seller}%"
     if material:
-        where.append("material ILIKE :material")
-        params["material"] = f"%{material}%"
+        where.append("material ILIKE :material"); params["material"] = f"%{material}%"
+    if status:
+        where.append("status ILIKE :status");     params["status"] = f"%{status}%"
+    if contract_id:
+        where.append("contract_id = :contract_id"); params["contract_id"] = contract_id
     if start:
-        where.append("pickup_time >= :start")
-        params["start"] = start
+        where.append("pickup_time >= :start");    params["start"] = start
     if end:
-        where.append("pickup_time <= :end")
-        params["end"] = end
+        where.append("pickup_time <= :end");      params["end"] = end
 
-    where_sql = " AND ".join(where)
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
 
-    # total count header for pagination (no limit/offset here)
-    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
-    total_row = await database.fetch_one(
-        f"SELECT COUNT(*) AS c FROM bols WHERE {where_sql}",
-        count_params,
-    )
-    total = int(total_row["c"] or 0) if total_row else 0
-    response.headers["X-Total-Count"] = str(total)
+    # total count header
+    count_row = await database.fetch_one(f"SELECT COUNT(*) AS c FROM bols{where_sql}", params)
+    response.headers["X-Total-Count"] = str(int(count_row["c"] or 0) if count_row else 0)
 
     rows = await database.fetch_all(
         f"""
         SELECT *
         FROM bols
-        WHERE {where_sql}
+        {where_sql}
         ORDER BY pickup_time DESC NULLS LAST, created_at DESC NULLS LAST, bol_id DESC
         LIMIT :limit OFFSET :offset
         """,
-        params,
+        {**params, "limit": limit, "offset": offset},
     )
 
     out: List[BOLOut] = []
     for r in rows:
         d = dict(r)
-
-        carrier = CarrierInfo(
-            name=d.get("carrier_name") or "",
-            driver=d.get("carrier_driver") or "",
-            truck_vin=d.get("carrier_truck_vin") or "",
-        )
-
-        pickup_sig = Signature(
-            base64=d.get("pickup_signature_base64") or "",
-            timestamp=(
-                d.get("pickup_signature_time")
-                or d.get("pickup_time")
-                or datetime.utcnow()
-            ),
-        )
-
-        bol_in = BOLIn(
+        out.append(BOLOut(
+            bol_id=d["bol_id"],
             contract_id=d["contract_id"],
             buyer=d.get("buyer") or "",
             seller=d.get("seller") or "",
             material=d.get("material") or "",
-            weight_tons=float(d.get("weight_tons") or 0),
-            price_per_unit=float(d.get("price_per_unit") or 0),
-            total_value=float(d.get("total_value") or 0),
-            carrier=carrier,
-            pickup_signature=pickup_sig,
-            pickup_time=d.get("pickup_time") or d.get("created_at") or datetime.utcnow(),
-            carbon_intensity_kgco2e=d.get("carbon_intensity_kgco2e"),
-            offset_kgco2e=d.get("offset_kgco2e"),
-            esg_cert_id=d.get("esg_cert_id"),
+            weight_tons=float(d.get("weight_tons") or 0.0),
+            price_per_unit=float(d.get("price_per_unit") or 0.0),
+            total_value=float(d.get("total_value") or 0.0),
+            carrier=CarrierInfo(
+                name=d.get("carrier_name") or "",
+                driver=d.get("carrier_driver") or "",
+                truck_vin=d.get("carrier_truck_vin") or "",
+            ),
+            pickup_signature=Signature(
+                base64=d.get("pickup_signature_base64") or "",
+                timestamp=d.get("pickup_signature_time") or d.get("pickup_time") or utcnow(),
+            ),
+            delivery_signature=(
+                Signature(
+                    base64=d.get("delivery_signature_base64") or "",
+                    timestamp=d.get("delivery_signature_time") or d.get("delivery_time") or None,
+                ) if (d.get("delivery_signature_base64") or d.get("delivery_signature_time")) else None
+            ),
+            pickup_time=d.get("pickup_time") or d.get("created_at") or utcnow(),
+            delivery_time=d.get("delivery_time"),
+            status=d.get("status") or "Scheduled",
             origin_country=d.get("origin_country"),
             destination_country=d.get("destination_country"),
             port_code=d.get("port_code"),
@@ -14735,28 +14648,7 @@ async def list_bols_admin(
             tax_pct=d.get("tax_pct"),
             country_of_origin=d.get("country_of_origin"),
             export_country=d.get("export_country"),
-        )
-
-        delivery_sig = None
-        if d.get("delivery_signature_base64") or d.get("delivery_signature_time"):
-            delivery_sig = Signature(
-                base64=d.get("delivery_signature_base64") or "",
-                timestamp=(
-                    d.get("delivery_signature_time")
-                    or d.get("delivery_time")
-                    or datetime.utcnow()
-                ),
-            )
-
-        out.append(
-            BOLOut(
-                **bol_in.model_dump(),
-                bol_id=d["bol_id"],
-                status=d.get("status") or "Scheduled",
-                delivery_signature=delivery_sig,
-                delivery_time=d.get("delivery_time"),
-            )
-        )
+        ))
     return out
 
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
