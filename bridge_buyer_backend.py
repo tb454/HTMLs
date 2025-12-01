@@ -14000,8 +14000,16 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 logger.warn("contract_create_failed_fallback", err=str(e2))
             except Exception:
                 pass
-            raise HTTPException(status_code=500, detail="contract create failed")
-
+        except Exception as e2:
+            try:
+                logger.warn("contract_create_failed_fallback", err=str(e2))
+            except Exception:
+                pass
+            # TEMP: show actual DB error so we can patch precisely
+            raise HTTPException(
+                status_code=500,
+                detail=f"contract create failed: {type(e2).__name__}: {str(e2)}"
+            )
     # ========= Admin Exports router ==========
 
 # -------- Products --------
