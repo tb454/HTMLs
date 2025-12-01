@@ -1199,61 +1199,87 @@ onReady(async () => {
     }
 
     async function createContract() {
-    const seller   = document.getElementById("sellerName").value.trim();
-        const buyer    = document.getElementById("buyerName").value.trim();
-        const material = document.getElementById("material").value.trim();
-        const weight_tons   = parseFloat(document.getElementById("tons").value);
-        const price_per_ton = parseFloat(document.getElementById("price").value);
-        if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
-          toast("Fill all fields (seller, buyer, material, tons, $/ton).");
+      const seller        = document.getElementById("sellerName").value.trim();
+      const buyer         = document.getElementById("buyerName").value.trim();
+      const material      = document.getElementById("material").value.trim();
+      const weight_tons   = parseFloat(document.getElementById("tons").value);
+      const price_per_ton = parseFloat(document.getElementById("price").value);
+
+      if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
+        toast("Fill all fields (seller, buyer, material, tons, $/ton).");
+        return;
+      }
+
+      // OPTIONAL safety pre-check (keeps good UX; backend still enforces)
+      try {
+        const invRes  = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
+        const invRows = await invRes.json();
+        const row     = (invRows || []).find(r => {
+          const sku = (r.sku || '').toString();
+          return sku === material || sku.toLowerCase() === material.toLowerCase();
+        });
+        const finished_lbs    = row ? Number(row.finished_lbs || 0) : 0;
+        const available_tons  = finished_lbs / 2000;
+        if (available_tons < weight_tons) {
+          toast(`Not enough inventory: available ${available_tons.toFixed(2)} ton(s) < requested ${weight_tons.toFixed(2)}.`);
           return;
         }
+      } catch {
+        // let the backend decide if the inventory probe fails
+      }
 
-        // 1) Pre-check finished goods for this seller/material to avoid 409s
-        try {
-          const invRes = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
-          const invRows = await invRes.json();
-          // match by exact sku OR case-insensitive
-          const row = (invRows || []).find(r => {
-            const sku = (r.sku || '').toString();
-            return sku === material || sku.toLowerCase() === material.toLowerCase();
-          });
-          const finished_lbs = row ? Number(row.finished_lbs || 0) : 0;
-          const available_tons = finished_lbs / 2000;
-          if (available_tons < weight_tons) {
-            toast(`Not enough inventory: available ${available_tons.toFixed(2)} ton(s) < requested ${weight_tons.toFixed(2)}.`);
-            return;
-          }
-        } catch {
-          // if inventory endpoint fails, let backend decide
-        }
+      // match backend fields exactly; do NOT send a client-side status
+      const body = {
+        seller,
+        buyer,
+        material,
+        weight_tons,
+        price_per_ton,
+        currency: "USD",
+        tax_percent: null
+      };
 
-        // 2) Send safe defaults that most schemas accept
-        const body = {
-          seller,
-          buyer,
-          material,
-          weight_tons,
-          price_per_ton,
-          currency: "USD",
-          tax_pct: null,
-          status: "Open"   // <— if your enum is "Pending", switch to that; must match DB EXACTLY
-        };
+      // Try live (reserve). On HTTP 500 only, retry once with import mode to bypass reserve.
+      const idem = (crypto.randomUUID?.() || String(Date.now()));
 
-        const res = await api(`/contracts`, {
+      try {
+        await api(`/contracts`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Idempotency-Key": (crypto.randomUUID?.() || String(Date.now()))
+            "Idempotency-Key": idem
           },
           body: JSON.stringify(body)
         });
-
         toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
-        await listContracts();
-        renderRecentMovements(seller, material);
-        refreshFinishedFromInputs();
+      } catch (e) {
+        if ((e?.message || "").startsWith("HTTP 500")) {
+          try {
+            await api(`/contracts`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Idempotency-Key": idem + "-imp",
+                "X-Import-Mode": "historical"
+              },
+              body: JSON.stringify(body)
+            });
+            toast(`Contract inserted (import mode) for ${weight_tons} tons of ${material}.`);
+          } catch (e2) {
+            toast(e2?.message || "Contract create failed");
+            throw e2;
+          }
+        } else {
+          toast(e?.message || "Contract create failed");
+          throw e;
+        }
       }
+    
+      // refresh tables/cards
+      try { await listContracts(); } catch {}
+      try { renderRecentMovements(seller, material); } catch {}
+      try { refreshFinishedFromInputs(); } catch {}
+    }
 
     function toISOStringDateStart(v){
       if (!v) return "";

@@ -1,4 +1,4 @@
-// static/js.login.js
+// /static/js/login.js 
 
 // Same-origin by default
 const endpoint = (window.ENDPOINT && typeof window.ENDPOINT === "string")
@@ -41,9 +41,23 @@ async function api(path, opts = {}) {
     method: opts.method || "GET",
     headers,
     body: opts.body,
-    credentials: "include", 
+    credentials: "include",
   });
   return res;
+}
+
+// Role → homepage map (use the actual .html files)
+const ROLE_HOME = {
+  admin:  "/admin.html",
+  seller: "/seller.html",
+  buyer:  "/buyer.html",
+};
+
+function safeInternalNext(nxt) {
+  // honor ?next= only for same-origin internal paths
+  if (!nxt) return null;
+  if (!nxt.startsWith("/") || nxt.startsWith("//")) return null;
+  return nxt;
 }
 
 // ?next= handling + loading state + show/hide password
@@ -51,6 +65,7 @@ const qs   = new URLSearchParams(location.search);
 const next = qs.get("next");
 const loginBtn = document.querySelector('#loginForm button[type="submit"]');
 
+// show/hide password
 (function () {
   const t = document.getElementById("togglePw"),
         p = document.getElementById("password");
@@ -68,8 +83,7 @@ document.getElementById("loginForm").addEventListener("submit", async function (
   e.preventDefault();
   const errBox = document.getElementById("error");
   const okBox  = document.getElementById("success");
-  // CSP-safe: use Bootstrap's hidden
-  errBox.classList.add("hidden"); 
+  errBox.classList.add("hidden");
   okBox.classList.add("hidden");
 
   const username = document.getElementById("username").value.trim();
@@ -87,37 +101,40 @@ document.getElementById("loginForm").addEventListener("submit", async function (
 
     if (!res.ok) {
       let msg = "Invalid credentials. Try again.";
-      try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch {}
+      try {
+        const j = await res.json();
+        if (j?.message) msg = j.message;
+        else if (j?.detail) msg = j.detail;
+      } catch {}
       errBox.textContent = msg; errBox.classList.remove("hidden");
       return;
     }
 
     const data = await res.json();
-    // normalize role + persist minimal state
+
+    // normalize role
     let role = (data.role || "").toLowerCase();
     if (role === "yard") role = "seller";
-    localStorage.setItem("bridgeUser", JSON.stringify({ role }));
+    if (!ROLE_HOME[role]) role = "buyer"; // hard fallback
 
-    // 1) If ?next= is present (e.g. /trader), always honor that first,
-    //    but only if it's an internal path
-    let target = null;
-    if (next && next.startsWith("/") && !next.startsWith("//")) {
-      target = next;
+    // persist minimal state if you want
+    try { localStorage.setItem("bridgeUser", JSON.stringify({ role })); } catch {}
+
+    // Target resolution order:
+    // 1) ?next= (internal only)
+    let target = safeInternalNext(next);
+
+    // 2) server-provided redirect (internal only)
+    if (!target && typeof data.redirect === "string") {
+      const safe = safeInternalNext(data.redirect);
+      if (safe) target = safe;
     }
 
-    // 2) Else, prefer server-provided redirect
-    if (!target && data.redirect) {
-      target = data.redirect;
-    }
+    // 3) strict role map (.html pages)
+    if (!target) target = ROLE_HOME[role];
 
-    // 3) Else, fallback by role
-    if (!target) {
-      target = role === "admin" ? "/admin"
-            : role ? `/${role}` : "/buyer";
-    }
+    window.location.assign(target);
 
-    window.location.href = target;
-    
   } catch (err) {
     errBox.textContent = "Network error. Please try again.";
     errBox.classList.remove("hidden");
