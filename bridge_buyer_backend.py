@@ -4447,41 +4447,55 @@ def _price_id_for_lookup(lookup_key: str) -> str:
 
 
 @app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
-async def start_subscription_checkout(member: str, plan: str, email: Optional[str] = None, _=Depends(csrf_protect)):
+async def start_subscription_checkout(body: SubscriptionCheckoutIn, _=Depends(csrf_protect)):
     if not (USE_STRIPE and stripe and STRIPE_API_KEY):
         raise HTTPException(501, "Stripe is disabled in this environment")
-    plan = (plan or "").lower()
+
+    member = body.member.strip()
+    plan   = (body.plan or "").strip().lower()
+    email  = str(body.email).strip().lower() if body.email else None
+
     if plan not in BASE_PLAN_LOOKUP:
         raise HTTPException(400, "plan must be starter|standard|enterprise")
 
     # Ensure (or create) Stripe Customer and persist locally
     row = await database.fetch_one(
-        "SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member}
+        "SELECT email, stripe_customer_id FROM billing_payment_profiles WHERE member=:m",
+        {"m": member},
     )
     if row and row["stripe_customer_id"]:
         cust_id = row["stripe_customer_id"]
         try:
-            stripe.Customer.modify(cust_id, email=(email or row["email"]), name=member)
+            stripe.Customer.modify(
+                cust_id,
+                email=(email or row["email"]),
+                name=member,
+            )
         except Exception:
             pass
     else:
-        cust = stripe.Customer.create(email=(email or ""), name=member, metadata={"member": member})
+        cust = stripe.Customer.create(
+            email=(email or ""),
+            name=member,
+            metadata={"member": member},
+        )
         cust_id = cust.id
-        await database.execute("""
+        await database.execute(
+            """
             INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
             VALUES (:m,:e,:c,false)
             ON CONFLICT (member) DO UPDATE
-              SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
-        """, {"m": member, "e": (email or ""), "c": cust_id})
+              SET email=EXCLUDED.email,
+                  stripe_customer_id=EXCLUDED.stripe_customer_id
+            """,
+            {"m": member, "e": (email or ""), "c": cust_id},
+        )
 
-    # Resolve base + add-on price IDs
-    base_price = _price_id_for_lookup(BASE_PLAN_LOOKUP[plan])
+    base_price   = _price_id_for_lookup(BASE_PLAN_LOOKUP[plan])
     addon_prices = [_price_id_for_lookup(k) for k in PLAN_LOOKUP_TO_ADDON_KEYS.get(plan, [])]
 
-    # Build line items: base plan (qty=1) + metered add-ons (no quantity needed)
     line_items = [{"price": base_price, "quantity": 1}] + [{"price": pid} for pid in addon_prices]
 
-    # Hosted Checkout in SUBSCRIPTION mode
     session = stripe.checkout.Session.create(
         mode="subscription",
         customer=cust_id,
@@ -4490,7 +4504,7 @@ async def start_subscription_checkout(member: str, plan: str, email: Optional[st
         subscription_data={"metadata": {"member": member, "plan": plan}},
         success_url=f"{STRIPE_RETURN_BASE}/apply?sub=ok&session={{CHECKOUT_SESSION_ID}}&member={quote(member, safe='')}",
         cancel_url=f"{STRIPE_RETURN_BASE}/apply?sub=cancel",
-        metadata={"member": member, "email": (email or row["email"] if row else "")},
+        metadata={"member": member, "email": email or (row["email"] if row else "")},
     )
     return {"url": session.url}
 
@@ -4609,25 +4623,50 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
     except Exception:
         pass
 # === Stripe Meter Events: WS messages ===
+from pydantic import BaseModel, EmailStr
+
+class PmSetupIn(BaseModel):
+    member: str
+    email: EmailStr
+
+class SubscriptionCheckoutIn(BaseModel):
+    member: str
+    plan: str
+    email: Optional[EmailStr] = None
 
 @app.post("/billing/pm/setup_session", tags=["Billing"], summary="Create setup-mode Checkout Session (ACH+Card)")
-async def pm_setup_session(member: str, email: str, _=Depends(csrf_protect)):
+async def pm_setup_session(body: PmSetupIn, _=Depends(csrf_protect)):
     if not (USE_STRIPE and stripe and STRIPE_API_KEY):
         raise HTTPException(501, "Stripe is disabled in this environment")
+
+    member = body.member.strip()
+    email  = str(body.email).strip().lower()
+
     # 1) ensure (or create) Stripe Customer
-    row = await database.fetch_one("SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m", {"m": member})
+    row = await database.fetch_one(
+        "SELECT stripe_customer_id FROM billing_payment_profiles WHERE member=:m",
+        {"m": member},
+    )
     if row and row["stripe_customer_id"]:
         cust_id = row["stripe_customer_id"]
     else:
-        cust = stripe.Customer.create(email=email, name=member, metadata={"member": member})
+        cust = stripe.Customer.create(
+            email=email,
+            name=member,
+            metadata={"member": member},
+        )
         cust_id = cust.id
-        await database.execute("""
-          INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
-          VALUES (:m,:e,:c,false)
-          ON CONFLICT (member) DO UPDATE SET email=EXCLUDED.email, stripe_customer_id=EXCLUDED.stripe_customer_id
-        """, {"m": member, "e": email, "c": cust_id})
+        await database.execute(
+            """
+            INSERT INTO billing_payment_profiles(member,email,stripe_customer_id,has_default)
+            VALUES (:m,:e,:c,false)
+            ON CONFLICT (member) DO UPDATE
+              SET email=EXCLUDED.email,
+                  stripe_customer_id=EXCLUDED.stripe_customer_id
+            """,
+            {"m": member, "e": email, "c": cust_id},
+        )
 
-    # 2) Stripe Checkout (mode=setup) for PM collection (card + ACH bank account)
     session = stripe.checkout.Session.create(
         mode="setup",
         customer=cust_id,
