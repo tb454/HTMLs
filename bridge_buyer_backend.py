@@ -450,6 +450,7 @@ async def _ensure_cache_control_header(request: Request, call_next):
                 )
             else:
                 resp.headers["Cache-Control"] = "private, max-age=10"
+    
     return resp
 
 
@@ -4642,6 +4643,9 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
         pass
 # === Stripe Meter Events: WS messages ===
 from pydantic import BaseModel, EmailStr
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+stripe.api_key = STRIPE_SECRET_KEY
 
 class PmSetupIn(BaseModel):
     member: str
@@ -13943,7 +13947,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 )
                 RETURNING *
             """, payload)
-  # (optional) Stripe metered usage: +1 contract for this seller
+  # Stripe metered usage: +1 contract for this seller
         try:
             member_key = (row["seller"] or "").strip()
             # Get tenant's subscription item id for "contracts"
@@ -14073,7 +14077,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 logger.warn("contract_create_failed_fallback", err=str(e2))
             except Exception:
                 pass
-            # TEMP: show actual DB error for debugging
+            # show actual DB error for debugging
             raise HTTPException(
                 status_code=500,
                 detail=f"contract create failed: {type(e2).__name__}: {str(e2)}"
