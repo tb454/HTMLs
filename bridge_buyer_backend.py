@@ -13823,93 +13823,94 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     )
                     RETURNING *
                 """, payload)
-
-        else:
+            
             # LIVE path: reserve inventory, write Pending
-            async with database.transaction():
-                await database.execute("""
-                    INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-                    VALUES (:s,:k,0,0,0)
-                    ON CONFLICT (seller, sku) DO NOTHING
-                """, {"s": seller, "k": sku})
-
-                inv = await database.fetch_one("""
-                    SELECT qty_on_hand, qty_reserved, qty_committed
-                    FROM inventory_items
+            await database.execute("""
+                INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
+                SELECT :s, :k, 0, 0, 0
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM inventory_items
                     WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                    FOR UPDATE
-                """, {"s": seller, "k": sku})
+                )
+            """, {"s": seller, "k": sku})
 
-                on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
-                reserved  = float(inv["qty_reserved"]) if inv else 0.0
-                committed = float(inv["qty_committed"]) if inv else 0.0
-                available = on_hand - reserved - committed
-                if available < qty:
-                    # In non-prod (ci/test/dev), auto-top-up so tests and local runs don’t 409.
-                    _env = os.getenv("ENV", "").lower()
-                    if _env in {"ci", "test", "testing", "development", "dev"}:
-                        short = qty - available
-                        # bump on_hand by the shortfall
+            inv = await database.fetch_one("""
+                SELECT qty_on_hand, qty_reserved, qty_committed
+                FROM inventory_items
+                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                FOR UPDATE
+            """, {"s": seller, "k": sku})
+
+            on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
+            reserved  = float(inv["qty_reserved"]) if inv else 0.0
+            committed = float(inv["qty_committed"]) if inv else 0.0
+            available = on_hand - reserved - committed
+            if available < qty:
+                # In non-prod (ci/test/dev), auto-top-up so tests and local runs don’t 409.
+                _env = os.getenv("ENV", "").lower()
+                if _env in {"ci", "test", "testing", "development", "dev"}:
+                    short = qty - available
+                    # bump on_hand by the shortfall
+                    await database.execute("""
+                        UPDATE inventory_items
+                        SET qty_on_hand = qty_on_hand + :short,
+                            updated_at = NOW()
+                        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                    """, {"short": short, "s": seller, "k": sku})
+                    # log a movement for traceability (reason: auto_topup_for_tests)
+                    try:
                         await database.execute("""
-                            UPDATE inventory_items
-                            SET qty_on_hand = qty_on_hand + :short,
-                                updated_at = NOW()
-                            WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                        """, {"short": short, "s": seller, "k": sku})
-                        # log a movement for traceability (reason: auto_topup_for_tests)
-                        try:
-                            await database.execute("""
-                            INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                            VALUES (:s,:k,'upsert',:q,NULL,:m)
-                            """, {"s": seller, "k": sku, "q": short,
-                                "m": json.dumps({"reason":"auto_topup_for_tests"})})
-                        except Exception:
-                            pass
-                        # recompute available
-                        available = on_hand + short - reserved - committed
-                    else:
-                        raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
+                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                        VALUES (:s,:k,'upsert',:q,NULL,:m)
+                        """, {"s": seller, "k": sku, "q": short,
+                            "m": json.dumps({"reason":"auto_topup_for_tests"})})
+                    except Exception:
+                        pass
+                    # recompute available
+                    available = on_hand + short - reserved - committed
+                else:
+                    raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
 
-                await database.execute("""
-                    UPDATE inventory_items
-                       SET qty_reserved = qty_reserved + :q, updated_at = NOW()
-                     WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                """, {"q": qty, "s": seller, "k": sku})
+            await database.execute("""
+                UPDATE inventory_items
+                   SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+                 WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+            """, {"q": qty, "s": seller, "k": sku})
 
-                await database.execute("""
-                    INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                    VALUES (:s,:k,'reserve',:q,:cid,:m)
-                """, {"s": seller, "k": sku, "q": qty, "cid": cid,
-                      "m": json.dumps({"reason": "contract_create"})})
+            await database.execute("""
+                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
+                VALUES (:s,:k,'reserve',:q,:cid,:m)
+            """, {"s": seller, "k": sku, "q": qty, "cid": cid,
+                  "m": json.dumps({"reason": "contract_create"})})
 
-                payload = {
-                    "id": cid,
-                    "buyer": contract.buyer, "seller": contract.seller,
-                    "material": contract.material, "weight_tons": contract.weight_tons,
-                    "price_per_ton": quantize_money(contract.price_per_ton), "status": "Pending",
-                    "pricing_formula": contract.pricing_formula,
-                    "reference_symbol": contract.reference_symbol,
-                    "reference_price": contract.reference_price,
-                    "reference_source": contract.reference_source,
-                    "reference_timestamp": contract.reference_timestamp,
-                    "currency": contract.currency or "USD",
-                    "tenant_id": tenant_id,
-                }
+            payload = {
+                "id": cid,
+                "buyer": contract.buyer, "seller": contract.seller,
+                "material": contract.material, "weight_tons": contract.weight_tons,
+                "price_per_ton": quantize_money(contract.price_per_ton), "status": "Pending",
+                "pricing_formula": contract.pricing_formula,
+                "reference_symbol": contract.reference_symbol,
+                "reference_price": contract.reference_price,
+                "reference_source": contract.reference_source,
+                "reference_timestamp": contract.reference_timestamp,
+                "currency": contract.currency or "USD",
+                "tenant_id": tenant_id,
+            }
 
-                row = await database.fetch_one("""
-                    INSERT INTO contracts (
-                        id,buyer,seller,material,weight_tons,price_per_ton,status,
-                        pricing_formula,reference_symbol,reference_price,reference_source,
-                        reference_timestamp,currency,tenant_id
-                    )
-                    VALUES (
-                        :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
-                        :pricing_formula,:reference_symbol,:reference_price,:reference_source,
-                        :reference_timestamp,:currency,:tenant_id
-                    )
-                    RETURNING *
-                """, payload)
-        # (optional) Stripe metered usage: +1 contract for this seller
+            row = await database.fetch_one("""
+                INSERT INTO contracts (
+                    id,buyer,seller,material,weight_tons,price_per_ton,status,
+                    pricing_formula,reference_symbol,reference_price,reference_source,
+                    reference_timestamp,currency,tenant_id
+                )
+                VALUES (
+                    :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
+                    :pricing_formula,:reference_symbol,:reference_price,:reference_source,
+                    :reference_timestamp,:currency,:tenant_id
+                )
+                RETURNING *
+            """, payload)
+  # (optional) Stripe metered usage: +1 contract for this seller
         try:
             member_key = (row["seller"] or "").strip()
             # Get the tenant's subscription item id for "contracts"
@@ -14039,12 +14040,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 logger.warn("contract_create_failed_fallback", err=str(e2))
             except Exception:
                 pass
-        except Exception as e2:
-            try:
-                logger.warn("contract_create_failed_fallback", err=str(e2))
-            except Exception:
-                pass
-            # TEMP: show actual DB error so we can patch precisely
+            # TEMP: show actual DB error for debugging
             raise HTTPException(
                 status_code=500,
                 detail=f"contract create failed: {type(e2).__name__}: {str(e2)}"
