@@ -22,6 +22,7 @@ from sqlalchemy import create_engine, Table, MetaData, and_, select, Column, Str
 import os
 import databases
 import uuid
+import stripe
 import csv
 import io
 from pathlib import Path
@@ -14032,14 +14033,14 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Open',COALESCE(:ccy,'USD'),:tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "wt": qty,         # float
-                "ppt": price_val,  # float
+                "wt": qty,         
+                "ppt": price_val,  
                 "ccy": contract.currency,
                 "tenant_id": tenant_id,
             })
