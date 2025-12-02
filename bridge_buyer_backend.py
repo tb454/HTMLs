@@ -10398,7 +10398,11 @@ class ProductIn(BaseModel):
 
 # -------- Contracts & BOLs --------
 class ContractIn(BaseModel):
-    buyer: str
+    # For open-market posts from /seller, allow missing buyer and default to 'OPEN'
+    buyer: str = Field(
+        default="OPEN",
+        description="Buyer name. For open-market offers, defaults to 'OPEN'."
+    )
     seller: str
     material: str
     weight_tons: float
