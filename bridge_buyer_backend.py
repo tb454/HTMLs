@@ -13754,6 +13754,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
     qty    = float(tons_dec)
     seller = (contract.seller or "").strip()
+    price_val = float(quantize_money(price_dec))
     sku    = (contract.material or "").strip()
     # resolve tenant from request (if any)
     tenant_id = await current_tenant_id(request)
@@ -13812,8 +13813,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "weight_tons": tons_dec,
-                "price_per_ton": quantize_money(price_dec),
+                "weight_tons": qty,
+                "price_per_ton": price_val,
                 "status": "Signed",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
@@ -13917,8 +13918,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "weight_tons": tons_dec,
-                "price_per_ton": quantize_money(price_dec),
+                "weight_tons": qty,
+                "price_per_ton": price_val,
                 "status": "Pending",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
@@ -14031,14 +14032,13 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
                 VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Open',COALESCE(:ccy,'USD'),:tenant_id)
-                ON CONFLICT (id) DO NOTHING
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "wt": tons_dec,
-                "ppt": quantize_money(price_dec),
+                "wt": qty,         # float
+                "ppt": price_val,  # float
                 "ccy": contract.currency,
                 "tenant_id": tenant_id,
             })

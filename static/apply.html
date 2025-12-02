@@ -14,8 +14,8 @@
   />
   <link rel="stylesheet" href="/static/css/apply.css">
 
-  <script src="https://js.stripe.com/v3/"></script>
-  <script src="/static/js/locale.js" defer></script>
+  <script defer nonce="{{NONCE}}" src="https://js.stripe.com/v3/"></script>
+  <script defer nonce="{{NONCE}}" src="/static/js/locale.js"></script>
 </head>
 <body>
 
@@ -239,11 +239,9 @@
       <div class="mt-3"><strong>BRidge Platform</strong> — Powered by ScrapFutures.com</div>
       <div>Need help? <a href="mailto:support@scrapfutures.com">support@scrapfutures.com</a></div>
     </footer>
-  </div>
+  </div> 
 
- 
-
-<script src="/static/js/apply.js" defer></script>
+<script defer nonce="{{NONCE}}" src="/static/js/apply.js"></script>
 
 </body>
 </html>
