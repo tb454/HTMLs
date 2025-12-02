@@ -4644,9 +4644,6 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
 # === Stripe Meter Events: WS messages ===
 from pydantic import BaseModel, EmailStr
 
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
-stripe.api_key = STRIPE_SECRET_KEY
-
 class PmSetupIn(BaseModel):
     member: str
     email: EmailStr
