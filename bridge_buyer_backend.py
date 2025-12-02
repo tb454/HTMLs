@@ -12468,9 +12468,9 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status = :expected
+                WHERE id = :id AND status IN ('Pending','Signed')
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
-            """, {"id": contract_id, "expected": body.expected_status})
+            """, {"id": contract_id})
 
             # If the contract already has a tenant, prefer that over request inference
             if row and row.get("tenant_id"):
