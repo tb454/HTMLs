@@ -200,6 +200,24 @@ def quantize_money(value: Decimal | float | str) -> Decimal:
         return amt.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0.00")
+    
+def _coerce_decimal(v: Any, field_name: str) -> Decimal:
+    """
+    Make sure we send real numerics (Decimal) to Postgres, not strings.
+    """
+    try:
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        if isinstance(v, str):
+            return Decimal(v.strip())
+        raise ValueError
+    except (InvalidOperation, ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name} value: {v!r}",
+        )
 
 def _rget(row, key, default=None):
     """
@@ -13726,7 +13744,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     await _check_contract_quota()
 
     cid    = str(uuid.uuid4())
-    qty    = float(contract.weight_tons)
+    # normalize numerics ONCE so asyncpg never sees a string
+    price_dec = _coerce_decimal(contract.price_per_ton, "price_per_ton")
+    tons_dec  = _coerce_decimal(contract.weight_tons, "weight_tons")
+
+    qty    = float(tons_dec)
     seller = (contract.seller or "").strip()
     sku    = (contract.material or "").strip()
     # resolve tenant from request (if any)
@@ -13783,9 +13805,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             # Historical import: Signed, optional back-dated created_at
             payload = {
                 "id": cid,
-                "buyer": contract.buyer, "seller": contract.seller,
-                "material": contract.material, "weight_tons": contract.weight_tons,
-                "price_per_ton": quantize_money(contract.price_per_ton), "status": "Signed",
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "weight_tons": tons_dec,
+                "price_per_ton": quantize_money(price_dec),
+                "status": "Signed",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -13885,9 +13910,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             payload = {
                 "id": cid,
-                "buyer": contract.buyer, "seller": contract.seller,
-                "material": contract.material, "weight_tons": contract.weight_tons,
-                "price_per_ton": quantize_money(contract.price_per_ton), "status": "Pending",
+                "buyer": contract.buyer,
+                "seller": contract.seller,
+                "material": contract.material,
+                "weight_tons": tons_dec,
+                "price_per_ton": quantize_money(price_dec),
+                "status": "Pending",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -13913,7 +13941,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
   # (optional) Stripe metered usage: +1 contract for this seller
         try:
             member_key = (row["seller"] or "").strip()
-            # Get the tenant's subscription item id for "contracts"
+            # Get tenant's subscription item id for "contracts"
             mp = await database.fetch_one(
                 "SELECT stripe_item_contracts FROM member_plan_items WHERE member=:m",
                 {"m": member_key}
@@ -13922,7 +13950,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             record_usage_safe(sub_item, 1)
         except Exception:
             pass
-        # best-effort audit/webhook; never crash
+        # best-effort audit/webhook;
         try:
             actor = request.session.get("username") if hasattr(request, "session") else None
             await log_action(actor or "system", "contract.create", str(row["id"]),
@@ -13998,18 +14026,19 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Open',COALESCE(:ccy,'USD'),:tenant_id)
                 ON CONFLICT (id) DO NOTHING
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "wt": contract.weight_tons,
-                "ppt": quantize_money(contract.price_per_ton),
+                "wt": tons_dec,
+                "ppt": quantize_money(price_dec),
                 "ccy": contract.currency,
                 "tenant_id": tenant_id,
             })
+
             row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
             if row:
                 return await _idem_guard(request, key, row)

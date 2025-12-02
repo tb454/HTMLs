@@ -434,7 +434,7 @@
     <section class="section">
       <div class="section-title">My Contracts</div>
       <div class="row g-2 mb-2">
-        <div class="col-md-3"><input id="filterStatus" class="form-control form-control-sm" placeholder="Status (e.g., Pending)"></div>
+        <div class="col-md-3"><input id="filterStatus" class="form-control form-control-sm" placeholder="Status (e.g., Open)"></div>
         <div class="col-md-3"><input id="filterStart" type="date" class="form-control form-control-sm" placeholder="Start (ISO)"></div>
         <div class="col-md-3"><input id="filterEnd" type="date" class="form-control form-control-sm" placeholder="End (ISO)"></div>
        <div class="col-md-3 d-flex gap-2">
@@ -1205,8 +1205,9 @@ onReady(async () => {
       const weight_tons   = parseFloat(document.getElementById("tons").value);
       const price_per_ton = parseFloat(document.getElementById("price").value);
 
-      if (!seller || !buyer || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
-        toast("Fill all fields (seller, buyer, material, tons, $/ton).");
+      // Allow open-market posts (blank buyer). Backend will mark status=open/pending.
+      if (!seller || !material || !Number.isFinite(weight_tons) || !Number.isFinite(price_per_ton)) {
+        toast("Fill all required fields (seller, material, tons, $/ton).");
         return;
       }
 
@@ -1221,17 +1222,16 @@ onReady(async () => {
         const finished_lbs    = row ? Number(row.finished_lbs || 0) : 0;
         const available_tons  = finished_lbs / 2000;
         if (available_tons < weight_tons) {
-          toast(`Not enough inventory: available ${available_tons.toFixed(2)} ton(s) < requested ${weight_tons.toFixed(2)}.`);
-          return;
+          toast(`Warning: only ${available_tons.toFixed(2)}t on file; requesting ${weight_tons.toFixed(2)}t…`);
         }
+
       } catch {
         // let the backend decide if the inventory probe fails
       }
 
-      // match backend fields exactly; do NOT send a client-side status
+      // match backend fields exactly
       const body = {
         seller,
-        buyer,
         material,
         weight_tons,
         price_per_ton,
