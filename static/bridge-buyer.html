@@ -652,7 +652,7 @@
       setLoadingUI(true);
       root.setAttribute('aria-busy','true');
 
-      const q = new URLSearchParams({ status: 'Pending', limit, offset, sort: sortBy });
+      const q = new URLSearchParams({ status: 'pending', limit, offset, sort: sortBy });
       const buyerEl = document.getElementById('buyerFilter');
       const matEl   = document.getElementById('materialFilter');
       const buyerVal = (buyerEl?.value || '').trim();
