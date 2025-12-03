@@ -731,7 +731,7 @@
             'Content-Type': 'application/json',
             'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),            
           },
-          body: JSON.stringify({ op:'purchase', expected_status:'Pending' })
+          body: JSON.stringify({ op:'purchase', expected_status:'pending' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
