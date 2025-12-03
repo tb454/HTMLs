@@ -12468,7 +12468,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status IN ('Pending','Signed')
+                WHERE id = :id AND status IN ('pending','Signed')
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
@@ -13707,7 +13707,7 @@ async def list_contracts_admin(
                     price_per_ton=d["price_per_ton"],
                     currency=(d.get("currency") or "USD"),
                     tax_percent=d.get("tax_percent"),
-                    status=d.get("status") or "Pending",
+                    status=d.get("status") or "pending",
                     created_at=d.get("created_at"),
                     signed_at=d.get("signed_at"),
                     signature=d.get("signature"),
@@ -13922,7 +13922,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "material": contract.material,
                 "weight_tons": qty,
                 "price_per_ton": price_val,
-                "status": "Pending",
+                "status": "pending",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -14033,7 +14033,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'pending',COALESCE(:ccy,'USD'),:tenant_id)
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
@@ -14059,7 +14059,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "price_per_ton": quantize_money(contract.price_per_ton),
                 "currency": contract.currency or "USD",
                 "tax_percent": contract.tax_percent,
-                "status": "Pending",
+                "status": "pending",
                 "created_at": utcnow(),
                 "signed_at": None,
                 "signature": None,
@@ -15070,7 +15070,7 @@ async def create_bol_alias(request: Request):
         try:
             await database.execute("""
               INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, currency)
-              VALUES (:id, :buyer, :seller, :material, :wt, :ppt, 'Pending', 'USD')
+              VALUES (:id, :buyer, :seller, :material, :wt, :ppt, 'pending', 'USD')
             """, {
                 "id": new_cid,
                 "buyer": (body.get("buyer") or "Test Buyer"),
@@ -15085,7 +15085,7 @@ async def create_bol_alias(request: Request):
             new_cid = str(uuid.uuid4())
             await database.execute("""
               INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, currency)
-              VALUES (:id, 'Test Buyer', 'Test Seller', 'Test Material', 1.0, 1.0, 'Pending', 'USD')
+              VALUES (:id, 'Test Buyer', 'Test Seller', 'Test Material', 1.0, 1.0, 'pending', 'USD')
             """, {"id": new_cid})
             contract_id = new_cid
 
@@ -15257,8 +15257,8 @@ def export_all_zip_admin():
 @app.post(
     "/contracts/{contract_id}/cancel",
     tags=["Contracts"],
-    summary="Cancel Pending contract",
-    description="Cancels a Pending contract and releases reserved inventory (unreserve).",
+    summary="Cancel pending contract",
+    description="Cancels a pending contract and releases reserved inventory (unreserve).",
     status_code=200
 )
 async def cancel_contract(contract_id: str):
@@ -15267,11 +15267,11 @@ async def cancel_contract(contract_id: str):
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status='Cancelled'
-                WHERE id=:id AND status='Pending'
+                WHERE id=:id AND status='pending'
                 RETURNING seller, material, weight_tons
             """, {"id": contract_id})
             if not row:
-                raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
+                raise HTTPException(status_code=409, detail="Only pending contracts can be cancelled.")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
