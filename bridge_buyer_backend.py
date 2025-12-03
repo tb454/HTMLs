@@ -12468,7 +12468,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status IN ('pending','Signed')
+                WHERE id = :id AND status IN ('Pending','Signed')
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
@@ -13922,7 +13922,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "material": contract.material,
                 "weight_tons": qty,
                 "price_per_ton": price_val,
-                "status": "pending",
+                "status": "Pending",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -14033,7 +14033,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'pending',COALESCE(:ccy,'USD'),:tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
@@ -15267,11 +15267,11 @@ async def cancel_contract(contract_id: str):
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status='Cancelled'
-                WHERE id=:id AND status='pending'
+                WHERE id=:id AND status='Pending'
                 RETURNING seller, material, weight_tons
             """, {"id": contract_id})
             if not row:
-                raise HTTPException(status_code=409, detail="Only pending contracts can be cancelled.")
+                raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
