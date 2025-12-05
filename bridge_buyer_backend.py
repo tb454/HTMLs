@@ -11086,7 +11086,7 @@ class BOLOut(BOLIn):
         }
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
-    expected_status: Literal["Open"] = "Open"
+    expected_status: Literal["Open"] = None
     idempotency_key: Optional[str] = None
 
 # Tighter typing for updates
@@ -12488,7 +12488,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status IN ('Open','Pending')
+                WHERE id = :id AND status = 'Open'
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
@@ -12498,7 +12498,9 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                 tenant_id = str(tenant_from_row)
 
             if not row:
-                raise HTTPException(status_code=409, detail="Contract not purchasable (not Open).")
+                cur = await database.fetch_one("SELECT status FROM contracts WHERE id=:id", {"id": contract_id})
+                cur_st = (cur["status"] if cur and cur["status"] else "Unknown")
+                raise HTTPException(status_code=409, detail=f"Contract not purchasable (is '{cur_st}', need 'Open').")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
