@@ -9128,6 +9128,20 @@ async def _ensure_contracts_bols_schema():
             logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
+# ===== CONTRACTS: delivery fields =====
+@startup
+async def _ensure_contract_delivery_fields():
+    await run_ddl_multi("""
+    ALTER TABLE contracts
+      ADD COLUMN IF NOT EXISTS delivered_at           TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS delivery_notes         TEXT,
+      ADD COLUMN IF NOT EXISTS delivery_proof_url     TEXT,
+      ADD COLUMN IF NOT EXISTS delivery_confirmed_by  UUID;
+    CREATE INDEX IF NOT EXISTS idx_contracts_delivered_at ON contracts(delivered_at);
+    """)
+# ===== CONTRACTS: delivery fields =====
+
+# ===== AUDIT LOG schema bootstrap (idempotent) =====
 @startup
 async def _ensure_audit_log_schema():
     ddl = """
@@ -12610,6 +12624,116 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         except: pass
         raise HTTPException(409, "purchase failed (inventory or state)")
 # ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
+
+# ------ BOL Delivery -------
+from pydantic import BaseModel, AnyUrl
+from typing import Optional
+from fastapi import Body, Depends, HTTPException, Request
+
+class DeliveryConfirmIn(BaseModel):
+    notes: Optional[str] = None
+    proof_url: Optional[AnyUrl] = None
+
+async def _user_id_for(identity: str) -> Optional[str]:
+    if not identity:
+        return None
+    row = await database.fetch_one(
+        """
+        SELECT id
+          FROM public.users
+         WHERE LOWER(COALESCE(email,'')) = LOWER(:ident)
+            OR LOWER(COALESCE(username,'')) = LOWER(:ident)
+         LIMIT 1
+        """,
+        {"ident": identity.strip()}
+    )
+    return str(row["id"]) if row and row["id"] else None
+
+@app.post(
+    "/contracts/{contract_id}/confirm_delivery",
+    tags=["Contracts"],
+    summary="Buyer confirms delivery (marks Fulfilled)"
+)
+async def confirm_delivery(
+    contract_id: str,
+    payload: DeliveryConfirmIn = Body(default=DeliveryConfirmIn()),
+    request: Request = None,
+    _=Depends(csrf_protect),
+):
+    if not request:
+        raise HTTPException(401, "Unauthorized")
+
+    row = await database.fetch_one(
+        """
+        SELECT id, buyer, status, delivered_at
+          FROM contracts
+         WHERE id = :id
+        """,
+        {"id": contract_id},
+    )
+    if not row:
+        raise HTTPException(404, "Contract not found")
+
+    cur_status = (row["status"] or "").strip()
+    buyer_name = (row["buyer"] or "").strip()
+    is_admin = _is_admin_session(request)
+    username = (request.session.get("username") or request.session.get("email") or "").strip()
+    session_member = (request.session.get("member") or request.session.get("org") or "").strip()
+
+    owns = (
+        is_admin
+        or (buyer_name and buyer_name.lower() == username.lower())
+        or (buyer_name and buyer_name.lower() == session_member.lower())
+    )
+    if not owns:
+        raise HTTPException(403, "Forbidden")
+
+    if cur_status == "Fulfilled":
+        return {
+            "id": contract_id,
+            "status": "Fulfilled",
+            "delivered_at": (row["delivered_at"].isoformat() if row.get("delivered_at") else None),
+            "idempotent": True,
+        }
+
+    if cur_status not in ("Signed", "Dispatched"):
+        raise HTTPException(409, f"Cannot confirm from status {cur_status}")
+
+    now = utcnow()
+    confirmer_id = await _user_id_for(username)
+
+    async with database.transaction():
+        await database.execute(
+            """
+            UPDATE contracts
+               SET status = 'Fulfilled',
+                   delivered_at = COALESCE(delivered_at, :ts),
+                   delivery_notes = COALESCE(:notes, delivery_notes),
+                   delivery_proof_url = COALESCE(:proof, delivery_proof_url),
+                   delivery_confirmed_by = COALESCE(delivery_confirmed_by, :uid)
+             WHERE id = :id
+            """,
+            {
+                "id": contract_id,
+                "ts": now,
+                "notes": payload.notes,
+                "proof": (str(payload.proof_url) if payload.proof_url else None),
+                "uid": confirmer_id,
+            },
+        )
+        try:
+            await audit_append(
+                (request.session.get("username") or "system"),
+                "contract.delivery.confirm",
+                "contract",
+                str(contract_id),
+                {"notes": payload.notes, "proof_url": (str(payload.proof_url) if payload.proof_url else None)},
+            )
+        except Exception:
+            pass
+
+    return {"id": contract_id, "status": "Fulfilled", "delivered_at": now.isoformat()}
+# ------ BOL Delivery -------
 
 # --- MATERIAL PRICE HISTORY (by day, avg) ---
 @app.get(
