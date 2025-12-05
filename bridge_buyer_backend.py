@@ -63,11 +63,17 @@ from fastapi import Depends
 from uuid import UUID 
 from starlette.middleware.base import BaseHTTPMiddleware 
 
-# ---- Admin dependency helper (typed) ----
+# ---- Admin dependency helper  ----
 from fastapi import Request as _FastAPIRequest
 def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
+
+# ---- Free mode checker ----
+import os
+def is_free_mode() -> bool:
+    return os.getenv("BRIDGE_FREE_MODE", "").strip() in ("1", "true", "True")
+# ---- Free mode checker ----
 
 from datetime import date as _date, date, timedelta, datetime, timezone 
 import asyncio
@@ -14556,7 +14562,7 @@ async def _ensure_yard_config_schema() -> None:
     """)
 # ----- yard configuration ----
 
-# --- Public endpoint (replaces /public/yard_signup) ---
+# --- Public endpoint -----
 @app.post(
     "/public/apply",
     tags=["Public"],
@@ -14617,13 +14623,13 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
     except Exception as e:
         print("[WARN] application email failed:", e)
 
-         # Require payment method on file BEFORE accepting
-    pay = await database.fetch_one("""
-    SELECT has_default FROM billing_payment_profiles WHERE member=:m OR member=:alt
-    """, {"m": payload.org_name, "alt": (payload.org_name or "").strip()})
-    if not (pay and pay["has_default"]):
-        raise HTTPException(402, detail="Payment method required. Please add a payment method before submitting.")
-
+    # Require payment method on file BEFORE accepting
+    if not is_free_mode():
+        pay = await database.fetch_one("""
+        SELECT has_default FROM billing_payment_profiles WHERE member=:m OR member=:alt
+        """, {"m": payload.org_name, "alt": (payload.org_name or "").strip()})
+        if not (pay and pay["has_default"]):
+            raise HTTPException(402, detail="Payment method required. Please add a payment method before submitting.")
     await database.execute(
         """
         INSERT INTO tenant_applications (
@@ -14639,6 +14645,26 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
         {"application_id": application_id, **payload.model_dump()},
     )
 
+        # In FREE mode, auto-create member + role so they can log in immediately
+    if is_free_mode():
+        try:
+            # upsert tenant/member (adjust to your table/columns)
+            await database.execute("""
+            INSERT INTO members (member_id, org_name, email, role, is_active)
+            VALUES (:mid, :org, :email, :role, true)
+            ON CONFLICT (email) DO UPDATE
+              SET org_name = EXCLUDED.org_name,
+                  role = EXCLUDED.role,
+                  is_active = true
+            """, {
+                "mid": str(uuid.uuid4()),
+                "org": payload.org_name,
+                "email": payload.email,
+                "role": (payload.role or "buyer").lower()
+            })
+        except Exception as e:
+            print("[WARN] free-mode auto-create failed:", e)
+
     # Best-effort audit (ignore failures)
     try:
         actor = getattr(request, "session", {}).get("username") if hasattr(request, "session") else None
@@ -14647,7 +14673,7 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
         pass
 
     return ApplicationOut(application_id=application_id, status="pending", message="Application received.")
-# --- Public endpoint (replaces /public/yard_signup) ---
+# --- Public endpoint ------
 
 # ----- ICE Logs/Testing/Resend/Rotate -----
 @app.get("/admin/ice/logs", tags=["Admin"])

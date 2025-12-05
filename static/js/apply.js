@@ -302,10 +302,23 @@ form.addEventListener('submit', async (e)=>{
       headers:{'Content-Type':'application/json','Idempotency-Key': idem},
       body: JSON.stringify(payload)
     });
-    show('ok',"Thanks! Your application has been received. We'll email you after review.");
+    show('ok',"Thanks! Your application has been received.");
     toast('✓ Application submitted');
-    localStorage.removeItem('bridge_apply_draft_v1'); form.reset(); $('agree').checked=false;
+
+    // role-aware next
+    const roleSel = (document.getElementById('role')?.value || '').toLowerCase();
+    const next = roleSel === 'seller' ? '/seller' : roleSel === 'buyer' ? '/buyer' : '/';
+    if (isFreeMode()) {
+      // send them to your login page with a clean next=
+      location.href = `/static/bridge-login.html?next=${encodeURIComponent(next)}`;
+      return;
+    }
+
+    localStorage.removeItem('bridge_apply_draft_v1'); 
+    form.reset(); 
+    $('agree').checked=false;
     await refreshPmBadge();
+
   }catch(err){
     show('err', err?.message || 'Could not submit application.');
   }finally{
