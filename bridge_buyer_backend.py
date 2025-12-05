@@ -12472,14 +12472,22 @@ async def export_contracts_csv():
             headers={"Content-Disposition": 'attachment; filename="contracts.csv"'})
 #-------- Export Contracts as CSV --------
 
-# --- Idempotent purchase (atomic contract signing + inventory commit + BOL create) ---
-@app.patch("/contracts/{contract_id}/purchase",
-           tags=["Contracts"],
-           summary="Purchase (atomic)",
-           description="Atomically change a Pending contract to Signed, move reserved→committed, and auto-create a Scheduled BOL.",
-           status_code=200)
-async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request, _=Depends(csrf_protect)):
+# --- Idempotent purchase (contract sign + BOL + buyer_position) ---
+@app.patch(
+    "/contracts/{contract_id}/purchase",
+    tags=["Contracts"],
+    summary="Purchase (atomic)",
+    description="Change an Open contract to Signed, create a Scheduled BOL and buyer position. No inventory mutation.",
+    status_code=200,
+)
+async def purchase_contract(
+    contract_id: str,
+    body: PurchaseIn,
+    request: Request,
+    _=Depends(csrf_protect),
+):
     try:
+        # ---- idempotency ----
         key = _idem_key(request) or getattr(body, "idempotency_key", None)
         hit = None
         if key:
@@ -12487,152 +12495,240 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
         if hit:
             return hit
 
-        # Resolve tenant once for the whole purchase flow
         tenant_id = await current_tenant_id(request)
 
         async with database.transaction():
-            row = await database.fetch_one("""
-                UPDATE contracts
-                SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status = 'Open'
-                RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
-            """, {"id": contract_id})
+            # Lock the contract row first
+            row = await database.fetch_one(
+                """
+                SELECT id, buyer, seller, material, weight_tons, price_per_ton,
+                       status, currency, tenant_id, created_at
+                FROM contracts
+                WHERE id = :id
+                FOR UPDATE
+                """,
+                {"id": contract_id},
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Contract not found")
 
-            # If the contract already has a tenant, prefer that over request inference (Record-safe)
-            tenant_from_row = _rget(row, "tenant_id", None)
+            status = (row["status"] or "").strip()
+
+            # If already purchased-ish → idempotent success
+            if status in ("Signed", "Dispatched", "Fulfilled"):
+                bol_row = await database.fetch_one(
+                    """
+                    SELECT bol_id
+                    FROM bols
+                    WHERE contract_id = :cid
+                    ORDER BY pickup_time ASC NULLS FIRST, created_at ASC NULLS FIRST
+                    LIMIT 1
+                    """,
+                    {"cid": contract_id},
+                )
+                bol_id = bol_row["bol_id"] if bol_row else None
+                resp = {
+                    "ok": True,
+                    "contract_id": contract_id,
+                    "new_status": status,
+                    "bol_id": bol_id,
+                    "idempotent": True,
+                }
+                return await _idem_guard(request, key, resp)
+
+            # Only Open contracts are purchasable
+            if status != "Open":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Contract not purchasable from status '{status}' (need 'Open').",
+                )
+
+            # Flip to Signed (NO inventory touches)
+            updated = await database.fetch_one(
+                """
+                UPDATE contracts
+                   SET status   = 'Signed',
+                       signed_at = COALESCE(signed_at, NOW())
+                 WHERE id = :id
+                 RETURNING id, buyer, seller, material, weight_tons,
+                           price_per_ton, currency, tenant_id, status, created_at
+                """,
+                {"id": contract_id},
+            )
+            if not updated:
+                raise HTTPException(status_code=409, detail="Contract state changed; retry.")
+
+            d = dict(updated)
+            qty = float(d["weight_tons"] or 0.0)
+            price_per_ton = float(d["price_per_ton"] or 0.0)
+            ccy = (d.get("currency") or "USD").upper()
+            tenant_from_row = d.get("tenant_id")
             if tenant_from_row:
                 tenant_id = str(tenant_from_row)
 
-            if not row:
-                cur = await database.fetch_one("SELECT status FROM contracts WHERE id=:id", {"id": contract_id})
-                cur_st = (cur["status"] if cur and cur["status"] else "Unknown")
-                raise HTTPException(status_code=489, detail=f"Contract not purchasable (is '{cur_st}', need 'Open').")
-
-            qty = float(row["weight_tons"])
-            seller = row["seller"].strip()
-            sku = row["material"].strip()
-
-            inv = await database.fetch_one("""
-                SELECT qty_on_hand, qty_reserved, qty_committed
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                FOR UPDATE
-            """, {"s": seller, "k": sku})
-
-            on_hand   = float(inv["qty_on_hand"]   if inv and inv["qty_on_hand"]   is not None else 0.0)
-            reserved  = float(inv["qty_reserved"]  if inv and inv["qty_reserved"]  is not None else 0.0)
-            committed = float(inv["qty_committed"] if inv and inv["qty_committed"] is not None else 0.0)
-            available = max(0.0, on_hand - reserved - committed)
-
-            short = max(0.0, qty - reserved)
-            if short > 0:
-                if available >= short:
-                    await database.execute("""
-                        UPDATE inventory_items
-                        SET qty_reserved = qty_reserved + :short,
-                            updated_at = NOW()
-                        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                    """, {"short": short, "s": seller, "k": sku})
-                    await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta, tenant_id)
-                        VALUES (:s,:k,'reserve',:q,:cid,:m,:tenant_id)
-                    """, {
-                        "s": seller,
-                        "k": sku,
-                        "q": short,
-                        "cid": contract_id,
-                        "m": json.dumps({"reason": "auto_topup_for_purchase"}),
+            # Create a single Scheduled BOL for this contract (if none yet)
+            existing_bol = await database.fetch_one(
+                "SELECT bol_id FROM bols WHERE contract_id = :cid LIMIT 1",
+                {"cid": contract_id},
+            )
+            if existing_bol:
+                bol_id = existing_bol["bol_id"]
+            else:
+                bol_id = str(uuid.uuid4())
+                await database.fetch_one(
+                    """
+                    INSERT INTO bols (
+                        bol_id, contract_id, buyer, seller, material, weight_tons,
+                        price_per_unit, total_value,
+                        carrier_name, carrier_driver, carrier_truck_vin,
+                        pickup_signature_base64, pickup_signature_time,
+                        pickup_time, status,
+                        tenant_id
+                    )
+                    VALUES (
+                        :bol_id, :contract_id, :buyer, :seller, :material, :tons,
+                        :ppu, :total,
+                        :cname, :cdriver, :cvin,
+                        :ps_b64, :ps_time,
+                        :pickup_time, 'Scheduled',
+                        :tenant_id
+                    )
+                    RETURNING bol_id
+                    """,
+                    {
+                        "bol_id": bol_id,
+                        "contract_id": contract_id,
+                        "buyer": d["buyer"],
+                        "seller": d["seller"],
+                        "material": d["material"],
+                        "tons": qty,
+                        "ppu": price_per_ton,
+                        "total": qty * price_per_ton,
+                        "cname": "TBD",
+                        "cdriver": "TBD",
+                        "cvin": "TBD",
+                        "ps_b64": None,
+                        "ps_time": None,
+                        "pickup_time": utcnow(),
                         "tenant_id": tenant_id,
-                    })
-                    reserved += short
-                    available -= short
-                else:
-                    raise HTTPException(status_code=419, detail="Reserved/available inventory insufficient to commit.")
-
-            await database.execute("""
-                UPDATE inventory_items
-                SET qty_reserved = qty_reserved - :q,
-                    qty_committed = qty_committed + :q,
-                    updated_at = NOW()
-                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-            """, {"q": qty, "seller": seller, "sku": sku})
-
-            await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta, tenant_id)
-                VALUES (:seller, :sku, 'commit', :q, :ref_contract, :meta, :tenant_id)
-            """, {
-                "seller": seller,
-                "sku": sku,
-                "q": qty,
-                "ref_contract": contract_id,
-                "meta": json.dumps({"reason": "purchase"}),
-                "tenant_id": tenant_id,
-            })
-
-            bol_id = str(uuid.uuid4())
-            await database.fetch_one("""
-                INSERT INTO bols (
-                    bol_id, contract_id, buyer, seller, material, weight_tons,
-                    price_per_unit, total_value,
-                    carrier_name, carrier_driver, carrier_truck_vin,
-                    pickup_signature_base64, pickup_signature_time,
-                    pickup_time, status,
-                    tenant_id
+                    },
                 )
-                VALUES (
-                    :bol_id, :contract_id, :buyer, :seller, :material, :tons,
-                    :ppu, :total,
-                    :cname, :cdriver, :cvin,
-                    :ps_b64, :ps_time,
-                    :pickup_time, 'Scheduled',
-                    :tenant_id
-                )
-                RETURNING bol_id
-            """, {
-                "bol_id": bol_id,
-                "contract_id": contract_id,
-                "buyer": row["buyer"],
-                "seller": row["seller"],
-                "material": row["material"],
-                "tons": qty,
-                "ppu": float(row["price_per_ton"]),
-                "total": qty * float(row["price_per_ton"]),
-                "cname": "TBD", "cdriver": "TBD", "cvin": "TBD",
-                "ps_b64": None, "ps_time": None,
-                "pickup_time": utcnow(),
-                "tenant_id": tenant_id,
-            })
 
+            # Buyer position (one row per purchased contract)
             try:
-                await database.execute("""
-                INSERT INTO buyer_positions(
-                    position_id, contract_id, buyer, seller, material,
-                    weight_tons, price_per_ton, currency, status, purchased_at, tenant_id
+                await database.execute(
+                    """
+                    INSERT INTO buyer_positions(
+                      position_id, contract_id, buyer, seller, material,
+                      weight_tons, price_per_ton, currency,
+                      status, purchased_at, tenant_id
+                    )
+                    VALUES (
+                      :id, :cid, :b, :s, :m,
+                      :wt, :ppt, :ccy,
+                      'Open', NOW(), :tenant_id
+                    )
+                    ON CONFLICT DO NOTHING
+                    """,
+                    {
+                        "id": str(uuid.uuid4()),
+                        "cid": contract_id,
+                        "b": d["buyer"],
+                        "s": d["seller"],
+                        "m": d["material"],
+                        "wt": qty,
+                        "ppt": price_per_ton,
+                        "ccy": ccy,
+                        "tenant_id": tenant_id,
+                    },
                 )
-                VALUES (:id, :cid, :b, :s, :m, :wt, :ppt, COALESCE(:ccy,'USD'), 'Open', NOW(), :tenant_id)
-                """, {
-                    "id": str(uuid.uuid4()),
-                    "cid": contract_id,
-                    "b": row["buyer"],
-                    "s": row["seller"],
-                    "m": row["material"],
-                    "wt": qty,
-                    "ppt": float(row["price_per_ton"]),
-                    "ccy": "USD",
-                    "tenant_id": tenant_id,
-                })
             except Exception:
+                # best-effort; never block purchase on this
                 pass
 
-        resp = {"ok": True, "contract_id": contract_id, "new_status": "Signed", "bol_id": bol_id}
+        # ---- best-effort hooks (audit / events / usage) outside transaction ----
+        try:
+            actor = (request.session.get("username") if hasattr(request, "session") else None) or "system"
+        except Exception:
+            actor = "system"
+
+        # audit chain
+        try:
+            await audit_append(
+                actor,
+                "contract.purchase",
+                "contract",
+                str(contract_id),
+                {"new_status": "Signed", "bol_id": bol_id},
+            )
+        except Exception:
+            pass
+
+        # webhook-ish event
+        try:
+            await emit_event_safe(
+                "contract.updated",
+                {
+                    "contract_id": str(contract_id),
+                    "status": "Signed",
+                },
+            )
+        except Exception:
+            pass
+
+        # usage meter – EXCH_CONTRACT purchase
+        try:
+            await record_usage_event(
+                member=d["buyer"],
+                event_type="EXCH_CONTRACT",
+                quantity=1.0,
+                ref_table="contracts",
+                ref_id=str(contract_id),
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            pass
+
+        # Dossier ingest
+        try:
+            await enqueue_dossier_event(
+                source_table="contracts",
+                source_id=str(contract_id),
+                event_type="CONTRACT_PURCHASED",
+                payload={
+                    "id": str(contract_id),
+                    "buyer": d["buyer"],
+                    "seller": d["seller"],
+                    "material": d["material"],
+                    "weight_tons": qty,
+                    "price_per_ton": price_per_ton,
+                    "currency": ccy,
+                    "status": "Signed",
+                    "created_at": d["created_at"].isoformat() if d.get("created_at") else None,
+                },
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            pass
+
+        resp = {
+            "ok": True,
+            "contract_id": contract_id,
+            "new_status": "Signed",
+            "bol_id": bol_id,
+        }
         return await _idem_guard(request, key, resp)
+
     except HTTPException:
         raise
     except Exception as e:
-        try: logger.warn("purchase_contract_failed", err=str(e))
-        except: pass
-        raise HTTPException(412, "purchase failed (inventory or state)")
-# ----- Idempotent purchase (atomic contract signing + inventory commit + BOL create) -----
+        try:
+            logger.warn("purchase_contract_failed_simple", err=str(e))
+        except Exception:
+            pass
+        # generic failure (NO 419, NO INVENTORY SHIT)
+        raise HTTPException(status_code=409, detail="purchase failed")
+# --- Idempotent purchase (contract sign + BOL + buyer_position) ---
 
 # ------ BOL Delivery -------
 from pydantic import BaseModel, AnyUrl
