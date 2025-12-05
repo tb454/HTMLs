@@ -321,6 +321,49 @@
     let buyerKey  = storedUser.buyer  || storedUser.member || storedUser.org || storedUser.company || storedUser.username || '';
     let memberKey = storedUser.member || storedUser.org    || storedUser.company || buyerKey || '';
 
+    // --- Make sure we actually have buyer/member context, even if bridgeUser is empty ---
+    async function ensureBuyerContext() {      
+      if (buyerKey && memberKey) return true;
+
+      try {        
+        const r = await api('/me');
+        const j = await r.json();
+        const u = (j.username || '').toLowerCase();
+
+        // Hard mappings for your real accounts
+        if (u === 'anthony.priority' || u === 'anthony@priorityrecycling.com') {
+          buyerKey = memberKey = 'Priority Recycling';
+        } else if (u === 'alex.farnsworth' || u === 'alex@farnsworthmetals.com') {
+          buyerKey = memberKey = 'Farnsworth Metals';
+        } else if (u) {
+          // Generic fallback: turn "anthony.priority" into "Anthony Priority"
+          const base = u.split('@')[0].replace(/[._-]+/g, ' ').trim();
+          const orgGuess = base
+            ? base.replace(/\b\w/g, c => c.toUpperCase())
+            : j.username;
+
+          buyerKey = buyerKey || orgGuess || j.username || '';
+          memberKey = memberKey || orgGuess || j.username || '';
+        }
+
+        // Persist back into bridgeUser so next page load is instant
+        const merged = {
+          ...(storedUser || {}),
+          username: j.username || storedUser.username || '',
+          role: j.role || storedUser.role || '',
+          buyer: buyerKey,
+          member: memberKey,
+          org: memberKey
+        };
+        try { localStorage.setItem('bridgeUser', JSON.stringify(merged)); } catch {}
+
+      } catch (e) {
+        // If /me blows up, fall through and report "no context"
+      }
+
+      return !!buyerKey;
+    }
+
     function _formatTons(v){
       const n = Number(v || 0);
       if (!isFinite(n) || !n) return '—';
@@ -362,10 +405,12 @@
     async function loadBuyerPositions(){
       const body = document.getElementById('buyerPositionsBody');
       if (!body) return;
-      if (!buyerKey) {
+
+      if (!(await ensureBuyerContext())) {
         body.textContent = 'No buyer context detected. Log in again or contact support.';
         return;
       }
+
       body.textContent = 'Loading positions…';
       try{
         const res = await api(`/buyer_positions?buyer=${encodeURIComponent(buyerKey)}`);
@@ -408,13 +453,16 @@
     async function loadBuyerBols(){
       const body = document.getElementById('buyerBolsBody');
       if (!body) return;
-      if (!buyerKey) {
+
+      if (!(await ensureBuyerContext())) {
         body.textContent = 'No buyer context detected. Log in again or contact support.';
         return;
       }
+
       body.textContent = 'Loading BOLs…';
       try{
         const res = await api(`/bols?buyer=${encodeURIComponent(buyerKey)}`);
+
         const rows = await res.json();
         if (!Array.isArray(rows) || rows.length === 0){
           body.textContent = 'No BOLs found for this buyer.';
@@ -466,10 +514,12 @@
     async function loadBuyerBilling(){
       const body = document.getElementById('buyerBillingBody');
       if (!body) return;
-      if (!memberKey) {
+
+      if (!(await ensureBuyerContext())) {
         body.textContent = 'No member context detected. Billing may not be available.';
         return;
       }
+
       body.textContent = 'Loading billing summary…';
       try{
         const res = await api(`/billing/member_summary?member=${encodeURIComponent(memberKey)}`);
