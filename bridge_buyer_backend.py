@@ -12488,7 +12488,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status = 'Open'
+                WHERE id = :id AND status IN ('Open','Pending')
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
