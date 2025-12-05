@@ -631,8 +631,9 @@
       btn.type = 'button';
       btn.textContent = 'Buy';
       btn.setAttribute('aria-label', `Buy contract ${r?.material||''} from ${r?.seller||''}`);
-      btn.disabled = (r?.status !== 'Open');   // disable unless Open
-      if (r?.status === 'Open') btn.addEventListener('click', (ev)=> buy(ev, r.id));
+      const canBuy = /^(open|pending)$/i.test(r?.status || '');
+      btn.disabled = !canBuy;
+      if (canBuy) btn.addEventListener('click', (ev)=> buy(ev, r.id));
       right.append(btn);
 
       const row = document.createElement('div');
@@ -732,7 +733,7 @@
             'Content-Type': 'application/json',
             'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),            
           },
-          body: JSON.stringify({ op:'purchase', expected_status:'Open' })
+          body: JSON.stringify({ op:'purchase' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
