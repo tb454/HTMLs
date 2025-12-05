@@ -12492,9 +12492,10 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
-            # If the contract already has a tenant, prefer that over request inference
-            if row and row.get("tenant_id"):
-                tenant_id = str(row["tenant_id"])
+            # If the contract already has a tenant, prefer that over request inference (Record-safe)
+            tenant_from_row = _rget(row, "tenant_id", None)
+            if tenant_from_row:
+                tenant_id = str(tenant_from_row)
 
             if not row:
                 raise HTTPException(status_code=409, detail="Contract not purchasable (not Open).")
