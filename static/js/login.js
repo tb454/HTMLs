@@ -117,8 +117,39 @@ document.getElementById("loginForm").addEventListener("submit", async function (
     if (role === "yard") role = "seller";
     if (!ROLE_HOME[role]) role = "buyer"; // hard fallback
 
-    // persist minimal state if you want
-    try { localStorage.setItem("bridgeUser", JSON.stringify({ role })); } catch {}
+    // --- derive org/buyer key from login identifier ---
+    const rawUser = username; // what they typed into the login box
+
+    const orgGuess = (function (u) {
+      if (!u) return "";
+      const lower = u.toLowerCase();
+
+      // Hard-coded mappings for your real yards/buyers
+      if (lower === "anthony.priority" || lower === "anthony@priorityrecycling.com") {
+        return "Priority Recycling";
+      }
+      if (lower === "alex.farnsworth" || lower === "alex@farnsworthmetals.com") {
+        return "Farnsworth Metals";
+      }
+
+      // Fallback: turn "anthony.priority" or "anthony_priority" into "Anthony Priority"
+      const base = u.split("@")[0].replace(/[._-]+/g, " ").trim();
+      if (!base) return u;
+      return base.replace(/\b\w/g, c => c.toUpperCase());
+    })(rawUser);
+
+    const bridgeUser = {
+      username: rawUser,
+      role,
+      // The buyer/member/org key the buyer dashboard will use:
+      buyer:  orgGuess || rawUser,
+      member: orgGuess || rawUser,
+      org:    orgGuess || rawUser
+    };
+
+    try {
+      localStorage.setItem("bridgeUser", JSON.stringify(bridgeUser));
+    } catch {}
 
     // Target resolution order:
     // 1) ?next= (internal only)

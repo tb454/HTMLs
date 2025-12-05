@@ -12725,8 +12725,7 @@ async def purchase_contract(
         try:
             logger.warn("purchase_contract_failed_simple", err=str(e))
         except Exception:
-            pass
-        # generic failure (NO 419, NO INVENTORY SHIT)
+            pass        
         raise HTTPException(status_code=409, detail="purchase failed")
 # --- Idempotent purchase (contract sign + BOL + buyer_position) ---
 
