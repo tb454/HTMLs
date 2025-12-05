@@ -3181,6 +3181,47 @@ app.include_router(runtime_router)
 app.include_router(limits_router)
 # ----- Compliance, Surveillance, Runtime Limits -----
 
+# ------ Access-control bootstrap (tenants↔users, perms, billing shell) -------
+@startup
+async def _ensure_access_control_schema():
+    await run_ddl_multi("""
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    /* users: you already have indices, keep them—this adds a lower(email) UNIQUE if missing */
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower2
+      ON public.users ((lower(email))) WHERE email IS NOT NULL;
+
+    /* tenant_memberships: link a user to a tenant with a role */
+    CREATE TABLE IF NOT EXISTS tenant_memberships (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id  UUID NOT NULL,
+      user_id    UUID NOT NULL,
+      role       TEXT NOT NULL,                    -- buyer|seller|admin
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (tenant_id, user_id)
+    );
+
+    /* user_permissions: flat list of perms; UNIQUE for idempotent inserts */
+    CREATE TABLE IF NOT EXISTS user_permissions (
+      user_id   UUID NOT NULL,
+      tenant_id UUID NOT NULL,
+      perm      TEXT NOT NULL,
+      PRIMARY KEY (user_id, tenant_id, perm)
+    );
+
+    /* billing_customers: one row per tenant for plan/promo flag */
+    CREATE TABLE IF NOT EXISTS billing_customers (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id  UUID UNIQUE NOT NULL,
+      plan       TEXT NOT NULL DEFAULT 'free',
+      promo      BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    /* tenants.slug unique is already enforced in your schema; keep using that */
+    """)
+# ------ Access-control bootstrap -------
+
 # ----- Onboarding, Tenants, Invite -----
 onboard_router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 tenants_router = APIRouter(prefix="/tenants", tags=["Tenants"])
@@ -3364,6 +3405,108 @@ app.include_router(invites_router)
 app.include_router(orgs_router)
 app.include_router(admin_tenants_router)
 # ----- Onboarding, Tenants, Invite -----
+
+# --- Admin: one-shot user+tenant+perms+billing provisioner ---
+@app.post("/admin/provision_user", tags=["Admin"], summary="Provision user + tenant + perms", status_code=200)
+async def admin_provision_user(p: dict, request: Request, _=Depends(csrf_protect)):
+    """
+    Body p example:
+    {
+      "email": "alex@farnsworthmetals.com",
+      "username": "alex.farnsworth",          # optional
+      "org_name": "Farnsworth Metals",
+      "role": "seller",                        # buyer|seller|admin
+      "plan": "free",                          # free|starter|standard|enterprise
+      "promo": true                            # just marks billing_customers.promo
+    }
+    """
+    # Gate in prod like your other admin endpoints
+    _require_admin(request)
+
+    from uuid import uuid4
+    email = (p.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "email required")
+
+    uname = (p.get("username") or email.split("@")[0]).strip()[:64]
+    org   = (p.get("org_name") or "").strip()
+    if not org:
+        raise HTTPException(400, "org_name required")
+
+    role  = (p.get("role") or "buyer").strip().lower()
+    if role not in ("buyer","seller","admin"):
+        role = "buyer"
+
+    plan  = (p.get("plan") or "free").strip().lower()
+    promo = bool(p.get("promo", False))
+
+    # Simple default perms per role
+    default_perms_map = {
+        "buyer":  ["contracts.read","contracts.purchase","bols.read"],
+        "seller": ["contracts.create","contracts.update","inventory.write","bols.create"],
+        "admin":  ["*"]
+    }
+    default_perms = default_perms_map[role]
+
+    async with database.transaction():
+        # 1) user (idempotent on email)
+        user = await database.fetch_one("""
+            INSERT INTO public.users (id,email,username,password_hash,role,is_active,email_verified,created_at)
+            VALUES (gen_random_uuid(), :email, :uname, crypt('TempBridge123!', gen_salt('bf')), :role, TRUE, TRUE, NOW())
+            ON CONFLICT ((lower(email))) DO UPDATE
+              SET username=EXCLUDED.username, role=EXCLUDED.role, is_active=TRUE
+            RETURNING id
+        """, {"email": email, "uname": uname, "role": role})
+        user_id = user["id"]
+
+        # 2) tenant (idempotent on slug)
+        slug = re.sub(r"[^a-z0-9]+", "-", org.lower()).strip("-") or "tenant-" + uuid4().hex[:8]
+        tenant = await database.fetch_one("""
+            INSERT INTO tenants (id, slug, name, region)
+            VALUES (gen_random_uuid(), :slug, :name, NULL)
+            ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name
+            RETURNING id
+        """, {"slug": slug, "name": org})
+        tenant_id = tenant["id"]
+
+        # 3) membership (idempotent by UNIQUE(tenant_id,user_id))
+        await database.execute("""
+            INSERT INTO tenant_memberships (id, tenant_id, user_id, role)
+            VALUES (gen_random_uuid(), :tid, :uid, :role)
+            ON CONFLICT (tenant_id, user_id) DO UPDATE SET role=EXCLUDED.role
+        """, {"tid": tenant_id, "uid": user_id, "role": role})
+
+        # 4) perms seed (do-nothing on duplicates)
+        for perm in default_perms:
+            await database.execute("""
+                INSERT INTO user_permissions (user_id, tenant_id, perm)
+                VALUES (:uid, :tid, :perm)
+                ON CONFLICT (user_id, tenant_id, perm) DO NOTHING
+            """, {"uid": user_id, "tid": tenant_id, "perm": perm})
+
+        # 5) billing shell per-tenant (even for free/promo so upgrades are trivial later)
+        await database.execute("""
+            INSERT INTO billing_customers (tenant_id, plan, promo)
+            VALUES (:tid, :plan, :promo)
+            ON CONFLICT (tenant_id) DO UPDATE SET plan=EXCLUDED.plan, promo=EXCLUDED.promo
+        """, {"tid": tenant_id, "plan": plan, "promo": promo})
+
+    return {"ok": True, "tenant_id": str(tenant_id), "user_id": str(user_id), "plan": plan, "promo": promo}
+
+@app.post("/admin/provision/free_buyer", tags=["Admin"], include_in_schema=False)
+async def provision_free_buyer(email: str, org: str, request: Request, _=Depends(csrf_protect)):
+    return await admin_provision_user(
+        {"email": email, "org_name": org, "role": "buyer", "plan": "free", "promo": True},
+        request
+    )
+
+@app.post("/admin/provision/seller", tags=["Admin"], include_in_schema=False)
+async def provision_seller(email: str, org: str, request: Request, _=Depends(csrf_protect)):
+    return await admin_provision_user(
+        {"email": email, "org_name": org, "role": "seller", "plan": "starter", "promo": True},
+        request
+    )
+# --- Admin: provisioner ---
 
 # ----- Integrations, Logs, Keys -----
 integrations_router = APIRouter(prefix="/integrations", tags=["Integrations"])
@@ -5514,6 +5657,10 @@ with open("static/trader.html", "r", encoding="utf-8") as f:
 
 @app.get("/buyer", include_in_schema=False)
 async def buyer_page_dynamic(request: Request):
+    # permission gates
+    await require_perm(request, "contracts.read")
+    await require_perm(request, "contracts.purchase")
+
     nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     html = _BUYER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
 
@@ -9320,9 +9467,12 @@ async def idem_put(key: str, resp: dict):
 )
 @limiter.limit("60/minute")
 async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_protect)):
+    # permission gate
+    await require_perm(request, "inventory.write")
+
     key = _idem_key(request)
     if key and key in _idem_cache:
-        return _idem_cache[key]   
+        return _idem_cache[key]
 
     if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         raise HTTPException(401, "login required")
@@ -11154,6 +11304,32 @@ async def _ensure_multitenant_columns():
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
 
+# -------- Permission helpers (add just below current_tenant_id) --------
+async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
+    if not (user_id and tenant_id):
+        return False
+    row = await database.fetch_one("""
+      SELECT 1 FROM user_permissions
+      WHERE user_id=:u AND tenant_id=:t AND (perm=:p OR perm='*') LIMIT 1
+    """, {"u": user_id, "t": tenant_id, "p": perm})
+    return bool(row)
+
+async def require_perm(request: Request, perm: str):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    if not ident:
+        raise HTTPException(401, "login required")
+    u = await database.fetch_one("""
+      SELECT id FROM public.users
+      WHERE lower(COALESCE(email,''))=:i OR lower(COALESCE(username,''))=:i LIMIT 1
+    """, {"i": ident})
+    if not u:
+        raise HTTPException(401, "login required")
+    uid = str(u["id"])
+    tid = await current_tenant_id(request)
+    if not await _has_perm(uid, tid, perm):
+        raise HTTPException(403, f"missing permission: {perm}")
+# -------- Permission helpers --------
+
 # -------- Tenant / member helpers --------
 def _slugify_member(member: str) -> str:
     """
@@ -11206,7 +11382,7 @@ async def current_tenant_id(request: Request) -> Optional[str]:
         # Don't block the request on mapping issues
         return None
     return None
-# -------- /Tenant / member helpers --------
+# -------- Tenant / member helpers --------
 
 async def _org_plan(org: Optional[str]) -> str:
     # Swap for real org→plan mapping if you store it; default NONMEM unless you signal MEMBER.
@@ -12486,6 +12662,7 @@ async def purchase_contract(
     request: Request,
     _=Depends(csrf_protect),
 ):
+    await require_perm(request, "contracts.purchase")
     try:
         # ---- idempotency ----
         key = _idem_key(request) or getattr(body, "idempotency_key", None)
@@ -13974,6 +14151,7 @@ async def list_contracts_admin(
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
+    await require_perm(request, "contracts.create")
     tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     if key:
@@ -15044,6 +15222,7 @@ async def list_bols_admin(
 
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
+    await require_perm(request, "bols.create")
     tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     hit = await idem_get(key) if key else None
