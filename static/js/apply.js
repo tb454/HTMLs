@@ -1,6 +1,12 @@
 // Unified API base
 window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
 
+// --- TEMP: Free mode (no payment required) ---
+const FREE_MODE = true; // flip to false when 3 For Free ends
+function isFreeMode(){
+  return !!FREE_MODE || window.BRIDGE_FREE_MODE === '1' || localStorage.getItem('BRIDGE_FREE_MODE') === '1';
+}
+
 function _cookie(name){
   const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g,'\\$1')+'=([^;]*)'));
   return m ? decodeURIComponent(m[1]) : '';
@@ -84,6 +90,21 @@ form.addEventListener('input', ()=> {
     });
   }catch{}
 })();
+function updateSubmitDisabled(){
+  const submit = document.getElementById('submitBtn');
+  if (!submit) return;
+  const ok = form.checkValidity()
+    && document.getElementById('agree')?.checked
+    && document.getElementById('feesAgree')?.checked;
+  submit.disabled = !ok;
+}
+
+// keep button state current in FREE mode
+['input','change'].forEach(evt => {
+  form.addEventListener(evt, () => { if (isFreeMode()) updateSubmitDisabled(); });
+});
+document.getElementById('agree')?.addEventListener('change', () => { if (isFreeMode()) updateSubmitDisabled(); });
+document.getElementById('feesAgree')?.addEventListener('change', () => { if (isFreeMode()) updateSubmitDisabled(); });
 
 // ---- Payment Method flow (Stripe Checkout in setup mode) ----
 async function pmStatus(member){
@@ -107,7 +128,23 @@ function memberKeyFromForm(){
 }
 async function refreshPmBadge(){
   const member = memberKeyFromForm();
-  const plan = (document.getElementById('plan').value || '').trim();
+  const plan = (document.getElementById('plan')?.value || '').trim();
+
+  // FREE MODE: no payment required, keep UI visible but disabled
+  if (isFreeMode()) {
+    const pmEl = document.getElementById('pmStatus');
+    if (pmEl) pmEl.textContent = 'Payment method not required during free access.';
+    const hint = document.getElementById('subHint');
+    if (hint) hint.textContent = 'Subscriptions are disabled during free access.';
+    const subBtn = document.getElementById('startSubBtn');
+    if (subBtn) subBtn.disabled = true;
+
+    // Submit enabled purely by validity + required checkboxes
+    updateSubmitDisabled();
+    return;
+  }
+
+  // PAID MODE
   if(!member){ return; }
   try{
     const s = await pmStatus(member);
@@ -119,8 +156,9 @@ async function refreshPmBadge(){
 
     const subBtn = document.getElementById('startSubBtn');
     const canStart = hasPm && !!plan;
-    subBtn.disabled = !canStart;
-    document.getElementById('subHint').textContent =
+    if (subBtn) subBtn.disabled = !canStart;
+    const hint = document.getElementById('subHint');
+    if (hint) hint.textContent =
       canStart ? 'Ready to start subscription.' : 'Choose a plan and add a payment method to enable “Start Subscription”.';
   }catch{
     document.getElementById('submitBtn').disabled = true;
@@ -131,6 +169,7 @@ async function refreshPmBadge(){
 
 // Wire buttons (no inline handlers)
 document.getElementById('startSubBtn')?.addEventListener('click', async (ev)=>{
+  if (isFreeMode()) { toast('Subscriptions are disabled during free access.'); return; }
   const btn = ev.currentTarget;
   const member = memberKeyFromForm();
   const plan = (document.getElementById('plan').value || '').trim().toLowerCase();
@@ -145,6 +184,7 @@ document.getElementById('startSubBtn')?.addEventListener('click', async (ev)=>{
   }
 });
 document.getElementById('addPmBtn')?.addEventListener('click', async ()=>{
+  if (isFreeMode()) { toast('Payment method collection is disabled during free access.'); return; }
   const member = memberKeyFromForm();
   const email  = (document.getElementById('email').value || '').trim();
   if(!member || !email){ toast('Enter Organization and Email first'); return; }
@@ -161,6 +201,12 @@ document.getElementById('locale-save')?.addEventListener('click', ()=>{
 (async ()=>{
   const pmOk   = qs.get('pm') === 'ok';
   const pmSess = qs.get('sess');
+  if (isFreeMode()) {
+    const lbl = document.getElementById('payment_method_lbl');
+    if (lbl) lbl.textContent = 'Payment Method (temporarily not required)';
+    updateSubmitDisabled();
+  }
+  
   if (pmOk && pmSess) {
     const member = memberKeyFromForm() || (qs.get('member') || '');
     try {
@@ -211,13 +257,15 @@ form.addEventListener('submit', async (e)=>{
   const member = memberKeyFromForm();
   if(!member){ show('err','Organization or Email is required.'); return; }
 
-  try{
-    const s = await pmStatus(member);
-    if(!s.has_default){
-      show('err','Add a payment method to continue.'); toast('Payment method required'); return;
+  if (!isFreeMode()) {
+    try{
+      const s = await pmStatus(member);
+      if(!s.has_default){
+        show('err','Add a payment method to continue.'); toast('Payment method required'); return;
+      }
+    }catch{
+      show('err','Could not verify payment method. Try again.'); return;
     }
-  }catch{
-    show('err','Could not verify payment method. Try again.'); return;
   }
 
   const fd = new FormData(form);
