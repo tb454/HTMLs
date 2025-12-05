@@ -12506,7 +12506,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             if not row:
                 cur = await database.fetch_one("SELECT status FROM contracts WHERE id=:id", {"id": contract_id})
                 cur_st = (cur["status"] if cur and cur["status"] else "Unknown")
-                raise HTTPException(status_code=409, detail=f"Contract not purchasable (is '{cur_st}', need 'Open').")
+                raise HTTPException(status_code=419, detail=f"Contract not purchasable (is '{cur_st}', need 'Open').")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
@@ -12547,7 +12547,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                     reserved += short
                     available -= short
                 else:
-                    raise HTTPException(status_code=409, detail="Reserved/available inventory insufficient to commit.")
+                    raise HTTPException(status_code=419, detail="Reserved/available inventory insufficient to commit.")
 
             await database.execute("""
                 UPDATE inventory_items
