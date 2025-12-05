@@ -631,7 +631,8 @@
       btn.type = 'button';
       btn.textContent = 'Buy';
       btn.setAttribute('aria-label', `Buy contract ${r?.material||''} from ${r?.seller||''}`);
-      btn.addEventListener('click', (ev)=> buy(ev, r.id));
+      btn.disabled = (r?.status !== 'Open');   // disable unless Open
+      if (r?.status === 'Open') btn.addEventListener('click', (ev)=> buy(ev, r.id));
       right.append(btn);
 
       const row = document.createElement('div');
@@ -652,7 +653,7 @@
       setLoadingUI(true);
       root.setAttribute('aria-busy','true');
 
-      const q = new URLSearchParams({ status: 'pending', limit, offset, sort: sortBy });
+      const q = new URLSearchParams({ status: 'Open', limit, offset, sort: sortBy });
       const buyerEl = document.getElementById('buyerFilter');
       const matEl   = document.getElementById('materialFilter');
       const buyerVal = (buyerEl?.value || '').trim();
@@ -731,7 +732,7 @@
             'Content-Type': 'application/json',
             'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),            
           },
-          body: JSON.stringify({ op:'purchase', expected_status:'pending' })
+          body: JSON.stringify({ op:'purchase', expected_status:'Open' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);

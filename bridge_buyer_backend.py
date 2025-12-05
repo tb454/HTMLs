@@ -9066,7 +9066,7 @@ async def _ensure_contracts_bols_schema():
           material TEXT NOT NULL,
           weight_tons NUMERIC NOT NULL,
           price_per_ton NUMERIC NOT NULL,
-          status TEXT NOT NULL DEFAULT 'Pending',
+          status TEXT NOT NULL DEFAULT 'Open',
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           signed_at TIMESTAMPTZ,
           signature TEXT
@@ -9542,6 +9542,13 @@ async def _ensure_contract_enums_and_fks():
         END
         $bridge$;
         """)
+
+    # ensure 'Open' exists in the enum (safe/idempotent)
+    try:
+        await database.execute("ALTER TYPE contract_status ADD VALUE IF NOT EXISTS 'Open'")
+    except Exception:
+        # older PGs or order constraints — ignore if already present
+        pass
 
     # Cast the column to the enum if the table exists (no-throw)
     try:
@@ -11065,12 +11072,11 @@ class BOLOut(BOLIn):
         }
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
-    expected_status: Literal["Pending"] = "Pending"
+    expected_status: Literal["Open"] = "Open"
     idempotency_key: Optional[str] = None
 
 # Tighter typing for updates
-ContractStatus = Literal["Pending", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
-
+ContractStatus = Literal["Open", "Signed", "Dispatched", "Fulfilled", "Cancelled"]
 class ContractUpdate(BaseModel):
     status: ContractStatus
     signature: Optional[str] = None
@@ -11243,7 +11249,7 @@ async def close_through(cutoff: _date, request: Request):
       UPDATE contracts
          SET status='Fulfilled'
        WHERE created_at::date <= :d
-         AND status IN ('Pending','Signed','Dispatched')
+         AND status IN ('Open','Signed','Dispatched')
     """, {"d": cutoff})
 
     # BOLs → Delivered
@@ -12468,7 +12474,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status = 'Signed', signed_at = NOW()
-                WHERE id = :id AND status IN ('Pending','Signed')
+                WHERE id = :id AND status = 'Open'
                 RETURNING id, buyer, seller, material, weight_tons, price_per_ton, tenant_id
             """, {"id": contract_id})
 
@@ -12477,7 +12483,7 @@ async def purchase_contract(contract_id: str, body: PurchaseIn, request: Request
                 tenant_id = str(row["tenant_id"])
 
             if not row:
-                raise HTTPException(status_code=409, detail="Contract not purchasable (already taken or not Pending).")
+                raise HTTPException(status_code=409, detail="Contract not purchasable (not Open).")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
@@ -13922,7 +13928,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "material": contract.material,
                 "weight_tons": qty,
                 "price_per_ton": price_val,
-                "status": "Pending",
+                "status": "Open",
                 "pricing_formula": contract.pricing_formula,
                 "reference_symbol": contract.reference_symbol,
                 "reference_price": contract.reference_price,
@@ -14033,7 +14039,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
-                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Pending',COALESCE(:ccy,'USD'),:tenant_id)
+                VALUES (:id,:buyer,:seller,:material,:wt,:ppt,'Open',COALESCE(:ccy,'USD'),:tenant_id)
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
@@ -14059,7 +14065,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "price_per_ton": quantize_money(contract.price_per_ton),
                 "currency": contract.currency or "USD",
                 "tax_percent": contract.tax_percent,
-                "status": "pending",
+                "status": "Open",
                 "created_at": utcnow(),
                 "signed_at": None,
                 "signature": None,
@@ -14211,7 +14217,7 @@ async def _ensure_tenant_applications_schema():
     CREATE TABLE IF NOT EXISTS tenant_applications (
       application_id UUID PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'Open',
       entity_type TEXT NOT NULL,
       role TEXT NOT NULL,
       org_name TEXT NOT NULL,
@@ -15070,7 +15076,7 @@ async def create_bol_alias(request: Request):
         try:
             await database.execute("""
               INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, currency)
-              VALUES (:id, :buyer, :seller, :material, :wt, :ppt, 'pending', 'USD')
+              VALUES (:id, :buyer, :seller, :material, :wt, :ppt, 'Open', 'USD')
             """, {
                 "id": new_cid,
                 "buyer": (body.get("buyer") or "Test Buyer"),
@@ -15085,7 +15091,7 @@ async def create_bol_alias(request: Request):
             new_cid = str(uuid.uuid4())
             await database.execute("""
               INSERT INTO contracts (id, buyer, seller, material, weight_tons, price_per_ton, status, currency)
-              VALUES (:id, 'Test Buyer', 'Test Seller', 'Test Material', 1.0, 1.0, 'pending', 'USD')
+              VALUES (:id, 'Test Buyer', 'Test Seller', 'Test Material', 1.0, 1.0, 'Open', 'USD')
             """, {"id": new_cid})
             contract_id = new_cid
 
@@ -15267,11 +15273,11 @@ async def cancel_contract(contract_id: str):
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status='Cancelled'
-                WHERE id=:id AND status='Pending'
+                WHERE id=:id AND status='Open'
                 RETURNING seller, material, weight_tons
             """, {"id": contract_id})
             if not row:
-                raise HTTPException(status_code=409, detail="Only Pending contracts can be cancelled.")
+                raise HTTPException(status_code=409, detail="Only Open contracts can be cancelled.")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
