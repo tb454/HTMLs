@@ -1780,13 +1780,12 @@ async def _ensure_users_minimal_for_tests():
         CREATE TABLE IF NOT EXISTS public.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           email TEXT,
-          username TEXT,
+          username TEXT UNIQUE,
           password_hash TEXT NOT NULL,
           role TEXT NOT NULL DEFAULT 'buyer',
           is_active BOOLEAN NOT NULL DEFAULT TRUE,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
-        -- Helpful unique indices (nullable-safe)
         CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_lower
           ON public.users ((lower(username))) WHERE username IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower
@@ -3187,21 +3186,18 @@ async def _ensure_access_control_schema():
     await run_ddl_multi("""
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-    /* users: you already have indices, keep them—this adds a lower(email) UNIQUE if missing */
     CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower2
       ON public.users ((lower(email))) WHERE email IS NOT NULL;
 
-    /* tenant_memberships: link a user to a tenant with a role */
     CREATE TABLE IF NOT EXISTS tenant_memberships (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id  UUID NOT NULL,
       user_id    UUID NOT NULL,
-      role       TEXT NOT NULL,                    -- buyer|seller|admin
+      role       TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (tenant_id, user_id)
     );
 
-    /* user_permissions: flat list of perms; UNIQUE for idempotent inserts */
     CREATE TABLE IF NOT EXISTS user_permissions (
       user_id   UUID NOT NULL,
       tenant_id UUID NOT NULL,
@@ -3209,7 +3205,6 @@ async def _ensure_access_control_schema():
       PRIMARY KEY (user_id, tenant_id, perm)
     );
 
-    /* billing_customers: one row per tenant for plan/promo flag */
     CREATE TABLE IF NOT EXISTS billing_customers (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id  UUID UNIQUE NOT NULL,
@@ -3217,8 +3212,6 @@ async def _ensure_access_control_schema():
       promo      BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
-    /* tenants.slug unique is already enforced in your schema; keep using that */
     """)
 # ------ Access-control bootstrap -------
 
