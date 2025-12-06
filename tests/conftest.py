@@ -1,79 +1,71 @@
 # tests/conftest.py
+
 import os
 import sys
 import pathlib
-
 import pytest
 from fastapi.testclient import TestClient
 
-# --- make sure we can import bridge_buyer_backend from the repo root ---
+# --- 1) Point Python at your repo root so we can import the backend ---
 THIS_FILE = pathlib.Path(__file__).resolve()
-HTMLS_ROOT = THIS_FILE.parents[1]
-sys.path.insert(0, str(HTMLS_ROOT))
+REPO_ROOT = THIS_FILE.parents[1]  # .../HTMLs
+sys.path.insert(0, str(REPO_ROOT))
 
-# --- force CI env + test DB BEFORE importing the app ---
+# --- 2) CI env + DB DSN *before* importing the backend module ---
 os.environ.setdefault("ENV", "ci")
+# Adjust DB name if your CI service uses a different one
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/test_db",
+    "postgresql://postgres:postgres@localhost:5432/bridge",
 )
+# Optional but harmless: make sure DDL bootstraps run in CI
+os.environ.setdefault("BRIDGE_BOOTSTRAP_DDL", "1")
+os.environ.setdefault("INIT_DB", "1")
+# Kill Stripe / external integrations in CI
+os.environ.setdefault("ENABLE_STRIPE", "0")
+os.environ.setdefault("DOSSIER_SYNC", "0")
 
-from bridge_buyer_backend import app  # noqa: E402
+# --- 3) Import the real backend app ---
+# If your file is named differently, change this to `import backend as bridge_buyer_backend`
+import bridge_buyer_backend as backend
 
-# ===== CI AUTH BYPASS: ALWAYS-AUTHED USER IN TESTS =====
+app = backend.app
 
-try:
-    # this is the auth dependency used by your endpoints
-    from bridge_buyer_backend import get_current_user  # type: ignore
-except ImportError:
-    # if your helper is named differently, change this import to match
-    raise RuntimeError(
-        "Import get_current_user from bridge_buyer_backend failed. "
-        "Update conftest.py to import your real auth dependency."
-    )
+# --- 4) Patch auth/permissions so tests don't get 401/403 ---
 
+# All your protected endpoints call `await require_perm(request, "perm")`.
+# For CI, we just no-op it.
+async def _require_perm_noop(request, perm: str):
+    return None
 
-class _CiUser:
-    """
-    Minimal fake user object to satisfy anything that expects a 'user'
-    from get_current_user in CI.
-    """
-    def __init__(self):
-        self.id = "00000000-0000-0000-0000-000000000000"
-        self.username = "ci-tester"
-        self.email = "ci@example.com"
-        self.role = "admin"
-        self.is_active = True
+backend.require_perm = _require_perm_noop  # monkey-patch in the module
 
 
-async def _ci_user_override():
-    # In CI we don't care who the user is, just that auth passes.
-    return _CiUser()
+# Admin-only endpoints use `_require_admin(request)`; no-op that too.
+def _require_admin_noop(request):
+    return None
+
+backend._require_admin = _require_admin_noop  # monkey-patch in the module
 
 
-# override the real dependency ONLY in tests
-app.dependency_overrides[get_current_user] = _ci_user_override
-
-
-# ===== TEST CLIENT + SEED DATA =====
-
+# --- 5) Shared TestClient fixture (starts FastAPI lifespan/startup once) ---
 @pytest.fixture(scope="session")
 def client():
     """
-    Single TestClient for the whole test session.
-
-    - Triggers FastAPI startup (so your DDL bootstrap runs once).
-    - Uses the CI auth bypass above so every request is 'logged in'.
+    Session-scoped TestClient so:
+      - Startup hooks run once (DDL, indices, etc.)
+      - DB schema is bootstrapped once for all tests
     """
     with TestClient(app) as c:
         yield c
 
 
+# --- 6) Seed minimal inventory so contracts/BOL tests don't 409 ---
 @pytest.fixture(scope="session", autouse=True)
-def seed_inventory(client):
+def seed_inventory(client: TestClient):
     """
-    Seed a little inventory so /contracts has something to reserve
-    when tests post Shred Steel contracts.
+    Make sure there is scrap on hand for Winski so /contracts and /bols
+    can run without 'not enough inventory' errors in CI.
     """
     payload = {
         "source": "ci",
@@ -81,12 +73,24 @@ def seed_inventory(client):
         "items": [
             {
                 "sku": "Shred Steel",
-                "qty_on_hand": 100.0,
-                "description": "test",
+                "qty_on_hand": 500.0,
+                "description": "CI seed Shred Steel",
                 "uom": "ton",
-            }
+            },
+            {
+                "sku": "Plate & Structural",
+                "qty_on_hand": 500.0,
+                "description": "CI seed P&S",
+                "uom": "ton",
+            },
+            {
+                "sku": "Heavy Melt Steel",
+                "qty_on_hand": 500.0,
+                "description": "CI seed HMS",
+                "uom": "ton",
+            },
         ],
     }
-    r = client.post("/inventory/adjust", json=payload)
-    # don't crash tests if this fails; just print for debugging
-    print("seed_inventory status:", r.status_code, r.text)
+    r = client.post("/inventory/bulk_upsert", json=payload)
+    # Don't hard-fail CI on this, but assert in case something is really broken
+    assert r.status_code == 200, f"Inventory seed failed: {r.status_code} {r.text}"
