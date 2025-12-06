@@ -42,20 +42,29 @@ jobs:
                       prometheus-client sentry-sdk python-multipart uvicorn \
                       "databases[postgres]" passlib[bcrypt] python-dotenv requests psycopg
 
-      - name: Bootstrap CI DB
+      - name: Install psql client & wait for Postgres
+        env:
+          PGPASSWORD: postgres
         run: |
-          python - <<'PY'
-          import os, psycopg
-          with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as con:
-              con.execute("""
-              CREATE TABLE IF NOT EXISTS idempotency_keys (key text PRIMARY KEY, created_at timestamptz DEFAULT now());
-              CREATE TABLE IF NOT EXISTS webhook_events (
-                id bigserial PRIMARY KEY,
-                source text, headers_json jsonb, body_json jsonb,
-                signature_valid boolean, created_at timestamptz DEFAULT now()
-              );
-              """)
-          PY
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          until pg_isready -h localhost -U postgres -d bridge; do sleep 1; done
+
+      - name: Bootstrap CI DB (schema + seed)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # create database if not exists (safe check)
+          if ! psql -h localhost -U postgres -lqt | cut -d"|" -f1 | grep -qw bridge; then
+            psql -h localhost -U postgres -c "CREATE DATABASE bridge;"
+          fi
+
+          # create pgcrypto extension in bridge DB (required for crypt/gen_salt)
+          psql -h localhost -U postgres -d bridge -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+          # The application's startup functions will handle creating all necessary tables
+          # when ENV=ci is set. This includes the users table and test user seed.
+          echo "Database bootstrap complete. Application startup will create remaining schema."
 
       - name: Run tests
         run: pytest -q
