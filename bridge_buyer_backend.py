@@ -7712,6 +7712,24 @@ async def login(request: Request):
     request.session["username"] = (row["username"] or row["email"])
     request.session["role"] = role
 
+    # Set a default member/org in the session if none present (first membership wins)
+    try:
+        if "member" not in httpx.request.session:
+            mem_row = await database.fetch_one("""
+                SELECT t.name, t.slug
+                FROM tenant_memberships m
+                JOIN tenants t ON t.id = m.tenant_id
+                JOIN public.users u ON u.id = m.user_id
+                WHERE lower(coalesce(u.email,''))=:ident
+                OR lower(coalesce(u.username,''))=:ident
+                ORDER BY m.created_at NULLS LAST
+                LIMIT 1
+            """, {"ident": (row["username"] or row["email"]).strip().lower()})
+            if mem_row:
+                request.session["member"] = mem_row["name"] or mem_row["slug"]
+    except Exception:
+        pass
+
     return LoginOut(ok=True, role=role, redirect=f"/{role}")
 # ======= AUTH ========
 
@@ -11304,7 +11322,7 @@ async def _ensure_multitenant_columns():
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
 
-# -------- Permission helpers (add just below current_tenant_id) --------
+# -------- Permission helpers --------
 async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
     if not (user_id and tenant_id):
         return False
@@ -11313,6 +11331,83 @@ async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
       WHERE user_id=:u AND tenant_id=:t AND (perm=:p OR perm='*') LIMIT 1
     """, {"u": user_id, "t": tenant_id, "p": perm})
     return bool(row)
+
+async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
+    if not (user_id and tenant_id):
+        return False
+    row = await database.fetch_one("""
+      SELECT 1 FROM user_permissions
+      WHERE user_id=:u AND tenant_id=:t AND (perm=:p OR perm='*')
+      LIMIT 1
+    """, {"u": user_id, "t": tenant_id, "p": perm})
+    return bool(row)
+
+async def require_perm(request: Request, perm: str):
+    # ✅ FREE MODE: in free mode, allow all gated routes
+    if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1", "true", "yes"):
+        return
+
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    if not ident:
+        raise HTTPException(401, "login required")
+
+    u = await database.fetch_one("""
+      SELECT id FROM public.users
+      WHERE lower(COALESCE(email,''))=:i OR lower(COALESCE(username,''))=:i
+      LIMIT 1
+    """, {"i": ident})
+    if not u:
+        raise HTTPException(401, "login required")
+
+    uid = str(u["id"])
+    tid = await current_tenant_id(request)
+    if not await _has_perm(uid, tid, perm):
+        raise HTTPException(403, f"missing permission: {perm}")
+
+def _slugify_member(member: str) -> str:
+    """
+    'Winski Brothers' -> 'winski-brothers'
+    """
+    m = (member or "").strip().lower()
+    m = re.sub(r"[^a-z0-9]+", "-", m)
+    return m.strip("-") or m
+
+def current_member_from_request(request: Request) -> Optional[str]:
+    """
+    Order:
+      1) ?member=
+      2) session['member'] / session['org'] / session['yard_name']
+      3) session['seller']
+    """
+    for key in ("member", "org", "yard_name", "seller"):
+        v = request.query_params.get(key)
+        if v:
+            return v.strip()
+    if hasattr(request, "session"):
+        for key in ("member", "org", "yard_name", "seller"):
+            v = request.session.get(key)
+            if v:
+                return str(v).strip()
+    return None
+
+async def current_tenant_id(request: Request) -> Optional[str]:
+    """
+    Resolve tenant_id via the inferred member key (slug match).
+    """
+    member = current_member_from_request(request)
+    if not member:
+        return None
+    slug = _slugify_member(member)
+    try:
+        row = await database.fetch_one(
+            "SELECT id FROM tenants WHERE slug = :slug",
+            {"slug": slug},
+        )
+        if row and row["id"]:
+            return str(row["id"])
+    except Exception:
+        return None
+    return None
 
 async def require_perm(request: Request, perm: str):
     ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
