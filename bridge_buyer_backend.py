@@ -1457,9 +1457,9 @@ async def vendor_snapshot_to_indices():
             CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
             NOW()                                      AS ts,
             'blended'                                  AS region,
-            -- 50% reference, 30% vendor, 20% contracts (all in USD/lb)
-            0.50*b.price
-            + 0.30*v.vendor_lb
+            -- 30% reference, 50% vendor, 20% contracts (all in USD/lb)
+            0.30*b.price
+            + 0.50*v.vendor_lb
             + 0.20*COALESCE(c.contract_lb, b.price)   AS price
           FROM (
             -- latest reference per symbol from reference_prices
@@ -7714,14 +7714,14 @@ async def login(request: Request):
 
     # Set a default member/org in the session if none present (first membership wins)
     try:
-        if "member" not in httpx.request.session:
+        if "member" not in request.session:
             mem_row = await database.fetch_one("""
                 SELECT t.name, t.slug
                 FROM tenant_memberships m
                 JOIN tenants t ON t.id = m.tenant_id
                 JOIN public.users u ON u.id = m.user_id
-                WHERE lower(coalesce(u.email,''))=:ident
-                OR lower(coalesce(u.username,''))=:ident
+                WHERE lower(coalesce(u.email,'')) = :ident
+                   OR lower(coalesce(u.username,'')) = :ident
                 ORDER BY m.created_at NULLS LAST
                 LIMIT 1
             """, {"ident": (row["username"] or row["email"]).strip().lower()})
@@ -11342,28 +11342,6 @@ async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
     """, {"u": user_id, "t": tenant_id, "p": perm})
     return bool(row)
 
-async def require_perm(request: Request, perm: str):
-    # ✅ FREE MODE: in free mode, allow all gated routes
-    if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1", "true", "yes"):
-        return
-
-    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
-    if not ident:
-        raise HTTPException(401, "login required")
-
-    u = await database.fetch_one("""
-      SELECT id FROM public.users
-      WHERE lower(COALESCE(email,''))=:i OR lower(COALESCE(username,''))=:i
-      LIMIT 1
-    """, {"i": ident})
-    if not u:
-        raise HTTPException(401, "login required")
-
-    uid = str(u["id"])
-    tid = await current_tenant_id(request)
-    if not await _has_perm(uid, tid, perm):
-        raise HTTPException(403, f"missing permission: {perm}")
-
 def _slugify_member(member: str) -> str:
     """
     'Winski Brothers' -> 'winski-brothers'
@@ -11410,17 +11388,33 @@ async def current_tenant_id(request: Request) -> Optional[str]:
     return None
 
 async def require_perm(request: Request, perm: str):
+    """
+    Permission gate with FREE mode support.
+
+    - If BRIDGE_FREE_MODE is set (1/true/yes), do nothing.
+    - Otherwise, resolve user -> user_id, tenant_id and check user_permissions.
+    """
+    # FREE MODE: let everyone through
+    if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1", "true", "yes"):
+        return
+
     ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
     if not ident:
         raise HTTPException(401, "login required")
+
     u = await database.fetch_one("""
-      SELECT id FROM public.users
-      WHERE lower(COALESCE(email,''))=:i OR lower(COALESCE(username,''))=:i LIMIT 1
+      SELECT id
+      FROM public.users
+      WHERE lower(COALESCE(email,'')) = :i
+         OR lower(COALESCE(username,'')) = :i
+      LIMIT 1
     """, {"i": ident})
     if not u:
         raise HTTPException(401, "login required")
+
     uid = str(u["id"])
     tid = await current_tenant_id(request)
+
     if not await _has_perm(uid, tid, perm):
         raise HTTPException(403, f"missing permission: {perm}")
 # -------- Permission helpers --------
