@@ -117,6 +117,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 import structlog, time
+logger = structlog.get_logger()
 
 # rate limiting (imports only here; init happens after ProxyHeaders)
 from slowapi import Limiter
@@ -1316,15 +1317,147 @@ async def hsts_middleware(request: Request, call_next):
 # ===== /Security headers =====
 
 # =====  request-id + structured logs =====
-logger = structlog.get_logger()
+def _split_sql_statements(sql: str) -> list[str]:
+    """
+    Split SQL on semicolons, but NOT inside:
+      - single quotes '...'
+      - double quotes "..."
+      - line comments -- ...
+      - block comments /* ... */
+      - dollar-quoted blocks $$...$$ or $tag$...$tag$
+    """
+    s = sql or ""
+    out: list[str] = []
+    buf: list[str] = []
+
+    i = 0
+    n = len(s)
+
+    in_sq = False
+    in_dq = False
+    in_line = False
+    in_block = False
+    dollar_tag: str | None = None
+
+    def startswith_at(prefix: str, pos: int) -> bool:
+        return s.startswith(prefix, pos)
+
+    while i < n:
+        ch = s[i]
+
+        # line comment ends at newline
+        if in_line:
+            buf.append(ch)
+            if ch == "\n":
+                in_line = False
+            i += 1
+            continue
+
+        # block comment ends at */
+        if in_block:
+            buf.append(ch)
+            if ch == "*" and i + 1 < n and s[i + 1] == "/":
+                buf.append("/")
+                i += 2
+                in_block = False
+            else:
+                i += 1
+            continue
+
+        # dollar-quoted block ends at same tag
+        if dollar_tag:
+            if startswith_at(dollar_tag, i):
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                dollar_tag = None
+            else:
+                buf.append(ch)
+                i += 1
+            continue
+
+        # inside quotes
+        if in_sq:
+            buf.append(ch)
+            if ch == "'":
+                # handle escaped '' inside strings
+                if i + 1 < n and s[i + 1] == "'":
+                    buf.append("'")
+                    i += 2
+                    continue
+                in_sq = False
+            i += 1
+            continue
+
+        if in_dq:
+            buf.append(ch)
+            if ch == '"':
+                in_dq = False
+            i += 1
+            continue
+
+        # entering comments?
+        if ch == "-" and i + 1 < n and s[i + 1] == "-":
+            buf.append(ch); buf.append("-")
+            i += 2
+            in_line = True
+            continue
+
+        if ch == "/" and i + 1 < n and s[i + 1] == "*":
+            buf.append(ch); buf.append("*")
+            i += 2
+            in_block = True
+            continue
+
+        # entering quotes?
+        if ch == "'":
+            buf.append(ch)
+            in_sq = True
+            i += 1
+            continue
+
+        if ch == '"':
+            buf.append(ch)
+            in_dq = True
+            i += 1
+            continue
+
+        # entering dollar-quote?  $$ or $tag$
+        if ch == "$":
+            j = i + 1
+            while j < n and s[j] != "$" and (s[j].isalnum() or s[j] == "_"):
+                j += 1
+            if j < n and s[j] == "$":
+                tag = s[i:j + 1]  # includes both $...$
+                buf.append(tag)
+                i = j + 1
+                dollar_tag = tag
+                continue
+
+        # split on semicolon only when "top level"
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                out.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
 async def run_ddl_multi(sql: str):
-    """Split and run multiple DDL statements (for asyncpg/databases)."""
-    stmts = [s.strip() for s in sql.split(";") if s.strip()]
-    for stmt in stmts:
+    """Run multiple DDL statements safely (no naive split(';'))."""
+    for stmt in _split_sql_statements(sql):
         try:
             await database.execute(stmt)
         except Exception as e:
-            logger.warn("ddl_failed", sql=stmt[:120], err=str(e))
+            logger.warn("ddl_failed", sql=stmt[:160], err=str(e))
 # =====  request-id + structured logs =====
 
 # ------ ID Logging ------
@@ -1371,6 +1504,8 @@ async def locale_middleware(request: Request, call_next):
 async def startup_bootstrap_and_connect():
     env = os.getenv("ENV", "").lower()
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
+    if env in {"production", "prod"}:
+        return
 
     # 1) Target database BEFORE touching `engine` or any bootstrap that uses it
     try:
@@ -1416,15 +1551,12 @@ def _ensure_database_exists(dsn: str):
         admin_url = url.set(database="postgres")
         admin_dsn = admin_url.render_as_string(hide_password=False)
 
-        with psycopg.connect(admin_dsn) as conn:
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
             conn.execute("SET statement_timeout = 5000")
-            # Try create; swallow DuplicateDatabase
             try:
                 conn.execute(f'CREATE DATABASE "{target_db}"')
             except psycopg.errors.DuplicateDatabase:
                 pass
-            # commit not strictly required with autocommit but harmless
-            conn.commit()
     except Exception:
         # Never block the process on auto-create errors; startup will show a clear failure later if still missing
         pass
@@ -2584,11 +2716,16 @@ async def _ensure_invites_log():
 async def _uniq_ref_guard():
     try:
         await database.execute("""
-          ALTER TABLE contracts
-          ADD CONSTRAINT uq_contracts_ref UNIQUE (reference_source, reference_symbol)
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_contracts_ref') THEN
+            ALTER TABLE contracts
+              ADD CONSTRAINT uq_contracts_ref UNIQUE (reference_source, reference_symbol);
+          END IF;
+        END$$;
         """)
     except Exception:
-        pass  # already exists or incompatible
+        pass
 # ----- Uniq ref guard -----
 
 # ----- Extra indexes -----
@@ -3186,6 +3323,17 @@ app.include_router(limits_router)
 async def _ensure_access_control_schema():
     await run_ddl_multi("""
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+                        
+    CREATE TABLE IF NOT EXISTS public.users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT,
+      username TEXT,
+      password_hash TEXT,
+      role TEXT NOT NULL DEFAULT 'buyer',
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
 
     /* users: you already have indices, keep them—this adds a lower(email) UNIQUE if missing */
     CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower2
@@ -3218,7 +3366,7 @@ async def _ensure_access_control_schema():
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    /* tenants.slug unique is already enforced in your schema; keep using that */
+    /* tenants.slug unique is already enforced in your schema keep using that */
     """)
 # ------ Access-control bootstrap -------
 
@@ -5080,6 +5228,9 @@ async def _billing_cron():
 # ---- ws meter flush -----
 @startup
 async def _ws_meter_flush():
+    if os.getenv("BILL_INTERNAL_WS", "0").lower() not in ("1", "true", "yes"):
+        return
+
     """
     Hourly: sum new WS message counts from data_msg_counters and emit to Stripe as raw counts.
     Assumes table: data_msg_counters(member TEXT, count BIGINT, ts TIMESTAMPTZ).
@@ -5995,18 +6146,14 @@ async def set_locale_prefs(p: LocalePrefs, request: Request):
     return resp
 # -------- Global --------
 
-# --- Pricing & Indices wiring (drop-in) --------------------------------------
+# --- Pricing & Indices wiring --------------------------------------
 import os, asyncio
 from datetime import datetime, timedelta
 import asyncpg
 from sqlalchemy import create_engine
 import databases  
-
-# Nightly index builder
 from indices_builder import run_indices_builder as indices_generate_snapshot
-# -----------------------------------------------------------------------------
 
-# -------- Database setup (sync psycopg3 + async asyncpg) -----------
 BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 # Normalize legacy scheme
@@ -8373,8 +8520,16 @@ async def _ensure_futures_tables_if_missing():
 @startup
 async def _ensure_trading_schema():
     try:
-        await database.execute("DROP MATERIALIZED VIEW IF EXISTS v_latest_settle")
-        await database.execute("DROP TABLE IF EXISTS v_latest_settle")
+        await database.execute("""
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname='v_latest_settle' AND relkind='m') THEN
+            EXECUTE 'DROP MATERIALIZED VIEW v_latest_settle';
+          ELSIF EXISTS (SELECT 1 FROM pg_class WHERE relname='v_latest_settle' AND relkind='v') THEN
+            EXECUTE 'DROP VIEW v_latest_settle';
+          END IF;
+        END$$;
+        """)
     except Exception:
         pass
 
@@ -9681,25 +9836,22 @@ async def _ensure_perf_indexes():
 @startup
 async def _ensure_inventory_constraints():
     try:
-        await database.execute(
-            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_on_hand_nonneg CHECK (qty_on_hand >= 0)"
-        )
+        await database.execute("""
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_qty_on_hand_nonneg') THEN
+            ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_on_hand_nonneg CHECK (qty_on_hand >= 0);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_qty_reserved_nonneg') THEN
+            ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_reserved_nonneg CHECK (qty_reserved >= 0);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_qty_committed_nonneg') THEN
+            ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_committed_nonneg CHECK (qty_committed >= 0);
+          END IF;
+        END$$;
+        """)
     except Exception:
-        pass  # already exists
-
-    try:
-        await database.execute(
-            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_reserved_nonneg CHECK (qty_reserved >= 0)"
-        )
-    except Exception:
-        pass  # already exists
-
-    try:
-        await database.execute(
-            "ALTER TABLE inventory_items ADD CONSTRAINT chk_qty_committed_nonneg CHECK (qty_committed >= 0)"
-        )
-    except Exception:
-        pass  # already exists
+        pass
 # -------- Inventory safety constraints --------
      
 # -------- Contract enums and FKs --------
@@ -9740,11 +9892,33 @@ async def _ensure_contract_enums_and_fks():
 
     # Cast the column to the enum if the table exists (no-throw)
     try:
+        await database.execute("ALTER TABLE contracts ALTER COLUMN status DROP DEFAULT;")
+    except Exception:
+        pass
+
+    try:
         await database.execute("""
           ALTER TABLE contracts
           ALTER COLUMN status TYPE contract_status
-          USING status::contract_status
+          USING (
+            CASE
+              WHEN status IS NULL OR status = '' THEN 'Open'
+              WHEN status IN ('Left Open','OPEN') THEN 'Open'
+              WHEN status ILIKE 'pending%' THEN 'Pending'
+              WHEN status ILIKE 'signed%' THEN 'Signed'
+              WHEN status ILIKE 'dispatch%' THEN 'Dispatched'
+              WHEN status ILIKE 'fulfill%' OR status ILIKE 'delivered%' THEN 'Fulfilled'
+              WHEN status ILIKE 'cancel%' THEN 'Cancelled'
+              WHEN status = 'Open' THEN 'Open'
+              ELSE 'Open'
+            END
+          )::contract_status
         """)
+    except Exception:
+        pass
+
+    try:
+        await database.execute("ALTER TABLE contracts ALTER COLUMN status SET DEFAULT 'Open'::contract_status;")
     except Exception:
         pass
 
