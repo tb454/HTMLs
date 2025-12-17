@@ -1666,6 +1666,39 @@ async def _ensure_vendor_quotes_schema():
     CREATE UNIQUE INDEX IF NOT EXISTS uq_vmm_vendor_vendor_mat
       ON vendor_material_map(vendor, material_vendor);
     """)
+
+@startup
+async def _ensure_v_vendor_blend_latest_view():
+    await run_ddl_multi("""
+    CREATE OR REPLACE VIEW public.v_vendor_blend_latest AS
+    WITH latest_date AS (
+      SELECT MAX(sheet_date) AS d FROM vendor_quotes
+    ),
+    latest_per_vendor AS (
+      SELECT DISTINCT ON (vq.vendor, COALESCE(m.material_canonical, vq.material))
+        COALESCE(m.material_canonical, vq.material) AS material,
+        vq.vendor,
+        vq.price_per_lb,
+        vq.inserted_at
+      FROM vendor_quotes vq
+      LEFT JOIN vendor_material_map m
+        ON m.vendor = vq.vendor AND m.material_vendor = vq.material
+      JOIN latest_date ld
+        ON vq.sheet_date = ld.d
+      WHERE vq.price_per_lb IS NOT NULL
+        AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+      ORDER BY vq.vendor, COALESCE(m.material_canonical, vq.material), vq.inserted_at DESC
+    )
+    SELECT
+      material,
+      ROUND(AVG(price_per_lb)::numeric, 6) AS blended_lb,
+      COUNT(*)::int                        AS vendor_count,
+      MIN(price_per_lb)::numeric           AS px_min,
+      MAX(price_per_lb)::numeric           AS px_max
+    FROM latest_per_vendor
+    GROUP BY material;
+    """)
+
 # ===== Vendor Quotes (ingest + pricing blend) =====
 
 # ------     Billing & International DDL -----
@@ -1996,7 +2029,7 @@ async def _connect_db_first():
             await database.connect()
         if getattr(app.state, "db_pool", None) is None:
             import asyncpg
-            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, min_size=10, max_size=20)
+            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, min_size=1, max_size=5)
 
     try:
         await _do_connect()
@@ -9811,7 +9844,11 @@ async def _ensure_contract_enums_and_fks():
     try:
         await database.execute("ALTER TYPE contract_status ADD VALUE IF NOT EXISTS 'Open'")
     except Exception:
-        # older PGs or order constraints — ignore if already present
+        pass
+    
+    try:
+        await database.execute("DROP VIEW IF EXISTS public.v_recent_vwap;")
+    except Exception:
         pass
 
     # Cast the column to the enum if the table exists (no-throw)
@@ -9843,6 +9880,43 @@ async def _ensure_contract_enums_and_fks():
 
     try:
         await database.execute("ALTER TABLE contracts ALTER COLUMN status SET DEFAULT 'Open'::contract_status;")
+    except Exception:
+        pass
+
+        # Recreate v_recent_vwap now that contracts.status may be an enum
+    try:
+        await database.execute("""
+        CREATE OR REPLACE VIEW public.v_recent_vwap AS
+        SELECT
+          fp.id AS product_id,
+          fp.material,
+          fp.delivery_location,
+          COALESCE(p.lookback_days, 14) AS lookback_days,
+          CASE
+            WHEN SUM(c.weight_tons) FILTER (
+              WHERE c.status IN ('Signed','Fulfilled')
+                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+            ) IS NULL
+             OR SUM(c.weight_tons) FILTER (
+              WHERE c.status IN ('Signed','Fulfilled')
+                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+            ) = 0
+            THEN NULL
+            ELSE
+              SUM(c.price_per_ton * c.weight_tons) FILTER (
+                WHERE c.status IN ('Signed','Fulfilled')
+                  AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+              )
+              / NULLIF(SUM(c.weight_tons) FILTER (
+                  WHERE c.status IN ('Signed','Fulfilled')
+                    AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
+                ), 0)
+          END AS recent_vwap
+        FROM futures_products fp
+        LEFT JOIN futures_pricing_params p ON p.product_id = fp.id
+        LEFT JOIN contracts c ON c.material = fp.material
+        GROUP BY fp.id, fp.material, fp.delivery_location, COALESCE(p.lookback_days,14);
+        """)
     except Exception:
         pass
 
