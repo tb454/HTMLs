@@ -32,7 +32,7 @@ import tempfile
 import pathlib
 from typing import Any, Dict  
 import json, hashlib, base64, hmac
-from passlib.hash import bcrypt
+from passlib.hash import bcrypt as passlib_bcrypt
 from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
@@ -273,6 +273,9 @@ async def _run_callable(fn):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ensure databases backend is live (required for database.execute / database.fetch)
+    if not database.is_connected:
+        await database.connect()
     # ensure the registry exists before any startup hook can append to it
     app.state._bg_tasks = getattr(app.state, "_bg_tasks", [])
     # 1) startup hooks
@@ -953,7 +956,7 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
         # seed an admin user if none exists (bcrypt is generated in Python)
         try:
             default_email = "admin@example.com"
-            default_pass = bcrypt.hash("admin123!")  # only used in CI/staging
+            default_pass = passlib_bcrypt.hash("admin123!")  # only used in CI/staging
             conn.execute(
                 _sqltext(
                     "INSERT INTO public.users (email, password_hash, role) "
@@ -1816,7 +1819,7 @@ async def vq_current(limit:int=500):
 
 @vendor_router.post("/snapshot_to_indices", summary="Snapshot vendor-blended prices into indices_daily for today")
 async def vq_snapshot_to_indices(as_of: date = None):
-    asof = as_of or datetime.now(datetime.timezone.utc).date()
+    asof = as_of or datetime.now(timezone.utc).date()
     rows = await database.fetch_all("""
       WITH latest AS (
         SELECT DISTINCT ON (vendor, material)
@@ -10012,7 +10015,7 @@ async def _nightly_dossier_sync():
         nonlocal last_sent
         while True:
             # schedule ~02:05 UTC daily
-            now = datetime.now(datetime.timezone.utc)
+            now = datetime.now(timezone.utc)
             target = now.replace(hour=2, minute=5, second=0, microsecond=0)
             if target <= now:
                 target += timedelta(days=1)
@@ -12514,7 +12517,7 @@ async def stocks_snapshot(as_of: date):
 
 @app.get("/stocks", tags=["Stocks"], summary="Read stocks snapshot (JSON)")
 async def stocks(as_of: date | None = None):
-    d = as_of or datetime.now(datetime.timezone.utc).date()
+    d = as_of or datetime.now(timezone.utc).date()
     rows = await database.fetch_all("""
       SELECT as_of, symbol, location, qty_lots, lot_size
       FROM public.stocks_daily
@@ -12525,7 +12528,7 @@ async def stocks(as_of: date | None = None):
 
 @app.get("/stocks.csv", tags=["Stocks"], summary="Read stocks snapshot (CSV)")
 async def stocks_csv(as_of: date | None = None):
-    d = as_of or datetime.now(datetime.timezone.utc).date()
+    d = as_of or datetime.now(timezone.utc).date()
     rows = await database.fetch_all("""
       SELECT as_of, symbol, location, qty_lots, lot_size
       FROM public.stocks_daily
@@ -12629,7 +12632,7 @@ async def get_all_bols_pg(
             },
             "pickup_signature": {
                 "base64": d.get("pickup_signature_base64") or "",
-                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.now(datetime.timezone.utc),
+                "timestamp": d.get("pickup_signature_time") or d.get("pickup_time") or datetime.now(timezone.utc),
             },
             "delivery_signature": (
                 {"base64": d.get("delivery_signature_base64"), "timestamp": d.get("delivery_signature_time")}
@@ -14451,6 +14454,10 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     )
                     RETURNING *
                 """, payload)
+            
+            # ---- import_mode short-circuit ----
+            if import_mode:
+                return await _idem_guard(request, key, row)
             
             # LIVE path: reserve inventory, write Pending
             await database.execute("""
@@ -17778,7 +17785,7 @@ async def index_history_csv(symbol: str, start: date | None = None, end: date | 
 
 @app.get("/index/tweet", tags=["Index"], summary="One-line tweet text for today’s BR-Settle")
 async def index_tweet(as_of: date | None = None):
-    d = as_of or datetime.now(datetime.timezone.utc).date()
+    d = as_of or datetime.now(timezone.utc).date()
     rows = await database.fetch_all(
         "SELECT symbol, settle FROM public.settlements WHERE as_of=:d ORDER BY symbol",
         {"d": d}
@@ -18252,7 +18259,7 @@ async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
 
 async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
     data = await build_export_zip()
-    now = datetime.now(datetime.timezone.utc)
+    now = datetime.now(timezone.utc)
     day = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{stamp}_export_all.zip"
