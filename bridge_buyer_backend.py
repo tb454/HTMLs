@@ -991,7 +991,7 @@ def send_application_email(payload: ApplyRequest, app_id: str):
     subject = f"[BRidge] New Access Application — {payload.org_name} ({payload.plan})"
     lines = [
         f"Application ID: {app_id}",
-        f"Received At: {datetime.now(datetime.timezone.utc).isoformat()}Z",
+        f"Received At: {datetime.now(_tz.utc).isoformat()}Z",
         "",
         f"Entity Type: {payload.entity_type}",
         f"Role: {payload.role}",
@@ -1452,7 +1452,14 @@ def _split_sql_statements(sql: str) -> list[str]:
 
 
 async def run_ddl_multi(sql: str):
-    """Run multiple DDL statements safely (no naive split(';'))."""
+    """Run multiple DDL statements safely; auto-connect if needed."""
+    try:
+        if not database.is_connected:
+            await database.connect()
+    except Exception:
+        # If connect fails, we still want a clean warning per stmt below.
+        pass
+
     for stmt in _split_sql_statements(sql):
         try:
             await database.execute(stmt)
@@ -1537,7 +1544,7 @@ def _ensure_database_exists(dsn: str):
     """
     try:
         from sqlalchemy.engine.url import make_url
-        import psycopg  # psycopg3
+        import psycopg  
 
         url = make_url(dsn)
         if not str(url).startswith("postgresql"):
@@ -1579,7 +1586,7 @@ async def vendor_latest(limit: int = 200):
     """, {"limit": limit})
     return [dict(r) for r in rows]
 
-@vendor_router.post("/snapshot_to_indices", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
+@vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
 async def vendor_snapshot_to_indices():
     # Use your existing _vendor_blended_lb(material) helper if it exists and returns lb-price;
     # Here we snapshot *all mapped* materials.
@@ -1977,6 +1984,9 @@ async def _create_db_if_missing_async(db_url: str) -> None:
 @startup
 async def _connect_db_first():
     env = os.getenv("ENV", "").lower()
+
+    if not database.is_connected:
+        await database.connect()
 
     async def _do_connect():
         if not database.is_connected:
@@ -4455,41 +4465,6 @@ async def notify_humans(event: str, *, member: str, subject: str, html: str,
         await _send_email(ADMIN_EMAIL, f"[{event}] " + subject, html, ref_type, ref_id)
 # ----- billing contacts and email logs -----
 
-# ----- Invite system (admin create + accept) -----
-class InviteCreateIn(BaseModel):
-    email: EmailStr
-    role: Literal["manager","employee","buyer","seller"]="employee"
-    member: Optional[str] = None
-
-@app.post("/admin/invites/create", tags=["Admin"], summary="Create invite link (email+role+member)")
-async def admin_invite_create(email: EmailStr, role: Literal["admin","manager","employee"], member: str, request: Request):
-    _require_admin(request)  # enforce admin in prod
-    payload = {"email": str(email).strip().lower(), "role": role, "member": member.strip()}
-    tok = make_signed_token(payload)
-    base = os.getenv("BILLING_PUBLIC_URL") or os.getenv("BASE_URL") or ""
-    link = f"{base}/invites/accept?token={tok}" if base else f"/invites/accept?token={tok}"
-
-    # optional: log/store
-    try:
-        await database.execute("""
-          INSERT INTO invites_log(invite_id, email, member, role_req)
-          VALUES (gen_random_uuid(), :e, :m, :r)
-        """, {"e": str(email).lower(), "m": member, "r": role})
-    except Exception:
-        pass
-
-    # email human
-    try:
-        html = f"<div style='font-family:system-ui'>You have been invited to <b>{member}</b> as <b>{role}</b>.<br>Click to accept: <a href='{link}'>{link}</a></div>"
-        await _send_email(str(email), f"BRidge Invite — {member}", html, ref_type="invite", ref_id=member)
-    except Exception:
-        pass
-
-    return {"ok": True, "link": link}
-
-
-# ----- Invite system (admin create + accept) -----
-
 # ===== member plan items =====
 @startup
 async def _ensure_member_plan_items():
@@ -6160,17 +6135,13 @@ BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if BASE_DATABASE_URL.startswith("postgres://"):
     BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Driver-specific DSNs
 SYNC_DATABASE_URL = BASE_DATABASE_URL
-if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL and "+asyncpg" not in SYNC_DATABASE_URL:
+if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL:
     SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 ASYNC_DATABASE_URL = BASE_DATABASE_URL
-if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
-    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
-if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
-    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
-
+if ASYNC_DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in ASYNC_DATABASE_URL:
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 # Instantiate clients
 engine = create_engine(
     SYNC_DATABASE_URL,
@@ -8326,30 +8297,6 @@ def admin_export_all(request: Request = None):
             headers={"Content-Disposition": 'attachment; filename="bridge_export_all.zip"'}
         )
 
-@app.get("/admin/exports/all.zip", tags=["Admin"], summary="Download all datasets in a zip", status_code=200)
-async def admin_export_all():
-    import io, zipfile, csv, datetime as dt
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-      for name, sql in [
-        ("contracts.csv", "SELECT * FROM contracts"),
-        ("bols.csv", "SELECT * FROM bols"),
-        ("vendor_quotes.csv", "SELECT * FROM vendor_quotes"),
-        ("indices_daily.csv", "SELECT * FROM indices_daily"),
-      ]:
-        rows = await database.fetch_all(sql)
-        s = io.StringIO()
-        if rows:
-            writer = csv.DictWriter(s, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows([dict(r) for r in rows])
-        else:
-            s.write("")
-        z.writestr(name, s.getvalue())
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="all.zip"'} )
-
 @app.get("/admin/export_behavior.json", tags=["Admin"], summary="Behavioral export (contracts, BOLs) for Dossier", status_code=200)
 async def admin_export_behavior():
     import json
@@ -8360,39 +8307,6 @@ async def admin_export_behavior():
       "contracts": [dict(x) for x in contracts],
       "bols": [dict(x) for x in bols],
     }
-
-@app.get("/admin/dossier/queue", tags=["Admin"], summary="Dossier ingest queue (recent)", status_code=200)
-async def admin_dossier_queue(limit: int = Query(40, ge=1, le=500)):
-    """
-    Return recent rows from dossier_ingest_queue for the admin dashboard.
-    """
-    rows = await database.fetch_all(
-        """
-        SELECT id, source_system, source_table, event_type, status,
-               attempts, last_error, created_at
-        FROM dossier_ingest_queue
-        ORDER BY created_at DESC
-        LIMIT :lim
-        """,
-        {"lim": limit},
-    )
-    return [dict(r) for r in rows]
-
-
-@app.post("/admin/dossier/retry_failed", tags=["Admin"], summary="Retry failed Dossier ingest events", status_code=200)
-async def admin_dossier_retry_failed():
-    """
-    Mark failed rows in dossier_ingest_queue back to pending so the worker can retry them.
-    """
-    await database.execute(
-        """
-        UPDATE dossier_ingest_queue
-        SET status = 'pending', attempts = 0
-        WHERE status = 'failed'
-        """
-    )
-    return {"message": "Retry triggered."}
-
 # --- ZIP export (all core data) ---
 
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
@@ -13669,7 +13583,7 @@ async def delta_anomalies(material: str):
     return [dict(r) for r in rows]
 
 # --- INDICES FEED ---
-@app.get("/indices", tags=["Analytics"], summary="Return latest BRidge scrap index values", description="Shows the most recent average price snapshot for tracked materials in each region.")
+@app.get("/api/indices", tags=["Analytics"], summary="Return latest BRidge scrap index values", description="Shows the most recent average price snapshot for tracked materials in each region.")
 async def get_latest_indices():
     query = """
         SELECT DISTINCT ON (region, sku)
@@ -16605,14 +16519,6 @@ class AlertIn(BaseModel):
     data: Dict[str, Any]
     severity: Literal["info","warn","high"] = "info"
 
-@app.get("/surveil/alerts", tags=["Surveillance"], summary="List alerts")
-async def surveil_list(limit:int=100):
-    rows = await database.fetch_all(
-        "SELECT * FROM surveil_alerts ORDER BY created_at DESC LIMIT :l",
-        {"l": limit}
-    )
-    return [dict(r) for r in rows]
-
 @app.post("/surveil/alert", tags=["Surveillance"], summary="Create alert")
 async def surveil_create(a: AlertIn):
     try:
@@ -16698,115 +16604,204 @@ async def ml_anomaly(a: AnomIn):
 @startup
 async def _flywheel_anomaly_cron():
     """
-    Nightly flywheel job:
-    - Look at last 60 days of contracts
-    - Compute per-(seller, material) price anomaly
-    - Write one row into anomaly_scores per pair
-    This is completely internal; no QBO/ICE calls.
+    Nightly flywheel job (vendor-aware):
+
+    A) Vendor Quote Anomalies:
+       - For each canonical material on the latest sheet_date
+       - Compare each vendor's latest quote vs cross-vendor mean/stdev
+       - Write anomaly_scores with symbol prefix 'VQ::'
+
+    B) Contract-vs-Vendor Spread:
+       - For each (seller, material) with recent contracts
+       - Compare latest contract price vs vendor blended benchmark (latest)
+       - Write anomaly_scores with symbol prefix 'SPREAD::'
     """
     async def _run():
         while True:
             try:
-                # Pull last 60 days of price history per seller/material
-                rows = await database.fetch_all(
-                    """
-                    SELECT seller       AS member,
-                           material     AS symbol,
+                # -------- A) Vendor quote anomalies (big universe) --------
+                # Pull latest-per-vendor-per-canonical material for latest sheet_date
+                vq_rows = await database.fetch_all("""
+                    WITH latest_date AS (
+                      SELECT MAX(sheet_date) AS d FROM vendor_quotes
+                    ),
+                    latest_per_vendor AS (
+                      SELECT DISTINCT ON (vq.vendor, vmm.material_canonical)
+                        vq.vendor,
+                        vmm.material_canonical AS material,
+                        vq.price_per_lb,
+                        vq.sheet_date,
+                        vq.inserted_at
+                      FROM vendor_quotes vq
+                      JOIN vendor_material_map vmm
+                        ON vmm.vendor = vq.vendor
+                       AND vmm.material_vendor = vq.material
+                      JOIN latest_date ld ON vq.sheet_date = ld.d
+                      WHERE vq.price_per_lb IS NOT NULL
+                        AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+                      ORDER BY vq.vendor, vmm.material_canonical, vq.inserted_at DESC
+                    )
+                    SELECT vendor, material, price_per_lb, sheet_date
+                    FROM latest_per_vendor
+                """)
+
+                # Group by material -> list of (vendor, price_lb)
+                mats: dict[str, list[tuple[str, float]]] = {}
+                latest_sheet_date = None
+                for r in vq_rows:
+                    vendor = (r["vendor"] or "").strip()
+                    material = (r["material"] or "").strip()
+                    px = float(r["price_per_lb"])
+                    if not vendor or not material:
+                        continue
+                    mats.setdefault(material, []).append((vendor, px))
+                    latest_sheet_date = r["sheet_date"]
+
+                vq_pairs_written = 0
+                if latest_sheet_date:
+                    as_of = latest_sheet_date  # DATE already
+                    for material, pts in mats.items():
+                        if len(pts) < 4:
+                            # need multiple vendors to know what's "off market"
+                            continue
+                        prices = [p for _v, p in pts]
+                        try:
+                            mu = mean(prices)
+                            sd = stdev(prices) or 0.0
+                        except Exception:
+                            continue
+                        if sd <= 0:
+                            continue
+
+                        for vendor, px in pts:
+                            z = (px - mu) / sd
+                            score = float(min(1.0, max(0.0, abs(z) / 4.0)))
+                            features = {
+                                "kind": "vendor_quote",
+                                "material": material,
+                                "vendor_px_lb": round(px, 6),
+                                "cross_vendor_avg_lb": round(mu, 6),
+                                "cross_vendor_sd_lb": round(sd, 6),
+                                "zscore": round(z, 4),
+                                "vendor_count": len(prices),
+                                "sheet_date": str(as_of),
+                            }
+                            # symbol namespacing avoids PK collisions
+                            sym = f"VQ::{material}"
+                            await database.execute(
+                                """
+                                INSERT INTO anomaly_scores(member, symbol, as_of, score, features)
+                                VALUES (:m, :s, :d, :sc, :feat::jsonb)
+                                ON CONFLICT (member, symbol, as_of) DO UPDATE
+                                  SET score = EXCLUDED.score,
+                                      features = EXCLUDED.features,
+                                      created_at = NOW()
+                                """,
+                                {"m": vendor, "s": sym, "d": as_of, "sc": score, "feat": json.dumps(features)},
+                            )
+                            vq_pairs_written += 1
+
+                # -------- B) Contract vs vendor spread anomalies --------
+                # Build latest vendor blended benchmark (latest sheet_date)
+                vendor_bench = await database.fetch_all("""
+                    SELECT material, blended_lb, vendor_count, px_min, px_max
+                    FROM v_vendor_blend_latest
+                """)
+                bench_map = { (r["material"] or "").strip(): dict(r) for r in vendor_bench if r["material"] }
+
+                # Pull last 60d contracts
+                c_rows = await database.fetch_all("""
+                    SELECT seller AS member,
+                           material AS symbol,
                            price_per_ton,
                            created_at
                     FROM contracts
                     WHERE created_at >= NOW() - INTERVAL '60 days'
                       AND price_per_ton IS NOT NULL
-                    """
-                )
+                """)
 
-                # Group into (member, symbol) -> [(price, created_at), ...]
-                buckets: Dict[Tuple[str, str], List[Tuple[float, datetime]]] = {}
-                for r in rows:
-                    member = (r["member"] or "").strip()
-                    symbol = (r["symbol"] or "").strip()
-                    if not member or not symbol:
+                # Group to compute spread history per (seller, material)
+                buckets: dict[tuple[str, str], list[tuple[float, datetime]]] = {}
+                for r in c_rows:
+                    seller = (r["member"] or "").strip()
+                    material = (r["symbol"] or "").strip()
+                    if not seller or not material:
                         continue
-                    key = (member, symbol)
-                    buckets.setdefault(key, []).append(
-                        (float(r["price_per_ton"]), r["created_at"])
-                    )
+                    buckets.setdefault((seller, material), []).append((float(r["price_per_ton"]), r["created_at"]))
 
-                for (member, symbol), pts in buckets.items():
-                    if len(pts) < 10:
-                        # need at least 10 points for anything meaningful
+                spread_pairs_written = 0
+                for (seller, material), pts in buckets.items():
+                    # Need a vendor benchmark to compare against
+                    b = bench_map.get(material)
+                    if not b or b.get("blended_lb") is None:
                         continue
 
-                    # Sort oldest → newest by created_at
+                    bench_ton = float(b["blended_lb"]) * 2000.0
                     pts.sort(key=lambda x: x[1])
-                    prices = [p for p, _tstamp in pts]
+                    prices = [p for p, _ts in pts]
                     last_price, last_ts = pts[-1]
+                    # Spread series = contract - bench
+                    spreads = [p - bench_ton for p in prices]
 
+                    if len(spreads) < 10:
+                        continue
                     try:
-                        mu = mean(prices)
-                        sd = stdev(prices) or 0.0
+                        mu = mean(spreads)
+                        sd = stdev(spreads) or 0.0
                     except Exception:
                         continue
-
                     if sd <= 0:
-                        # flat curve, nothing to flag
                         continue
 
-                    z = (last_price - mu) / sd
-                    # Normalize to [0,1]: |z| / 4.0, capped at 1.0
+                    last_spread = last_price - bench_ton
+                    z = (last_spread - mu) / sd
                     score = float(min(1.0, max(0.0, abs(z) / 4.0)))
-
                     as_of = last_ts.date()
+
                     features = {
-                        "avg_price": round(mu, 4),
-                        "stdev_price": round(sd, 4),
-                        "last_price": round(last_price, 4),
+                        "kind": "contract_vs_vendor",
+                        "material": material,
+                        "bench_vendor_lb": round(float(b["blended_lb"]), 6),
+                        "bench_vendor_ton": round(bench_ton, 4),
+                        "vendor_count": int(b.get("vendor_count") or 0),
+                        "contract_last_ton": round(last_price, 4),
+                        "spread_last": round(last_spread, 4),
+                        "spread_avg": round(mu, 4),
+                        "spread_sd": round(sd, 4),
                         "zscore": round(z, 4),
-                        "n": len(prices),
+                        "n": len(spreads),
                     }
 
-                    try:
-                        # Supabase shape managed schema already exists (BRIDGE_BOOTSTRAP_DDL=0).
-                        await database.execute(
-                            """
-                            INSERT INTO anomaly_scores(member, symbol, as_of, score, features)
-                            VALUES (:m, :s, :d, :sc, :features)
-                            """,
-                            {
-                                "m": member,
-                                "s": symbol,
-                                "d": as_of,
-                                "sc": score,
-                                "features": json.dumps(features),
-                            },
-                        )
-                    except Exception as e:
-                        try:
-                            logger.warn("flywheel_anomaly_insert_failed",
-                                        member=member, symbol=symbol, err=str(e))
-                        except Exception:
-                            pass
+                    sym = f"SPREAD::{material}"
+                    await database.execute(
+                        """
+                        INSERT INTO anomaly_scores(member, symbol, as_of, score, features)
+                        VALUES (:m, :s, :d, :sc, :feat::jsonb)
+                        ON CONFLICT (member, symbol, as_of) DO UPDATE
+                          SET score = EXCLUDED.score,
+                              features = EXCLUDED.features,
+                              created_at = NOW()
+                        """,
+                        {"m": seller, "s": sym, "d": as_of, "sc": score, "feat": json.dumps(features)},
+                    )
+                    spread_pairs_written += 1
 
-                try:
-                    logger.info("flywheel_anomaly_run_ok", pairs=len(buckets))
-                except Exception:
-                    pass
+                logger.info(
+                    "flywheel_anomaly_run_ok",
+                    vendor_pairs=vq_pairs_written,
+                    spread_pairs=spread_pairs_written,
+                    vendor_materials=len(mats),
+                    contract_pairs=len(buckets),
+                )
 
             except Exception as e:
-                # Never kill the worker on flywheel errors
                 try:
                     logger.warn("flywheel_anomaly_cron_failed", err=str(e))
                 except Exception:
                     pass
 
-            # Sleep ~24h between runs
-            try:
-                await asyncio.sleep(24 * 3600)
-            except Exception:
-                # if sleep is interrupted, just loop again
-                pass
+            await asyncio.sleep(24 * 3600)
 
-    # Spawn the background task and register in app.state._bg_tasks
     t = asyncio.create_task(_run())
     app.state._bg_tasks.append(t)
 # ===== Surveillance / Alerts =====
@@ -18175,54 +18170,49 @@ async def _fetch_csv_rows(query: str, params: Dict[str, Any] = None) -> List[Dic
 
 async def build_export_zip() -> bytes:
     """
-    Builds a ZIP with CSVs for contracts, bols, inventory, users, index_snapshots.
+    Builds a ZIP with CSVs for contracts, bols, inventory movements, users, index_snapshots.
     Mirrors /admin/export_all.zip behavior but returns bytes for reuse (cron/upload).
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-       exports = {
-    # contracts table: id, buyer, seller, material, weight_tons, price_per_ton, ...
-    "contracts.csv": CONTRACTS_EXPORT_SQL,
+        exports = {
+            "contracts.csv": CONTRACTS_EXPORT_SQL,
+            "bols.csv": """
+                SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
+                       price_per_unit, total_value,
+                       carrier_name, carrier_driver, carrier_truck_vin,
+                       pickup_signature_base64, pickup_signature_time,
+                       pickup_time, delivery_signature_base64, delivery_signature_time,
+                       delivery_time, status
+                FROM bols
+                ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
+            """,
+            "inventory_movements.csv": """
+                SELECT seller, sku, movement_type, qty, ref_contract, created_at
+                FROM inventory_movements
+                ORDER BY created_at DESC
+            """,
+            "users.csv": """
+                SELECT id, email, COALESCE(username, '') AS username, role, created_at
+                FROM public.users
+                ORDER BY created_at DESC
+            """,
+            "index_snapshots.csv": """
+                SELECT id, region, sku, avg_price, snapshot_date
+                FROM index_snapshots
+                ORDER BY snapshot_date DESC
+            """,
+        }
 
-    # bols table: bol_id (not id) and detailed columns 
-    "bols.csv": """
-        SELECT bol_id, contract_id, buyer, seller, material, weight_tons,
-               price_per_unit, total_value,
-               carrier_name, carrier_driver, carrier_truck_vin,
-               pickup_signature_base64, pickup_signature_time,
-               pickup_time, delivery_signature_base64, delivery_signature_time,
-               delivery_time, status
-        FROM bols
-        ORDER BY pickup_time DESC NULLS LAST, bol_id DESC
-    """,
-    "inventory_movements.csv": """
-        SELECT seller, sku, movement_type, qty, ref_contract, created_at
-        FROM inventory_movements
-        ORDER BY created_at DESC
-    """,
-    # users table is public.users in your bootstrap; include username if present
-    "users.csv": """
-        SELECT id, email, COALESCE(username, '') AS username, role, created_at
-        FROM public.users
-        ORDER BY created_at DESC
-    """,
-    "index_snapshots.csv": """
-        SELECT id, region, sku, avg_price, snapshot_date
-        FROM index_snapshots
-        ORDER BY snapshot_date DESC
-    """
-}
-
-    for fname, sql in exports.items():
+        for fname, sql in exports.items():
             rows = await _fetch_csv_rows(sql)
-            mem = io.StringIO()
+            mem = io.StringIO(newline="")
             if rows:
                 writer = csv.DictWriter(mem, fieldnames=list(rows[0].keys()))
                 writer.writeheader()
                 writer.writerows(rows)
-            else:
-                mem.write("")  # empty file is fine
             zf.writestr(fname, mem.getvalue().encode("utf-8"))
+
     return buf.getvalue()
 
 async def _upload_to_supabase(path: str, data: bytes) -> Dict[str, Any]:
