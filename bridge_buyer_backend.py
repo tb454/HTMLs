@@ -6135,13 +6135,20 @@ BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if BASE_DATABASE_URL.startswith("postgres://"):
     BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# --- SQLAlchemy (sync) wants a driver prefix ---
 SYNC_DATABASE_URL = BASE_DATABASE_URL
 if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL:
     SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
+# --- asyncpg (and databases) must NOT have "+asyncpg" in scheme ---
+# asyncpg expects: postgresql://user:pass@host:port/dbname
 ASYNC_DATABASE_URL = BASE_DATABASE_URL
-if ASYNC_DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in ASYNC_DATABASE_URL:
-    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+# If someone set DATABASE_URL as postgresql+asyncpg://..., strip it back
+if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+
 # Instantiate clients
 engine = create_engine(
     SYNC_DATABASE_URL,
