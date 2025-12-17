@@ -9859,22 +9859,22 @@ async def _ensure_contract_enums_and_fks():
 
     try:
         await database.execute("""
-          ALTER TABLE contracts
-          ALTER COLUMN status TYPE contract_status
-          USING (
-            CASE
-              WHEN status IS NULL OR status = '' THEN 'Open'
-              WHEN status IN ('Left Open','OPEN') THEN 'Open'
-              WHEN status ILIKE 'pending%' THEN 'Pending'
-              WHEN status ILIKE 'signed%' THEN 'Signed'
-              WHEN status ILIKE 'dispatch%' THEN 'Dispatched'
-              WHEN status ILIKE 'fulfill%' OR status ILIKE 'delivered%' THEN 'Fulfilled'
-              WHEN status ILIKE 'cancel%' THEN 'Cancelled'
-              WHEN status = 'Open' THEN 'Open'
-              ELSE 'Open'
-            END
-          )::contract_status
-        """)
+            ALTER TABLE contracts
+            ALTER COLUMN status TYPE contract_status
+            USING (
+                CASE
+                WHEN status IS NULL OR (status::text) = '' THEN 'Open'
+                WHEN (status::text) IN ('Left Open','OPEN') THEN 'Open'
+                WHEN (status::text) ILIKE 'pending%' THEN 'Pending'
+                WHEN (status::text) ILIKE 'signed%' THEN 'Signed'
+                WHEN (status::text) ILIKE 'dispatch%' THEN 'Dispatched'
+                WHEN (status::text) ILIKE 'fulfill%' OR (status::text) ILIKE 'delivered%' THEN 'Fulfilled'
+                WHEN (status::text) ILIKE 'cancel%' THEN 'Cancelled'
+                WHEN (status::text) = 'Open' THEN 'Open'
+                ELSE 'Open'
+                END
+            )::contract_status
+            """)
     except Exception:
         pass
 

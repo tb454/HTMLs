@@ -36,18 +36,11 @@ services:
     env_file: .env
     environment:
       <<: *default-env
-      # allow localhost Host header while ENV=production
       ALLOW_LOCALHOST_IN_PROD: "1"
       ALLOW_PUBLIC_SELLER_SIGNUP: "1"
-
-      # inside the network, hostname is "db"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
-
-      # DB pool caps (used if you wire the code change; harmless otherwise)
-      DB_POOL_MIN: "1"
-      DB_POOL_MAX: "5"
-
       GUNICORN_CMD_ARGS: "--timeout 90"
+      BRIDGE_BOOTSTRAP_DDL: "0"
     command: >
       gunicorn bridge_buyer_backend:app
       -k uvicorn.workers.UvicornWorker
@@ -79,13 +72,7 @@ services:
       <<: *default-env
       ALLOW_LOCALHOST_IN_PROD: "1"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
-
-      # IMPORTANT: prevent worker from racing DDL/bootstrap with api
       BRIDGE_BOOTSTRAP_DDL: "0"
-
-      # also cap pools if worker creates any (safe)
-      DB_POOL_MIN: "1"
-      DB_POOL_MAX: "3"
     command: ["python","-u","worker.py"]
 
 volumes:
