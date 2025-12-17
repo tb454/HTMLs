@@ -3,7 +3,7 @@
 x-env: &default-env
   ENV: "production"
   PYTHONUNBUFFERED: "1"
-  UVICORN_WORKERS: "4"
+  UVICORN_WORKERS: "1"
 
 services:
   db:
@@ -45,7 +45,7 @@ services:
     command: >
       gunicorn bridge_buyer_backend:app
       -k uvicorn.workers.UvicornWorker
-      -w ${API_WORKERS:-4}
+      -w ${API_WORKERS:-1}
       --timeout 90
       --bind 0.0.0.0:8000
     ports:
