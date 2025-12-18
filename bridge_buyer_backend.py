@@ -1009,6 +1009,7 @@ async def _bootstrap_core_tables_for_ci():
       seller text NOT NULL,
       sku text NOT NULL,
       description text,
+      location text,
       uom text NOT NULL DEFAULT 'ton',
       qty_on_hand numeric NOT NULL DEFAULT 0,
       qty_reserved numeric NOT NULL DEFAULT 0,
