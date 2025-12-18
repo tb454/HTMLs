@@ -1823,7 +1823,7 @@ async def vq_ingest_excel(file: UploadFile = File(...)):
 
         if sheet_date is None:
             sheet_date = utcnow().date()
-            
+
         rows.append({
             "vendor": vendor, "category": category or "Unknown",
             "material": material, "price_per_lb": price_per_lb,
@@ -2114,10 +2114,14 @@ async def time_sync(request: Request):
 # =====  account - user ownership =====
 @startup
 async def _ensure_account_user_map():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS account_users(
-      account_id UUID PRIMARY KEY,
-      username   TEXT NOT NULL
+      account_id UUID NOT NULL,
+      username   TEXT NOT NULL,
+      PRIMARY KEY (account_id, username)
     );
     """)
 # =====  account - user ownership =====
@@ -2185,22 +2189,28 @@ async def admin_attach_user(
         """
         INSERT INTO account_users(account_id, username)
         VALUES (:id, :u)
-        ON CONFLICT (account_id) DO UPDATE SET username = EXCLUDED.username
+        ON CONFLICT (account_id, username) DO NOTHING
         """,
         {"id": account_id, "u": body.username.strip()},
     )
     return {"ok": True, "account_id": account_id, "username": body.username.strip()}
 
-@accounts_router.get("/{account_id}/users", summary="Get user linked to account")
+@accounts_router.get("/{account_id}/users", summary="Get users linked to account")
 async def admin_get_account_user(account_id: str, request: Request):
     _require_admin(request)
-    row = await database.fetch_one(
-        "SELECT account_id::text AS account_id, username FROM account_users WHERE account_id=:id",
+
+    rows = await database.fetch_all(
+        "SELECT username FROM account_users WHERE account_id=:id ORDER BY username",
         {"id": account_id},
     )
-    if not row:
-        return {"account_id": account_id, "username": None}
-    return dict(row)
+    usernames = [r["username"] for r in rows]
+
+    # Backward compatible: keep "username" as the first user (or None)
+    return {
+        "account_id": account_id,
+        "usernames": usernames,
+        "username": (usernames[0] if usernames else None),
+    }
 
 # wire router
 app.include_router(accounts_router)
@@ -8504,6 +8514,7 @@ async def _ensure_trading_schema():
           id UUID PRIMARY KEY,
           name TEXT NOT NULL,
           type TEXT NOT NULL CHECK (type IN ('buyer','seller','broker'))
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
         """
@@ -8693,6 +8704,7 @@ async def _ensure_inventory_schema():
         """
         CREATE OR REPLACE VIEW inventory_available AS
         SELECT
+          tenant_id,
           seller,
           sku,
           description,
