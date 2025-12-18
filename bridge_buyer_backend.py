@@ -9527,111 +9527,91 @@ async def finished_goods(
     ]
 
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_contracts_bols_schema():
-    ddl = [
-        # contracts (base shape)
-        """
-        CREATE TABLE IF NOT EXISTS public.contracts (
-          id UUID PRIMARY KEY,
-          buyer TEXT NOT NULL,
-          seller TEXT NOT NULL,
-          material TEXT NOT NULL,
-          weight_tons NUMERIC NOT NULL,
-          price_per_ton NUMERIC NOT NULL,
-          status TEXT NOT NULL DEFAULT 'Open',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          signed_at TIMESTAMPTZ,
-          signature TEXT
-        );
-        """,
+    # Optional gate (you already set this in tests/conftest.py)
+    if not os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes"):
+        return
 
-        # idempotent key for imports/backfills
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON public.contracts(dedupe_key);",
+    sql = """
+    -- contracts (base shape)
+    CREATE TABLE IF NOT EXISTS public.contracts (
+      id UUID PRIMARY KEY,
+      buyer TEXT NOT NULL,
+      seller TEXT NOT NULL,
+      material TEXT NOT NULL,
+      weight_tons NUMERIC NOT NULL,
+      price_per_ton NUMERIC NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      signed_at TIMESTAMPTZ,
+      signature TEXT
+    );
 
-        # extend contracts with pricing fields used by create_contract()
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;",
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_symbol    TEXT;",
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_price     NUMERIC;",
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_source    TEXT;",
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_timestamp TIMESTAMPTZ;",
-        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS currency            TEXT DEFAULT 'USD';",
+    -- idempotent key for imports/backfills
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON public.contracts(dedupe_key);
 
-        # bols (base shape)
-        """
-        CREATE TABLE IF NOT EXISTS public.bols (
-          bol_id UUID PRIMARY KEY,
-          contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
-          buyer TEXT,
-          seller TEXT,
-          material TEXT,
-          weight_tons NUMERIC,
-          price_per_unit NUMERIC,
-          total_value NUMERIC,
+    -- pricing fields used by create_contract()
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_symbol    TEXT;
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_price     NUMERIC;
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_source    TEXT;
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_timestamp TIMESTAMPTZ;
+    ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS currency            TEXT DEFAULT 'USD';
 
-          carrier_name TEXT,
-          carrier_driver TEXT,
-          carrier_truck_vin TEXT,
-          carrier_dot TEXT,
-          carrier_mc TEXT,
-          trailer TEXT,
-          driver_name TEXT,
+    -- bols (base shape)
+    CREATE TABLE IF NOT EXISTS public.bols (
+      bol_id UUID PRIMARY KEY,
+      contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+      buyer TEXT,
+      seller TEXT,
+      material TEXT,
+      weight_tons NUMERIC,
+      price_per_unit NUMERIC,
+      total_value NUMERIC,
+      pickup_signature_base64 TEXT,
+      pickup_signature_time TIMESTAMPTZ,
+      pickup_time TIMESTAMPTZ,
+      delivery_signature_base64 TEXT,
+      delivery_signature_time TIMESTAMPTZ,
+      delivery_time TIMESTAMPTZ,
+      status TEXT
+    );
 
-          pickup_signature_base64 TEXT,
-          pickup_signature_time TIMESTAMPTZ,
-          pickup_time TIMESTAMPTZ,
+    -- ✅ REPAIR legacy/minimal bols tables (THIS fixes carrier_name missing in CI)
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name      TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_driver    TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_truck_vin TEXT;
 
-          delivery_signature_base64 TEXT,
-          delivery_signature_time TIMESTAMPTZ,
-          delivery_time TIMESTAMPTZ,
+    -- (these are in your create schema already, but safe to repair too)
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_base64   TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_time     TIMESTAMPTZ;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_time               TIMESTAMPTZ;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_base64 TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_time   TIMESTAMPTZ;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_time             TIMESTAMPTZ;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS status                    TEXT;
 
-          notes TEXT,
-          status TEXT,
+    CREATE INDEX IF NOT EXISTS idx_bols_contract    ON public.bols(contract_id);
+    CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON public.bols(pickup_time DESC);
 
-          origin_country TEXT,
-          destination_country TEXT,
-          port_code TEXT,
-          hs_code TEXT,
-          duty_usd NUMERIC,
-          tax_pct NUMERIC
-        );
-        """,
+    -- export/compliance fields (idempotent)
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS origin_country      TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS destination_country TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS port_code           TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS hs_code             TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name TEXT;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS duty_usd            NUMERIC;
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS tax_pct             NUMERIC;
+    """
 
-        "CREATE INDEX IF NOT EXISTS idx_bols_contract    ON public.bols(contract_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON public.bols(pickup_time DESC);",
-
-        # repair legacy/minimal bols tables (CI / drift-proof) — MATCH TYPES ABOVE
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_driver TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_truck_vin TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_dot TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_mc TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS trailer TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS driver_name TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_time TIMESTAMPTZ;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_base64 TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_time TIMESTAMPTZ;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMPTZ;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_base64 TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_time TIMESTAMPTZ;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS notes TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS status TEXT;",
-
-        # export/compliance fields (idempotent)
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS origin_country TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS destination_country TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS port_code TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS hs_code TEXT;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC;",
-        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC;",
-    ]
-
-    for s in ddl:
-        try:
-            await database.execute(s)
-        except Exception as e:
-            logger.error("contracts_bols_bootstrap_failed", sql=s[:200], err=str(e))
+    try:
+        await run_ddl_multi(sql)
+    except Exception as e:
+        logger.error("contracts_bols_bootstrap_failed", err=str(e))
+        # CI should fail loudly if schema can't be applied
+        if os.getenv("ENV", "").lower() in {"ci", "test"}:
             raise
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
