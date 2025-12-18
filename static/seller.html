@@ -682,7 +682,7 @@ async function api(path, opt = {}) {
   if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
     headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
   }
-  const res = await fetch(url, { credentials:'include', ...opt, headers });
+  const res = await fetch(url, { credentials:'include', ...opt, cache: (opt.cache || 'no-store'), headers });
   if (res.status === 401) {
     const next = encodeURIComponent(location.pathname + location.search);
     location.href = `/static/bridge-login.html?next=${next}`;
@@ -1232,6 +1232,7 @@ onReady(async () => {
     async function createContract() {
       const seller        = document.getElementById("sellerName").value.trim();
       const buyer         = document.getElementById("buyerName").value.trim();
+      const buyerNorm     = buyer || "OPEN";
       const material      = document.getElementById("material").value.trim();
       const weight_tons   = parseFloat(document.getElementById("tons").value);
       const price_per_ton = parseFloat(document.getElementById("price").value);
@@ -1262,7 +1263,7 @@ onReady(async () => {
 
       // match backend fields exactly
       const body = {
-        buyer,
+        buyer: buyerNorm,
         seller,
         material,
         weight_tons,
@@ -1323,7 +1324,7 @@ onReady(async () => {
       if (end)    qs.set("end",   toISOStringDateEnd(end));      // ISO UTC (exclusive) end
 
       const tbody = document.querySelector("#sellerContractsTable tbody");      
-      const res = await api(`/contracts?${qs.toString()}`);
+      const res = await api(`/contracts/search?${qs.toString()}`);
       const totalCount = +(res.headers.get('X-Total-Count') || 0);
       const rows = await res.json();
 

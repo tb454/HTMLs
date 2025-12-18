@@ -354,11 +354,26 @@ def _apply_cache_headers(request: Request, headers: dict):
                 headers["Cache-Control"] = "public, max-age=3600"
         return
 
-    # 4) Dynamic GET/HEAD: short client cache (quiets webhint)
+    # 4) API endpoints must NEVER be cached (tables must update instantly)
+    API_PREFIXES = (
+        "/contracts", "/bols", "/inventory", "/vendor_quotes", "/analytics",
+        "/market", "/indices", "/reference_prices", "/prices", "/billing",
+        "/fees", "/settlement", "/index", "/rfq", "/trade", "/clob",
+        "/stocks", "/yards", "/hedge", "/pricing", "/benchmarks", "/admin",
+        "/me"
+    )
+    if path.startswith(API_PREFIXES):
+        headers["Cache-Control"] = "no-store"
+        prev_vary = headers.get("Vary")
+        headers["Vary"] = ("Authorization, Cookie" if not prev_vary else f"{prev_vary}, Authorization, Cookie")
+        if "Expires" in headers:
+            del headers["Expires"]
+        return
+
+    # 5) Other dynamic GET/HEAD: short client cache (quiets webhint)
     headers["Cache-Control"] = "private, max-age=10"
     prev_vary = headers.get("Vary")
     headers["Vary"] = ("Authorization, Cookie" if not prev_vary else f"{prev_vary}, Authorization, Cookie")
-    # No Expires — Cache-Control is authoritative
     if "Expires" in headers:
         del headers["Expires"]
 # ---- /Cache policy helper ----
@@ -417,12 +432,14 @@ class GlobalSecurityCacheMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path or "/"
 
-        # 1) FORCE Cache-Control for /contracts ( GET & others )
-        if path.startswith("/contracts"):
-            if request.method in ("GET", "HEAD"):
-                resp.headers["Cache-Control"] = "private, max-age=10"
-            else:
-                resp.headers["Cache-Control"] = "no-store"
+        # 1) FORCE Cache-Control for dynamic API (never cache JSON tables)
+        if path.startswith((
+            "/contracts", "/bols", "/inventory", "/vendor_quotes", "/analytics",
+            "/market", "/indices", "/reference_prices", "/prices", "/billing",
+            "/fees", "/rfq", "/trade", "/clob", "/stocks", "/yards", "/hedge",
+            "/benchmarks", "/admin", "/me"
+        )):
+            resp.headers["Cache-Control"] = "no-store"
         else:
             # Generic fallback: ensure Cache-Control isn't missing/empty
             cc = (resp.headers.get("Cache-Control") or "").strip()
@@ -600,11 +617,142 @@ async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "sup
 @app.get(
     "/indices/latest",
     tags=["Indices"],
-    summary="Get latest index record",
+    summary="Get latest indices (list mode) OR latest index record (legacy symbol mode)",
 )
 async def indices_latest(
-    symbol: str = Query(..., description="Index symbol, e.g. BR-CU-#1")
+    symbol: str | None = Query(None, description="Legacy: index symbol, e.g. BR-CU-#1"),
+    region: str | None = Query(None, description="List mode: region code (e.g. IN)"),
+    group: str | None = Query(None, description="List mode: ferrous|nonferrous (currently informational)"),
+    limit: int = Query(200, ge=1, le=2000, description="List mode max rows"),
 ):
+    # -------------------------
+    # LEGACY MODE (symbol=...)
+    # -------------------------
+    if symbol:
+        fallback = {
+            "symbol": symbol,
+            "name": symbol,
+            "value": None,
+            "unit": None,
+            "currency": None,
+            "as_of": None,
+            "source_note": "No index history yet",
+        }
+
+        try:
+            row = await database.fetch_one(
+                """
+                SELECT dt AS as_of, close_price, unit, currency, source_note
+                FROM bridge_index_history
+                WHERE symbol = :s
+                ORDER BY dt DESC
+                LIMIT 1
+                """,
+                {"s": symbol},
+            )
+            if not row:
+                return fallback
+
+            return {
+                "symbol": symbol,
+                "name": symbol,
+                "value": row["close_price"],
+                "unit": row["unit"],
+                "currency": row["currency"],
+                "as_of": row["as_of"],
+                "source_note": row["source_note"],
+            }
+        except Exception as e:
+            try:
+                logger.warn("indices_latest_legacy_error", err=str(e))
+            except Exception:
+                pass
+            return fallback
+
+    # -------------------------
+    # LIST MODE (region/group)
+    # -------------------------
+    # Find latest index_date available in indices_daily
+    drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+    if not drow or not drow["d"]:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "index_date": None,
+            "region": region,
+            "group": group,
+            "indices": [],
+        }
+
+    index_date = drow["d"]
+
+    # Use ts if present; otherwise just utcnow
+    tsrow = None
+    try:
+        tsrow = await database.fetch_one(
+            "SELECT MAX(ts) AS ts FROM indices_daily WHERE as_of_date = :d",
+            {"d": index_date},
+        )
+    except Exception:
+        tsrow = None
+
+    as_of = None
+    try:
+        if tsrow and tsrow["ts"]:
+            as_of = tsrow["ts"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        as_of = None
+    if not as_of:
+        as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Pull rows
+    params = {"d": index_date, "lim": limit}
+    where = "as_of_date = :d"
+    if region:
+        where += " AND region ILIKE :r"
+        params["r"] = region
+
+    rows = await database.fetch_all(
+        f"""
+        SELECT region, material,
+               COALESCE(price, avg_price) AS index_price_per_ton,
+               COALESCE(currency,'USD')   AS currency,
+               volume_tons
+        FROM indices_daily
+        WHERE {where}
+        ORDER BY material
+        LIMIT :lim
+        """,
+        params,
+    )
+
+    # Vendor counts (optional join)
+    vmap = {}
+    try:
+        vrows = await database.fetch_all("SELECT material, vendor_count FROM v_vendor_blend_latest")
+        for r in vrows:
+            vmap[(r["material"] or "").strip()] = int(r["vendor_count"] or 0)
+    except Exception:
+        pass
+
+    out = []
+    for r in rows:
+        mat = (r["material"] or "").strip()
+        out.append({
+            "material": mat,
+            "index_price_per_ton": float(r["index_price_per_ton"] or 0.0),
+            "currency": (r["currency"] or "USD"),
+            "vendor_count": int(vmap.get(mat, 0)),
+            "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+        })
+
+    return {
+        "as_of": as_of,
+        "index_date": str(index_date),
+        "region": region,
+        "group": group,
+        "indices": out,
+    }
+
     fallback = {
         "symbol": symbol,
         "name": symbol,
@@ -744,6 +892,122 @@ async def prices_copper_last():
         "note": "no COMEX_CU in reference_prices; using static default",
     }
 # ------ Prices endpoint ------
+
+@app.get(
+    "/market/snapshot",
+    tags=["Market"],
+    summary="Market snapshot (references + indices + vendor import)",
+    status_code=200
+)
+async def market_snapshot(
+    region: str | None = Query(None),
+    group: str | None = Query(None),
+    limit_indices: int = Query(20, ge=1, le=200),
+    request: Request | None = None,
+):
+    # 1) references: latest per symbol (keep it small; expand later)
+    ref_syms = ["COMEX_CU", "LME_AL", "COMEX_AU", "COMEX_AG"]
+    refs = []
+    try:
+        rows = await database.fetch_all("""
+          SELECT DISTINCT ON (symbol)
+                 symbol, price, currency, unit, source, ts_market, ts_server
+          FROM reference_prices
+          WHERE symbol = ANY(:syms)
+          ORDER BY symbol, COALESCE(ts_market, ts_server) DESC
+        """, {"syms": ref_syms})
+        for r in rows:
+            ts = r["ts_market"] or r["ts_server"]
+            try:
+                tsz = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
+            except Exception:
+                tsz = None
+            refs.append({
+                "symbol": r["symbol"],
+                "price": float(r["price"]) if r["price"] is not None else None,
+                "currency": (r["currency"] or "USD"),
+                "unit": (r["unit"] or "lb"),
+                "source": (r["source"] or "internal"),
+                "reference_timestamp": tsz,
+            })
+    except Exception:
+        pass
+
+    # 2) indices: latest index_date rows
+    top_indices = []
+    index_date = None
+    try:
+        drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+        index_date = drow["d"] if drow and drow["d"] else None
+        if index_date:
+            eff_region = (region or "").strip() or None
+            if not eff_region and request is not None:
+                try:
+                    tid = await current_tenant_id(request)
+                    if tid:
+                        tr = await database.fetch_one("SELECT region FROM tenants WHERE id=:id", {"id": tid})
+                        if tr and tr["region"]:
+                            eff_region = str(tr["region"]).strip()
+                except Exception:
+                    pass
+
+            params = {"d": index_date, "lim": limit_indices}
+            where = "as_of_date=:d"
+            if eff_region:
+                where += " AND region ILIKE :r"
+                params["r"] = eff_region
+
+            rows = await database.fetch_all(f"""
+              SELECT region, material,
+                     COALESCE(price, avg_price) AS px_ton,
+                     COALESCE(currency,'USD')   AS ccy,
+                     volume_tons
+              FROM indices_daily
+              WHERE {where}
+              ORDER BY COALESCE(volume_tons,0) DESC, material
+              LIMIT :lim
+            """, params)
+
+            vmap = {}
+            try:
+                vrows = await database.fetch_all("SELECT material, vendor_count FROM v_vendor_blend_latest")
+                for vr in vrows:
+                    vmap[(vr["material"] or "").strip()] = int(vr["vendor_count"] or 0)
+            except Exception:
+                pass
+
+            for r in rows:
+                mat = (r["material"] or "").strip()
+                top_indices.append({
+                    "region": r["region"],
+                    "material": mat,
+                    "index_price_per_ton": float(r["px_ton"] or 0.0),
+                    "currency": (r["ccy"] or "USD"),
+                    "index_date": str(index_date),
+                    "vendor_count": int(vmap.get(mat, 0)),
+                    "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+                })
+    except Exception:
+        pass
+
+    # 3) vendor import timestamp
+    vendor_last_import_at = None
+    try:
+        v = await database.fetch_one("SELECT MAX(inserted_at) AS t FROM vendor_quotes")
+        if v and v["t"]:
+            vendor_last_import_at = v["t"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        pass
+
+    # 4) as_of (UTC Z) = now; UI uses it as proof of freshness
+    as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return {
+        "as_of": as_of,
+        "references": refs,
+        "top_indices": top_indices,
+        "vendor_last_import_at": vendor_last_import_at,
+    }
 
 @app.get("/fx/convert", tags=["Global"], summary="Convert amount between currencies (static FX)")
 async def fx_convert(amount: float, from_ccy: str = "USD", to_ccy: str = "USD"):
@@ -950,6 +1214,145 @@ async def trader_positions(username: str = Depends(get_username)):
         TraderPosition(symbol_root=r["symbol_root"], net_lots=float(r["net_qty"] or 0))
         for r in rows
     ]
+
+@trader_router.post("/marks/snapshot", summary="Mark-to-market snapshot for physical contracts", status_code=200)
+async def trader_marks_snapshot(region: str | None = None, request: Request | None = None):
+    # choose scope (tenant if available)
+    tenant_id = None
+    try:
+        if request is not None:
+            tenant_id = await current_tenant_id(request)
+    except Exception:
+        tenant_id = None
+
+    # latest index date
+    drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+    idx_date = drow["d"] if drow and drow["d"] else None
+
+    # find contracts to mark
+    params = {}
+    where = "status IN ('Open','Signed','Dispatched')"
+    if tenant_id:
+        where += " AND tenant_id = :tid"
+        params["tid"] = tenant_id
+
+    crows = await database.fetch_all(f"""
+      SELECT id, material, seller, currency, price_per_ton
+      FROM contracts
+      WHERE {where}
+      ORDER BY created_at DESC
+      LIMIT 2000
+    """, params)
+
+    marked_at = utcnow()
+    marked = 0
+
+    for c in crows:
+        cid = c["id"]
+        mat = (c["material"] or "").strip()
+        ccy = (c.get("currency") or "USD")
+
+        px = None
+        ref_ts = None
+        src = "INDEX"
+
+        # try indices_daily
+        if idx_date:
+            try:
+                p = {"d": idx_date, "m": mat}
+                w = "as_of_date=:d AND material=:m"
+                if region:
+                    w += " AND region ILIKE :r"
+                    p["r"] = region
+                row = await database.fetch_one(
+                    f"SELECT COALESCE(price, avg_price) AS px, COALESCE(ts,NOW()) AS ts FROM indices_daily WHERE {w} LIMIT 1",
+                    p
+                )
+                if row and row["px"] is not None:
+                    px = float(row["px"])
+                    ref_ts = row["ts"]
+            except Exception:
+                pass
+
+        # fallback to contract trade price if no index
+        if px is None:
+            try:
+                px = float(c["price_per_ton"] or 0.0)
+                src = "CONTRACT"
+                ref_ts = marked_at
+            except Exception:
+                continue
+
+        try:
+            await database.execute("""
+              INSERT INTO contract_marks(contract_id, marked_at, region, material, mark_price_per_ton, currency, source, reference_timestamp)
+              VALUES (:cid,:ma,:reg,:mat,:px,:ccy,:src,:rt)
+            """, {
+                "cid": str(cid),
+                "ma": marked_at,
+                "reg": region,
+                "mat": mat,
+                "px": px,
+                "ccy": ccy,
+                "src": src,
+                "rt": ref_ts or marked_at,
+            })
+            marked += 1
+        except Exception:
+            pass
+
+    return {
+        "as_of": marked_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "marked_at": marked_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "region": region,
+        "contracts_marked": marked,
+    }
+
+@trader_router.get("/marks/latest", summary="Latest mark set for contracts", status_code=200)
+async def trader_marks_latest(region: str | None = None, limit: int = Query(200, ge=1, le=2000)):
+    # latest marked_at
+    params = {"lim": limit}
+    where = "1=1"
+    if region:
+        where += " AND region ILIKE :r"
+        params["r"] = region
+
+    mrow = await database.fetch_one(f"SELECT MAX(marked_at) AS ma FROM contract_marks WHERE {where}", params)
+    ma = mrow["ma"] if mrow and mrow["ma"] else None
+    if not ma:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "marked_at": None,
+            "region": region,
+            "rows": [],
+        }
+
+    rows = await database.fetch_all(f"""
+      SELECT contract_id, material, region, mark_price_per_ton, currency, source, reference_timestamp, marked_at
+      FROM contract_marks
+      WHERE marked_at = :ma
+        AND ({where})
+      ORDER BY marked_at DESC
+      LIMIT :lim
+    """, {**params, "ma": ma})
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "marked_at": ma.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "region": region,
+        "rows": [
+            {
+                "contract_id": str(r["contract_id"]),
+                "material": r.get("material"),
+                "region": r.get("region"),
+                "mark_price_per_ton": float(r["mark_price_per_ton"] or 0.0),
+                "currency": r.get("currency") or "USD",
+                "source": r.get("source") or "INDEX",
+                "reference_timestamp": (r["reference_timestamp"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if r.get("reference_timestamp") else None),
+            }
+            for r in rows
+        ],
+    }
 
 app.include_router(trader_router)
 # ---- Trader page ----
@@ -1783,7 +2186,8 @@ async def _ensure_vendor_quotes_schema():
 
 @startup
 async def _ensure_v_vendor_blend_latest_view():
-    await run_ddl_multi("""
+    await run_ddl_multi("""                        
+    DROP VIEW IF EXISTS public.v_vendor_blend_latest;
     CREATE OR REPLACE VIEW public.v_vendor_blend_latest AS
     WITH latest_date AS (
       SELECT MAX(sheet_date) AS d FROM vendor_quotes
@@ -2665,6 +3069,74 @@ async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)
         {"d": latest_date, "lim": limit_per_vendor},
     )
     return [dict(r) for r in rows]
+
+@app.get("/admin/vendor/pricing/latest", tags=["Admin"], summary="Admin: latest vendor blended pricing", status_code=200)
+async def admin_vendor_pricing_latest(limit: int = Query(500, ge=1, le=5000)):
+    # Latest sheet_date
+    drow = await database.fetch_one("SELECT MAX(sheet_date) AS d FROM vendor_quotes")
+    sheet_date = drow["d"] if drow and drow["d"] else None
+
+    rows = []
+    try:
+        rows = await database.fetch_all("""
+          SELECT material,
+                 blended_lb,
+                 vendor_count,
+                 px_min,
+                 px_max
+          FROM v_vendor_blend_latest
+          ORDER BY material
+          LIMIT :lim
+        """, {"lim": limit})
+    except Exception:
+        rows = []
+
+    as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "as_of": as_of,
+        "sheet_date": (str(sheet_date) if sheet_date else None),
+        "rows": [
+            {
+                "material": r["material"],
+                "price_per_lb": float(r["blended_lb"] or 0.0),
+                "vendor_count": int(r["vendor_count"] or 0),
+                "px_min": float(r["px_min"] or 0.0),
+                "px_max": float(r["px_max"] or 0.0),
+                "currency": "USD",
+                "effective_at": (str(sheet_date) if sheet_date else None),
+            }
+            for r in rows
+        ],
+    }
+
+@app.post("/admin/vendor/import", tags=["Admin"], summary="Admin: import vendor pricing file (csv/xlsx)", status_code=200)
+async def admin_vendor_import(file: UploadFile = File(...)):
+    fname = (file.filename or "").lower()
+    imported = 0
+
+    # Reuse your existing ingestors
+    if fname.endswith(".xlsx"):
+        res = await vq_ingest_excel(file)
+        imported = int(res.get("inserted", 0))
+    else:
+        res = await vq_ingest_csv(file)
+        imported = int(res.get("inserted", 0))
+
+    # derive metrics
+    last = None
+    try:
+        v = await database.fetch_one("SELECT MAX(inserted_at) AS t FROM vendor_quotes")
+        if v and v["t"]:
+            last = v["t"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        pass
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "imported_at": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "rows_inserted": imported,
+        "vendor_last_import_at": last,
+    }
 
 # ---- BR Indices ----
 from pydantic import BaseModel
@@ -6485,8 +6957,190 @@ async def pull_home():
     await pull_comex_home_once(app.state.db_pool)
     return {"ok": True}
 
-@router_pricing.get("/quote", summary="Compute material price using vendor sheets + reference curves")
-async def quote(category: str, material: str):
+@router_pricing.get("/quote", summary="Pricing quote (v2) OR legacy material pricing (v1)")
+async def quote(
+    material: str,
+    tons: float | None = None,
+    region: str | None = None,
+    currency: str = "USD",
+    category: str | None = None,   # legacy
+    request: Request | None = None
+):
+    mat = (material or "").strip()
+    if not mat:
+        raise HTTPException(status_code=400, detail="material is required")
+
+    # -------------------------
+    # V2 MODE (tons provided)
+    # -------------------------
+    if tons is not None:
+        # Latest indices_daily date
+        drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+        if not drow or not drow["d"]:
+            raise HTTPException(404, "No indices available yet (indices_daily empty)")
+
+        index_date = drow["d"]
+
+        # Region selection: explicit ?region= wins; else try tenant.region; else None
+        eff_region = (region or "").strip() or None
+        if not eff_region and request is not None:
+            try:
+                tid = await current_tenant_id(request)
+                if tid:
+                    tr = await database.fetch_one("SELECT region FROM tenants WHERE id=:id", {"id": tid})
+                    if tr and tr["region"]:
+                        eff_region = str(tr["region"]).strip()
+            except Exception:
+                pass
+
+        # Pull index price per ton from indices_daily
+        params = {"d": index_date, "m": mat}
+        where = "as_of_date=:d AND material=:m"
+        if eff_region:
+            where += " AND region ILIKE :r"
+            params["r"] = eff_region
+
+        idx = await database.fetch_one(
+            f"""
+            SELECT COALESCE(price, avg_price) AS px_ton,
+                   COALESCE(currency,'USD')   AS ccy,
+                   COALESCE(ts, NOW())        AS ts
+            FROM indices_daily
+            WHERE {where}
+            ORDER BY COALESCE(ts, NOW()) DESC
+            LIMIT 1
+            """,
+            params,
+        )
+
+        # Fallback: vendor blend latest
+        vendor_lb = None
+        try:
+            v = await database.fetch_one(
+                "SELECT blended_lb FROM v_vendor_blend_latest WHERE material=:m",
+                {"m": mat},
+            )
+            if v and v["blended_lb"] is not None:
+                vendor_lb = float(v["blended_lb"])
+        except Exception:
+            pass
+
+        # Final price selection
+        if idx and idx["px_ton"] is not None:
+            price_per_ton = float(idx["px_ton"])
+            ref_ts = idx["ts"]
+            ref_symbol = f"BR_INDEX_{mat}_{eff_region or 'ALL'}"
+            formula = f"INDEX({eff_region or 'ALL'},{mat}) + 0.00"
+            src = "INDEX"
+        elif vendor_lb is not None:
+            price_per_ton = float(vendor_lb) * 2000.0
+            ref_ts = utcnow()
+            ref_symbol = f"VENDOR_BLEND_{mat}"
+            formula = f"VENDOR_BLEND({mat}) * 2000"
+            src = "VENDOR"
+        else:
+            raise HTTPException(404, "No price available for that material")
+
+        total = round(price_per_ton * float(tons), 2)
+
+        # as_of (UTC Z)
+        as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # reference_timestamp (UTC Z)
+        try:
+            if isinstance(ref_ts, datetime):
+                ref_ts_z = ref_ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                ref_ts_z = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            ref_ts_z = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        return {
+            "as_of": as_of,
+            "material": mat,
+            "tons": float(tons),
+            "region": eff_region,
+            "currency": (currency or "USD").upper(),
+            "price_per_ton": round(price_per_ton, 2),
+            "total": total,
+            "pricing_formula": formula,
+            "reference": {
+                "type": src,
+                "symbol": ref_symbol,
+                "price": round(price_per_ton, 2),
+                "reference_timestamp": ref_ts_z,
+            },
+        }
+
+    # -------------------------
+    # V1 LEGACY MODE (no tons)
+    # -------------------------
+    # keep your old behavior exactly (category/material -> price_per_lb)
+    category = category or ""
+    row = await database.fetch_one("""
+        WITH latest_vendor AS (
+          SELECT
+            m.material_canonical AS mat,
+            AVG(v.price_per_lb)  AS vendor_lb
+          FROM vendor_quotes v
+          JOIN vendor_material_map m
+            ON m.vendor         = v.vendor
+           AND m.material_vendor = v.material
+          WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+            AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+            AND m.material_canonical ILIKE :mat
+          GROUP BY 1
+        )
+        SELECT vendor_lb FROM latest_vendor
+    """, {"mat": mat})
+    if row and row["vendor_lb"] is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(row["vendor_lb"]), 4),
+            "source": "vendor_mapped",
+            "notes": "Vendor-blended latest ($/lb) via vendor_material_map."
+        }
+
+    row2 = await database.fetch_one("""
+        WITH latest_date AS (
+          SELECT MAX(sheet_date) AS d FROM vendor_quotes
+        )
+        SELECT AVG(price_per_lb) AS p
+          FROM vendor_quotes v, latest_date
+         WHERE (v.sheet_date = latest_date.d OR v.sheet_date IS NULL)
+           AND (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+           AND v.material ILIKE :mat
+    """, {"mat": f"%{mat}%"})
+    if row2 and row2["p"] is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(row2["p"]), 4),
+            "source": "vendor_direct",
+            "notes": "Vendor-blended latest ($/lb) from vendor_quotes (direct material match)."
+        }
+
+    try:
+        price = await compute_material_price(_fetch_base, category, mat)
+    except Exception as e:
+        try:
+            logger.warn("pricing_compute_error", category=category, material=mat, err=str(e))
+        except Exception:
+            pass
+        price = None
+
+    if price is not None:
+        return {
+            "category": category,
+            "material": mat,
+            "price_per_lb": round(float(price), 4),
+            "source": "reference",
+            "notes": "Internal-only COMEX/LME-based calc."
+        }
+
+    raise HTTPException(status_code=404, detail="No price available for that category/material")
+
     """
     Pricing resolution order:
 
@@ -6919,8 +7573,226 @@ async def rp_debug_day(symbol: str, d: _date):
     return rows
 
 app.include_router(router_prices)
-# -----------------------------------------------------------------------
 app.include_router(router_pricing)
+# -----------------------------------------------------------------------
+
+# ===================== ADMIN: last-mile wiring endpoints =====================
+
+@startup
+async def _ensure_risk_and_marks_tables():
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS risk_events (
+      event_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      run_id     TEXT,
+      severity   TEXT NOT NULL,
+      type       TEXT NOT NULL,
+      material   TEXT,
+      region     TEXT,
+      message    TEXT,
+      context    JSONB
+    );
+    CREATE INDEX IF NOT EXISTS idx_risk_events_time ON risk_events(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS contract_marks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      contract_id UUID NOT NULL,
+      marked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      region TEXT,
+      material TEXT,
+      mark_price_per_ton NUMERIC NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      source TEXT NOT NULL DEFAULT 'INDEX',
+      reference_timestamp TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_contract_marks_latest ON contract_marks(marked_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_contract_marks_contract ON contract_marks(contract_id, marked_at DESC);
+    """)
+
+@app.post("/admin/reference/pull", tags=["Admin"], summary="Admin: pull reference prices", status_code=200)
+async def admin_reference_pull(symbols: list[str] | None = None, request: Request | None = None):
+    # Gate in production
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+
+    # best-effort pulls (internal)
+    try:
+        await pull_comex_home_once(app.state.db_pool)
+    except Exception:
+        pass
+    try:
+        await pull_comexlive_once(app.state.db_pool)
+    except Exception:
+        pass
+    try:
+        await pull_lme_once(app.state.db_pool)
+    except Exception:
+        pass
+
+    # how many symbols updated recently
+    updated = 0
+    try:
+        r = await database.fetch_one("""
+          SELECT COUNT(DISTINCT symbol) AS n
+          FROM reference_prices
+          WHERE ts_server >= NOW() - INTERVAL '5 minutes'
+        """)
+        updated = int(r["n"] or 0) if r else 0
+    except Exception:
+        updated = 0
+
+    nowz = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"as_of": nowz, "pulled_at": nowz, "symbols_updated": updated, "source": "internal"}
+
+@app.post("/admin/indices/build_today", tags=["Admin"], summary="Admin: build today's indices", status_code=200)
+async def admin_indices_build_today(region: str | None = None, request: Request | None = None):
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+
+    # Build vendor snapshot (optional, safe)
+    try:
+        await vendor_snapshot_to_indices()
+    except Exception:
+        pass
+
+    # Build contract-driven snapshot for today (safe)
+    today = utcnow().date()
+    try:
+        await indices_generate_snapshot(snapshot_date=today)
+    except Exception:
+        pass
+
+    # Count rows written for today (and region if provided)
+    params = {"d": today}
+    where = "as_of_date=:d"
+    if region:
+        where += " AND region ILIKE :r"
+        params["r"] = region
+
+    n = 0
+    try:
+        r = await database.fetch_one(f"SELECT COUNT(*) AS c FROM indices_daily WHERE {where}", params)
+        n = int(r["c"] or 0) if r else 0
+    except Exception:
+        n = 0
+
+    nowz = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"as_of": nowz, "index_date": str(today), "region": region, "rows_written": n}
+
+@app.post("/admin/forecast/run", tags=["Admin"], summary="Admin: run forecast + emit risk events", status_code=200)
+async def admin_forecast_run(horizon_days: int = 30, region: str | None = None, request: Request | None = None):
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+
+    run_id = uuid.uuid4().hex[:12]
+    as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # run the batch job
+    try:
+        await _forecast_run_all()
+    except Exception as e:
+        raise HTTPException(500, f"forecast run failed: {e}")
+
+    # Emit risk events from fresh anomaly_scores + surveil_alerts (best-effort)
+    risk_written = 0
+    try:
+        # anomaly_scores (high)
+        arows = await database.fetch_all("""
+          SELECT member, symbol, as_of, score, features
+          FROM anomaly_scores
+          WHERE created_at >= NOW() - INTERVAL '24 hours'
+            AND score >= 0.85
+          ORDER BY created_at DESC
+          LIMIT 200
+        """)
+        for r in arows:
+            try:
+                feat = r["features"] or {}
+                material = None
+                try:
+                    material = (feat.get("material") if isinstance(feat, dict) else None)
+                except Exception:
+                    material = None
+                await database.execute("""
+                  INSERT INTO risk_events(run_id,severity,type,material,region,message,context)
+                  VALUES (:rid,'high','anomaly_score',:mat,:reg,:msg,:ctx::jsonb)
+                """, {
+                    "rid": run_id,
+                    "mat": material,
+                    "reg": region,
+                    "msg": f"Anomaly score {float(r['score']):.2f} for {r['symbol']}",
+                    "ctx": json.dumps({"member": r["member"], "symbol": r["symbol"], "features": feat}, default=str),
+                })
+                risk_written += 1
+            except Exception:
+                pass
+
+        # surveil_alerts (last 24h)
+        srows = await database.fetch_all("""
+          SELECT rule, subject, severity, data, created_at
+          FROM surveil_alerts
+          WHERE created_at >= NOW() - INTERVAL '24 hours'
+          ORDER BY created_at DESC
+          LIMIT 200
+        """)
+        for r in srows:
+            try:
+                await database.execute("""
+                  INSERT INTO risk_events(run_id,severity,type,material,region,message,context)
+                  VALUES (:rid,:sev,'surveil_alert',NULL,:reg,:msg,:ctx::jsonb)
+                """, {
+                    "rid": run_id,
+                    "sev": (r["severity"] or "warn"),
+                    "reg": region,
+                    "msg": f"{r['rule']}: {r['subject']}",
+                    "ctx": json.dumps({"rule": r["rule"], "subject": r["subject"], "data": r["data"]}, default=str),
+                })
+                risk_written += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {
+        "as_of": as_of,
+        "run_id": run_id,
+        "horizon_days": int(horizon_days),
+        "outputs_written": 0,
+        "risk_events_written": risk_written,
+    }
+
+@app.get("/admin/risk/events", tags=["Admin"], summary="Admin: risk & surveillance events", status_code=200)
+async def admin_risk_events(since_hours: int = 24):
+    as_of = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = []
+    try:
+        rows = await database.fetch_all("""
+          SELECT event_id, created_at, severity, type, material, region, message, context, run_id
+          FROM risk_events
+          WHERE created_at >= NOW() - make_interval(hours => :h)
+          ORDER BY created_at DESC
+          LIMIT 200
+        """, {"h": since_hours})
+    except Exception:
+        rows = []
+
+    events = []
+    for r in rows:
+        events.append({
+            "event_id": str(r["event_id"]),
+            "created_at": r["created_at"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if r["created_at"] else None,
+            "run_id": r.get("run_id"),
+            "severity": r["severity"],
+            "type": r["type"],
+            "material": r.get("material"),
+            "region": r.get("region"),
+            "message": r.get("message"),
+            "context": (r.get("context") or {}),
+        })
+
+    return {"as_of": as_of, "since_hours": since_hours, "events": events}
+
+# ===================== /ADMIN: last-mile wiring endpoints =====================
 
 # Optional 3-minute refresher loop (best-effort)
 async def _price_refresher():
@@ -14858,18 +15730,18 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             if not row:
                 raise RuntimeError("contracts insert returned no row")
             
-  # Stripe metered usage: +1 contract for this seller
-        try:
-            member_key = (row["seller"] or "").strip()
-            # Get tenant's subscription item id for "contracts"
-            mp = await database.fetch_one(
-                "SELECT stripe_item_contracts FROM member_plan_items WHERE member=:m",
-                {"m": member_key}
-            )
-            sub_item = (mp and mp.get("stripe_item_contracts")) or os.getenv("STRIPE_ITEM_CONTRACTS_DEFAULT")
-            record_usage_safe(sub_item, 1)
-        except Exception:
-            pass
+            # Stripe metered usage: +1 contract for this seller
+            try:
+                member_key = (row["seller"] or "").strip()
+                mp = await database.fetch_one(
+                    "SELECT stripe_item_contracts FROM member_plan_items WHERE member=:m",
+                    {"m": member_key}
+                )
+                sub_item = (mp and mp.get("stripe_item_contracts")) or os.getenv("STRIPE_ITEM_CONTRACTS_DEFAULT")
+                record_usage_safe(sub_item, 1)
+            except Exception:
+                pass
+            
         # best-effort audit/webhook;
         try:
             actor = request.session.get("username") if hasattr(request, "session") else None
@@ -15839,7 +16711,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     
     # Stripe metered usage: +1 BOL for this seller
     try:
-        member_key = (row.get("seller") or "").strip()
+        d0 = dict(row) if row else {}
+        member_key = (d0.get("seller") or "").strip()
         mp = await database.fetch_one(
             "SELECT stripe_item_bols FROM member_plan_items WHERE member=:m",
             {"m": member_key}
@@ -15848,7 +16721,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         record_usage_safe(sub_item, 1)
     except Exception:
         pass
-        # Usage metering: BOL_ISSUED (1 per BOL) for this seller
+
+    # Usage metering: BOL_ISSUED (1 per BOL) for this seller
     try:
         if row:
             d = dict(row)
