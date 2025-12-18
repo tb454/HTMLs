@@ -8612,15 +8612,21 @@ async def _ensure_trading_hardening():
 
     # 2) add the named constraint with a guard (don’t fail if it already exists)
     try:
-        await database.execute(
-            "ALTER TABLE futures_listings "
-            "ADD CONSTRAINT chk_trading_status "
-            "CHECK (trading_status IN ('Trading','Halted','Expired'))"
-        )
-    except Exception:
-        # Already exists (or other benign condition) — ignore
+        await database.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'chk_trading_status'
+            ) THEN
+                ALTER TABLE futures_listings
+                ADD CONSTRAINT chk_trading_status
+                CHECK (trading_status IN ('Trading','Halted','Expired'));
+            END IF;
+            END$$;
+            """)
+    except Exception:        
         pass
-
 
 # ===== INVENTORY schema bootstrap (idempotent) =====
 @startup
@@ -8867,18 +8873,23 @@ async def _ensure_warrant_schema():
 
     # 2) Add FK separately, guarded (idempotent-ish)
     try:
-        await database.execute(
-            """
-            ALTER TABLE public.warrants
-            ADD CONSTRAINT fk_warrants_receipt
-            FOREIGN KEY (receipt_id)
-            REFERENCES public.receipts(id)
-            ON DELETE CASCADE
-            """
-        )
-    except Exception:
-        # already exists or receipts not ready yet in this boot — safe to ignore
-        pass
+            await database.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'fk_warrants_receipt'
+            ) THEN
+                ALTER TABLE public.warrants
+                ADD CONSTRAINT fk_warrants_receipt
+                FOREIGN KEY (receipt_id)
+                REFERENCES public.receipts(id)
+                ON DELETE CASCADE;
+            END IF;
+            END$$;
+            """)
+        except Exception:
+            pass
 
 class WarrantIn(BaseModel):
     receipt_id: str
