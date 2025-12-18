@@ -8826,6 +8826,8 @@ async def _ensure_inventory_schema():
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS bol_id       UUID;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS uom          TEXT;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS account_id   UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS contract_id_uuid UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS bol_id_uuid      UUID;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();",
 
         """
