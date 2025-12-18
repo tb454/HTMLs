@@ -1,0 +1,68 @@
+/* specs.css */
+
+body {
+  font-family: Arial, sans-serif;
+  line-height: 1.6;
+  margin: 20px;
+  background-color: #fff;
+  color: #333;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+/* Accordion button style */
+.accordion {
+  background-color: #eee;
+  color: #444;
+  cursor: pointer;
+  padding: 10px;
+  width: 100%;
+  border: none;
+  text-align: left;
+  outline: none;
+  transition: background-color 0.3s ease;
+  margin: 5px 0;
+  font-size: 1em;
+}
+
+.accordion:hover,
+.accordion.active {
+  background-color: #ccc;
+}
+
+/* Panel style */
+.panel {
+  padding: 0 10px;
+  display: none;
+  background-color: #f9f9f9;
+  overflow: hidden;
+  border: 1px solid #ccc;
+  margin-bottom: 5px;
+}
+
+.panel.open {
+  display: block;
+}
+
+/* Nested accordion styles */
+.accordion.nested {
+  margin-left: 20px;
+  font-size: 0.95em;
+}
+
+.panel.nested {
+  margin-left: 20px;
+}
+
+/* Typography helpers used in ferrous */
+p {
+  margin: 8px 0;
+}
+
+strong {
+  display: inline-block;
+  width: 180px;
+}

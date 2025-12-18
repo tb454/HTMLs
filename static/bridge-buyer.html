@@ -472,7 +472,7 @@
         const table = document.createElement('table');
         table.className = 'table table-sm mb-0 align-middle';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th>BOL</th><th>Status</th><th>Weight (t)</th><th>Updated</th></tr>';
+        thead.innerHTML = '<tr><th>BOL</th><th>Status</th><th>Weight (t)</th><th>Updated</th><th>PDF</th></tr>';
         table.appendChild(thead);
 
         const tbody = document.createElement('tbody');
@@ -480,7 +480,21 @@
           const tr = document.createElement('tr');
 
           const idCell = document.createElement('td');
-          idCell.textContent = b.id ?? b.bol_id ?? '—';
+          const bolId = b.bol_id ?? b.id ?? '—';
+          idCell.textContent = bolId;
+
+          const pdfCell = document.createElement('td');
+          if (bolId && bolId !== '—') {
+            const a = document.createElement('a');
+            a.className = 'btn btn-sm btn-outline-secondary';
+            a.textContent = 'PDF';
+            a.href = `${window.endpoint}/bol/${encodeURIComponent(bolId)}/pdf`;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            pdfCell.appendChild(a);
+          } else {
+            pdfCell.textContent = '—';
+          }
 
           const statusCell = document.createElement('td');
           statusCell.textContent = b.status || '—';
@@ -492,7 +506,7 @@
           const tsCell = document.createElement('td');
           tsCell.textContent = ts ? _fmtDate(ts) : '—';
 
-          tr.append(idCell, statusCell, wtCell, tsCell);
+          tr.append(idCell, statusCell, wtCell, tsCell, pdfCell);
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);

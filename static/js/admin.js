@@ -67,12 +67,14 @@ window.endpoint = (function () {
 
     tbody.innerHTML = rows.items.map(r => `
       <tr>
-        <td>${r.id}</td>
+        <td>${r.bol_id ?? r.id ?? '-'}</td>
         <td>${r.contract_id ?? '-'}</td>
-        <td>${r.carrier || '-'}</td>
-        <td>${r.status || '-'}</td>
+        <td>${r.carrier_name ?? r.carrier ?? '-'}</td>
+        <td>${r.status ?? '-'}</td>
         <td>
-          <a class="btn btn-sm btn-outline-secondary" href="${window.endpoint}/bol/${r.id}/pdf" target="_blank">PDF</a>
+          <a class="btn btn-sm btn-outline-secondary"
+            href="${window.endpoint}/bol/${r.bol_id ?? r.id}/pdf"
+            target="_blank" rel="noopener">PDF</a>
         </td>
       </tr>
     `).join('') || `<tr><td colspan="5" class="text-muted">No BOLs found.</td></tr>`;
