@@ -957,6 +957,102 @@ app.include_router(trader_router)
 
 
 # ===== DB bootstrap for CI/staging =====
+@startup
+async def _bootstrap_core_tables_for_ci():
+    env = (os.getenv("ENV", "") or "").lower()
+    if env not in {"ci", "test", "testing"}:
+        return
+
+    await run_ddl_multi("""
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    CREATE TABLE IF NOT EXISTS public.contracts (
+      id uuid NOT NULL DEFAULT gen_random_uuid(),
+      buyer text NOT NULL,
+      seller text NOT NULL,
+      material text NOT NULL,
+      weight_tons numeric NOT NULL,
+      price_per_ton numeric NOT NULL,
+      status text NOT NULL DEFAULT 'Open',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      tenant_id uuid
+    );
+
+    CREATE TABLE IF NOT EXISTS public.bols (
+      bol_id uuid NOT NULL DEFAULT gen_random_uuid(),
+      contract_id uuid,
+      buyer text,
+      seller text,
+      material text,
+      weight_tons numeric,
+      price_per_unit numeric,
+      total_value numeric,
+      pickup_time timestamptz,
+      delivery_time timestamptz,
+      status text DEFAULT 'Scheduled',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      tenant_id uuid
+    );
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='bols_contract_fk') THEN
+        ALTER TABLE public.bols
+          ADD CONSTRAINT bols_contract_fk
+          FOREIGN KEY (contract_id) REFERENCES public.contracts(id)
+          ON DELETE SET NULL;
+      END IF;
+    END$$;
+
+    CREATE TABLE IF NOT EXISTS public.inventory_items (
+      id uuid NOT NULL DEFAULT gen_random_uuid(),
+      seller text NOT NULL,
+      sku text NOT NULL,
+      description text,
+      uom text NOT NULL DEFAULT 'ton',
+      qty_on_hand numeric NOT NULL DEFAULT 0,
+      qty_reserved numeric NOT NULL DEFAULT 0,
+      qty_committed numeric NOT NULL DEFAULT 0,
+      updated_at timestamp without time zone NOT NULL DEFAULT now(),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      tenant_id uuid
+    );
+
+    -- REQUIRED for your ON CONFLICT (seller, sku)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku
+      ON public.inventory_items(seller, sku);
+
+    CREATE TABLE IF NOT EXISTS public.inventory_movements (
+      id uuid NOT NULL DEFAULT gen_random_uuid(),
+      seller text NOT NULL,
+      sku text NOT NULL,
+      movement_type text NOT NULL,
+      qty numeric NOT NULL,
+      uom text,
+      contract_id_uuid uuid,
+      bol_id_uuid uuid,
+      meta jsonb,
+      tenant_id uuid,
+      created_at timestamp without time zone NOT NULL DEFAULT now()
+    );
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_contract_fk') THEN
+        ALTER TABLE public.inventory_movements
+          ADD CONSTRAINT inv_mov_contract_fk
+          FOREIGN KEY (contract_id_uuid) REFERENCES public.contracts(id);
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_bol_fk') THEN
+        ALTER TABLE public.inventory_movements
+          ADD CONSTRAINT inv_mov_bol_fk
+          FOREIGN KEY (bol_id_uuid) REFERENCES public.bols(bol_id);
+      END IF;
+    END$$;
+    """)
+
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     """Create minimal tables needed for app/tests when ENV is non-prod."""
     ddl = """
@@ -1368,7 +1464,7 @@ def _split_sql_statements(sql: str) -> list[str]:
 
     while i < n:
         ch = s[i]
-
+        
         # line comment ends at newline
         if in_line:
             buf.append(ch)
@@ -1402,8 +1498,7 @@ def _split_sql_statements(sql: str) -> list[str]:
         # inside quotes
         if in_sq:
             buf.append(ch)
-            if ch == "'":
-                # handle escaped '' inside strings
+            if ch == "'":                
                 if i + 1 < n and s[i + 1] == "'":
                     buf.append("'")
                     i += 2
@@ -1451,7 +1546,7 @@ def _split_sql_statements(sql: str) -> list[str]:
             while j < n and s[j] != "$" and (s[j].isalnum() or s[j] == "_"):
                 j += 1
             if j < n and s[j] == "$":
-                tag = s[i:j + 1]  # includes both $...$
+                tag = s[i:j + 1]  
                 buf.append(tag)
                 i = j + 1
                 dollar_tag = tag
@@ -1476,19 +1571,36 @@ def _split_sql_statements(sql: str) -> list[str]:
 
 
 async def run_ddl_multi(sql: str):
-    """Run multiple DDL statements safely; auto-connect if needed."""
-    try:
-        if not database.is_connected:
-            await database.connect()
-    except Exception:
-        # If connect fails, we still want a clean warning per stmt below.
-        pass
+    """
+    Run DDL statements one-by-one WITHOUT wrapping in a single transaction.
+    If one DDL fails, log it and continue (but do NOT poison the connection).
+    """
+    stmts = []
+    buf = []
+    for line in sql.splitlines():        
+        if line.strip().startswith("--"):
+            continue
+        buf.append(line)
+        if ";" in line:
+            joined = "\n".join(buf).strip()
+            buf = []           
+            parts = [p.strip() for p in joined.split(";") if p.strip()]
+            stmts.extend(parts)
 
-    for stmt in _split_sql_statements(sql):
+    # any leftover
+    if buf:
+        tail = "\n".join(buf).strip()
+        if tail:
+            stmts.append(tail)
+
+    for s in stmts:
         try:
-            await database.execute(stmt)
+            await database.execute(s)
         except Exception as e:
-            logger.warn("ddl_failed", sql=stmt[:160], err=str(e))
+            try:
+                logger.warn("ddl_failed", err=str(e), sql=s[:240])
+            except Exception:
+                pass            
 # =====  request-id + structured logs =====
 
 # ------ ID Logging ------
@@ -1511,22 +1623,21 @@ async def locale_middleware(request: Request, call_next):
         tzname = await _tz_from_request(request)
         request.state.lang = lang
         request.state.tzname = tzname
-        # validate tz; if bad, fall back without exploding the request
+        
         try:
             request.state.tz = _ZoneInfo(tzname)
         except Exception:
             request.state.tz = _ZoneInfo("UTC")
             request.state.tzname = "UTC"
         resp: Response = await call_next(request)
-        # persist if explicitly provided in query (?lang= / ?tz=); otherwise leave cookies alone
+        
         prod = os.getenv("ENV","").lower() == "production"
         if "lang" in request.query_params:
             resp.set_cookie("LANG", lang, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
         if "tz" in request.query_params:
             resp.set_cookie("TZ", request.state.tzname, httponly=False, samesite="lax", secure=prod, path="/", max_age=60*60*24*365)
         return resp
-    except Exception:
-        # Never break the request path on locale issues
+    except Exception:        
         return await call_next(request)
 # ------ Language + TZ middleware ------
 
@@ -1572,7 +1683,7 @@ def _ensure_database_exists(dsn: str):
 
         url = make_url(dsn)
         if not str(url).startswith("postgresql"):
-            return  # only relevant for Postgres
+            return  
 
         target_db = url.database or ""
         if not target_db:
@@ -1588,8 +1699,7 @@ def _ensure_database_exists(dsn: str):
                 conn.execute(f'CREATE DATABASE "{target_db}"')
             except psycopg.errors.DuplicateDatabase:
                 pass
-    except Exception:
-        # Never block the process on auto-create errors; startup will show a clear failure later if still missing
+    except Exception:        
         pass
 # ------- /DB ensure-database-exists -------
 
@@ -1611,9 +1721,7 @@ async def vendor_latest(limit: int = 200):
     return [dict(r) for r in rows]
 
 @vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
-async def vendor_snapshot_to_indices():
-    # Use your existing _vendor_blended_lb(material) helper if it exists and returns lb-price;
-    # Here we snapshot *all mapped* materials.
+async def vendor_snapshot_to_indices():    
     await database.execute("""
           INSERT INTO indices_daily(symbol, ts, region, price)
           SELECT
@@ -1859,8 +1967,7 @@ async def vq_ingest_excel(file: UploadFile = File(...)):
     return {"inserted": len(rows)}
 
 @vendor_router.get("/current", summary="Latest blended $/lb per material (from most-recent vendor quotes)")
-async def vq_current(limit:int=500):
-    # pick the latest quote per (vendor, material) then average per material
+async def vq_current(limit:int=500):    
     q = """
     WITH latest AS (
       SELECT DISTINCT ON (vendor, material)
@@ -2040,8 +2147,7 @@ async def _create_db_if_missing_async(db_url: str) -> None:
                 await conn.execute(f'CREATE DATABASE "{target_db}"')
         finally:
             await conn.close()
-    except Exception:
-        # best-effort only
+    except Exception:        
         pass
 # ---------- Create database (dev/test/CI)------------
 
@@ -2065,10 +2171,8 @@ async def _connect_db_first():
     except Exception as e:
         msg = (str(e) or "").lower()
         # Handle: asyncpg.exceptions.InvalidCatalogNameError: database "... " does not exist
-        if env in {"ci", "test", "testing", "development"} and ("does not exist" in msg and "database" in msg):
-            # create DB using same host/user/pass but with admin 'postgres'
-            await _create_db_if_missing_async(BASE_DATABASE_URL or ASYNC_DATABASE_URL or SYNC_DATABASE_URL)
-            # retry once
+        if env in {"ci", "test", "testing", "development"} and ("does not exist" in msg and "database" in msg):            
+            await _create_db_if_missing_async(BASE_DATABASE_URL or ASYNC_DATABASE_URL or SYNC_DATABASE_URL)            
             await _do_connect()
         else:
             raise
@@ -2118,8 +2222,7 @@ async def time_sync(request: Request):
         tz = getattr(request.state, "tz", _ZoneInfo("UTC"))
         local_dt = utc.astimezone(tz)
         local_iso = local_dt.isoformat()
-        if _fmt_dt:
-            # locale-aware human format using request.state.lang when available
+        if _fmt_dt:            
             display = _fmt_dt(local_dt, format="medium", locale=getattr(request.state, "lang", "en"))
     except Exception:
         pass
@@ -2127,7 +2230,7 @@ async def time_sync(request: Request):
         "utc": utc.isoformat(),
         "local": local_iso,
         "tz": tzname,
-        "local_display": display,   # e.g., "Nov 8, 2025, 2:14:03 PM"
+        "local_display": display,   
         "mono_ns": time.time_ns()
     }
 # ===== Sentry =====
@@ -2301,7 +2404,7 @@ async def list_yard_rules(yard: str):
             {"yard": yard},
         )
     except Exception:
-        return []  # stub fallback
+        return [] 
 
     return [YardRuleOut(**dict(r)) for r in rows]
 
@@ -2333,8 +2436,7 @@ async def upsert_yard_rule(rule: YardRuleIn):
     params = rule.dict()
     try:
         row = await database.fetch_one(query_update, params)
-    except Exception:
-        # Table doesn't exist yet
+    except Exception:        
         raise HTTPException(status_code=500, detail="yard_rules table not created yet")
 
     if row:
@@ -2407,7 +2509,7 @@ async def hedge_recommendations(yard: str):
         rules_map = {}
 
     recs: List[HedgeRec] = []
-    LOT_SIZE = 20.0  # tons per futures lot (adjust if needed)
+    LOT_SIZE = 20.0  # tons per futures lot
 
     for inv in inv_rows:
         mat = inv["material"]
@@ -2461,8 +2563,7 @@ async def usage_by_member_current_cycle():
     Member is approximated as `buyer` on BOLs and `seller` on contracts.
     """
     today = date.today()
-    start = today.replace(day=1)
-    # naive month-end
+    start = today.replace(day=1)    
     if today.month == 12:
         end = date(today.year + 1, 1, 1)
     else:
@@ -9121,6 +9222,7 @@ async def _manual_upsert_absolute_tx(
     old = float(cur["qty_on_hand"]) if cur else 0.0
     new_qty = float(qty_on_hand_tons)
     delta = new_qty - old
+    delta_is_zero = abs(delta) < 1e-12
 
     await database.execute("""
       UPDATE inventory_items
