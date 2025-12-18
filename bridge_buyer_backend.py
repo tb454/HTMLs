@@ -1572,35 +1572,21 @@ def _split_sql_statements(sql: str) -> list[str]:
 
 async def run_ddl_multi(sql: str):
     """
-    Run DDL statements one-by-one WITHOUT wrapping in a single transaction.
-    If one DDL fails, log it and continue (but do NOT poison the connection).
+    Runs DDL safely statement-by-statement.
+    Handles DO $$ blocks, views, functions, quotes, etc.
+    Never raises; logs and continues.
     """
-    stmts = []
-    buf = []
-    for line in sql.splitlines():        
-        if line.strip().startswith("--"):
+    for stmt in _split_sql_statements(sql):
+        s = (stmt or "").strip()
+        if not s:
             continue
-        buf.append(line)
-        if ";" in line:
-            joined = "\n".join(buf).strip()
-            buf = []           
-            parts = [p.strip() for p in joined.split(";") if p.strip()]
-            stmts.extend(parts)
-
-    # any leftover
-    if buf:
-        tail = "\n".join(buf).strip()
-        if tail:
-            stmts.append(tail)
-
-    for s in stmts:
         try:
             await database.execute(s)
         except Exception as e:
             try:
                 logger.warn("ddl_failed", err=str(e), sql=s[:240])
             except Exception:
-                pass            
+                pass          
 # =====  request-id + structured logs =====
 
 # ------ ID Logging ------
@@ -1723,50 +1709,49 @@ async def vendor_latest(limit: int = 200):
 @vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
 async def vendor_snapshot_to_indices():    
     await database.execute("""
-          INSERT INTO indices_daily(symbol, ts, region, price)
-          SELECT
-            CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
-            NOW()                                      AS ts,
-            'blended'                                  AS region,
-            -- 30% reference, 50% vendor, 20% contracts (all in USD/lb)
-            0.30*b.price
-            + 0.50*v.vendor_lb
-            + 0.20*COALESCE(c.contract_lb, b.price)   AS price
-          FROM (
-            -- latest reference per symbol from reference_prices
-            SELECT rp.symbol, rp.price
-            FROM reference_prices rp
-            JOIN (
-              SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
-              FROM reference_prices
-              GROUP BY symbol
-            ) last ON last.symbol = rp.symbol
-                  AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
-          ) b
-          JOIN (
-            -- latest vendor LB per canonical material
-            SELECT m.material_canonical AS symbol,
-                   AVG(v.price_per_lb)  AS vendor_lb
-            FROM vendor_quotes v
-            JOIN vendor_material_map m
-              ON m.vendor = v.vendor AND m.material_vendor = v.material
-            WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
-              AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-            GROUP BY 1
-          ) v ON v.symbol = b.symbol
-          LEFT JOIN (
-            -- contract-weighted average over recent window, converted from $/ton to $/lb
-            SELECT
-              mim.symbol,
-              AVG(c.price_per_ton / 2000.0) AS contract_lb
-            FROM contracts c
-            JOIN material_index_map mim
-              ON mim.material = c.material
-            WHERE c.status IN ('Signed','Dispatched','Fulfilled')
-              AND c.created_at >= NOW() - INTERVAL '30 days'
-            GROUP BY mim.symbol
-          ) c ON c.symbol = b.symbol
-        """)
+      INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
+      SELECT
+        CURRENT_DATE                               AS as_of_date,
+        'blended'                                  AS region,
+        b.symbol                                   AS material,
+        (0.30*b.price + 0.50*v.vendor_lb + 0.20*COALESCE(c.contract_lb, b.price)) * 2000.0 AS avg_price,
+        NULL::numeric                               AS volume_tons,
+        'USD'                                       AS currency
+      FROM (
+        SELECT rp.symbol, rp.price
+        FROM reference_prices rp
+        JOIN (
+          SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
+          FROM reference_prices
+          GROUP BY symbol
+        ) last ON last.symbol = rp.symbol
+              AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
+      ) b
+      JOIN (
+        SELECT m.material_canonical AS symbol,
+               AVG(v.price_per_lb)  AS vendor_lb
+        FROM vendor_quotes v
+        JOIN vendor_material_map m
+          ON m.vendor = v.vendor AND m.material_vendor = v.material
+        WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+          AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+        GROUP BY 1
+      ) v ON v.symbol = b.symbol
+      LEFT JOIN (
+        SELECT
+          mim.symbol,
+          AVG(c.price_per_ton / 2000.0) AS contract_lb
+        FROM contracts c
+        JOIN material_index_map mim
+          ON mim.material = c.material
+        WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+          AND c.created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY mim.symbol
+      ) c ON c.symbol = b.symbol
+      ON CONFLICT (as_of_date, region, material) DO UPDATE
+        SET avg_price = EXCLUDED.avg_price,
+            currency  = EXCLUDED.currency
+    """)
     return {"ok": True}
 
 @startup
@@ -9224,54 +9209,31 @@ async def _manual_upsert_absolute_tx(
         {"from": old, "to": new_qty, "reason": movement_reason, "idem_key": idem_key},
         default=str,
     )
-    try:
-        await database.execute("""
-          INSERT INTO inventory_movements (
-            seller, sku, movement_type, qty,
-            uom, ref_contract, contract_id, bol_id,
-            meta, tenant_id, created_at
-          )
-          VALUES (
-            :seller, :sku, :mt, :qty,
-            :uom, :ref_contract, :cid, :bid,
-            CAST(:meta AS jsonb), :tenant_id, NOW()
-          )
-        """, {
-            "seller": s,
-            "sku": k_norm,
-            "mt": "upsert",
-            "qty": delta,
-            "uom": (uom or "ton"),
-            "ref_contract": None,
-            "cid": None,
-            "bid": None,
-            "meta": meta_json,
-            "tenant_id": tenant_id,
-        })
-    except Exception:
-        await database.execute("""
-          INSERT INTO inventory_movements (
-            seller, sku, movement_type, qty,
-            uom, ref_contract, contract_id, bol_id,
-            meta, tenant_id, created_at
-          )
-          VALUES (
-            :seller, :sku, :mt, :qty,
-            :uom, :ref_contract, :cid, :bid,
-            CAST(:meta AS jsonb), :tenant_id, NOW()
-          )
-        """, {
-            "seller": s,
-            "sku": k_norm,
-            "mt": "upsert",
-            "qty": delta,
-            "uom": (uom or "ton"),
-            "ref_contract": None,
-            "cid": None,
-            "bid": None,
-            "meta": meta_json,
-            "tenant_id": tenant_id,
-        })
+
+    # Prefer UUID pointer columns (matches Supabase schema)
+    await database.execute("""
+      INSERT INTO inventory_movements (
+        seller, sku, movement_type, qty,
+        uom, ref_contract, contract_id_uuid, bol_id_uuid,
+        meta, tenant_id, created_at
+      )
+      VALUES (
+        :seller, :sku, :mt, :qty,
+        :uom, :ref_contract, :cid_uuid, :bid_uuid,
+        CAST(:meta AS jsonb), :tenant_id, NOW()
+      )
+    """, {
+        "seller": s,
+        "sku": k_norm,
+        "mt": "upsert",
+        "qty": delta,
+        "uom": (uom or "ton"),
+        "ref_contract": None,  
+        "cid_uuid": None,       
+        "bid_uuid": None,
+        "meta": meta_json,
+        "tenant_id": tenant_id,
+    })
 
     # --- webhook emit (inventory.movement)
     try:
@@ -9354,9 +9316,9 @@ async def emit_event(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]
         r = await client.post(url, headers=headers, content=body)
         ok = 200 <= r.status_code < 300
         return {"ok": ok, "status_code": r.status_code, "response": r.text}
-
 # ---------- /helpers ----------
 
+# -------- Inventory endpoints --------
 class InventoryRowOut(BaseModel):
     seller: str
     sku: str
@@ -9454,6 +9416,7 @@ async def list_movements(
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
+# -------- Inventory endpoints --------
 
 # ---- Buyer Positions: list by buyer/status ----
 class BuyerPositionRow(BaseModel):
@@ -12686,23 +12649,28 @@ async def receipt_consume(receipt_id: str, bol_id: Optional[str] = None, prov: R
 #-------- Receipts lifecycle --------
 
 # ----- Reference Prices -----
-@app.post("/reference_prices/upsert_from_vendor", tags=["Reference"], summary="Upsert today's vendor-blended LB into reference_prices", status_code=200)
+@app.post("/reference_prices/upsert_from_vendor", tags=["Reference"], summary="Insert vendor-blended into reference_prices", status_code=200)
 async def upsert_vendor_to_reference():
-    # Ensure reference_prices has columns: symbol TEXT, ts TIMESTAMPTZ, price_lb NUMERIC, source TEXT
-    # Upsert by (symbol, ts::date, source) can be added later; for now just insert "now".
+    """
+    Writes vendor blended prices into reference_prices using your real schema:
+      reference_prices(symbol, source, price, ts_market, ts_server, currency)
+    """
     await database.execute("""
-        INSERT INTO reference_prices (symbol, ts, price_lb, source)
-        SELECT m.material_canonical AS symbol,
-               NOW() AS ts,
-               AVG(v.price_per_lb) AS price_lb,
-               'vendor' AS source
-        FROM vendor_quotes v
-        JOIN vendor_material_map m
-          ON m.vendor=v.vendor AND m.material_vendor=v.material
-        WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
-          AND v.price_per_lb IS NOT NULL
-          AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-        GROUP BY m.material_canonical
+      INSERT INTO reference_prices (symbol, source, price, ts_market, ts_server, currency)
+      SELECT
+        m.material_canonical AS symbol,
+        'vendor'             AS source,
+        AVG(v.price_per_lb)  AS price,
+        MAX(v.sheet_date)::timestamptz AS ts_market,
+        NOW()                AS ts_server,
+        'USD'                AS currency
+      FROM vendor_quotes v
+      JOIN vendor_material_map m
+        ON m.vendor=v.vendor AND m.material_vendor=v.material
+      WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+        AND v.price_per_lb IS NOT NULL
+        AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
+      GROUP BY m.material_canonical
     """)
     return {"ok": True}
 # ----- Reference Prices -----
