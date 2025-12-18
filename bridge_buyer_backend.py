@@ -9527,12 +9527,12 @@ async def finished_goods(
     ]
 
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
-@startup
+@app.on_event("startup")
 async def _ensure_contracts_bols_schema():
     ddl = [
         # contracts (base shape)
         """
-        CREATE TABLE IF NOT EXISTS contracts (
+        CREATE TABLE IF NOT EXISTS public.contracts (
           id UUID PRIMARY KEY,
           buyer TEXT NOT NULL,
           seller TEXT NOT NULL,
@@ -9545,60 +9545,94 @@ async def _ensure_contracts_bols_schema():
           signature TEXT
         );
         """,
-        
+
         # idempotent key for imports/backfills
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON contracts(dedupe_key);",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON public.contracts(dedupe_key);",
 
         # extend contracts with pricing fields used by create_contract()
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;",
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_symbol    TEXT;",
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_price     NUMERIC;",
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_source    TEXT;",
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS reference_timestamp TIMESTAMPTZ;",
-        "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS currency            TEXT DEFAULT 'USD';",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS pricing_formula     TEXT;",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_symbol    TEXT;",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_price     NUMERIC;",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_source    TEXT;",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS reference_timestamp TIMESTAMPTZ;",
+        "ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS currency            TEXT DEFAULT 'USD';",
 
         # bols (base shape)
         """
-        CREATE TABLE IF NOT EXISTS bols (
+        CREATE TABLE IF NOT EXISTS public.bols (
           bol_id UUID PRIMARY KEY,
-          contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+          contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
           buyer TEXT,
           seller TEXT,
           material TEXT,
           weight_tons NUMERIC,
           price_per_unit NUMERIC,
           total_value NUMERIC,
+
           carrier_name TEXT,
           carrier_driver TEXT,
           carrier_truck_vin TEXT,
+          carrier_dot TEXT,
+          carrier_mc TEXT,
+          trailer TEXT,
+          driver_name TEXT,
+
           pickup_signature_base64 TEXT,
           pickup_signature_time TIMESTAMPTZ,
           pickup_time TIMESTAMPTZ,
+
           delivery_signature_base64 TEXT,
           delivery_signature_time TIMESTAMPTZ,
           delivery_time TIMESTAMPTZ,
-          status TEXT
+
+          notes TEXT,
+          status TEXT,
+
+          origin_country TEXT,
+          destination_country TEXT,
+          port_code TEXT,
+          hs_code TEXT,
+          duty_usd NUMERIC,
+          tax_pct NUMERIC
         );
         """,
 
-        "CREATE INDEX IF NOT EXISTS idx_bols_contract     ON bols(contract_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time  ON bols(pickup_time DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_bols_contract    ON public.bols(contract_id);",
+        "CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON public.bols(pickup_time DESC);",
+
+        # repair legacy/minimal bols tables (CI / drift-proof) — MATCH TYPES ABOVE
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_driver TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_truck_vin TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_dot TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_mc TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS trailer TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS driver_name TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_time TIMESTAMPTZ;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_base64 TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_time TIMESTAMPTZ;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMPTZ;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_base64 TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_signature_time TIMESTAMPTZ;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS notes TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS status TEXT;",
 
         # export/compliance fields (idempotent)
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS origin_country TEXT;",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS destination_country TEXT;",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS port_code TEXT;",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS hs_code TEXT;",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC;",
-        "ALTER TABLE bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS origin_country TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS destination_country TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS port_code TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS hs_code TEXT;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS duty_usd NUMERIC;",
+        "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS tax_pct NUMERIC;",
     ]
 
     for s in ddl:
         try:
             await database.execute(s)
         except Exception as e:
-            logger.warn("contracts_bols_bootstrap_failed", sql=s[:100], err=str(e))
+            logger.error("contracts_bols_bootstrap_failed", sql=s[:200], err=str(e))
+            raise
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
 # ===== CONTRACTS: delivery fields =====
