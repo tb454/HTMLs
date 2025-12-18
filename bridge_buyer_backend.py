@@ -5861,6 +5861,14 @@ app.mount(
 )
 # -------- /Static HTML --------
 
+@app.head("/", include_in_schema=False)
+async def head_root():
+    return Response(status_code=200)
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    return PlainTextResponse("User-agent: *\nDisallow: /\n", media_type="text/plain; charset=utf-8")
+
 @app.get("/", include_in_schema=False)
 async def root(request: Request):
     """
@@ -9143,24 +9151,50 @@ async def _manual_upsert_absolute_tx(
         await database.execute("""
           INSERT INTO inventory_movements (
             seller, sku, movement_type, qty,
-            ref_contract, contract_id, bol_id,
+            uom, ref_contract, contract_id_uuid, bol_id_uuid,
             meta, tenant_id, created_at
           )
-          VALUES (:s,:k,'upsert',:q, :uom,
-                  NULL, NULL, NULL,
-                  :m::jsonb, :tenant_id, NOW())
-        """, {"s": s, "k": k_norm, "q": delta, "uom": (uom or "ton"), "m": meta_json, "tenant_id": tenant_id})
+          VALUES (
+            :seller, :sku, :mt, :qty,
+            :uom, :ref_contract, :cid, :bid,
+            :meta::jsonb, :tenant_id, NOW()
+          )
+        """, {
+            "seller": s,
+            "sku": k_norm,
+            "mt": "upsert",
+            "qty": delta,
+            "uom": (uom or "ton"),
+            "ref_contract": None,
+            "cid": None,
+            "bid": None,
+            "meta": meta_json,
+            "tenant_id": tenant_id,
+        })
     except Exception:
         await database.execute("""
           INSERT INTO inventory_movements (
             seller, sku, movement_type, qty,
-            ref_contract, contract_id, bol_id,
-            meta, tenant_id
+            uom, ref_contract, contract_id_uuid, bol_id_uuid,
+            meta, tenant_id, created_at
           )
-          VALUES (:s,:k,'upsert',:q,
-                  NULL, NULL, NULL,
-                  :m, :tenant_id)
-        """, {"s": s, "k": k_norm, "q": delta, "m": meta_json, "tenant_id": tenant_id})
+          VALUES (
+            :seller, :sku, :mt, :qty,
+            :uom, :ref_contract, :cid, :bid,
+            :meta::jsonb, :tenant_id, NOW()
+          )
+        """, {
+            "seller": s,
+            "sku": k_norm,
+            "mt": "upsert",
+            "qty": delta,
+            "uom": (uom or "ton"),
+            "ref_contract": None,
+            "cid": None,
+            "bid": None,
+            "meta": meta_json,
+            "tenant_id": tenant_id,
+        })
 
     # --- webhook emit (inventory.movement)
     try:
@@ -14666,24 +14700,28 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                         await database.execute("""
                             INSERT INTO inventory_movements (
                                 seller, sku, movement_type, qty,
-                                uom, contract_id, bol_id, ref_contract,
+                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
                                 meta, tenant_id, created_at
                             )
                             VALUES (
                                 :seller, :sku, :mt, :qty,
-                                :uom, :cid, :bid, :ref,
+                                :uom, :ref_contract, :cid, :bid,
                                 :meta::jsonb, :tenant_id, NOW()
                             )
-                            """, {
+                        """, {
                             "seller": seller,
                             "sku": sku,
-                            "mt": "reserve",              
-                            "qty": qty,
+                            "mt": "adjust",
+                            "qty": short,
                             "uom": "ton",
-                            "cid": cid,           
-                            "bid": None,                  
-                            "ref": cid,
-                            "meta": json.dumps({...}, default=str),
+                            "ref_contract": None,
+                            "cid": None,
+                            "bid": None,
+                            "meta": json.dumps({
+                                "reason": "auto_topup_for_tests",
+                                "short_tons": short,
+                                "requested_tons": qty
+                            }, default=str),
                             "tenant_id": tenant_id,
                         })
                     except Exception:
@@ -14701,15 +14739,27 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             await database.execute("""
                 INSERT INTO inventory_movements (
-                        seller, sku, movement_type, qty,
-                        ref_contract, contract_id_uuid, bol_id_uuid,
-                        meta
-                    )
-                    VALUES (:s,:k,'upsert',:q,
-                            NULL, NULL, NULL,
-                            :m)
-            """, {"s": seller, "k": sku, "q": qty, "cid": cid,
-                  "m": json.dumps({"reason": "contract_create"})})
+                    seller, sku, movement_type, qty,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                    meta, tenant_id, created_at
+                )
+                VALUES (
+                    :seller, :sku, :mt, :qty,
+                    :uom, :ref_contract, :cid, :bid,
+                    :meta::jsonb, :tenant_id, NOW()
+                )
+            """, {
+                "seller": seller,
+                "sku": sku,
+                "mt": "reserve",
+                "qty": qty,
+                "uom": "ton",
+                "ref_contract": cid,
+                "cid": cid,
+                "bid": None,
+                "meta": json.dumps({"reason": "contract_create", "contract_id": cid}, default=str),
+                "tenant_id": tenant_id,
+            })
 
             payload = {
                 "id": cid,
@@ -16110,18 +16160,19 @@ async def cancel_contract(contract_id: str):
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, contract_id, bol_id, ref_contract,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
-                    :seller, :sku, 'unreserve', :q,
-                    'ton', :cid, NULL, :cid,
+                    :seller, :sku, 'unreserve', :qty,
+                    'ton', :ref_contract, :cid, NULL,
                     :meta::jsonb, NULL, NOW()
                 )
             """, {
                 "seller": seller,
                 "sku": sku,
-                "q": qty,
+                "qty": qty,
+                "ref_contract": contract_id,
                 "cid": contract_id,
                 "meta": json.dumps({"reason": "cancel"}, default=str),
             })
