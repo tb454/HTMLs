@@ -14612,6 +14612,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
     await _check_contract_quota()
 
+    row = None 
+
     cid    = str(uuid.uuid4())
     # normalize numerics ONCE so asyncpg never sees a string
     price_dec = _coerce_decimal(contract.price_per_ton, "price_per_ton")
@@ -14852,6 +14854,10 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 )
                 RETURNING *
             """, payload)
+
+            if not row:
+                raise RuntimeError("contracts insert returned no row")
+            
   # Stripe metered usage: +1 contract for this seller
         try:
             member_key = (row["seller"] or "").strip()
@@ -14934,9 +14940,20 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         raise
     except Exception as e:
         try:
-            logger.warn("contract_create_failed_primary", err=str(e))
+            logger.exception(
+                "contract_create_failed_primary",
+                err=str(e),
+                cid=str(cid),
+                seller=str(contract.seller),
+                material=str(contract.material),
+                qty=float(qty),
+                price_per_ton=float(price_val),
+                tenant_id=(str(tenant_id) if tenant_id else None),
+            )
         except Exception:
             pass
+
+        # --------------------- fallback path: minimal insert -----------------------------
         try:
             await database.execute("""
                 INSERT INTO contracts (id,buyer,seller,material,weight_tons,price_per_ton,status,currency,tenant_id)
@@ -14946,8 +14963,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "buyer": contract.buyer,
                 "seller": contract.seller,
                 "material": contract.material,
-                "wt": qty,         
-                "ppt": price_val,  
+                "wt": qty,
+                "ppt": price_val,
                 "ccy": contract.currency,
                 "tenant_id": tenant_id,
             })
@@ -14963,7 +14980,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "seller": contract.seller,
                 "material": contract.material,
                 "weight_tons": float(contract.weight_tons),
-                "price_per_ton": quantize_money(contract.price_per_ton),
+                "price_per_ton": quantize_money(price_dec),  # <-- use the normalized Decimal you already computed
                 "currency": contract.currency or "USD",
                 "tax_percent": contract.tax_percent,
                 "status": "Open",
@@ -14977,17 +14994,17 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "reference_timestamp": contract.reference_timestamp,
             }
             return await _idem_guard(request, key, fallback)
+
         except Exception as e2:
             try:
-                logger.warn("contract_create_failed_fallback", err=str(e2))
+                logger.exception("contract_create_failed_fallback", err=str(e2), cid=str(cid))
             except Exception:
                 pass
-            # show actual DB error for debugging
             raise HTTPException(
                 status_code=500,
                 detail=f"contract create failed: {type(e2).__name__}: {str(e2)}"
             )
-    # ========= Admin Exports router ==========
+# ========= Admin Exports router ==========
 
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")

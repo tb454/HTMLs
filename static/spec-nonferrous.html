@@ -3,52 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Guidelines for Nonferrous Scrap: Commodity Specifications</title>
-  <style nonce="{{NONCE}}">
-    /* Basic styles for accordion buttons */
-    .accordion {
-      background-color: #eee;
-      color: #444;
-      cursor: pointer;
-      padding: 10px;
-      width: 100%;
-      border: none;
-      text-align: left;
-      outline: none;
-      transition: background-color 0.3s ease;
-      margin: 5px 0;
-      font-size: 1em;
-    }
-    .accordion:hover, .active {
-      background-color: #ccc;
-    }
-    /* Panel (content) styling */
-    .panel {
-      padding: 0 10px;
-      display: none;
-      background-color: #f9f9f9;
-      overflow: hidden;
-      border: 1px solid #ccc;
-      margin-bottom: 5px;
-    }
-    /* Nested accordion styles */
-    .accordion.nested {
-      margin-left: 20px;
-      font-size: 0.95em;
-    }
-    .panel.nested {
-      margin-left: 20px;
-    }
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      line-height: 1.6;
-      background-color: #fdfdfd;
-      color: #333;
-    }
-    h1 {
-      margin-bottom: 20px;
-    }
-  </style>
+  <link rel="stylesheet" href="/static/css/specs.css?v=20251218">
 </head>
 <body>
   <h1>Commodity Specifications for Nonferrous Scrap</h1>
@@ -634,20 +589,7 @@
     </div>
   </div>
 
-  <script nonce="{{NONCE}}">
-    // JavaScript to handle accordion toggling
-    var acc = document.getElementsByClassName("accordion");
-    for (var i = 0; i < acc.length; i++) {
-      acc[i].addEventListener("click", function() {
-        this.classList.toggle("active");
-        var panel = this.nextElementSibling;
-        if (panel.style.display === "block") {
-          panel.style.display = "none";
-        } else {
-          panel.style.display = "block";
-        }
-      });
-    }
-  </script>
+  <script defer src="/static/js/specs-accordion.js?v=20251218"></script>
+
 </body>
 </html>
