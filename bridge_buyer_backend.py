@@ -22,7 +22,6 @@ from sqlalchemy import create_engine, Table, MetaData, and_, select, Column, Str
 import os
 import databases
 import uuid
-import stripe
 import csv
 import io
 from pathlib import Path
@@ -1030,8 +1029,8 @@ async def _bootstrap_core_tables_for_ci():
       movement_type text NOT NULL,
       qty numeric NOT NULL,
       uom text,
-      contract_id_uuid uuid,
-      bol_id_uuid uuid,
+      contract_id uuid,
+      bol_id uuid,
       meta jsonb,
       tenant_id uuid,
       created_at timestamp without time zone NOT NULL DEFAULT now()
@@ -1042,13 +1041,13 @@ async def _bootstrap_core_tables_for_ci():
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_contract_fk') THEN
         ALTER TABLE public.inventory_movements
           ADD CONSTRAINT inv_mov_contract_fk
-          FOREIGN KEY (contract_id_uuid) REFERENCES public.contracts(id);
+          FOREIGN KEY (contract_id) REFERENCES public.contracts(id);
       END IF;
 
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_bol_fk') THEN
         ALTER TABLE public.inventory_movements
           ADD CONSTRAINT inv_mov_bol_fk
-          FOREIGN KEY (bol_id_uuid) REFERENCES public.bols(bol_id);
+          FOREIGN KEY (bol_id) REFERENCES public.bols(bol_id);
       END IF;
     END$$;
     """)
@@ -2609,31 +2608,6 @@ async def usage_by_member_current_cycle():
 
     return list(usage.values())
 # ---- Usage By Member ----
-
-# ---- Prices Over Time ----
-@analytics_router.get("/prices_over_time", summary="Daily average $/ton for a material over a rolling window")
-async def prices_over_time(material: str, window: str = "1M"):
-    """
-    Uses contracts as the source of truth:
-      - Filters by material ILIKE
-      - Groups by contract created_at::date
-      - Returns [{"date":"YYYY-MM-DD","avg_price": <float>}]
-    window: "1M","3M","6M","1Y" -> limits the lookback.
-    """
-    lookbacks = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
-    days = lookbacks.get((window or "1M").upper(), 30)
-    rows = await database.fetch_all("""
-      SELECT
-        created_at::date AS d,
-        AVG(price_per_ton) AS avg_ton
-      FROM contracts
-      WHERE material ILIKE :m
-        AND created_at >= NOW() - make_interval(days => :days)
-      GROUP BY d
-      ORDER BY d
-    """, {"m": f"%{material}%", "days": days})
-    return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
-# ---- Prices Over Time ----
 
 # ---- Tons by Yard This Month ----
 @analytics_router.get("/tons_by_yard_this_month", summary="Delivered tons by seller (current month)")
@@ -9253,7 +9227,7 @@ async def _manual_upsert_absolute_tx(
         await database.execute("""
           INSERT INTO inventory_movements (
             seller, sku, movement_type, qty,
-            uom, ref_contract, contract_id_uuid, bol_id_uuid,
+            uom, ref_contract, contract_id, bol_id,
             meta, tenant_id, created_at
           )
           VALUES (
@@ -9277,7 +9251,7 @@ async def _manual_upsert_absolute_tx(
         await database.execute("""
           INSERT INTO inventory_movements (
             seller, sku, movement_type, qty,
-            uom, ref_contract, contract_id_uuid, bol_id_uuid,
+            uom, ref_contract, contract_id, bol_id,
             meta, tenant_id, created_at
           )
           VALUES (
@@ -10504,19 +10478,6 @@ async def list_dossier_queue(limit: int = 40):
         {"lim": limit},
     )
     return [DossierQueueRow(**dict(r)) for r in rows]
-
-
-@admin_dossier_router.post("/retry_failed")
-async def retry_failed_dossier():
-    # Simple implementation: mark failed → pending; external worker will pick up
-    count = await database.execute(
-        """
-        UPDATE dossier_ingest_queue
-        SET status = 'pending', attempts = 0
-        WHERE status = 'failed'
-        """
-    )
-    return {"ok": True, "message": "Retry triggered", "updated": count}
 
 @admin_dossier_router.post("/run_batch", summary="Drain pending Dossier ingest queue")
 async def run_dossier_ingest_batch(limit: int = 100):
@@ -13576,29 +13537,28 @@ async def analytics_contracts_by_region(region: str | None = None, start: str | 
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
 
-@app.get("/analytics/prices_over_time", tags=["Analytics"], summary="Daily avg prices & volume for a material")
-async def analytics_prices_over_time(material: str, window: str = "1M"):
-    days = _parse_window_to_days(window)
-    q = """
-      SELECT (created_at AT TIME ZONE 'utc')::date AS d,
-             ROUND(AVG(price_per_ton)::numeric, 2) AS avg_price,
-             ROUND(SUM(COALESCE(weight_tons,0))::numeric, 2) AS volume_tons
-        FROM contracts
-       WHERE material = :m
-         AND created_at >= NOW() - make_interval(days => :days)
-         AND price_per_ton IS NOT NULL
-    GROUP BY d
-    ORDER BY d
+@analytics_router.get("/prices_over_time", summary="Daily average $/ton for a material over a rolling window")
+async def prices_over_time(material: str, window: str = "1M"):
     """
-    rows = await database.fetch_all(q, {"m": material, "days": days})
-    return [
-        {
-            "date": str(r["d"]),
-            "avg_price": float(r["avg_price"]) if r["avg_price"] is not None else 0.0,
-            "volume": float(r["volume_tons"] or 0)
-        }
-        for r in rows
-    ]
+    Uses contracts as the source of truth:
+      - Filters by material ILIKE
+      - Groups by contract created_at::date
+      - Returns [{"date":"YYYY-MM-DD","avg_price": <float>}]
+    window: "1M","3M","6M","1Y" -> limits the lookback.
+    """
+    lookbacks = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+    days = lookbacks.get((window or "1M").upper(), 30)
+    rows = await database.fetch_all("""
+      SELECT
+        created_at::date AS d,
+        AVG(price_per_ton) AS avg_ton
+      FROM contracts
+      WHERE material ILIKE :m
+        AND created_at >= NOW() - make_interval(days => :days)
+      GROUP BY d
+      ORDER BY d
+    """, {"m": f"%{material}%", "days": days})
+    return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
 
 @app.get("/analytics/contracts_by_day", tags=["Analytics"], summary="Contract count per day")
 async def analytics_contracts_by_day(days: int = 30):
@@ -13702,20 +13662,6 @@ async def rolling_bands(material: str, days: int = 365):
     FROM d;
     """
     rows = await database.fetch_all(q, {"m": material, "days": days})
-    return [dict(r) for r in rows]
-
-@app.get("/analytics/tons_by_yard_this_month", tags=["Analytics"], summary="Tons this calendar month by yard (seller)")
-async def tons_by_yard_this_month(limit: int = 50):
-    q = """
-    SELECT seller AS yard_id,
-           ROUND(COALESCE(SUM(weight_tons),0)::numeric, 2) AS tons_month
-      FROM contracts
-     WHERE created_at >= date_trunc('month', NOW())
-     GROUP BY seller
-     ORDER BY tons_month DESC
-     LIMIT :lim
-    """
-    rows = await database.fetch_all(q, {"lim": limit})
     return [dict(r) for r in rows]
 
 # --- DAILY INDEX SNAPSHOTS ---
@@ -14802,7 +14748,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                         await database.execute("""
                             INSERT INTO inventory_movements (
                                 seller, sku, movement_type, qty,
-                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                                uom, ref_contract, contract_id, bol_id,
                                 meta, tenant_id, created_at
                             )
                             VALUES (
@@ -14842,7 +14788,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract, contract_id, bol_id,
                     meta, tenant_id, created_at
                 )
                 VALUES (
@@ -16262,7 +16208,7 @@ async def cancel_contract(contract_id: str):
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract, contract_id, bol_id,
                     meta, tenant_id, created_at
                 )
                 VALUES (
