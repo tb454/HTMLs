@@ -9548,6 +9548,9 @@ async def _ensure_contracts_bols_schema():
       signature TEXT
     );
 
+    "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS idem_key TEXT;";
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem ON public.bols(contract_id, idem_key);",
+
     -- idempotent key for imports/backfills
     ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_contracts_dedupe ON public.contracts(dedupe_key);
