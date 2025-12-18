@@ -8888,7 +8888,7 @@ async def _ensure_warrant_schema():
             END IF;
             END$$;
             """)
-        except Exception:
+    except Exception:
             pass
 
 class WarrantIn(BaseModel):
