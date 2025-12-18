@@ -9529,7 +9529,6 @@ async def finished_goods(
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
 @startup
 async def _ensure_contracts_bols_schema():
-    # Optional gate (you already set this in tests/conftest.py)
     if not os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes"):
         return
 
@@ -9547,9 +9546,6 @@ async def _ensure_contracts_bols_schema():
       signed_at TIMESTAMPTZ,
       signature TEXT
     );
-
-    "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS idem_key TEXT;";
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem ON public.bols(contract_id, idem_key);",
 
     -- idempotent key for imports/backfills
     ALTER TABLE public.contracts ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
@@ -9573,26 +9569,38 @@ async def _ensure_contracts_bols_schema():
       weight_tons NUMERIC,
       price_per_unit NUMERIC,
       total_value NUMERIC,
+
+      carrier_name TEXT,
+      carrier_driver TEXT,
+      carrier_truck_vin TEXT,
+
       pickup_signature_base64 TEXT,
       pickup_signature_time TIMESTAMPTZ,
       pickup_time TIMESTAMPTZ,
+
       delivery_signature_base64 TEXT,
       delivery_signature_time TIMESTAMPTZ,
       delivery_time TIMESTAMPTZ,
-      status TEXT
+
+      status TEXT,
+
+      -- idempotency (needed for ON CONFLICT (contract_id, idem_key))
+      idem_key TEXT
     );
 
-    "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS idem_key TEXT;",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem ON public.bols(contract_id, idem_key);",
-    
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_bol_id ON public.bols(bol_id);",
+    -- ✅ ensure the idempotency columns/index exist even if bols table pre-existed
+    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS idem_key TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem ON public.bols(contract_id, idem_key);
 
-    -- REPAIR legacy/minimal bols tables
+    -- indexes
+    CREATE INDEX IF NOT EXISTS idx_bols_contract    ON public.bols(contract_id);
+    CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON public.bols(pickup_time DESC);
+
+    -- repair legacy/minimal bols tables (safe)
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name      TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_driver    TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_truck_vin TEXT;
 
-    -- (these are in your create schema already, but safe to repair too)
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_base64   TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_signature_time     TIMESTAMPTZ;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS pickup_time               TIMESTAMPTZ;
@@ -9601,15 +9609,11 @@ async def _ensure_contracts_bols_schema():
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS delivery_time             TIMESTAMPTZ;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS status                    TEXT;
 
-    CREATE INDEX IF NOT EXISTS idx_bols_contract    ON public.bols(contract_id);
-    CREATE INDEX IF NOT EXISTS idx_bols_pickup_time ON public.bols(pickup_time DESC);
-
     -- export/compliance fields (idempotent)
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS origin_country      TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS destination_country TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS port_code           TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS hs_code             TEXT;
-    ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS duty_usd            NUMERIC;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS tax_pct             NUMERIC;
     """
@@ -9618,9 +9622,7 @@ async def _ensure_contracts_bols_schema():
         await run_ddl_multi(sql)
     except Exception as e:
         logger.error("contracts_bols_bootstrap_failed", err=str(e))
-        # CI should fail loudly if schema can't be applied
-        if os.getenv("ENV", "").lower() in {"ci", "test"}:
-            raise
+        raise
 # ===== /CONTRACTS / BOLS schema bootstrap =====
 
 # ===== CONTRACTS: delivery fields =====
