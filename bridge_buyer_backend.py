@@ -65,6 +65,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # ---- Admin dependency helper  ----
 from fastapi import Request as _FastAPIRequest
+def _require_admin(request: _FastAPIRequest):
+    """
+    Require an 'admin' role in the current session; raises 403 otherwise.
+    """
+    _require_role(request, {"admin"})
 def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
@@ -547,6 +552,22 @@ async def ratelimit_handler(request, exc):
 
 
 SNAPSHOT_AUTH = os.getenv("SNAPSHOT_AUTH", "")
+
+async def run_daily_snapshot(storage: str = "supabase") -> dict:
+    """
+    Minimal, safe snapshot routine used by the background job.
+    Attempts to run indices builder if available; always returns a dict and never raises.
+    """
+    try:
+        if 'run_indices_builder' in globals():
+            fn = run_indices_builder
+            if inspect.iscoroutinefunction(fn):
+                await fn()
+            else:
+                fn()
+        return {"ok": True, "storage": storage, "ts": utcnow().isoformat()}
+    except Exception as e:
+        return {"ok": False, "storage": storage, "error": str(e)}
 
 # --- background snapshot wrapper: never crash the worker ---
 async def _snapshot_task(storage: str):
@@ -2713,7 +2734,7 @@ async def get_br_index_history(
           ON vmm.instrument_code = si.instrument_code
         WHERE vq.sheet_date IS NOT NULL
           AND vq.unit_raw IN ('LB','LBS')
-          AND vq.sheet_date >= CURRENT_DATE - INTERVAL ':days days'
+          AND vq.sheet_date >= CURRENT_DATE - make_interval(days => :days)
           {filter_sql}
         GROUP BY vq.sheet_date, vmm.instrument_code, si.core_code, si.material_canonical
         ORDER BY vq.sheet_date;
@@ -8733,30 +8754,30 @@ async def _ensure_inventory_schema():
 # ------ RECEIPTS schema bootstrap (idempotent) =====
 @startup
 async def _ensure_receipts_schema():
-    # When pointing at Supabase/managed DB, skip DDL entirely.
     if not BOOTSTRAP_DDL:
         return
-
-    ddl = """
+    try:
+        await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS public.receipts (
       id              UUID PRIMARY KEY,
-      status          TEXT NOT NULL,
-      consumed_at     TIMESTAMPTZ,
-      consumed_bol_id UUID,
+      seller          TEXT NOT NULL,
+      sku             TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'created',
+      qty_tons        NUMERIC,
       symbol          TEXT,
       location        TEXT,
       qty_lots        NUMERIC,
       lot_size        NUMERIC,
-      sku             TEXT,
-      qty_tons        NUMERIC,
-      tenant_id       UUID
+      consumed_at     TIMESTAMPTZ,
+      consumed_bol_id UUID,
+      provenance      JSONB,
+      tenant_id       UUID,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
     CREATE INDEX IF NOT EXISTS idx_receipts_status ON public.receipts(status);
     CREATE INDEX IF NOT EXISTS idx_receipts_symbol_location ON public.receipts(symbol, location);
-    """
-    try:
-        await run_ddl_multi(ddl)
+    """)
     except Exception as e:
         logger.warn("receipts_bootstrap_failed", err=str(e))
 # ===== RECEIPTS schema bootstrap (idempotent) =====
