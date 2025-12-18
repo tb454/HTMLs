@@ -1271,7 +1271,7 @@ onReady(async () => {
         tax_percent: null
       };
 
-      // Try live (reserve). On HTTP 500 only, retry once with import mode to bypass reserve.
+      // LIVE only: create contract must reserve inventory (no silent import fallback)
       const idem = (crypto.randomUUID?.() || String(Date.now()));
 
       try {
@@ -1283,36 +1283,19 @@ onReady(async () => {
           },
           body: JSON.stringify(body)
         });
+
         toast(`Reserved ${weight_tons} tons of ${material} from ${seller}.`);
+
       } catch (e) {
-        if ((e?.message || "").startsWith("HTTP 500")) {
-          try {
-            await api(`/contracts`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Idempotency-Key": idem + "-imp",
-                "X-Import-Mode": "historical"
-              },
-              body: JSON.stringify(body)
-            });
-            toast(`Contract inserted (import mode) for ${weight_tons} tons of ${material}.`);
-          } catch (e2) {
-            toast(e2?.message || "Contract create failed");
-            throw e2;
-          }
-        } else {
-          toast(e?.message || "Contract create failed");
-          throw e;
-        }
+        toast(e?.message || "Contract create failed");
+        throw e;
       }
-    
-      // refresh tables/cards
+
+      // refresh tables/cards (give DB a beat)
       try { await listContracts(); } catch {}
       try { renderRecentMovements(seller, material); } catch {}
-      try { refreshFinishedFromInputs(); } catch {}
-    }
-
+      setTimeout(() => { try { refreshFinishedFromInputs(); } catch {} }, 150);
+    }       
     function toISOStringDateStart(v){
       if (!v) return "";
       const d = new Date(v);
