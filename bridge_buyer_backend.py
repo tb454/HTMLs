@@ -8766,69 +8766,76 @@ async def _ensure_trading_hardening():
             """)
     except Exception:        
         pass
-
 # ===== INVENTORY schema bootstrap (idempotent) =====
-@app.on_event("startup")
+@startup
 async def _ensure_inventory_schema():
-    ddl: list[str] = [
+    ddl = [
         """
-        CREATE TABLE IF NOT EXISTS public.inventory_items (
-          seller        TEXT NOT NULL,
-          sku           TEXT NOT NULL,
-          qty_on_hand   NUMERIC NOT NULL DEFAULT 0,
+        CREATE TABLE IF NOT EXISTS inventory_items (
+          seller TEXT NOT NULL,
+          sku TEXT NOT NULL,
+          description TEXT,
+          uom TEXT,
+          location TEXT,
+          qty_on_hand NUMERIC NOT NULL DEFAULT 0,
+          qty_reserved NUMERIC NOT NULL DEFAULT 0,
+          qty_committed NUMERIC NOT NULL DEFAULT 0,
+          source TEXT,
+          external_id TEXT,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           PRIMARY KEY (seller, sku)
         );
         """,
 
-        # repair/add columns 
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS description   TEXT;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS uom           TEXT;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS location      TEXT;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS source        TEXT;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS external_id   TEXT;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS qty_reserved  NUMERIC NOT NULL DEFAULT 0;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS qty_committed NUMERIC NOT NULL DEFAULT 0;",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();",
-        "ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS tenant_id     UUID;",
+        # ✅ REPAIR legacy/minimal tables (THIS is what you're missing)
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS description   TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS uom           TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS location      TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS source        TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS external_id   TEXT;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS qty_reserved  NUMERIC NOT NULL DEFAULT 0;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS qty_committed NUMERIC NOT NULL DEFAULT 0;",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS tenant_id     UUID;",
 
-        # inventory_movements
         """
-        CREATE TABLE IF NOT EXISTS public.inventory_movements (
-          id            BIGSERIAL PRIMARY KEY,
-          account_id    UUID,
-          seller        TEXT NOT NULL,
-          sku           TEXT NOT NULL,
-          movement_type TEXT NOT NULL,
-          qty           NUMERIC NOT NULL,
-          uom           TEXT,
-          contract_id   UUID,
-          bol_id        UUID,
-          ref_contract  TEXT,
-          meta          JSONB,
-          tenant_id     UUID,
-          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+            id            BIGSERIAL PRIMARY KEY,
+            account_id    UUID,
+            seller        TEXT NOT NULL,
+            sku           TEXT NOT NULL,
+            movement_type TEXT NOT NULL,
+            qty           NUMERIC NOT NULL,
+            uom           TEXT,
+            contract_id   UUID,
+            bol_id        UUID,
+            ref_contract  TEXT,
+            meta          JSONB,
+            tenant_id     UUID,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
 
-        # inventory_ingest_log
+        # (optional but safe) repair movements too
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+
         """
-        CREATE TABLE IF NOT EXISTS public.inventory_ingest_log (
-          id           BIGSERIAL PRIMARY KEY,
-          source       TEXT,
-          seller       TEXT,
-          item_count   INT,
-          idem_key     TEXT,
-          sig_present  BOOLEAN,
-          sig_valid    BOOLEAN,
-          remote_addr  TEXT,
-          user_agent   TEXT,
-          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        CREATE TABLE IF NOT EXISTS inventory_ingest_log (
+          id BIGSERIAL PRIMARY KEY,
+          source TEXT,
+          seller TEXT,
+          item_count INT,
+          idem_key TEXT,
+          sig_present BOOLEAN,
+          sig_valid BOOLEAN,
+          remote_addr TEXT,
+          user_agent TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
 
-        # view (last, depends on columns existing)
         """
-        CREATE OR REPLACE VIEW public.inventory_available AS
+        CREATE OR REPLACE VIEW inventory_available AS
         SELECT
           seller,
           sku,
@@ -8841,7 +8848,7 @@ async def _ensure_inventory_schema():
           qty_committed,
           updated_at,
           tenant_id
-        FROM public.inventory_items;
+        FROM inventory_items;
         """,
     ]
 
@@ -8849,8 +8856,7 @@ async def _ensure_inventory_schema():
         try:
             await run_ddl_multi(stmt)
         except Exception as e:
-            logger.error("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:200])            
-            raise
+            logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 # ===== INVENTORY schema bootstrap (idempotent) =====
 
 # ------ RECEIPTS schema bootstrap (idempotent) =====
