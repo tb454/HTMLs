@@ -8513,7 +8513,7 @@ async def _ensure_trading_schema():
         CREATE TABLE IF NOT EXISTS accounts (
           id UUID PRIMARY KEY,
           name TEXT NOT NULL,
-          type TEXT NOT NULL CHECK (type IN ('buyer','seller','broker'))
+          type TEXT NOT NULL CHECK (type IN ('buyer','seller','broker')),
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
@@ -8667,26 +8667,28 @@ async def _ensure_inventory_schema():
           PRIMARY KEY (seller, sku)
         );
         """,
-       """
+
+        # ✅ add tenant_id in a safe, order-independent way
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+
+        """
         CREATE TABLE IF NOT EXISTS inventory_movements (
             id            BIGSERIAL PRIMARY KEY,
             account_id    UUID,
             seller        TEXT NOT NULL,
             sku           TEXT NOT NULL,
-            movement_type TEXT NOT NULL,   -- e.g. 'reserve','commit','unreserve','upsert','ship','adjust'
+            movement_type TEXT NOT NULL,
             qty           NUMERIC NOT NULL,
             uom           TEXT,
-            contract_id   BIGINT,
-            bol_id        BIGINT,
+            contract_id   UUID,
+            bol_id        UUID,
             ref_contract  TEXT,
             meta          JSONB,
+            tenant_id     UUID,
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
-
-        ALTER TABLE inventory_movements
-            ADD COLUMN IF NOT EXISTS ref_contract TEXT,
-            ADD COLUMN IF NOT EXISTS meta JSONB;
         """,
+
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
           id BIGSERIAL PRIMARY KEY,
@@ -8701,10 +8703,11 @@ async def _ensure_inventory_schema():
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
+
+        # ✅ keep seller first to avoid the "cannot change name of view column" problem
         """
         CREATE OR REPLACE VIEW inventory_available AS
         SELECT
-          tenant_id,
           seller,
           sku,
           description,
@@ -8714,13 +8717,15 @@ async def _ensure_inventory_schema():
           qty_reserved,
           (qty_on_hand - qty_reserved) AS qty_available,
           qty_committed,
-          updated_at
+          updated_at,
+          tenant_id
         FROM inventory_items;
         """
     ]
+
     for stmt in ddl:
         try:
-            await run_ddl_multi(stmt) 
+            await run_ddl_multi(stmt)
         except Exception as e:
             logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
 # ===== INVENTORY schema bootstrap (idempotent) =====
