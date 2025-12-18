@@ -900,10 +900,10 @@ async def prices_copper_last():
     status_code=200
 )
 async def market_snapshot(
+    request: Request,
     region: str | None = Query(None),
     group: str | None = Query(None),
     limit_indices: int = Query(20, ge=1, le=200),
-    request: Request | None = None,
 ):
     # 1) references: latest per symbol (keep it small; expand later)
     ref_syms = ["COMEX_CU", "LME_AL", "COMEX_AU", "COMEX_AG"]
@@ -1216,7 +1216,7 @@ async def trader_positions(username: str = Depends(get_username)):
     ]
 
 @trader_router.post("/marks/snapshot", summary="Mark-to-market snapshot for physical contracts", status_code=200)
-async def trader_marks_snapshot(region: str | None = None, request: Request | None = None):
+async def trader_marks_snapshot(region: str | None = None, request: Request = None):
     # choose scope (tenant if available)
     tenant_id = None
     try:
