@@ -1692,7 +1692,7 @@ async def _ensure_v_vendor_blend_latest_view():
     SELECT
       material,
       ROUND(AVG(price_per_lb)::numeric, 6) AS blended_lb,
-      COUNT(*)::int                        AS vendor_count,
+      COUNT(*)                             AS vendor_count,
       MIN(price_per_lb)::numeric           AS px_min,
       MAX(price_per_lb)::numeric           AS px_max
     FROM latest_per_vendor
@@ -1779,6 +1779,10 @@ async def vq_ingest_csv(file: UploadFile = File(...)):
                 sheet_date = datetime.fromisoformat(dt_raw).date()
         except Exception:
             pass
+
+        if sheet_date is None:
+            sheet_date = utcnow().date()
+
         rows.append({
             "vendor": vendor, "category": category or "Unknown",
             "material": material, "price_per_lb": price_per_lb,
@@ -1816,6 +1820,10 @@ async def vq_ingest_excel(file: UploadFile = File(...)):
                 sheet_date = datetime.fromisoformat(dt_raw).date()
         except Exception:
             pass
+
+        if sheet_date is None:
+            sheet_date = utcnow().date()
+            
         rows.append({
             "vendor": vendor, "category": category or "Unknown",
             "material": material, "price_per_lb": price_per_lb,
