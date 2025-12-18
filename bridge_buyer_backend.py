@@ -2839,7 +2839,6 @@ async def surveil_recent(limit: int = 25):
                        subject=r["subject"],
                        severity=r["severity"],
                        opened_at=r["created_at"]) for r in rows]
-app.include_router(analytics_router)
 # ---- Recent Surveillance ----
 
 # =====  invites log =====
@@ -18899,4 +18898,5 @@ async def waterfall_apply(member: str, shortfall_usd: float):
                            {"i":str(uuid.uuid4()),"m":member,"a":shortfall_usd,"n":f"IM/VM used={use_imvm}"})
     return {"ok": rem <= 0, "remaining_shortfall": rem}
 app.include_router(clearing_router)
+app.include_router(analytics_router)
 # ===================== /CLEARING (Margin & Variation) =====================
