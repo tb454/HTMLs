@@ -8766,6 +8766,7 @@ async def _ensure_trading_hardening():
             """)
     except Exception:        
         pass
+
 # ===== INVENTORY schema bootstrap (idempotent) =====
 @startup
 async def _ensure_inventory_schema():
@@ -8783,11 +8784,12 @@ async def _ensure_inventory_schema():
           source TEXT,
           external_id TEXT,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          tenant_id UUID,
           PRIMARY KEY (seller, sku)
         );
         """,
 
-        # ✅ REPAIR legacy/minimal tables (THIS is what you're missing)
+        # repair legacy/minimal inventory_items tables
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS description   TEXT;",
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS uom           TEXT;",
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS location      TEXT;",
@@ -8816,8 +8818,15 @@ async def _ensure_inventory_schema():
         );
         """,
 
-        # (optional but safe) repair movements too
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+        # repair legacy/minimal inventory_movements tables
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS ref_contract TEXT;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS meta         JSONB;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id    UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS contract_id  UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS bol_id       UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS uom          TEXT;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS account_id   UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();",
 
         """
         CREATE TABLE IF NOT EXISTS inventory_ingest_log (
@@ -8856,7 +8865,8 @@ async def _ensure_inventory_schema():
         try:
             await run_ddl_multi(stmt)
         except Exception as e:
-            logger.warn("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:120])
+            logger.error("inventory_schema_bootstrap_failed", err=str(e), sql=stmt[:200])
+            raise
 # ===== INVENTORY schema bootstrap (idempotent) =====
 
 # ------ RECEIPTS schema bootstrap (idempotent) =====
