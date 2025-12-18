@@ -1713,7 +1713,7 @@ async def _ensure_v_vendor_blend_latest_view():
     SELECT
       material,
       ROUND(AVG(price_per_lb)::numeric, 6) AS blended_lb,
-      COUNT(*)::integer                    AS vendor_count,
+      COUNT(*)                             AS vendor_count,
       MIN(price_per_lb)::numeric           AS px_min,
       MAX(price_per_lb)::numeric           AS px_max
     FROM latest_per_vendor
