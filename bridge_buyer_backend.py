@@ -9579,7 +9579,12 @@ async def _ensure_contracts_bols_schema():
       status TEXT
     );
 
-    -- ✅ REPAIR legacy/minimal bols tables (THIS fixes carrier_name missing in CI)
+    "ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS idem_key TEXT;",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem ON public.bols(contract_id, idem_key);",
+    
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_bol_id ON public.bols(bol_id);",
+
+    -- REPAIR legacy/minimal bols tables
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_name      TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_driver    TEXT;
     ALTER TABLE public.bols ADD COLUMN IF NOT EXISTS carrier_truck_vin TEXT;
@@ -15747,6 +15752,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     tenant_id = await current_tenant_id(request)
 
     # Try to insert; if it already exists (same key), fetch the existing row
+    idem_key = (request.headers.get("Idempotency-Key") or "").strip() or None
+
     row = await database.fetch_one("""
         INSERT INTO bols (
             bol_id, contract_id, buyer, seller, material, weight_tons,
@@ -15755,7 +15762,8 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             pickup_signature_base64, pickup_signature_time,
             pickup_time, status,
             origin_country, destination_country, port_code, hs_code, duty_usd, tax_pct,
-            tenant_id
+            tenant_id,
+            idem_key
         )
         VALUES (
             :bol_id, :contract_id, :buyer, :seller, :material, :weight_tons,
@@ -15764,26 +15772,50 @@ async def create_bol_pg(bol: BOLIn, request: Request):
             :pickup_sig_b64, :pickup_sig_time,
             :pickup_time, 'Scheduled',
             :origin_country, :destination_country, :port_code, :hs_code, :duty_usd, :tax_pct,
-            :tenant_id
+            :tenant_id,
+            :idem_key
         )
-        ON CONFLICT (bol_id) DO NOTHING
+        ON CONFLICT (contract_id, idem_key) DO NOTHING
         RETURNING *
     """, {
         "bol_id": bol_id_str,
         "contract_id": str(bol.contract_id),
-        "buyer": bol.buyer, "seller": bol.seller, "material": bol.material,
-        "weight_tons": bol.weight_tons, "price_per_unit": bol.price_per_unit, "total_value": bol.total_value,
-        "carrier_name": bol.carrier.name, "carrier_driver": bol.carrier.driver, "carrier_truck_vin": bol.carrier.truck_vin,
-        "pickup_sig_b64": bol.pickup_signature.base64, "pickup_sig_time": bol.pickup_signature.timestamp,
+        "buyer": bol.buyer,
+        "seller": bol.seller,
+        "material": bol.material,
+        "weight_tons": bol.weight_tons,
+        "price_per_unit": bol.price_per_unit,
+        "total_value": bol.total_value,
+        "carrier_name": bol.carrier.name,
+        "carrier_driver": bol.carrier.driver,
+        "carrier_truck_vin": bol.carrier.truck_vin,
+        "pickup_sig_b64": bol.pickup_signature.base64,
+        "pickup_sig_time": bol.pickup_signature.timestamp,
         "pickup_time": bol.pickup_time,
-        "origin_country": bol.origin_country, "destination_country": bol.destination_country,
-        "port_code": bol.port_code, "hs_code": bol.hs_code,
-        "duty_usd": duty_usd, "tax_pct": tax_pct,
+        "origin_country": bol.origin_country,
+        "destination_country": bol.destination_country,
+        "port_code": bol.port_code,
+        "hs_code": bol.hs_code,
+        "duty_usd": duty_usd,
+        "tax_pct": tax_pct,
         "tenant_id": tenant_id,
-    })    
+        "idem_key": idem_key,
+    })
+
     we_created = row is not None
+
     if row is None:
-        row = await database.fetch_one("SELECT * FROM bols WHERE bol_id = :id", {"id": bol_id_str})
+        if idem_key:
+            row = await database.fetch_one(
+                "SELECT * FROM bols WHERE contract_id = :cid AND idem_key = :k",
+                {"cid": str(bol.contract_id), "k": idem_key},
+            )
+        else:
+            row = await database.fetch_one(
+                "SELECT * FROM bols WHERE bol_id = :id",
+                {"id": bol_id_str},
+            )
+    
     # Stripe metered usage: +1 BOL for this seller
     try:
         member_key = (row.get("seller") or "").strip()
