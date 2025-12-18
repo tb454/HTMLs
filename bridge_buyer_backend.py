@@ -3780,11 +3780,17 @@ class DeadLetterRow(BaseModel):
 async def list_dead_letters(limit: int = 50):
     rows = await database.fetch_all(
         """
-        SELECT id, event_type, status_code, response, created_at
+        SELECT
+          id,
+          event AS event_type,
+          status_code,
+          response_text AS response,
+          created_at
         FROM webhook_dead_letters
         ORDER BY created_at DESC
         LIMIT :limit
-        """
+        """,
+        {"limit": limit},
     )
     return [DeadLetterRow(**dict(r)) for r in rows]
 
@@ -5228,6 +5234,30 @@ async def _ensure_billing_schema():
       max_contracts_per_day INT NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- ---- PATCH: unify billing_plan_limits shape (supports both older + newer code paths) ----
+    ALTER TABLE billing_plan_limits
+      ADD COLUMN IF NOT EXISTS max_bols_month INT,
+      ADD COLUMN IF NOT EXISTS max_contracts_month INT,
+      ADD COLUMN IF NOT EXISTS max_ws_messages_month BIGINT,
+      ADD COLUMN IF NOT EXISTS max_receipts_month INT,
+      ADD COLUMN IF NOT EXISTS max_invoices_month INT,
+      ADD COLUMN IF NOT EXISTS overage_bol_usd NUMERIC,
+      ADD COLUMN IF NOT EXISTS overage_contract_usd NUMERIC;
+
+    ALTER TABLE billing_plan_limits
+      ADD COLUMN IF NOT EXISTS inc_bol_create INT NOT NULL DEFAULT 50,
+      ADD COLUMN IF NOT EXISTS inc_bol_deliver_tons NUMERIC NOT NULL DEFAULT 500,
+      ADD COLUMN IF NOT EXISTS inc_receipts INT NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS inc_warrants INT NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS inc_ws_msgs BIGINT NOT NULL DEFAULT 50000,
+      ADD COLUMN IF NOT EXISTS over_bol_create_usd NUMERIC NOT NULL DEFAULT 1.00,
+      ADD COLUMN IF NOT EXISTS over_deliver_per_ton_usd NUMERIC NOT NULL DEFAULT 0.50,
+      ADD COLUMN IF NOT EXISTS over_receipt_usd NUMERIC NOT NULL DEFAULT 0.50,
+      ADD COLUMN IF NOT EXISTS over_warrant_usd NUMERIC NOT NULL DEFAULT 0.50,
+      ADD COLUMN IF NOT EXISTS over_ws_per_million_usd NUMERIC NOT NULL DEFAULT 5.00;
+    -- ---- /PATCH ----
+                                        
     """)
 # ----- billing prefs -----
 
@@ -5840,7 +5870,7 @@ async def root(request: Request):
     token = _csrf_get_or_create(request)
     prod = os.getenv("ENV","").lower() == "production"
     resp = FileResponse("static/bridge-login.html")
-    resp.set_cookie("XSRF-TOKEN", token, httponly=True, samesite="lax", secure=prod, path="/")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
 
 # --- Dynamic pages with per-request nonce + strict CSP ---
@@ -9112,17 +9142,25 @@ async def _manual_upsert_absolute_tx(
     try:
         await database.execute("""
           INSERT INTO inventory_movements (
-            seller, sku, movement_type, qty, ref_contract, meta, tenant_id
+            seller, sku, movement_type, qty,
+            ref_contract, contract_id, bol_id,
+            meta, tenant_id, created_at
           )
-          VALUES (:s,:k,'upsert',:q,NULL,:m::jsonb,:tenant_id)
-        """, {"s": s, "k": k, "q": delta, "m": meta_json, "tenant_id": tenant_id})
+          VALUES (:s,:k,'upsert',:q, :uom,
+                  NULL, NULL, NULL,
+                  :m::jsonb, :tenant_id, NOW())
+        """, {"s": s, "k": k_norm, "q": delta, "uom": (uom or "ton"), "m": meta_json, "tenant_id": tenant_id})
     except Exception:
         await database.execute("""
           INSERT INTO inventory_movements (
-            seller, sku, movement_type, qty, ref_contract, meta, tenant_id
+            seller, sku, movement_type, qty,
+            ref_contract, contract_id, bol_id,
+            meta, tenant_id
           )
-          VALUES (:s,:k,'upsert',:q,NULL,:m,:tenant_id)
-        """, {"s": s, "k": k, "q": delta, "m": meta_json, "tenant_id": tenant_id})
+          VALUES (:s,:k,'upsert',:q,
+                  NULL, NULL, NULL,
+                  :m, :tenant_id)
+        """, {"s": s, "k": k_norm, "q": delta, "m": meta_json, "tenant_id": tenant_id})
 
     # --- webhook emit (inventory.movement)
     try:
@@ -14626,10 +14664,28 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     # log a movement for traceability (reason: auto_topup_for_tests)
                     try:
                         await database.execute("""
-                        INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                        VALUES (:s,:k,'upsert',:q,NULL,:m)
-                        """, {"s": seller, "k": sku, "q": short,
-                            "m": json.dumps({"reason":"auto_topup_for_tests"})})
+                            INSERT INTO inventory_movements (
+                                seller, sku, movement_type, qty,
+                                uom, contract_id, bol_id, ref_contract,
+                                meta, tenant_id, created_at
+                            )
+                            VALUES (
+                                :seller, :sku, :mt, :qty,
+                                :uom, :cid, :bid, :ref,
+                                :meta::jsonb, :tenant_id, NOW()
+                            )
+                            """, {
+                            "seller": seller,
+                            "sku": sku,
+                            "mt": "reserve",              
+                            "qty": qty,
+                            "uom": "ton",
+                            "cid": cid,           
+                            "bid": None,                  
+                            "ref": cid,
+                            "meta": json.dumps({...}, default=str),
+                            "tenant_id": tenant_id,
+                        })
                     except Exception:
                         pass
                     # recompute available
@@ -14644,8 +14700,14 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             """, {"q": qty, "s": seller, "k": sku})
 
             await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:s,:k,'reserve',:q,:cid,:m)
+                INSERT INTO inventory_movements (
+                        seller, sku, movement_type, qty,
+                        ref_contract, contract_id_uuid, bol_id_uuid,
+                        meta
+                    )
+                    VALUES (:s,:k,'upsert',:q,
+                            NULL, NULL, NULL,
+                            :m)
             """, {"s": seller, "k": sku, "q": qty, "cid": cid,
                   "m": json.dumps({"reason": "contract_create"})})
 
@@ -16022,11 +16084,11 @@ async def cancel_contract(contract_id: str):
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status='Cancelled'
-                WHERE id=:id AND status='Left Open'
+                WHERE id=:id AND status IN('Left Open', 'Open')
                 RETURNING seller, material, weight_tons
             """, {"id": contract_id})
             if not row:
-                raise HTTPException(status_code=456, detail="Only Left Open contracts can be cancelled.")
+                raise HTTPException(status_code=456, detail="Only Open/Left Open contracts can be cancelled.")
 
             qty = float(row["weight_tons"])
             seller = row["seller"].strip()
@@ -16046,11 +16108,23 @@ async def cancel_contract(contract_id: str):
             """, {"q": qty, "s": seller, "k": sku})
 
             await database.execute("""
-                INSERT INTO inventory_movements (seller, sku, movement_type, qty, ref_contract, meta)
-                VALUES (:seller, :sku, 'unreserve', :q, :ref_contract, :meta)
-            """, {"seller": seller, "sku": sku, "q": qty, "ref_contract": contract_id,
-                  "meta": json.dumps({"reason": "cancel"})})
-
+                INSERT INTO inventory_movements (
+                    seller, sku, movement_type, qty,
+                    uom, contract_id, bol_id, ref_contract,
+                    meta, tenant_id, created_at
+                )
+                VALUES (
+                    :seller, :sku, 'unreserve', :q,
+                    'ton', :cid, NULL, :cid,
+                    :meta::jsonb, NULL, NOW()
+                )
+            """, {
+                "seller": seller,
+                "sku": sku,
+                "q": qty,
+                "cid": contract_id,
+                "meta": json.dumps({"reason": "cancel"}, default=str),
+            })
         return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
     except HTTPException:
         raise
