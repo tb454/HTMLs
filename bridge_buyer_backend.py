@@ -15594,13 +15594,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 """, payload)
             
             # ---- import_mode short-circuit ----
-            if import_mode:
-                # RETURNING * can be None in some envs/drivers; never return None
-                if not row:
-                    row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
-                if not row:
-                    raise HTTPException(status_code=500, detail="contracts import insert returned no row")
-                return await _idem_guard(request, key, dict(row))
+            if not row:
+                row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
+            if not row:
+                raise HTTPException(status_code=500, detail="contracts import insert returned no row")
+            return await _idem_guard(request, key, dict(row))
+        else:
             
             # LIVE path: reserve inventory, write Pending
             await database.execute("""
@@ -15850,7 +15849,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
             if row:
-                return await _idem_guard(request, key, row)
+                return await _idem_guard(request, key, dict(row))
 
             # ultra-rare fallback: synthesize a minimal ContractOut-shaped dict
             fallback = {
