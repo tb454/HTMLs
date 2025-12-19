@@ -6960,11 +6960,11 @@ async def pull_home():
 @router_pricing.get("/quote", summary="Pricing quote (v2) OR legacy material pricing (v1)")
 async def quote(
     material: str,
+    request: Request,    
     tons: float | None = None,
     region: str | None = None,
     currency: str = "USD",
     category: str | None = None,   # legacy
-    request: Request | None = None
 ):
     mat = (material or "").strip()
     if not mat:
@@ -7610,7 +7610,7 @@ async def _ensure_risk_and_marks_tables():
     """)
 
 @app.post("/admin/reference/pull", tags=["Admin"], summary="Admin: pull reference prices", status_code=200)
-async def admin_reference_pull(symbols: list[str] | None = None, request: Request | None = None):
+async def admin_reference_pull(request: Request, symbols: list[str] | None = None):
     # Gate in production
     if os.getenv("ENV","").lower() == "production":
         _require_admin(request)
@@ -7645,7 +7645,7 @@ async def admin_reference_pull(symbols: list[str] | None = None, request: Reques
     return {"as_of": nowz, "pulled_at": nowz, "symbols_updated": updated, "source": "internal"}
 
 @app.post("/admin/indices/build_today", tags=["Admin"], summary="Admin: build today's indices", status_code=200)
-async def admin_indices_build_today(region: str | None = None, request: Request | None = None):
+async def admin_indices_build_today(request: Request, region: str | None = None):
     if os.getenv("ENV","").lower() == "production":
         _require_admin(request)
 
@@ -7680,7 +7680,7 @@ async def admin_indices_build_today(region: str | None = None, request: Request 
     return {"as_of": nowz, "index_date": str(today), "region": region, "rows_written": n}
 
 @app.post("/admin/forecast/run", tags=["Admin"], summary="Admin: run forecast + emit risk events", status_code=200)
-async def admin_forecast_run(horizon_days: int = 30, region: str | None = None, request: Request | None = None):
+async def admin_forecast_run(request: Request, horizon_days: int = 30, region: str | None = None):
     if os.getenv("ENV","").lower() == "production":
         _require_admin(request)
 
