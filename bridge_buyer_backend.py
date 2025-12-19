@@ -15595,7 +15595,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             
             # ---- import_mode short-circuit ----
             if import_mode:
-                return await _idem_guard(request, key, row)
+                # RETURNING * can be None in some envs/drivers; never return None
+                if not row:
+                    row = await database.fetch_one("SELECT * FROM contracts WHERE id=:id", {"id": cid})
+                if not row:
+                    raise HTTPException(status_code=500, detail="contracts import insert returned no row")
+                return await _idem_guard(request, key, dict(row))
             
             # LIVE path: reserve inventory, write Pending
             await database.execute("""
@@ -15804,7 +15809,9 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
         except Exception:
             pass
 
-        resp = row
+        if not row:
+            raise HTTPException(status_code=500, detail="contracts create returned no row")
+        resp = dict(row)
         return await _idem_guard(request, key, resp)
 
     # --------------------- fallback path: minimal insert -----------------------------
@@ -16708,7 +16715,9 @@ async def create_bol_pg(bol: BOLIn, request: Request):
                 "SELECT * FROM bols WHERE bol_id = :id",
                 {"id": bol_id_str},
             )
-    
+        if not row:
+            raise HTTPException(status_code=500, detail="bols create returned no row")
+       
     # Stripe metered usage: +1 BOL for this seller
     try:
         d0 = dict(row) if row else {}
