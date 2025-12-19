@@ -1357,105 +1357,7 @@ async def trader_marks_latest(region: str | None = None, limit: int = Query(200,
 app.include_router(trader_router)
 # ---- Trader page ----
 
-
 # ===== DB bootstrap for CI/staging =====
-@startup
-async def _bootstrap_core_tables_for_ci():
-    env = (os.getenv("ENV", "") or "").lower()
-    if env not in {"ci", "test", "testing"}:
-        return
-
-    await run_ddl_multi("""
-    CREATE EXTENSION IF NOT EXISTS pgcrypto;
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-    CREATE TABLE IF NOT EXISTS public.contracts (
-      id uuid NOT NULL DEFAULT gen_random_uuid(),
-      buyer text NOT NULL,
-      seller text NOT NULL,
-      material text NOT NULL,
-      weight_tons numeric NOT NULL,
-      price_per_ton numeric NOT NULL,
-      status text NOT NULL DEFAULT 'Open',
-      created_at timestamptz NOT NULL DEFAULT now(),
-      tenant_id uuid
-    );
-
-    CREATE TABLE IF NOT EXISTS public.bols (
-      bol_id uuid NOT NULL DEFAULT gen_random_uuid(),
-      contract_id uuid,
-      buyer text,
-      seller text,
-      material text,
-      weight_tons numeric,
-      price_per_unit numeric,
-      total_value numeric,
-      pickup_time timestamptz,
-      delivery_time timestamptz,
-      status text DEFAULT 'Scheduled',
-      created_at timestamptz NOT NULL DEFAULT now(),
-      tenant_id uuid
-    );
-
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='bols_contract_fk') THEN
-        ALTER TABLE public.bols
-          ADD CONSTRAINT bols_contract_fk
-          FOREIGN KEY (contract_id) REFERENCES public.contracts(id)
-          ON DELETE SET NULL;
-      END IF;
-    END$$;
-
-    CREATE TABLE IF NOT EXISTS public.inventory_movements (
-      id uuid NOT NULL DEFAULT gen_random_uuid(),
-      seller text NOT NULL,
-      sku text NOT NULL,
-      movement_type text NOT NULL,
-      qty numeric NOT NULL,
-      uom text,
-      contract_id_uuid uuid,
-      bol_id_uuid uuid,
-      ref_contract text,
-      meta jsonb,
-      tenant_id uuid,
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-
-    -- REQUIRED for your ON CONFLICT (seller, sku)
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku
-      ON public.inventory_items(seller, sku);
-
-    CREATE TABLE IF NOT EXISTS public.inventory_movements (
-      id uuid NOT NULL DEFAULT gen_random_uuid(),
-      seller text NOT NULL,
-      sku text NOT NULL,
-      movement_type text NOT NULL,
-      qty numeric NOT NULL,
-      uom text,
-      contract_id uuid,
-      bol_id uuid,
-      meta jsonb,
-      tenant_id uuid,
-      created_at timestamp without time zone NOT NULL DEFAULT now()
-    );
-
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_contract_fk') THEN
-        ALTER TABLE public.inventory_movements
-          ADD CONSTRAINT inv_mov_contract_fk
-            FOREIGN KEY (contract_id_uuid) REFERENCES public.contracts(id);
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_bol_fk') THEN
-        ALTER TABLE public.inventory_movements
-          ADD CONSTRAINT inv_mov_bol_fk
-            FOREIGN KEY (bol_id_uuid) REFERENCES public.bols(bol_id);
-      END IF;
-    END$$;
-    """)
-
 def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
     """Create minimal tables needed for app/tests when ENV is non-prod."""
     ddl = """
@@ -1979,6 +1881,9 @@ async def run_ddl_multi(sql: str):
     Handles DO $$ blocks, views, functions, quotes, etc.
     Never raises; logs and continues.
     """
+    # If managed schema is the boss (Supabase), do NOT run any bootstrapping DDL.
+    if not BOOTSTRAP_DDL:
+        return
     for stmt in _split_sql_statements(sql):
         s = (stmt or "").strip()
         if not s:
@@ -2037,7 +1942,15 @@ async def startup_bootstrap_and_connect():
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
     if env in {"production", "prod"}:
         return
-
+    
+    # Respect managed schema (Supabase): never run local bootstraps when disabled.
+    if not BOOTSTRAP_DDL:
+        try:
+            await database.connect()
+        except Exception:
+            pass
+        return
+    
     # 1) Target database BEFORE touching `engine` or any bootstrap that uses it
     try:
         _ensure_database_exists(SYNC_DATABASE_URL.replace("+psycopg", "")) 
@@ -9641,6 +9554,8 @@ async def _ensure_trading_hardening():
 # ===== INVENTORY schema bootstrap (idempotent) =====
 @startup
 async def _ensure_inventory_schema():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = [
         """
         CREATE TABLE IF NOT EXISTS inventory_items (
@@ -9680,8 +9595,8 @@ async def _ensure_inventory_schema():
             movement_type TEXT NOT NULL,
             qty           NUMERIC NOT NULL,
             uom           TEXT,
-            contract_id   UUID,
-            bol_id        UUID,
+            contract_id_uuid   UUID,
+            bol_id_uuid        UUID,
             ref_contract  TEXT,
             meta          JSONB,
             tenant_id     UUID,
@@ -9692,9 +9607,7 @@ async def _ensure_inventory_schema():
         # repair legacy/minimal inventory_movements tables
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS ref_contract TEXT;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS meta         JSONB;",
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id    UUID;",
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS contract_id  UUID;",
-        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS bol_id       UUID;",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS tenant_id    UUID;",       
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS uom          TEXT;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS account_id   UUID;",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS contract_id_uuid UUID;",
@@ -10400,7 +10313,7 @@ async def finished_goods(
 # ===== CONTRACTS / BOLS schema bootstrap (idempotent) =====
 @startup
 async def _ensure_contracts_bols_schema():
-    if not os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes"):
+    if not BOOTSTRAP_DDL:
         return
 
     sql = """
@@ -10899,122 +10812,10 @@ async def _ensure_inventory_constraints():
 # -------- Contract enums and FKs --------
 @startup
 async def _ensure_contract_enums_and_fks():
-    # Safe enum creation (idempotent)
-    try:
-        await database.execute("""
-        DO $bridge$
-        BEGIN
-          PERFORM 1 FROM pg_type WHERE typname = 'contract_status';
-          IF NOT FOUND THEN
-            CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
-          END IF;
-        END
-        $bridge$;
-        """)
-    except Exception:
-        # Fallback path for older PG or drivers splitting DO body
-        await database.execute("""
-        DO $bridge$
-        BEGIN
-          BEGIN
-            CREATE TYPE contract_status AS ENUM ('Pending','Signed','Dispatched','Fulfilled','Cancelled');
-          EXCEPTION WHEN duplicate_object THEN
-            NULL;
-          END;
-        END
-        $bridge$;
-        """)
-
-    # ensure 'Open' exists in the enum (safe/idempotent)
-    try:
-        await database.execute("ALTER TYPE contract_status ADD VALUE IF NOT EXISTS 'Open'")
-    except Exception:
-        pass
-    
-    try:
-        await database.execute("DROP VIEW IF EXISTS public.v_recent_vwap;")
-    except Exception:
-        pass
-
-    # Cast the column to the enum if the table exists (no-throw)
-    try:
-        await database.execute("ALTER TABLE contracts ALTER COLUMN status DROP DEFAULT;")
-    except Exception:
-        pass
-
-    try:
-        await database.execute("""
-            ALTER TABLE contracts
-            ALTER COLUMN status TYPE contract_status
-            USING (
-                CASE
-                WHEN status IS NULL OR (status::text) = '' THEN 'Open'
-                WHEN (status::text) IN ('Left Open','OPEN') THEN 'Open'
-                WHEN (status::text) ILIKE 'pending%' THEN 'Pending'
-                WHEN (status::text) ILIKE 'signed%' THEN 'Signed'
-                WHEN (status::text) ILIKE 'dispatch%' THEN 'Dispatched'
-                WHEN (status::text) ILIKE 'fulfill%' OR (status::text) ILIKE 'delivered%' THEN 'Fulfilled'
-                WHEN (status::text) ILIKE 'cancel%' THEN 'Cancelled'
-                WHEN (status::text) = 'Open' THEN 'Open'
-                ELSE 'Open'
-                END
-            )::contract_status
-            """)
-    except Exception:
-        pass
-
-    try:
-        await database.execute("ALTER TABLE contracts ALTER COLUMN status SET DEFAULT 'Open'::contract_status;")
-    except Exception:
-        pass
-
-        # Recreate v_recent_vwap now that contracts.status may be an enum
-    try:
-        await database.execute("""
-        CREATE OR REPLACE VIEW public.v_recent_vwap AS
-        SELECT
-          fp.id AS product_id,
-          fp.material,
-          fp.delivery_location,
-          COALESCE(p.lookback_days, 14) AS lookback_days,
-          CASE
-            WHEN SUM(c.weight_tons) FILTER (
-              WHERE c.status IN ('Signed','Fulfilled')
-                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
-            ) IS NULL
-             OR SUM(c.weight_tons) FILTER (
-              WHERE c.status IN ('Signed','Fulfilled')
-                AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
-            ) = 0
-            THEN NULL
-            ELSE
-              SUM(c.price_per_ton * c.weight_tons) FILTER (
-                WHERE c.status IN ('Signed','Fulfilled')
-                  AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
-              )
-              / NULLIF(SUM(c.weight_tons) FILTER (
-                  WHERE c.status IN ('Signed','Fulfilled')
-                    AND c.created_at >= NOW() - (COALESCE(p.lookback_days,14) || ' days')::interval
-                ), 0)
-          END AS recent_vwap
-        FROM futures_products fp
-        LEFT JOIN futures_pricing_params p ON p.product_id = fp.id
-        LEFT JOIN contracts c ON c.material = fp.material
-        GROUP BY fp.id, fp.material, fp.delivery_location, COALESCE(p.lookback_days,14);
-        """)
-    except Exception:
-        pass
-
-    # Re-assert CASCADE FK for bols → contracts (no-throw)
-    try:
-        await database.execute("ALTER TABLE bols DROP CONSTRAINT IF EXISTS bols_contract_id_fkey;")
-        await database.execute("""
-          ALTER TABLE bols
-          ADD CONSTRAINT bols_contract_id_fkey
-          FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
-        """)
-    except Exception:
-        pass
+    # HARD STOP: Supabase schema is the boss in production.
+    # This block previously converted contracts.status to an enum, which breaks ILIKE
+    # filters and causes "cannot alter type of a column used by a view" failures.
+    return
 # -------- Contract enums and FKs --------
 
 #-------- Dead Letter Startup --------
@@ -15532,7 +15333,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                             )
                             VALUES (
                                 :seller, :sku, :mt, :qty,
-                                :uom, :ref_contract, :cid, :bid,
+                                :uom, :ref_contract, :cid_uuid, :bid_uuid,
                                 CAST(:meta AS jsonb), :tenant_id, NOW()
                             )
                         """, {
@@ -15572,7 +15373,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 )
                 VALUES (
                     :seller, :sku, :mt, :qty,
-                    :uom, :ref_contract, :cid, :bid,
+                    :uom, :ref_contract, :cid_uuid, :bid_uuid,
                     CAST(:meta AS jsonb), :tenant_id, NOW()
                 )
             """, {
