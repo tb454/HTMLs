@@ -7679,6 +7679,7 @@ async def admin_indices_build_today(request: Request, region: str | None = None)
     nowz = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     return {"as_of": nowz, "index_date": str(today), "region": region, "rows_written": n}
 
+
 @app.post("/admin/forecast/run", tags=["Admin"], summary="Admin: run forecast + emit risk events", status_code=200)
 async def admin_forecast_run(request: Request, horizon_days: int = 30, region: str | None = None):
     if os.getenv("ENV","").lower() == "production":
