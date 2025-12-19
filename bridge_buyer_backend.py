@@ -11530,118 +11530,6 @@ async def _ensure_rfq_schema():
             logger.warn("rfq_schema_bootstrap_failed", err=str(e), sql=s[:90])
 #------- RFQs -------
 
-# -------- RFQ (create/quote/award) --------
-rfq_router = APIRouter(prefix="/rfq", tags=["RFQ"])
-
-@startup
-async def _ddl_rfq():
-    await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS rfq(
-        id           BIGSERIAL PRIMARY KEY,
-        buyer        TEXT NOT NULL,
-        material     TEXT NOT NULL,
-        tons         NUMERIC NOT NULL,
-        target_date  DATE,
-        notes        TEXT,
-        status       TEXT NOT NULL DEFAULT 'Open',  -- Open/Awarded/Closed
-        inserted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS rfq_quotes(
-        id           BIGSERIAL PRIMARY KEY,
-        rfq_id       BIGINT NOT NULL,
-        seller       TEXT NOT NULL,
-        price_per_lb NUMERIC NOT NULL,
-        notes        TEXT,
-        inserted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS rfq_awards(
-        id           BIGSERIAL PRIMARY KEY,
-        rfq_id       BIGINT NOT NULL,
-        quote_id     BIGINT NOT NULL,
-        awarded_by   TEXT NOT NULL,
-        awarded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_rfq_status ON rfq(status);
-    CREATE INDEX IF NOT EXISTS idx_rfq_quotes_rfq ON rfq_quotes(rfq_id);
-    """)
-
-class RFQCreate(BaseModel):
-    buyer: str
-    material: str
-    tons: float
-    target_date: date | None = None
-    notes: str | None = None
-
-@rfq_router.post("", summary="Create RFQ")
-async def create_rfq(data: RFQCreate):
-    q = """
-    INSERT INTO rfq(buyer, material, tons, target_date, notes)
-    VALUES(:buyer, :material, :tons, :target_date, :notes)
-    RETURNING *;
-    """
-    row = await database.fetch_one(query=q, values=data.model_dump())
-    return row
-
-class RFQQuoteIn(BaseModel):
-    seller: str
-    price_per_lb: float
-    notes: str | None = None
-
-@rfq_router.post("/{rfq_id}/quote", summary="Submit quote for an RFQ")
-async def quote_rfq(rfq_id: int, qin: RFQQuoteIn):
-    # RFQ must be open
-    rfq_row = await database.fetch_one("SELECT id, status FROM rfq WHERE id=:id", {"id": rfq_id})
-    if not rfq_row:
-        raise HTTPException(status_code=404, detail="RFQ not found")
-    if rfq_row["status"] != "Open":
-        raise HTTPException(status_code=400, detail="RFQ not open")
-
-    q = """
-    INSERT INTO rfq_quotes(rfq_id, seller, price_per_lb, notes)
-    VALUES(:rfq_id, :seller, :price_per_lb, :notes)
-    RETURNING *;
-    """
-    row = await database.fetch_one(query=q, values={"rfq_id": rfq_id, **qin.model_dump()})
-    return row
-
-class RFQAwardIn(BaseModel):
-    quote_id: int
-    awarded_by: str
-
-@rfq_router.post("/{rfq_id}/award", summary="Award an RFQ to a quote")
-async def award_rfq(rfq_id: int, ain: RFQAwardIn):
-    # verify RFQ and quote
-    rfq_row = await database.fetch_one("SELECT id, status FROM rfq WHERE id=:id", {"id": rfq_id})
-    if not rfq_row:
-        raise HTTPException(status_code=404, detail="RFQ not found")
-    if rfq_row["status"] != "Open":
-        raise HTTPException(status_code=400, detail="RFQ not open")
-
-    qrow = await database.fetch_one(
-        "SELECT id FROM rfq_quotes WHERE id=:qid AND rfq_id=:rid",
-        {"qid": ain.quote_id, "rid": rfq_id}
-    )
-    if not qrow:
-        raise HTTPException(status_code=404, detail="Quote not found for this RFQ")
-
-    # award + close rfq
-    award = await database.fetch_one("""
-        INSERT INTO rfq_awards(rfq_id, quote_id, awarded_by)
-        VALUES(:rid, :qid, :by)
-        RETURNING *;
-    """, {"rid": rfq_id, "qid": ain.quote_id, "by": ain.awarded_by})
-
-    await database.execute("UPDATE rfq SET status='Awarded' WHERE id=:id", {"id": rfq_id})
-    return {"award": award}
-
-# mount
-app.include_router(rfqs_router)   
-app.include_router(rfq_router)   
-# -------- RFQ (create/quote/award) --------
-
 # ------ Contracts refs index ------
 @startup
 async def _idx_refs():
@@ -15639,7 +15527,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                         await database.execute("""
                             INSERT INTO inventory_movements (
                                 seller, sku, movement_type, qty,
-                                uom, ref_contract, contract_id, bol_id,
+                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
                                 meta, tenant_id, created_at
                             )
                             VALUES (
@@ -15654,8 +15542,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                             "qty": short,
                             "uom": "ton",
                             "ref_contract": None,
-                            "cid": None,
-                            "bid": None,
+                            "cid_uuid": cid,
+                            "bid_uuid": None,
                             "meta": json.dumps({
                                 "reason": "auto_topup_for_tests",
                                 "short_tons": short,
@@ -15679,7 +15567,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id, bol_id,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
@@ -15694,8 +15582,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "qty": qty,
                 "uom": "ton",
                 "ref_contract": cid,
-                "cid": cid,
-                "bid": None,
+                "cid_uuid": None,
+                "bid_uuid": None,
                 "meta": json.dumps({"reason": "contract_create", "contract_id": cid}, default=str),
                 "tenant_id": tenant_id,
             })
@@ -16374,85 +16262,6 @@ async def ice_rotate_secret():
     # record a rotation (you can also bump LINK_SIGNING_SECRET or ICE_WEBHOOK_SECRET)
     return {"ok": True, "note": "Rotate via env/secrets manager; this endpoint just acks."}
 # ----- ICE Logs/Testing/Resend/Rotate -----
-
-# -------- Admin (ICE logs/tools) --------
-admin_ice = APIRouter(prefix="/admin/ice", tags=["Admin/ICE"])
-
-@startup
-async def _ddl_admin_ice():
-    await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS ice_delivery_logs(
-        id            BIGSERIAL PRIMARY KEY,
-        bol_id        BIGINT,
-        endpoint      TEXT,
-        status_code   INT,
-        latency_ms    INT,
-        ok            BOOLEAN,
-        payload       JSONB,
-        error         TEXT,
-        ts            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );    
-
-    CREATE TABLE IF NOT EXISTS ice_secrets(
-        id            BIGSERIAL PRIMARY KEY,
-        name          TEXT UNIQUE NOT NULL,
-        secret        TEXT NOT NULL,
-        rotated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    """)
-
-class LogsPage(BaseModel):
-    items: list[dict]
-    total: int
-    limit: int
-    offset: int
-
-@admin_ice.get("/logs", response_model=LogsPage, summary="List ICE delivery logs")
-async def ice_logs(limit: int = 25, offset: int = 0):
-    total = await database.fetch_val("SELECT COUNT(*) FROM ice_delivery_logs")
-    rows = await database.fetch_all(
-        "SELECT * FROM ice_delivery_logs ORDER BY ts DESC LIMIT :lim OFFSET :off",
-        {"lim": limit, "off": offset}
-    )
-    return {"items": rows, "total": total, "limit": limit, "offset": offset}
-
-class ResendIn(BaseModel):
-    log_id: int
-
-@admin_ice.post("/resend", summary="Resend a failed ICE delivery (stub)")
-async def ice_resend(inp: ResendIn):
-    row = await database.fetch_one("SELECT * FROM ice_delivery_logs WHERE id=:id", {"id": inp.log_id})
-    if not row:
-        raise HTTPException(status_code=404, detail="Log not found")
-    # TODO: actually re-post payload to ICE endpoint with signing; for now we just write a synthetic success
-    await database.execute("""
-        INSERT INTO ice_delivery_logs(bol_id, endpoint, status_code, latency_ms, ok, payload, error)
-        VALUES(:bol, :ep, 200, 123, TRUE, :pl, NULL)
-    """, {"bol": row["bol_id"], "ep": row["endpoint"], "pl": row["payload"]})
-    return {"status": "resent_enqueued"}
-
-@admin_ice.post("/test_ping", summary="Test ICE connectivity (stub)")
-async def ice_test_ping():
-    # In real impl: make a signed HEAD/GET to ICE sandbox
-    await asyncio.sleep(0.05)
-    return {"ok": True, "latency_ms": 50}
-
-class RotateIn(BaseModel):
-    name: str
-
-@admin_ice.post("/rotate_secret", summary="Rotate ICE signing secret (stub)")
-async def ice_rotate_secret(inp: RotateIn):
-    new_secret = secrets.token_urlsafe(48)
-    await database.execute("""
-        INSERT INTO ice_secrets(name, secret, rotated_at)
-        VALUES(:n, :s, NOW())
-        ON CONFLICT(name) DO UPDATE SET secret=EXCLUDED.secret, rotated_at=NOW()
-    """, {"n": inp.name, "s": new_secret})
-    return {"name": inp.name, "last4": new_secret[-4:]}
-
-# mount
-app.include_router(admin_ice)
-# -------- Admin (ICE logs/tools) --------
 
 # --- Admin listings/approve/export ---
 class ApplicationRow(BaseModel):
@@ -17147,7 +16956,7 @@ async def cancel_contract(contract_id: str):
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id, bol_id,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
@@ -17160,7 +16969,7 @@ async def cancel_contract(contract_id: str):
                 "sku": sku,
                 "qty": qty,
                 "ref_contract": contract_id,
-                "cid": contract_id,
+                "cid_uuid": contract_id,
                 "meta": json.dumps({"reason": "cancel"}, default=str),
             })
         return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
