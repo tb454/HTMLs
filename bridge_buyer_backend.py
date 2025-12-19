@@ -1407,19 +1407,19 @@ async def _bootstrap_core_tables_for_ci():
       END IF;
     END$$;
 
-    CREATE TABLE IF NOT EXISTS public.inventory_items (
+    CREATE TABLE IF NOT EXISTS public.inventory_movements (
       id uuid NOT NULL DEFAULT gen_random_uuid(),
       seller text NOT NULL,
       sku text NOT NULL,
-      description text,
-      location text,
-      uom text NOT NULL DEFAULT 'ton',
-      qty_on_hand numeric NOT NULL DEFAULT 0,
-      qty_reserved numeric NOT NULL DEFAULT 0,
-      qty_committed numeric NOT NULL DEFAULT 0,
-      updated_at timestamp without time zone NOT NULL DEFAULT now(),
-      created_at timestamptz NOT NULL DEFAULT now(),
-      tenant_id uuid
+      movement_type text NOT NULL,
+      qty numeric NOT NULL,
+      uom text,
+      contract_id_uuid uuid,
+      bol_id_uuid uuid,
+      ref_contract text,
+      meta jsonb,
+      tenant_id uuid,
+      created_at timestamptz NOT NULL DEFAULT now()
     );
 
     -- REQUIRED for your ON CONFLICT (seller, sku)
@@ -1445,13 +1445,13 @@ async def _bootstrap_core_tables_for_ci():
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_contract_fk') THEN
         ALTER TABLE public.inventory_movements
           ADD CONSTRAINT inv_mov_contract_fk
-          FOREIGN KEY (contract_id) REFERENCES public.contracts(id);
+            FOREIGN KEY (contract_id_uuid) REFERENCES public.contracts(id);
       END IF;
 
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='inv_mov_bol_fk') THEN
         ALTER TABLE public.inventory_movements
           ADD CONSTRAINT inv_mov_bol_fk
-          FOREIGN KEY (bol_id) REFERENCES public.bols(bol_id);
+            FOREIGN KEY (bol_id_uuid) REFERENCES public.bols(bol_id);
       END IF;
     END$$;
     """)
