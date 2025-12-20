@@ -511,8 +511,7 @@ async def _utf8_and_cache_headers(request, call_next):
     return resp
 
 instrumentator = Instrumentator()
-instrumentator.instrument(app).expose(app, include_in_schema=False)
-instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
+instrumentator.instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 # ---- Ensure Cache-Control exists on every GET/HEAD -------
 
 # === QBO OAuth Relay • Config ===
@@ -1157,14 +1156,14 @@ class TraderOrder(BaseModel):
     status: str
 
 from fastapi import Request as _Request
-async def get_username(request: _Request) -> str:
+async def get_username_session(request: _Request) -> str:
     # Pull username from session; fallback to email or anonymous
     return (request.session.get("username")
             or request.session.get("email")
             or "anonymous")
 
 @trader_router.get("/orders", response_model=List[TraderOrder])
-async def trader_orders(username: str = Depends(get_username)):
+async def trader_orders(username: str = Depends(get_username_session)):
     """
     Futures orders for all accounts tied to current username.
     """
@@ -1203,7 +1202,7 @@ class TraderPosition(BaseModel):
     net_lots: float
 
 @trader_router.get("/positions", response_model=List[TraderPosition])
-async def trader_positions(username: str = Depends(get_username)):
+async def trader_positions(username: str = Depends(get_username_session)):
     rows = await database.fetch_all(
         """
         SELECT fp.symbol_root,
@@ -2674,7 +2673,7 @@ YARD_RULES_DDL = """
 async def _ensure_yard_rules():
     await run_ddl_multi(YARD_RULES_DDL)
 
-yard_router = APIRouter(tags=["Yard Rules"])
+yard_rules_router = APIRouter(tags=["Yard Rules"])
 
 class YardRuleIn(BaseModel):
     yard: str
@@ -2692,7 +2691,7 @@ class YardRuleOut(YardRuleIn):
     id: str
     updated_at: datetime
 
-@yard_router.get("/yard_rules", response_model=List[YardRuleOut])
+@yard_rules_router.get("/yard_rules", response_model=List[YardRuleOut])
 async def list_yard_rules(yard: str):
     """
     Return saved yard pricing / hedge rules for a given yard key.
@@ -2717,7 +2716,7 @@ async def list_yard_rules(yard: str):
 
     return [YardRuleOut(**dict(r)) for r in rows]
 
-@yard_router.post("/yard_rules", response_model=YardRuleOut)
+@yard_rules_router.post("/yard_rules", response_model=YardRuleOut)
 async def upsert_yard_rule(rule: YardRuleIn):
     """
     Create or update a yard rule keyed by (yard, material).
@@ -2783,7 +2782,7 @@ class HedgeRec(BaseModel):
     target_hedge_ratio: float
     suggested_lots: float
 
-@yard_router.get("/hedge/recommendations", response_model=List[HedgeRec])
+@yard_rules_router.get("/hedge/recommendations", response_model=List[HedgeRec])
 async def hedge_recommendations(yard: str):
     """
     Very simple hedge recs: look at inventory_items for this seller,
@@ -2851,7 +2850,7 @@ async def hedge_recommendations(yard: str):
         )
 
     return recs
-app.include_router(yard_router)
+app.include_router(yard_rules_router)
 # ---- Hedge Recs ----
 
 # --- Usage By Member ---
@@ -6654,10 +6653,6 @@ def ops_deps():
       "platform": platform.platform(),
       "packages": {d.project_name: d.version for d in pkg_resources.working_set}
     }
-
-@app.get("/openapi.json", include_in_schema=False)
-def openapi_json():
-    return app.openapi()
 # -------- Health --------
 
 # -------- Global --------
@@ -7140,7 +7135,7 @@ async def quote(
     # Nothing hit: clean 404 instead of 500
     raise HTTPException(status_code=404, detail="No price available for that category/material")
 
-@router_fc.post("/run", summary="Run nightly forecast for all symbols")
+@router_fc.post("/run_batch", summary="Run nightly forecast for all symbols")
 async def run_forecast_now():
     await _forecast_run_all()
     return {"ok": True}
@@ -7166,7 +7161,7 @@ async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
             pass
         raise HTTPException(404, "No forecasts available")
 
-@router_idx.post("/run", summary="Build today's BRidge Index closes (UTC)")
+@router_idx.post("/run_builder", summary="Build today's BRidge Index closes (UTC)")
 async def run_indices_now():
     try:
         await run_indices_builder()
@@ -11139,118 +11134,6 @@ async def dossier_retry_failed():
         return {"ok": True, "message": "Failed events flagged for retry."}
     except Exception:
         return {"ok": False, "message": "dossier_ingest_queue not configured; nothing to retry."}
-admin_dossier_router = APIRouter(prefix="/admin/dossier", tags=["Dossier Ingest"])
-
-
-class DossierQueueRow(BaseModel):
-    id: int
-    source_system: str
-    source_table: str
-    event_type: str
-    status: str
-    attempts: int
-    last_error: Optional[str]
-    created_at: datetime
-
-
-@admin_dossier_router.get("/queue", response_model=List[DossierQueueRow])
-async def list_dossier_queue(limit: int = 40):
-    rows = await database.fetch_all(
-        """
-        SELECT id, source_system, source_table, event_type,
-               status, attempts, last_error, created_at
-        FROM dossier_ingest_queue
-        ORDER BY created_at DESC
-        LIMIT :lim
-        """,
-        {"lim": limit},
-    )
-    return [DossierQueueRow(**dict(r)) for r in rows]
-
-@admin_dossier_router.post("/run_batch", summary="Drain pending Dossier ingest queue")
-async def run_dossier_ingest_batch(limit: int = 100):
-    """
-    Pull up to `limit` pending rows from dossier_ingest_queue, POST them to
-    DOSSIER_INGEST_URL, and mark each as sent/failed.
-    This is idempotent per row: status transitions are:
-      pending -> sent   (on 2xx)
-      pending -> failed (on non-2xx or network error)
-    """
-    if not DOSSIER_INGEST_URL:
-        return {"ok": False, "sent": 0, "failed": 0, "reason": "DOSSIER_INGEST_URL not configured"}
-
-    rows = await database.fetch_all("""
-      SELECT id, source_system, source_table, source_id, event_type, payload
-      FROM dossier_ingest_queue
-      WHERE status = 'pending'
-      ORDER BY created_at ASC
-      LIMIT :lim
-    """, {"lim": limit})
-
-    if not rows:
-        return {"ok": True, "sent": 0, "failed": 0}
-
-    sent = 0
-    failed = 0
-
-    async def _headers_and_body(r):
-        body = {
-            "source_system": r["source_system"],
-            "source_table":  r["source_table"],
-            "source_id":     r["source_id"],
-            "event_type":    r["event_type"],
-            "payload":       r["payload"] or {},
-        }
-        raw = json.dumps(body, separators=(",", ":"), default=str).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if DOSSIER_INGEST_SECRET:
-            ts = str(int(time.time()))
-            mac = hmac.new(DOSSIER_INGEST_SECRET.encode("utf-8"),
-                           ts.encode("utf-8") + b"." + raw,
-                           hashlib.sha256).hexdigest()
-            headers["X-Atlas-Timestamp"] = ts
-            headers["X-Atlas-Signature"] = mac
-        return headers, raw
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        for r in rows:
-            try:
-                headers, raw = await _headers_and_body(r)
-                resp = await client.post(DOSSIER_INGEST_URL, headers=headers, content=raw)
-                ok = 200 <= resp.status_code < 300
-                if ok:
-                    sent += 1
-                    await database.execute("""
-                      UPDATE dossier_ingest_queue
-                         SET status='sent',
-                             attempts = attempts + 1,
-                             last_error = NULL,
-                             sent_at = NOW()
-                       WHERE id = :id
-                    """, {"id": r["id"]})
-                else:
-                    failed += 1
-                    await database.execute("""
-                      UPDATE dossier_ingest_queue
-                         SET status='failed',
-                             attempts = attempts + 1,
-                             last_error = :err
-                       WHERE id = :id
-                    """, {"id": r["id"], "err": f"{resp.status_code} {resp.text[:200]}"} )
-            except Exception as e:
-                failed += 1
-                try:
-                    await database.execute("""
-                      UPDATE dossier_ingest_queue
-                         SET status='failed',
-                             attempts = attempts + 1,
-                             last_error = :err
-                       WHERE id = :id
-                    """, {"id": r["id"], "err": str(e)})
-                except Exception:
-                    pass
-
-    return {"ok": True, "sent": sent, "failed": failed}
 
 app.include_router(admin_dossier_router)
 #------- /Dossier HR Sync -------
@@ -14452,393 +14335,6 @@ async def tax_lookup(hs_code: str, dest: str):
             "duty_usd": float(row["duty_usd"]) if row else 0.0}
 
 # ========== Admin Exports router ==========
-# ---------- Yard Profiles & Config Endpoints ----------
-
-YARDS_TAG = ["Yards"]  # reuse tag for OpenAPI grouping
-
-
-@app.get(
-    "/yards",
-    response_model=List[YardProfileOut],
-    tags=YARDS_TAG,
-    summary="List Yards",
-    description="List all yard profiles (one row per physical yard / tenant).",
-    status_code=200,
-)
-async def list_yards():
-    rows = await database.fetch_all("""
-        SELECT
-          id,
-          yard_code,
-          name,
-          city,
-          region,
-          default_currency,
-          default_hedge_ratio,
-          created_at
-        FROM yard_profiles
-        ORDER BY name
-    """)
-    return [YardProfileOut(**dict(r)) for r in rows]
-
-
-@app.post(
-    "/yards",
-    response_model=YardProfileOut,
-    tags=YARDS_TAG,
-    summary="Create Yard Profile",
-    description="Create a new yard profile used for pricing and hedge configuration.",
-    status_code=201,
-)
-async def create_yard(body: YardProfileCreate):
-    row = await database.fetch_one("""
-        INSERT INTO yard_profiles (
-          yard_code, name, city, region,
-          default_currency, default_hedge_ratio
-        )
-        VALUES (
-          :yard_code, :name, :city, :region,
-          :default_currency, :default_hedge_ratio
-        )
-        RETURNING
-          id,
-          yard_code,
-          name,
-          city,
-          region,
-          default_currency,
-          default_hedge_ratio,
-          created_at
-    """, body.model_dump())
-    if not row:
-        raise HTTPException(status_code=500, detail="Failed to create yard profile")
-    return YardProfileOut(**dict(row))
-
-
-@app.get(
-    "/yards/{yard_id}",
-    response_model=YardProfileOut,
-    tags=YARDS_TAG,
-    summary="Get Yard Profile",
-    description="Fetch a single yard profile by id.",
-    status_code=200,
-)
-async def get_yard(yard_id: UUID):
-    row = await database.fetch_one("""
-        SELECT
-          id,
-          yard_code,
-          name,
-          city,
-          region,
-          default_currency,
-          default_hedge_ratio,
-          created_at
-        FROM yard_profiles
-        WHERE id = :yard_id
-    """, {"yard_id": str(yard_id)})
-    if not row:
-        raise HTTPException(status_code=404, detail="Yard not found")
-    return YardProfileOut(**dict(row))
-
-
-@app.put(
-    "/yards/{yard_id}",
-    response_model=YardProfileOut,
-    tags=YARDS_TAG,
-    summary="Update Yard Profile",
-    description="Update fields on an existing yard profile.",
-    status_code=200,
-)
-async def update_yard(yard_id: UUID, body: YardProfileUpdate):
-    data = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not data:
-        # nothing to update, just return existing
-        return await get_yard(yard_id)
-
-    set_clauses = []
-    values = {"yard_id": str(yard_id)}
-    for idx, (k, v) in enumerate(data.items(), start=1):
-        param = f"v{idx}"
-        set_clauses.append(f"{k} = :{param}")
-        values[param] = v
-
-    sql = f"""
-        UPDATE yard_profiles
-        SET {", ".join(set_clauses)}
-        WHERE id = :yard_id
-        RETURNING
-          id,
-          yard_code,
-          name,
-          city,
-          region,
-          default_currency,
-          default_hedge_ratio,
-          created_at
-    """
-    row = await database.fetch_one(sql, values)
-    if not row:
-        raise HTTPException(status_code=404, detail="Yard not found")
-    return YardProfileOut(**dict(row))
-
-
-# ----- Yard Pricing Rules -----
-@app.get(
-    "/yards/{yard_id}/pricing_rules",
-    response_model=List[YardPricingRuleOut],
-    tags=YARDS_TAG,
-    summary="List Yard Pricing Rules",
-    description="List pricing rules per material for a given yard.",
-    status_code=200,
-)
-async def list_yard_pricing_rules(yard_id: UUID):
-    rows = await database.fetch_all("""
-        SELECT
-          id,
-          yard_id,
-          material,
-          formula,
-          loss_min_pct,
-          loss_max_pct,
-          min_margin_usd_ton,
-          active,
-          updated_at
-        FROM yard_pricing_rules
-        WHERE yard_id = :yard_id
-        ORDER BY material
-    """, {"yard_id": str(yard_id)})
-    return [YardPricingRuleOut(**dict(r)) for r in rows]
-
-
-@app.post(
-    "/yards/{yard_id}/pricing_rules",
-    response_model=YardPricingRuleOut,
-    tags=YARDS_TAG,
-    summary="Create Yard Pricing Rule",
-    description="Create a pricing rule for a yard/material.",
-    status_code=201,
-)
-async def create_yard_pricing_rule(yard_id: UUID, body: YardPricingRuleCreate):
-    payload = body.model_dump()
-    payload["yard_id"] = str(yard_id)
-    row = await database.fetch_one("""
-        INSERT INTO yard_pricing_rules (
-          yard_id,
-          material,
-          formula,
-          loss_min_pct,
-          loss_max_pct,
-          min_margin_usd_ton,
-          active
-        )
-        VALUES (
-          :yard_id,
-          :material,
-          :formula,
-          :loss_min_pct,
-          :loss_max_pct,
-          :min_margin_usd_ton,
-          :active
-        )
-        RETURNING
-          id,
-          yard_id,
-          material,
-          formula,
-          loss_min_pct,
-          loss_max_pct,
-          min_margin_usd_ton,
-          active,
-          updated_at
-    """, payload)
-    if not row:
-        raise HTTPException(status_code=500, detail="Failed to create pricing rule")
-    return YardPricingRuleOut(**dict(row))
-
-
-@app.put(
-    "/yard_pricing_rules/{rule_id}",
-    response_model=YardPricingRuleOut,
-    tags=YARDS_TAG,
-    summary="Update Yard Pricing Rule",
-    description="Update fields of an existing pricing rule.",
-    status_code=200,
-)
-async def update_yard_pricing_rule(rule_id: UUID, body: YardPricingRuleUpdate):
-    data = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not data:
-        # no updates requested → just return current state
-        row = await database.fetch_one("""
-            SELECT
-              id,
-              yard_id,
-              material,
-              formula,
-              loss_min_pct,
-              loss_max_pct,
-              min_margin_usd_ton,
-              active,
-              updated_at
-            FROM yard_pricing_rules
-            WHERE id = :rule_id
-        """, {"rule_id": str(rule_id)})
-        if not row:
-            raise HTTPException(status_code=404, detail="Pricing rule not found")
-        return YardPricingRuleOut(**dict(row))
-
-    set_clauses = []
-    values = {"rule_id": str(rule_id)}
-    for idx, (k, v) in enumerate(data.items(), start=1):
-        param = f"v{idx}"
-        set_clauses.append(f"{k} = :{param}")
-        values[param] = v
-
-    sql = f"""
-        UPDATE yard_pricing_rules
-        SET {", ".join(set_clauses)}, updated_at = NOW()
-        WHERE id = :rule_id
-        RETURNING
-          id,
-          yard_id,
-          material,
-          formula,
-          loss_min_pct,
-          loss_max_pct,
-          min_margin_usd_ton,
-          active,
-          updated_at
-    """
-    row = await database.fetch_one(sql, values)
-    if not row:
-        raise HTTPException(status_code=404, detail="Pricing rule not found")
-    return YardPricingRuleOut(**dict(row))
-
-
-# ----- Yard Hedge Rules -----
-@app.get(
-    "/yards/{yard_id}/hedge_rules",
-    response_model=List[YardHedgeRuleOut],
-    tags=YARDS_TAG,
-    summary="List Yard Hedge Rules",
-    description="List hedge rules per material for a given yard.",
-    status_code=200,
-)
-async def list_yard_hedge_rules(yard_id: UUID):
-    rows = await database.fetch_all("""
-        SELECT
-          id,
-          yard_id,
-          material,
-          min_tons,
-          target_hedge_ratio,
-          futures_symbol_root,
-          auto_hedge,
-          updated_at
-        FROM yard_hedge_rules
-        WHERE yard_id = :yard_id
-        ORDER BY material
-    """, {"yard_id": str(yard_id)})
-    return [YardHedgeRuleOut(**dict(r)) for r in rows]
-
-
-@app.post(
-    "/yards/{yard_id}/hedge_rules",
-    response_model=YardHedgeRuleOut,
-    tags=YARDS_TAG,
-    summary="Create Yard Hedge Rule",
-    description="Create a hedge rule for a yard/material.",
-    status_code=201,
-)
-async def create_yard_hedge_rule(yard_id: UUID, body: YardHedgeRuleCreate):
-    payload = body.model_dump()
-    payload["yard_id"] = str(yard_id)
-    row = await database.fetch_one("""
-        INSERT INTO yard_hedge_rules (
-          yard_id,
-          material,
-          min_tons,
-          target_hedge_ratio,
-          futures_symbol_root,
-          auto_hedge
-        )
-        VALUES (
-          :yard_id,
-          :material,
-          :min_tons,
-          :target_hedge_ratio,
-          :futures_symbol_root,
-          :auto_hedge
-        )
-        RETURNING
-          id,
-          yard_id,
-          material,
-          min_tons,
-          target_hedge_ratio,
-          futures_symbol_root,
-          auto_hedge,
-          updated_at
-    """, payload)
-    if not row:
-        raise HTTPException(status_code=500, detail="Failed to create hedge rule")
-    return YardHedgeRuleOut(**dict(row))
-
-
-@app.put(
-    "/yard_hedge_rules/{rule_id}",
-    response_model=YardHedgeRuleOut,
-    tags=YARDS_TAG,
-    summary="Update Yard Hedge Rule",
-    description="Update fields of an existing hedge rule.",
-    status_code=200,
-)
-async def update_yard_hedge_rule(rule_id: UUID, body: YardHedgeRuleUpdate):
-    data = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not data:
-        row = await database.fetch_one("""
-            SELECT
-              id,
-              yard_id,
-              material,
-              min_tons,
-              target_hedge_ratio,
-              futures_symbol_root,
-              auto_hedge,
-              updated_at
-            FROM yard_hedge_rules
-            WHERE id = :rule_id
-        """, {"rule_id": str(rule_id)})
-        if not row:
-            raise HTTPException(status_code=404, detail="Hedge rule not found")
-        return YardHedgeRuleOut(**dict(row))
-
-    set_clauses = []
-    values = {"rule_id": str(rule_id)}
-    for idx, (k, v) in enumerate(data.items(), start=1):
-        param = f"v{idx}"
-        set_clauses.append(f"{k} = :{param}")
-        values[param] = v
-
-    sql = f"""
-        UPDATE yard_hedge_rules
-        SET {", ".join(set_clauses)}, updated_at = NOW()
-        WHERE id = :rule_id
-        RETURNING
-          id,
-          yard_id,
-          material,
-          min_tons,
-          target_hedge_ratio,
-          futures_symbol_root,
-          auto_hedge,
-          updated_at
-    """
-    row = await database.fetch_one(sql, values)
-    if not row:
-        raise HTTPException(status_code=404, detail="Hedge rule not found")
-    return YardHedgeRuleOut(**dict(row))
-# ---------- Yard Profiles & Config Endpoints ----------
 
 # ---------- Pricing Helper Endpoint ----------
 PRICING_TAG = ["Pricing"]
