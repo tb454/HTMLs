@@ -62,13 +62,19 @@ from fastapi import Depends
 from uuid import UUID 
 from starlette.middleware.base import BaseHTTPMiddleware 
 
-# ---- Admin dependency helper  ----
+# ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
+
 def _require_admin(request: _FastAPIRequest):
     """
-    Require an 'admin' role in the current session; raises 403 otherwise.
+    In production: require session role 'admin'.
+    In non-prod: allow (so dev/CI doesn't brick).
     """
-    _require_role(request, {"admin"})
+    if os.getenv("ENV", "").lower() == "production":
+        role = (request.session.get("role") or "").lower()
+        if role != "admin":
+            raise HTTPException(status_code=403, detail="admin only")
+
 def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
@@ -176,8 +182,9 @@ _md_last_push_ms: Dict[str, int] = defaultdict(lambda: 0)
 # instrument registry (example; persist later)
 _INSTRUMENTS = {
     # symbol: lot_size (tons), tick_size ($/lb), description
-    "CU-SHRED-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Copper Shred 1-Month"},
-    "AL-6061-1M": {"lot": 20.0, "tick": 0.0005, "desc": "Al 6061 1-Month"},
+    "FE-SHRED-1M": {"lot": 20.0, "tick": 0.50, "desc": "Ferrous Shred Steel 1-Month (USD/ton)"},
+    "AL-6061-1M":  {"lot": 20.0, "tick": 0.0005, "desc": "Al 6061 1-Month (USD/lb)"},
+    "CU-1M":       {"lot": 20.0, "tick": 0.0005, "desc": "Copper 1-Month (USD/lb)"},
 }
 
 # ---- common utils (hashing, dates, json, rounding, lot size) ----
@@ -12579,16 +12586,14 @@ def _eval_pricing_formula(formula: str, reference_price: float) -> float:
     except Exception:
         return reference_price
 
-# ===== Admin gate helper  =====
-def _require_admin(request: Request):
-    """
-    In production: require a session role of 'admin'.
-    In non-prod: no-op, and never crash if request is None.
-    """
-    if os.getenv("ENV","").lower() == "production":
-        if not request or (request.session.get("role") != "admin"):
-            raise HTTPException(403, "admin only")
+# --- Symbol normalization (aliases) ---
+SYMBOL_ALIASES = {
+    "CU-SHRED-1M": "FE-SHRED-1M",  # legacy -> canonical
+}
 
+def _canon_symbol(sym: str) -> str:
+    s = (sym or "").strip().upper()
+    return SYMBOL_ALIASES.get(s, s)
 
 # ===== Webhook HMAC + replay protection =====
 def verify_sig(raw: bytes, header_sig: str, secret_env: str) -> bool:
@@ -17220,20 +17225,23 @@ def require_entitlement(user: str, feature: str):
         raise HTTPException(status_code=403, detail=f"Missing entitlement: {feature}")
 
 async def price_band_check(symbol: str, price: float):
+    symbol = _canon_symbol(symbol)
+
     if band := _PRICE_BANDS.get(symbol):
         lo, hi = band
         if price < lo or price > hi:
             raise HTTPException(status_code=422, detail=f"Price {price} outside band [{lo}, {hi}]")
-    # LULD on last settle 
+
+    # LULD on last settle
     if symbol in _LULD:
         down, up = _LULD[symbol]
         row = await database.fetch_one(
             "SELECT settle FROM settlements WHERE symbol=:s ORDER BY as_of DESC LIMIT 1",
             {"s": symbol}
         )
-        if row:
+        if row and row["settle"] is not None:
             base = float(row["settle"])
-            if price < base*(1.0 - down) or price > base*(1.0 + up):
+            if price < base*(1.0 - float(down)) or price > base*(1.0 + float(up)):
                 raise HTTPException(status_code=422, detail="LULD violation")
 
 async def _symbol_for_listing(listing_id: str) -> str:
@@ -17272,6 +17280,7 @@ async def kill_switch(member_id: str, enabled: bool = True):
 
 @app.post("/risk/price_band/{symbol}", tags=["Risk"], summary="Set absolute price band")
 async def set_price_band(symbol: str, lower: float, upper: float):
+    symbol = _canon_symbol(symbol)
     _PRICE_BANDS[symbol] = (lower, upper)
     await database.execute("""
       INSERT INTO runtime_price_bands(symbol, lower, upper, updated_at)
@@ -17282,6 +17291,7 @@ async def set_price_band(symbol: str, lower: float, upper: float):
 
 @app.post("/risk/luld/{symbol}", tags=["Risk"], summary="Set LULD pct (0.05=5%)")
 async def set_luld(symbol: str, down_pct: float, up_pct: float):
+    symbol = _canon_symbol(symbol)
     _LULD[symbol] = (down_pct, up_pct)
     await database.execute("""
       INSERT INTO runtime_luld(symbol, down_pct, up_pct, updated_at)
@@ -17796,7 +17806,7 @@ async def _rfq_symbol(rfq_id: str) -> str:
     row = await database.fetch_one("SELECT symbol FROM rfqs WHERE rfq_id=:id", {"id": rfq_id})
     if not row:
         raise HTTPException(404, "RFQ not found")
-    return row["symbol"]
+    return _canon_symbol(row["symbol"])
 
 @limiter.limit("30/minute")
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
@@ -17810,6 +17820,8 @@ async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     require_entitlement(user, "rfq.post")
     rfq_id = str(uuid.uuid4())
+    sym = _canon_symbol(r.symbol)
+
     await database.execute(
         """
         INSERT INTO rfqs(rfq_id, symbol, side, quantity_lots, price_limit, expires_at, creator)
@@ -17817,17 +17829,17 @@ async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
         """,
         {
             "id": rfq_id,
-            "symbol": r.symbol,
+            "symbol": sym,
             "side": r.side,
-            "qty": str(r.quantity_lots),
-            "pl": str(r.price_limit) if r.price_limit is not None else None,
+            "qty": r.quantity_lots,
+            "pl": r.price_limit,
             "exp": r.expires_at,
             "creator": user,
         },
     )
     # optional: broadcast a “new RFQ” tick
     try:
-        await _md_broadcast({"type": "rfq.new", "rfq_id": rfq_id, "symbol": r.symbol, "side": r.side, "qty_lots": float(r.quantity_lots)})
+                await _md_broadcast({"type": "rfq.new", "rfq_id": rfq_id, "symbol": sym, "side": r.side, "qty_lots": float(r.quantity_lots)})
     except Exception:
         pass
     resp = {"rfq_id": rfq_id, "status": "open"}
@@ -17884,7 +17896,7 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
 
     price = float(q["price"])
     qty   = float(q["qty_lots"])
-    symbol = rfq["symbol"]
+    symbol = _canon_symbol(rfq["symbol"])
     await price_band_check(symbol, price)
 
     # Determine sides for record
@@ -18501,8 +18513,10 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
     require_entitlement(user, "clob.trade")
     if _KILL_SWITCH.get(user):
         raise HTTPException(423, "Kill switch active")
-    await price_band_check(o.symbol, float(o.price))
-    await _check_position_limit(user, o.symbol, float(o.qty_lots), o.side)
+    sym = _canon_symbol(o.symbol)
+
+    await price_band_check(sym, float(o.price))
+    await _check_position_limit(user, sym, float(o.qty_lots), o.side)
 
     order_id = str(uuid.uuid4())
     qty = float(o.qty_lots)
@@ -18510,7 +18524,7 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
     await database.execute("""
       INSERT INTO clob_orders(order_id,symbol,side,price,qty_lots,qty_open,owner,tif,status)
       VALUES (:id,:s,:side,:p,:q,:q,:owner,:tif,'open')
-    """, {"id": order_id, "s": o.symbol, "side": o.side, "p": str(o.price), "q": qty, "owner": user, "tif": o.tif})
+        """, {"id": order_id, "s": sym, "side": o.side, "p": str(o.price), "q": qty, "owner": user, "tif": o.tif})
 
     # Enqueue for deterministic matching (must be inside this async function)
     ev = await database.fetch_one(
@@ -18518,13 +18532,15 @@ async def clob_place_order(o: CLOBOrderIn, request: Request):
         {"p": json.dumps({"order_id": order_id})}
     )
     await _event_queue.put((int(ev["id"]), "ORDER", {"order_id": order_id}))
-    await _publish_book(o.symbol)
+    await _publish_book(sym)
     resp = {"order_id": order_id, "queued": True}
     return await _idem_guard(request, key, resp)
 
 # ===== Settlement (VWAP from recent CLOB trades) =====
 @app.post("/settlement/publish", tags=["Settlement"], summary="Publish daily settle")
 async def settle_publish(symbol: str, as_of: date, method: str = "vwap_last60m"):
+    symbol = _canon_symbol(symbol)
+
     # naive vwap: last 60m clob trades
     rows = await database.fetch_all("""
       SELECT price, qty_lots FROM clob_trades
@@ -18573,7 +18589,7 @@ async def expire_month(tradable_symbol: str, as_of: date, request: Request):
 
     root = ic["symbol"]  # e.g., "BR-CU"
     # map index root to underlying settle symbol
-    under = {"BR-CU": "CU-SHRED-1M", "BR-AL": "AL-6061-1M"}.get(root)
+    under = {"BR-CU": "FE-SHRED-1M", "BR-AL": "AL-6061-1M"}.get(root)
     if not under:
         raise HTTPException(422, "No underlying mapping")
 
@@ -18731,6 +18747,8 @@ async def clob_cancel_order(order_id: str, request: Request):
 
 @clob_router.get("/orderbook", summary="Best bid/ask + depth (simple)")
 async def clob_orderbook(symbol: str, depth: int = 10):
+    symbol = _canon_symbol(symbol)
+
     bids = await database.fetch_all("""
       SELECT price, SUM(qty_open) qty FROM clob_orders
       WHERE symbol=:s AND side='buy' AND status='open'
