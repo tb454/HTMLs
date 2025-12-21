@@ -194,6 +194,25 @@ def _sha256_hex(s: str) -> str:
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+def _to_utc_z(ts: Any) -> str | None:
+    """
+    Convert a datetime-ish value to an ISO UTC Z string safely.
+    - If ts is naive, assume UTC.
+    - If ts is not a datetime, return None.
+    """
+    if ts is None:
+        return None
+    try:
+        if isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            else:
+                ts = ts.astimezone(timezone.utc)
+            return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
+    return None
+
 def _utc_date_now():
     return utcnow().date()
 
@@ -704,7 +723,7 @@ async def indices_latest(
     as_of = None
     try:
         if tsrow and tsrow["ts"]:
-            as_of = tsrow["ts"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            as_of = _to_utc_z(tsrow["ts"])
     except Exception:
         as_of = None
     if not as_of:
@@ -925,7 +944,7 @@ async def market_snapshot(
         for r in rows:
             ts = r["ts_market"] or r["ts_server"]
             try:
-                tsz = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
+                tsz = _to_utc_z(ts) if ts else None
             except Exception:
                 tsz = None
             refs.append({
@@ -1001,7 +1020,7 @@ async def market_snapshot(
     try:
         v = await database.fetch_one("SELECT MAX(inserted_at) AS t FROM vendor_quotes")
         if v and v["t"]:
-            vendor_last_import_at = v["t"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            vendor_last_import_at = _to_utc_z(v["t"])
     except Exception:
         pass
 
@@ -1256,7 +1275,7 @@ async def trader_marks_snapshot(region: str | None = None, request: Request = No
     for c in crows:
         cid = c["id"]
         mat = (c["material"] or "").strip()
-        ccy = (c.get("currency") or "USD")
+        ccy = (_rget(c, "currency") or "USD")
 
         px = None
         ref_ts = None
@@ -3265,6 +3284,42 @@ async def _uniq_ref_guard():
 # ----- Uniq ref guard -----
 
 # ----- Extra indexes -----
+@startup
+async def _ensure_backend_expected_uniques():
+    """
+    These UNIQUE indexes are required because the backend uses ON CONFLICT(...)
+    on these natural keys. Without them, inserts will 500.
+    """
+    if not BOOTSTRAP_DDL:
+        return
+
+    await run_ddl_multi("""
+    -- indices_daily: backend uses ON CONFLICT (as_of_date, region, material)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_indices_daily_date_region_material
+      ON public.indices_daily (as_of_date, region, material);
+
+    -- settlements: backend uses ON CONFLICT (as_of, symbol)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_settlements_asof_symbol
+      ON public.settlements (as_of, symbol);
+
+    -- anomaly_scores: backend uses ON CONFLICT (member, symbol, as_of)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_anomaly_scores_member_symbol_asof
+      ON public.anomaly_scores (member, symbol, as_of);
+
+    -- audit_events: backend treats (chain_date, seq) as unique
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_events_chain_date_seq
+      ON public.audit_events (chain_date, seq);
+
+    -- bols idempotency: backend uses ON CONFLICT (contract_id, idem_key)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_bols_contract_idem_key
+      ON public.bols (contract_id, idem_key)
+      WHERE idem_key IS NOT NULL;
+
+    -- inventory_items: make (seller, sku) stable for LOWER() lookups
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower
+      ON public.inventory_items ((lower(seller)), (lower(sku)));
+    """)
+
 @startup
 async def _ensure_more_indexes():
     ddl = [
@@ -14884,8 +14939,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 "mt": "reserve",
                 "qty": qty,
                 "uom": "ton",
-                "ref_contract": cid,
-                "cid_uuid": None,
+                "ref_contract": None,
+                "cid_uuid": cid,
                 "bid_uuid": None,
                 "meta": json.dumps({"reason": "contract_create", "contract_id": cid}, default=str),
                 "tenant_id": tenant_id,
@@ -16264,14 +16319,14 @@ async def cancel_contract(contract_id: str):
                 )
                 VALUES (
                     :seller, :sku, 'unreserve', :qty,
-                    'ton', :ref_contract, :cid, NULL,
+                    'ton', :ref_contract, :cid_uuid, NULL,
                     CAST(:meta AS jsonb), NULL, NOW()
                 )
             """, {
                 "seller": seller,
                 "sku": sku,
                 "qty": qty,
-                "ref_contract": contract_id,
+                "ref_contract": None,
                 "cid_uuid": contract_id,
                 "meta": json.dumps({"reason": "cancel"}, default=str),
             })
