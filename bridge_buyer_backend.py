@@ -575,9 +575,9 @@ async def ratelimit_handler(request, exc):
 
 SNAPSHOT_AUTH = os.getenv("SNAPSHOT_AUTH", "")
 
-async def run_daily_snapshot(storage: str = "supabase") -> dict:
+async def run_indices_snapshot(storage: str = "supabase") -> dict:
     """
-    Minimal, safe snapshot routine used by the background job.
+    Minimal, safe indices routine used by the background job.
     Attempts to run indices builder if available; always returns a dict and never raises.
     """
     try:
@@ -594,7 +594,7 @@ async def run_daily_snapshot(storage: str = "supabase") -> dict:
 # --- background snapshot wrapper: never crash the worker ---
 async def _snapshot_task(storage: str):
     try:
-        res = await run_daily_snapshot(storage=storage)
+        res = await run_indices_snapshot(storage=storage)
         try:
             logger.warn("snapshot_bg_result", **({"res": res} if isinstance(res, dict) else {"note": str(res)}))
         except Exception:
@@ -12081,9 +12081,10 @@ class BOLOut(BOLIn):
                 "export_country": "MX"
             }
         }
+
 class PurchaseIn(BaseModel):
     op: Literal["purchase"] = "purchase"
-    expected_status: Literal["Open"] = None
+    expected_status: Optional[Literal["Open"]] = "Open"
     idempotency_key: Optional[str] = None
 
 # Tighter typing for updates
@@ -18221,12 +18222,15 @@ async def fix_dropcopy(payload: dict):
 async def clob_cancel_order(order_id: str, request: Request):
     user = (request.session.get("username") if hasattr(request, "session") else None) or "anon"
     row = await database.fetch_one(
-    "SELECT owner,status,symbol FROM clob_orders WHERE order_id=:id",
-    {"id": order_id}
-)
-    if not row: raise HTTPException(404, "Order not found")
-    if row["owner"] != user: raise HTTPException(403, "Not owner")
-    if row["status"] != "open": return {"status": row["status"]}
+        "SELECT owner,status,symbol FROM clob_orders WHERE order_id=:id",
+        {"id": order_id}
+    )
+    if not row:
+        raise HTTPException(404, "Order not found")
+    if row["owner"] != user:
+        raise HTTPException(403, "Not owner")
+    if row["status"] != "open":
+        return {"status": row["status"]}
 
     await database.execute(
         "UPDATE clob_orders SET status='cancelled', qty_open=0 WHERE order_id=:id",
@@ -18342,6 +18346,7 @@ async def _clob_match(order_id: str) -> float:
         await _publish_book(symbol)
     except Exception:
         pass
+    return filled_total
 
 @limiter.limit("180/minute")
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
