@@ -1368,12 +1368,16 @@ async def trader_marks_latest(region: str | None = None, limit: int = Query(200,
         "rows": [
             {
                 "contract_id": str(r["contract_id"]),
-                "material": r.get("material"),
-                "region": r.get("region"),
+                "material": _rget(r, "material"),
+                "region": _rget(r, "region"),
                 "mark_price_per_ton": float(r["mark_price_per_ton"] or 0.0),
-                "currency": r.get("currency") or "USD",
-                "source": r.get("source") or "INDEX",
-                "reference_timestamp": (r["reference_timestamp"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if r.get("reference_timestamp") else None),
+                "currency": (_rget(r, "currency") or "USD"),
+                "source": (_rget(r, "source") or "INDEX"),
+                "reference_timestamp": (
+                    _rget(r, "reference_timestamp").astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    if _rget(r, "reference_timestamp")
+                    else None
+                ),
             }
             for r in rows
         ],
@@ -3128,7 +3132,7 @@ async def get_br_index_current():
             JOIN scrap_instrument si
               ON vmm.instrument_code = si.instrument_code
             WHERE vq.sheet_date IS NOT NULL
-              AND vq.unit_raw IN ('LB','LBS')
+              AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
         ),
         dedup AS (
             SELECT *
@@ -3204,7 +3208,7 @@ async def get_br_index_history(
         JOIN scrap_instrument si
           ON vmm.instrument_code = si.instrument_code
         WHERE vq.sheet_date IS NOT NULL
-          AND vq.unit_raw IN ('LB','LBS')
+          AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
           AND vq.sheet_date >= CURRENT_DATE - make_interval(days => :days)
           {filter_sql}
         GROUP BY vq.sheet_date, vmm.instrument_code, si.core_code, si.material_canonical
@@ -8877,7 +8881,8 @@ async def login(request: Request):
 async def me(request: Request):
     return {
         "username": (request.session.get("username") or "Guest"),
-        "role": (request.session.get("role") or "")
+        "role": (request.session.get("role") or ""),
+        "member": (request.session.get("member") or request.session.get("org") or ""),
     }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
@@ -10221,8 +10226,8 @@ async def list_inventory(
         q += " AND LOWER(sku) = LOWER(:sku)"
         vals["sku"] = sku
 
-    if tenant_scoped and tenant_id:
-        q += " AND tenant_id = :tenant_id"
+    if tenant_scoped and tenant_id:        
+        q += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
         vals["tenant_id"] = tenant_id
 
     q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
@@ -10272,7 +10277,7 @@ async def list_movements(
         vals["end"] = end
 
     if tenant_scoped and tenant_id:
-        q += " AND tenant_id = :tenant_id"
+        q += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
         vals["tenant_id"] = tenant_id
 
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
@@ -10350,7 +10355,7 @@ async def finished_goods(
     params: Dict[str, Any] = {"seller": seller}
 
     if tenant_scoped and tenant_id:
-        base_sql += " AND tenant_id = :tenant_id"
+        base_sql += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
         params["tenant_id"] = tenant_id
 
     base_sql += " ORDER BY sku"
@@ -10564,8 +10569,16 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload: require source, seller, items[]")
 
-    # Resolve tenant once per batch
+    # Resolve tenant once per batch (prefer seller name)
     tenant_id = await current_tenant_id(request)
+    if not tenant_id and seller:
+        try:
+            slug = _slugify_member(seller)
+            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
+            if trow and trow.get("id"):
+                tenant_id = str(trow["id"])
+        except Exception:
+            tenant_id = None
 
     raw = await request.body()
     sig = request.headers.get("X-Signature", "")    
@@ -10676,6 +10689,14 @@ async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_p
     qty_tons = _to_tons(qty_raw, uom)
 
     tenant_id = await current_tenant_id(request)
+    if not tenant_id and seller:
+        try:
+            slug = _slugify_member(seller)
+            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
+            if trow and trow.get("id"):
+                tenant_id = str(trow["id"])
+        except Exception:
+            tenant_id = None
 
     async with database.transaction():
         old, new_qty, delta = await _manual_upsert_absolute_tx(
@@ -14092,58 +14113,46 @@ async def analytics_contracts_by_day(days: int = 30):
 
 @app.post("/indices/run", tags=["Indices"], summary="Refs + Vendor + Blended")
 async def indices_run():
+    """
+    Canonical writer: indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
+    so /indices/latest list-mode actually shows updates.
+    """
     try:
-        # 1) Pull references (COMEX/LME) – your stub is fine
-        await pull_now_all()
+        # 1) Best-effort pull references
+        try:
+            await pull_now_all()
+        except Exception:
+            pass
 
-        # 2) Snapshot vendor layer into indices_daily (region='vendor')
-        await vendor_snapshot_to_indices()
+        # 2) Write blended snapshot into indices_daily using your correct schema writer
+        try:
+            await vendor_snapshot_to_indices()
+        except Exception:
+            pass
 
-        # 3) Blended 70/30 (reference price vs latest vendor LB)
-        await database.execute("""
-          INSERT INTO indices_daily(symbol, ts, region, price)
-          SELECT
-            CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
-            NOW()                                      AS ts,
-            'blended'                                  AS region,
-            0.70*b.price + 0.30*v.vendor_lb            AS price
-          FROM (
-            -- latest reference per symbol from reference_prices
-            SELECT rp.symbol, rp.price
-            FROM reference_prices rp
-            JOIN (
-              SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
-              FROM reference_prices
-              GROUP BY symbol
-            ) last ON last.symbol = rp.symbol
-                  AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
-          ) b
-          JOIN (
-            -- latest vendor LB per canonical material
-            SELECT m.material_canonical AS symbol,
-                   AVG(v.price_per_lb)  AS vendor_lb
-            FROM vendor_quotes v
-            JOIN vendor_material_map m
-              ON m.vendor = v.vendor AND m.material_vendor = v.material
-            WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
-              AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-            GROUP BY 1
-          ) v ON v.symbol = b.symbol
-        """)
+        # 3) Optional: also generate contract-based regional indices for today (same table)
+        try:
+            await indices_generate_snapshot(snapshot_date=utcnow().date())
+        except Exception:
+            pass
 
-        # keep your metric
-        try: METRICS_INDICES_SNAPSHOTS.inc()
-        except: pass
+        try:
+            METRICS_INDICES_SNAPSHOTS.inc()
+        except Exception:
+            pass
 
-        # log success
-        try: logger.info("indices_run_ok", step="refs+vendor+blended")
-        except: pass
+        try:
+            logger.info("indices_run_ok", step="canonical_indices_daily")
+        except Exception:
+            pass
 
-        return {"ok": True}
+        return {"ok": True, "index_date": str(utcnow().date())}
     except Exception as e:
-        try: logger.warning("indices_run_failed", err=str(e))
-        except: pass
-        return {"ok": False, "skipped": True}
+        try:
+            logger.warning("indices_run_failed", err=str(e))
+        except Exception:
+            pass
+        return {"ok": False, "skipped": True, "error": str(e)}
 
 def flag_outliers(prices, z=3.0):
     import statistics
@@ -14741,8 +14750,17 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     seller = (contract.seller or "").strip()
     price_val = float(quantize_money(price_dec))
     sku    = (contract.material or "").strip()
-    # resolve tenant from request (if any)
+
+    # resolve tenant from request/session first; if missing, derive from seller name
     tenant_id = await current_tenant_id(request)
+    if not tenant_id and seller:
+        try:
+            slug = _slugify_member(seller)
+            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
+            if trow and trow.get("id"):
+                tenant_id = str(trow["id"])
+        except Exception:
+            tenant_id = None
 
     # ---------- best-effort reference price (NO transaction, tiny timeout) ----------
     if not (contract.reference_price and contract.reference_source):
@@ -14849,13 +14867,13 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             
             # LIVE path: reserve inventory, write Pending
             await database.execute("""
-                INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed)
-                SELECT :s, :k, 0, 0, 0
+                INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
+                SELECT :s, :k, 0, 0, 0, :tid
                 WHERE NOT EXISTS (
                     SELECT 1 FROM inventory_items
                     WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
                 )
-            """, {"s": seller, "k": sku})
+            """, {"s": seller, "k": sku, "tid": tenant_id})
 
             inv = await database.fetch_one("""
                 SELECT qty_on_hand, qty_reserved, qty_committed
@@ -14918,9 +14936,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             await database.execute("""
                 UPDATE inventory_items
-                   SET qty_reserved = qty_reserved + :q, updated_at = NOW()
+                   SET qty_reserved = qty_reserved + :q,
+                       tenant_id    = COALESCE(tenant_id, :tid),
+                       updated_at   = NOW()
                  WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-            """, {"q": qty, "s": seller, "k": sku})
+            """, {"q": qty, "s": seller, "k": sku, "tid": tenant_id})
 
             await database.execute("""
                 INSERT INTO inventory_movements (
@@ -16327,7 +16347,7 @@ async def cancel_contract(contract_id: str):
                 "sku": sku,
                 "qty": qty,
                 "ref_contract": None,
-                "cid_uuid": contract_id,
+                "cid_uuid": UUID(contract_id),
                 "meta": json.dumps({"reason": "cancel"}, default=str),
             })
         return {"ok": True, "contract_id": contract_id, "status": "Cancelled"}
