@@ -1419,7 +1419,7 @@ def _bootstrap_schema_if_needed(engine: sqlalchemy.engine.Engine) -> None:
         except Exception:
             pass
 
-                # seed a test user for CI/rate-limit tests
+        # seed a test user for CI/rate-limit tests
         try:
             conn.execute(
                 _sqltext(
