@@ -14863,24 +14863,58 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             if not row:
                 raise HTTPException(status_code=500, detail="contracts import insert returned no row")
             return await _idem_guard(request, key, dict(row))
-        else:
-            
-            # LIVE path: reserve inventory, write Pending
+        else:            
+           
+            # Ensure inventory row exists + lock it (ALWAYS), then reserve against it
+            inv = None
+
+            # If we inferred tenant_id, claim legacy NULL rows for this seller+sku
+            if tenant_id:
+                await database.execute("""
+                    UPDATE inventory_items
+                       SET tenant_id = :tid
+                     WHERE LOWER(seller)=LOWER(:s)
+                       AND LOWER(sku)=LOWER(:k)
+                       AND tenant_id IS NULL
+                """, {"tid": tenant_id, "s": seller, "k": sku})
+
+            # Ensure the row exists (inventory_items PK is seller+sku, so tenant_id is metadata)
             await database.execute("""
                 INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
                 SELECT :s, :k, 0, 0, 0, :tid
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM inventory_items
-                    WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                    SELECT 1
+                      FROM inventory_items
+                     WHERE LOWER(seller)=LOWER(:s)
+                       AND LOWER(sku)=LOWER(:k)
                 )
             """, {"s": seller, "k": sku, "tid": tenant_id})
 
+            # Lock the row we reserve against (no tenant clause here because PK is seller+sku)
             inv = await database.fetch_one("""
-                SELECT qty_on_hand, qty_reserved, qty_committed
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                FOR UPDATE
+                SELECT qty_on_hand, qty_reserved, qty_committed, tenant_id
+                  FROM inventory_items
+                 WHERE LOWER(seller)=LOWER(:s)
+                   AND LOWER(sku)=LOWER(:k)
+                 FOR UPDATE
             """, {"s": seller, "k": sku})
+
+            # If tenant_id was inferred and row is still NULL, claim it now (after lock)
+            if tenant_id and inv and inv["tenant_id"] is None:
+                await database.execute("""
+                    UPDATE inventory_items
+                       SET tenant_id = :tid
+                     WHERE LOWER(seller)=LOWER(:s)
+                       AND LOWER(sku)=LOWER(:k)
+                       AND tenant_id IS NULL
+                """, {"tid": tenant_id, "s": seller, "k": sku})
+                inv = await database.fetch_one("""
+                    SELECT qty_on_hand, qty_reserved, qty_committed, tenant_id
+                      FROM inventory_items
+                     WHERE LOWER(seller)=LOWER(:s)
+                       AND LOWER(sku)=LOWER(:k)
+                     FOR UPDATE
+                """, {"s": seller, "k": sku})
 
             on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
             reserved  = float(inv["qty_reserved"]) if inv else 0.0
@@ -14936,10 +14970,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             await database.execute("""
                 UPDATE inventory_items
-                   SET qty_reserved = qty_reserved + :q,
-                       tenant_id    = COALESCE(tenant_id, :tid),
-                       updated_at   = NOW()
-                 WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+                SET qty_reserved = qty_reserved + :q,
+                    updated_at   = NOW(),
+                    tenant_id    = COALESCE(:tid, tenant_id)
+                WHERE LOWER(seller)=LOWER(:s)
+                AND LOWER(sku)=LOWER(:k)                
             """, {"q": qty, "s": seller, "k": sku, "tid": tenant_id})
 
             await database.execute("""

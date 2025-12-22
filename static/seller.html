@@ -795,30 +795,72 @@ onReady(async () => {
 
       refreshFinishedFromInputs();
 
-      // Prime summary widgets once the seller (if any) is set
-      try {
-        loadActiveContractsSummary();
-        loadSellerKPIs();
-        loadTradeLog();
-        loadMetalsOverview();
-        loadMarketSnapshot();          // top 10 card
-        loadMaterialBenchmarks(1);     // BR-Index table, 50 at a time
-        if (typeof initMaterialBenchmarksPaging === 'function') {
-          initMaterialBenchmarksPaging();
-        }
-      } catch {}
+      // Prime widgets (seller.js is defer, so wait until its functions exist)
+      (async () => {
+        try {
+          const waitFn = async (fnName, timeoutMs = 8000) => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < timeoutMs) {
+              if (typeof window[fnName] === 'function') return true;
+              await new Promise(r => setTimeout(r, 50));
+            }
+            return false;
+          };
+
+          // These are defined in THIS file (always safe)
+          try { loadActiveContractsSummary(); } catch {}
+          try { loadSellerKPIs(); } catch {}
+          try { loadTradeLog(); } catch {}
+          try { loadMetalsOverview(); } catch {}
+
+          // These come from seller.js (defer) – wait then call
+          if (await waitFn('loadMarketSnapshot')) { try { window.loadMarketSnapshot(); } catch {} }
+          if (await waitFn('loadMaterialBenchmarks')) { try { window.loadMaterialBenchmarks(1); } catch {} }
+          if (await waitFn('initMaterialBenchmarksPaging')) { try { window.initMaterialBenchmarksPaging(); } catch {} }
+
+          // Also force an immediate BR refresh once seller.js is live
+          if (await waitFn('refreshBRIndex')) { try { window.refreshBRIndex(true); } catch {} }
+
+        } catch {}
+      })();
       
-      // Refresh summary + trade log every 60s when page visible
+      // Keep overview cards alive
+      setInterval(() => {
+        if (document.hidden) return;
+        try { loadActiveContractsSummary(); } catch {}
+        try { refreshFinishedFromInputs(); } catch {}
+      }, 30000);
+
+      setInterval(() => {
+        if (document.hidden) return;
+        try { loadTradeLog(); } catch {}
+      }, 60000);
+
+      setInterval(() => {
+        if (document.hidden) return;
+        try { loadSellerKPIs(); } catch {}
+      }, 120000);
+
+    });
+
+     // Keep BR-Index alive (refresh every 30s)
       setInterval(() => {
         if (document.hidden) return;
         try {
-          loadActiveContractsSummary();
-          loadSellerKPIs();
-          loadTradeLog();
+          if (window.refreshBRIndex) window.refreshBRIndex(true);
         } catch {}
-      }, 60000);
+      }, 30000);
 
-    });
+    // Keep Recent Inventory Movements alive (every 15s)
+      setInterval(() => {
+        if (document.hidden) return;
+        try {
+          const seller = (document.getElementById("sellerName")?.value || '').trim();
+          const mat    = (document.getElementById("material")?.value || '').trim()
+                      || (document.getElementById("invSku")?.value || '').trim();
+          if (seller && mat) renderRecentMovements(seller, mat);
+        } catch {}
+      }, 15000);
 
     // Pricing widget
     onReady(() => {
@@ -908,7 +950,7 @@ onReady(async () => {
 
       try {
         const qs = new URLSearchParams({ seller, limit: '1000', offset: '0' });
-        const res  = await api(`/contracts?${qs.toString()}`);
+        const res  = await api(`/contracts/search?${qs.toString()}`);
         const rows = await res.json();
 
         let secured = 0;
@@ -966,7 +1008,7 @@ onReady(async () => {
       });
 
       try {
-        const res  = await api(`/contracts?${qs.toString()}`);
+        const res  = await api(`/contracts/search?${qs.toString()}`);
         const rows = await res.json();
 
         const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1033,7 +1075,7 @@ onReady(async () => {
 
       try {
         const qs = new URLSearchParams({ seller, limit: '50', offset: '0' });
-        const res  = await api(`/contracts?${qs.toString()}`);
+        const res  = await api(`/contracts/search?${qs.toString()}`);
         const rows = await res.json();
 
         if (!rows.length) {
@@ -1438,6 +1480,21 @@ onReady(async () => {
         _syncQuery({ page });
         listContracts();
       });
+
+      // Refresh Recent Movements when material changes
+      const matInput = document.getElementById("material");
+      if (matInput) {
+        const kick = () => {
+          try {
+            const seller = (document.getElementById("sellerName")?.value || '').trim();
+            const mat = (matInput.value || '').trim();
+            if (seller && mat) renderRecentMovements(seller, mat);
+          } catch {}
+        };
+        matInput.addEventListener("change", kick);
+        matInput.addEventListener("blur", kick);
+        matInput.addEventListener("keyup", (e) => { if (e.key === "Enter") kick(); });
+      }
 
       const sellerInput = document.getElementById("sellerName");
       if (sellerInput) {

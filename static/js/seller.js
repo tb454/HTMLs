@@ -6,6 +6,8 @@
 const MATERIALS_PAGE_SIZE = 50;
 let materialsPage = 1;
 let BRINDEX_ROWS = [];
+let BRINDEX_LAST_FETCH_MS = 0;
+const BRINDEX_TTL_MS = 25000; // refetch if older than 25s
 
 // ----------------------------------------
 // TOP 10 MARKET SNAPSHOT (USD/ton)
@@ -15,7 +17,7 @@ async function loadMarketSnapshot() {
   if (!tbody) return;
 
   try {
-    const resp = await fetch('/api/br-index/current', { credentials: 'include' });
+    const resp = await fetch('/api/br-index/current', { credentials: 'include', cache: 'no-store' });
     const rows = await resp.json();
 
     const top10 = rows
@@ -49,18 +51,22 @@ async function loadMaterialBenchmarks(page = 1) {
   if (!tbody) return;
 
   try {
-    // fetch once
-    if (BRINDEX_ROWS.length === 0) {
-      const resp = await fetch('/api/br-index/current', { credentials: 'include' });
+    // fetch if empty OR stale
+    const now = Date.now();
+    if (BRINDEX_ROWS.length === 0 || (now - BRINDEX_LAST_FETCH_MS) > BRINDEX_TTL_MS) {
+      const resp = await fetch('/api/br-index/current', { credentials: 'include', cache: 'no-store' });
+      if (!resp.ok) throw new Error('BR-Index fetch failed');
       const data = await resp.json();
 
-      BRINDEX_ROWS = data.map(r => ({
+      BRINDEX_ROWS = (data || []).map(r => ({
         symbol: r.instrument_code,
         name: r.material_canonical,
         category: r.core_code,
         last_ton: Number(r.px_avg) * 2000,
         last_lb: Number(r.px_avg)
       }));
+
+      BRINDEX_LAST_FETCH_MS = now;
     }
 
     const total = BRINDEX_ROWS.length;
@@ -111,3 +117,14 @@ function initMaterialBenchmarksPaging() {
     nextBtn.onclick = () => loadMaterialBenchmarks(materialsPage + 1);
   }
 }
+
+// Force-refresh helper (called by seller.html)
+async function refreshBRIndex(force = true) {
+  if (force) {
+    BRINDEX_ROWS = [];
+    BRINDEX_LAST_FETCH_MS = 0;
+  }
+  try { await loadMarketSnapshot(); } catch {}
+  try { await loadMaterialBenchmarks(materialsPage); } catch {}
+}
+window.refreshBRIndex = refreshBRIndex;
