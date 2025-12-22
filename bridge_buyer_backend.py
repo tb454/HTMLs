@@ -13494,8 +13494,8 @@ async def get_all_contracts(
     seller: Optional[str] = Query(None),
     material: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime]   = Query(None),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
     reference_source: Optional[str] = Query(None),
     reference_symbol: Optional[str] = Query(None),
     sort: Optional[str] = Query(
@@ -13522,6 +13522,23 @@ async def get_all_contracts(
 
     tenant_id = await current_tenant_id(request) if request is not None else None
 
+        # --- parse start/end from query ---
+    def _parse_qdt(v: Optional[str]) -> Optional[datetime]:
+        if not v:
+            return None
+        s = v.strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(s)
+        except Exception:
+            # accept YYYY-MM-DD only
+            try:
+                return datetime.fromisoformat(s[:10] + "T00:00:00")
+            except Exception:
+                return None
+
+    start_dt = _parse_qdt(start)
+    end_dt   = _parse_qdt(end)
+
     # base query
     query = "SELECT * FROM contracts"
     conditions, values = [], {}
@@ -13538,10 +13555,12 @@ async def get_all_contracts(
         conditions.append("material ILIKE :material");         values["material"] = f"%{material}%"
     if status:
         conditions.append("status ILIKE :status");             values["status"] = f"%{status}%"
-    if start:
-        conditions.append("created_at >= :start");             values["start"] = start
-    if end:
-        conditions.append("created_at <= :end");               values["end"] = end
+    if start_dt:
+        conditions.append("created_at::date >= :start_date")
+        values["start_date"] = start_dt.date()
+    if end_dt:        
+        conditions.append("created_at::date < :end_date")
+        values["end_date"] = end_dt.date()
     if reference_source:
         conditions.append("reference_source = :ref_src");      values["ref_src"] = reference_source
     if reference_symbol:
