@@ -13577,7 +13577,8 @@ async def get_all_contracts(
     # finalize + fetch
     query += f" ORDER BY {order_clause} LIMIT :limit OFFSET :offset"
     values["limit"], values["offset"] = limit, offset
-    return await database.fetch_all(query=query, values=values)
+    rows = await database.fetch_all(query=query, values=values)
+    return [ContractOut(**dict(r)) for r in rows]
 # ------ Contracts --------
 
 #-------- Export Contracts as CSV --------
