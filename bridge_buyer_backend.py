@@ -2157,6 +2157,9 @@ async def _ensure_vendor_ingest_schema():
 
     CREATE INDEX IF NOT EXISTS idx_vendor_ingest_runs_sha
       ON vendor_ingest_runs(file_sha256);
+                        
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_ingest_runs_file_sha
+      ON vendor_ingest_runs(file_sha256);
 
     -- 1) DEDUPE existing duplicates before creating a unique index
     -- keep newest inserted_at for same (vendor, material, sheet_date)
@@ -2325,15 +2328,33 @@ async def _vendor_ingest_run_begin(*, filename: str | None, file_sha256: str, so
         )
         return {"run_id": rid, "file_skipped": False}
 
-    row = await database.fetch_one(
-        """
-        INSERT INTO vendor_ingest_runs(filename, file_sha256, source, status)
-        VALUES (:fn, :h, :src, 'running')
-        RETURNING run_id
-        """,
-        {"fn": (filename or ""), "h": file_sha256, "src": source},
-    )
-    return {"run_id": str(row["run_id"]), "file_skipped": False}
+    try:
+        row = await database.fetch_one(
+            """
+            INSERT INTO vendor_ingest_runs(filename, file_sha256, source, status)
+            VALUES (:fn, :h, :src, 'running')
+            RETURNING run_id
+            """,
+            {"fn": (filename or ""), "h": file_sha256, "src": source},
+        )
+        return {"run_id": str(row["run_id"]), "file_skipped": False}
+    except Exception:
+        # If UNIQUE(file_sha256) raced, fetch the latest and behave consistently
+        existing2 = await database.fetch_one(
+            """
+            SELECT run_id, status
+            FROM vendor_ingest_runs
+            WHERE file_sha256 = :h
+            ORDER BY received_at DESC
+            LIMIT 1
+            """,
+            {"h": file_sha256},
+        )
+        if existing2:
+            if (existing2["status"] == "success") and (not force):
+                return {"run_id": str(existing2["run_id"]), "file_skipped": True}
+            return {"run_id": str(existing2["run_id"]), "file_skipped": False}
+        raise
 
 async def _vendor_ingest_run_finish(run_id: str, *, total_rows: int, upsert_rows: int, skipped_rows: int, ok: bool, error: str | None = None) -> None:
     await database.execute(
@@ -2630,6 +2651,7 @@ VENDOR_WATCH_DIR = os.getenv("VENDOR_WATCH_DIR", _DEFAULT_VENDOR_DIR)
 # Archive processed files to avoid re-processing forever
 VENDOR_WATCH_MOVE_PROCESSED = os.getenv("VENDOR_WATCH_MOVE_PROCESSED", "1").lower() in ("1", "true", "yes")
 VENDOR_WATCH_ARCHIVE_DIR = os.getenv("VENDOR_WATCH_ARCHIVE_DIR", str(_Path(VENDOR_WATCH_DIR) / "_processed"))
+VENDOR_WATCH_FAILED_DIR = os.getenv("VENDOR_WATCH_FAILED_DIR", str(_Path(VENDOR_WATCH_DIR) / "_failed"))
 
 def _is_excel_temp(p: _Path) -> bool:
     # Excel creates these while files are open: "~$Book1.xlsx"
@@ -2706,15 +2728,31 @@ async def _ingest_vendor_file_path(p: _Path) -> dict:
     )
     return res
 
+# --- watcher status (for ops) ---
+VENDOR_WATCH_LAST_SCAN_UTC = None
+VENDOR_WATCH_LAST_FILE = None
+VENDOR_WATCH_LAST_RESULT = None
+VENDOR_WATCH_LAST_ERROR = None
+
 async def _vendor_watch_loop():
+    global VENDOR_WATCH_LAST_SCAN_UTC, VENDOR_WATCH_LAST_FILE, VENDOR_WATCH_LAST_RESULT, VENDOR_WATCH_LAST_ERROR
+
     watch_dir = _Path(VENDOR_WATCH_DIR)
     archive_dir = _Path(VENDOR_WATCH_ARCHIVE_DIR)
+    failed_dir = _Path(VENDOR_WATCH_FAILED_DIR)
+
 
     # Create watch dir if missing 
     try:
         watch_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         return
+
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        failed_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
     try:
         logger.info("vendor_watch_started",
@@ -2728,6 +2766,8 @@ async def _vendor_watch_loop():
 
     while True:
         try:
+            VENDOR_WATCH_LAST_SCAN_UTC = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            VENDOR_WATCH_LAST_ERROR = None
             # list candidate files
             candidates: list[_Path] = []
             for suf in ("*.csv", "*.xlsx", "*.xls"):
@@ -2752,19 +2792,37 @@ async def _vendor_watch_loop():
 
                 # 2) ingest
                 try:
+                    VENDOR_WATCH_LAST_FILE = str(p)
+
                     res = await _ingest_vendor_file_path(p)
-                    tag = "success" if res.get("ok") else "failed"
-                    # If it's a duplicate file, STILL move it away so it doesn't loop forever
+
+                    VENDOR_WATCH_LAST_RESULT = res
+                    VENDOR_WATCH_LAST_ERROR = None
+
+                    # Always move off the hot folder when it processed (including duplicates)
                     if VENDOR_WATCH_MOVE_PROCESSED and res.get("ok"):
-                        _move_to_archive(p, archive_dir, "skipped" if res.get("file_skipped") else "ingested")
-                    elif VENDOR_WATCH_MOVE_PROCESSED and not res.get("ok"):                        
-                        pass
+                        _move_to_archive(
+                            p,
+                            archive_dir,
+                            "skipped" if res.get("file_skipped") else "ingested"
+                        )
+                    # If ingest returned ok=False (rare), quarantine it
+                    elif VENDOR_WATCH_MOVE_PROCESSED and not res.get("ok"):
+                        _move_to_archive(p, failed_dir, "failed")
+
                 except Exception as e:
-                    # locked file / parse error / db error: skip and retry next cycle
+                    VENDOR_WATCH_LAST_ERROR = f"{type(e).__name__}: {e}"
                     try:
                         logger.warn("vendor_watch_ingest_failed", file=str(p), err=str(e))
                     except Exception:
                         pass
+
+                    # Quarantine the file so it doesn't loop forever (best-effort)
+                    if VENDOR_WATCH_MOVE_PROCESSED:
+                        try:
+                            _move_to_archive(p, failed_dir, "exception")
+                        except Exception:
+                            pass
                     continue
 
         except Exception as e:
@@ -2788,7 +2846,26 @@ async def _start_vendor_watch_folder():
 
     t = asyncio.create_task(_vendor_watch_loop())
     app.state._bg_tasks.append(t)
-# ===================== /Vendor Quotes: Folder Watcher =====================
+
+
+@app.get("/admin/vendor/watch/status", tags=["Admin"], summary="Vendor watcher status", status_code=200)
+async def admin_vendor_watch_status(request: Request):
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
+
+    return {
+        "enabled": bool(VENDOR_WATCH_ENABLED),
+        "watch_dir": str(VENDOR_WATCH_DIR),
+        "interval_sec": int(VENDOR_WATCH_INTERVAL_SEC),
+        "move_processed": bool(VENDOR_WATCH_MOVE_PROCESSED),
+        "archive_dir": str(VENDOR_WATCH_ARCHIVE_DIR),
+        "failed_dir": str(VENDOR_WATCH_FAILED_DIR),
+        "last_scan_utc": VENDOR_WATCH_LAST_SCAN_UTC,
+        "last_file": VENDOR_WATCH_LAST_FILE,
+        "last_result": VENDOR_WATCH_LAST_RESULT,
+        "last_error": VENDOR_WATCH_LAST_ERROR,
+    }
+# ============= /Vendor Quotes: Folder Watcher ================
 
 @app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
 async def vendor_price_history(material: str, days:int = 365):
