@@ -2313,7 +2313,7 @@ async def _vendor_ingest_run_begin(*, filename: str | None, file_sha256: str, so
         await database.execute(
             """
             UPDATE vendor_ingest_runs
-               SET filename=:fn,
+               SET filename=:filename,
                    source=:src,
                    received_at=NOW(),
                    status='running',
@@ -2324,7 +2324,7 @@ async def _vendor_ingest_run_begin(*, filename: str | None, file_sha256: str, so
                    finished_at=NULL
              WHERE run_id=:id
             """,
-            {"id": rid, "fn": (filename or ""), "src": source},
+            {"id": rid, "filename": (filename or ""), "src": source},
         )
         return {"run_id": rid, "file_skipped": False}
 
@@ -2332,10 +2332,10 @@ async def _vendor_ingest_run_begin(*, filename: str | None, file_sha256: str, so
         row = await database.fetch_one(
             """
             INSERT INTO vendor_ingest_runs(filename, file_sha256, source, status)
-            VALUES (:fn, :h, :src, 'running')
+            VALUES (:filename, :h, :src, 'running')
             RETURNING run_id
             """,
-            {"fn": (filename or ""), "h": file_sha256, "src": source},
+            {"filename": (filename or ""), "h": file_sha256, "src": source},
         )
         return {"run_id": str(row["run_id"]), "file_skipped": False}
     except Exception:
