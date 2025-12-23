@@ -2615,6 +2615,181 @@ async def _vendor_blended_lb(material: str) -> float | None:
 
 app.include_router(vendor_router)
 
+# ========= Vendor Quotes: Folder Watcher ==========
+import shutil
+from pathlib import Path as _Path
+
+# Env toggles (OFF by default)
+VENDOR_WATCH_ENABLED = os.getenv("VENDOR_WATCH_ENABLED", "0").lower() in ("1", "true", "yes")
+VENDOR_WATCH_INTERVAL_SEC = int(os.getenv("VENDOR_WATCH_INTERVAL_SEC", "900"))  # 15 minutes default
+
+# Default watch dir: "<project>/vendor_quotes" unless overridden
+_DEFAULT_VENDOR_DIR = str((_Path(__file__).resolve().parent / "vendor_quotes"))
+VENDOR_WATCH_DIR = os.getenv("VENDOR_WATCH_DIR", _DEFAULT_VENDOR_DIR)
+
+# Archive processed files to avoid re-processing forever
+VENDOR_WATCH_MOVE_PROCESSED = os.getenv("VENDOR_WATCH_MOVE_PROCESSED", "1").lower() in ("1", "true", "yes")
+VENDOR_WATCH_ARCHIVE_DIR = os.getenv("VENDOR_WATCH_ARCHIVE_DIR", str(_Path(VENDOR_WATCH_DIR) / "_processed"))
+
+def _is_excel_temp(p: _Path) -> bool:
+    # Excel creates these while files are open: "~$Book1.xlsx"
+    return p.name.startswith("~$")
+
+async def _file_size_stable(p: _Path, wait_sec: float = 1.0) -> bool:
+    """
+    Avoid ingesting a file while it's still being written (download in progress).
+    """
+    try:
+        s1 = p.stat().st_size
+    except Exception:
+        return False
+    await asyncio.sleep(wait_sec)
+    try:
+        s2 = p.stat().st_size
+    except Exception:
+        return False
+    return s1 == s2 and s2 > 0
+
+async def _read_vendor_rows_from_path(p: _Path) -> tuple[list[dict], bytes]:
+    """
+    Returns (rows, raw_bytes). raw_bytes is used for SHA256 dedupe.
+    """
+    raw = p.read_bytes()  
+    suf = p.suffix.lower()
+
+    if suf == ".csv":
+        text = raw.decode("utf-8-sig", errors="replace")
+        rdr = csv.DictReader(io.StringIO(text))
+        rows = [r for r in rdr]
+        return rows, raw
+
+    if suf in (".xlsx", ".xls"):
+        import pandas as pd
+        df = pd.read_excel(io.BytesIO(raw))
+        rows = df.to_dict(orient="records")
+        return rows, raw
+
+    raise ValueError(f"Unsupported vendor quote file type: {p.suffix}")
+
+def _archive_path(dest_dir: _Path, src: _Path, tag: str) -> _Path:
+    """
+    Keep original name but add a timestamp + tag to avoid collisions.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
+    safe_tag = re.sub(r"[^a-zA-Z0-9_-]+", "_", tag)[:32]
+    return dest_dir / f"{stamp}__{safe_tag}__{src.name}"
+
+def _move_to_archive(src: _Path, archive_dir: _Path, tag: str) -> None:
+    try:
+        dst = _archive_path(archive_dir, src, tag)
+        try:
+            src.replace(dst) 
+        except Exception:
+            shutil.move(str(src), str(dst))
+    except Exception:        
+        pass
+
+async def _ingest_vendor_file_path(p: _Path) -> dict:
+    """
+    Uses your existing core ingest function (dedupe by sha + UPSERT by vendor/material/sheet_date).
+    """
+    rows, raw = await _read_vendor_rows_from_path(p)
+    file_sha = _sha256_bytes(raw)
+
+    res = await _ingest_vendor_file_rows(
+        rows=rows,
+        filename=p.name,
+        file_sha256=file_sha,
+        source="watcher",
+        force=False,
+    )
+    return res
+
+async def _vendor_watch_loop():
+    watch_dir = _Path(VENDOR_WATCH_DIR)
+    archive_dir = _Path(VENDOR_WATCH_ARCHIVE_DIR)
+
+    # Create watch dir if missing 
+    try:
+        watch_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    try:
+        logger.info("vendor_watch_started",
+                    enabled=True,
+                    dir=str(watch_dir),
+                    interval_sec=VENDOR_WATCH_INTERVAL_SEC,
+                    archive=str(archive_dir),
+                    move_processed=VENDOR_WATCH_MOVE_PROCESSED)
+    except Exception:
+        pass
+
+    while True:
+        try:
+            # list candidate files
+            candidates: list[_Path] = []
+            for suf in ("*.csv", "*.xlsx", "*.xls"):
+                candidates.extend(watch_dir.glob(suf))
+
+            # ignore archive dir + temp files
+            candidates = [
+                p for p in candidates
+                if p.is_file()
+                and not _is_excel_temp(p)
+                and p.parent.resolve() == watch_dir.resolve()
+            ]
+
+            # process oldest first
+            candidates.sort(key=lambda x: x.stat().st_mtime)
+
+            for p in candidates:
+                # 1) don't ingest if still being written
+                ok = await _file_size_stable(p, wait_sec=1.0)
+                if not ok:
+                    continue
+
+                # 2) ingest
+                try:
+                    res = await _ingest_vendor_file_path(p)
+                    tag = "success" if res.get("ok") else "failed"
+                    # If it's a duplicate file, STILL move it away so it doesn't loop forever
+                    if VENDOR_WATCH_MOVE_PROCESSED and res.get("ok"):
+                        _move_to_archive(p, archive_dir, "skipped" if res.get("file_skipped") else "ingested")
+                    elif VENDOR_WATCH_MOVE_PROCESSED and not res.get("ok"):                        
+                        pass
+                except Exception as e:
+                    # locked file / parse error / db error: skip and retry next cycle
+                    try:
+                        logger.warn("vendor_watch_ingest_failed", file=str(p), err=str(e))
+                    except Exception:
+                        pass
+                    continue
+
+        except Exception as e:
+            try:
+                logger.warn("vendor_watch_loop_error", err=str(e))
+            except Exception:
+                pass
+
+        await asyncio.sleep(max(30, VENDOR_WATCH_INTERVAL_SEC))
+
+@startup
+async def _start_vendor_watch_folder():
+    """
+    Enables "drop file in folder" ingestion.
+    OFF by default. Turn on with:
+      VENDOR_WATCH_ENABLED=1
+      VENDOR_WATCH_DIR=...
+    """
+    if not VENDOR_WATCH_ENABLED:
+        return
+
+    t = asyncio.create_task(_vendor_watch_loop())
+    app.state._bg_tasks.append(t)
+# ===================== /Vendor Quotes: Folder Watcher =====================
+
 @app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
 async def vendor_price_history(material: str, days:int = 365):
     rows = await database.fetch_all("""
