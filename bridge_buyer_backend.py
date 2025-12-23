@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-import re, time as _time_mod
+import re, time as _time_mod, math
 import requests
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from fastapi import UploadFile, File, Form
@@ -2672,6 +2672,100 @@ async def _file_size_stable(p: _Path, wait_sec: float = 1.0) -> bool:
         return False
     return s1 == s2 and s2 > 0
 
+def _parse_sheet_date_from_filename(name: str) -> date | None:
+    # Handles: "... as 12-23-2025 ..." or "12-3-2024" etc
+    m = re.search(r"(\d{1,2})-(\d{1,2})-(\d{4})", name)
+    if not m:
+        return None
+    mm, dd, yyyy = map(int, m.groups())
+    try:
+        return date(yyyy, mm, dd)
+    except Exception:
+        return None
+
+def _parse_prometal_quote_xlsx(raw: bytes, filename: str) -> list[dict]:
+    """
+    Pro Metal Quotation Chicago format:
+      Two tables side-by-side with headers: Description + UnitPrice.
+      Returns normalized rows compatible with _normalize_vendor_row().
+    """
+    import pandas as pd
+    df = pd.read_excel(io.BytesIO(raw), header=None)
+
+    # Find the header row containing Description + UnitPrice
+    hdr_idx = None
+    for i in range(len(df)):
+        row = [str(x).strip().lower() for x in df.iloc[i].tolist()]
+        if "description" in row and "unitprice" in row:
+            hdr_idx = i
+            break
+    if hdr_idx is None:
+        return []
+
+    sheet_date = _parse_sheet_date_from_filename(filename) or utcnow().date()
+
+    data = df.iloc[hdr_idx + 1 :].reset_index(drop=True)
+
+    def _is_num(x) -> bool:
+        try:
+            if x is None:
+                return False
+            if isinstance(x, float) and math.isnan(x):
+                return False
+            float(str(x).replace("$", "").replace(",", "").strip())
+            return True
+        except Exception:
+            return False
+
+    vendor = "Pro Metal Chicago"  # pick one stable vendor key and keep using it
+
+    out: list[dict] = []
+    cat_a = None
+    cat_b = None
+
+    for _, r in data.iterrows():
+        # ----- Table A: cols 0,1,2 -----
+        a_cat = r[0]
+        a_desc = r[1]
+        a_px = r[2]
+
+        if a_cat is not None and not (isinstance(a_cat, float) and math.isnan(a_cat)):
+            a_cat_s = str(a_cat).strip()
+            if a_cat_s:
+                cat_a = a_cat_s
+
+        if a_desc is not None and str(a_desc).strip() and _is_num(a_px):
+            out.append({
+                "vendor": vendor,
+                "category": (cat_a or "Unknown"),
+                "material": str(a_desc).strip(),
+                "price": str(a_px),
+                "unit": "LB",
+                "date": sheet_date.isoformat(),
+            })
+
+        # ----- Table B: cols 4,5,6 -----
+        b_cat = r[4]
+        b_desc = r[5]
+        b_px = r[6]
+
+        if b_cat is not None and not (isinstance(b_cat, float) and math.isnan(b_cat)):
+            b_cat_s = str(b_cat).strip()
+            if b_cat_s:
+                cat_b = b_cat_s
+
+        if b_desc is not None and str(b_desc).strip() and _is_num(b_px):
+            out.append({
+                "vendor": vendor,
+                "category": (cat_b or "Unknown"),
+                "material": str(b_desc).strip(),
+                "price": str(b_px),
+                "unit": "LB",
+                "date": sheet_date.isoformat(),
+            })
+
+    return out
+
 async def _read_vendor_rows_from_path(p: _Path) -> tuple[list[dict], bytes]:
     """
     Returns (rows, raw_bytes). raw_bytes is used for SHA256 dedupe.
@@ -2686,6 +2780,12 @@ async def _read_vendor_rows_from_path(p: _Path) -> tuple[list[dict], bytes]:
         return rows, raw
 
     if suf in (".xlsx", ".xls"):
+        # Vendor-specific parser for Pro Metal quote sheets
+        if "pro metal quotation" in p.name.lower():
+            rows = _parse_prometal_quote_xlsx(raw, p.name)
+            return rows, raw
+
+        # Generic Excel fallback
         import pandas as pd
         df = pd.read_excel(io.BytesIO(raw))
         rows = df.to_dict(orient="records")
