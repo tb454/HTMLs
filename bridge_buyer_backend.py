@@ -3052,7 +3052,19 @@ async def admin_vendor_pricing_latest(limit: int = Query(500, ge=1, le=5000)):
     }
 
 @app.post("/admin/vendor/import", tags=["Admin"], summary="Admin: import vendor pricing file (csv/xlsx)", status_code=200)
-async def admin_vendor_import(file: UploadFile = File(...)):
+async def admin_vendor_import(
+    request: Request,
+    file: UploadFile = File(...),
+    x_import_token: str = Header(default="", alias="X-Import-Token"),
+):
+    # In production: require either a valid machine token OR an admin session.
+    if os.getenv("ENV", "").lower() == "production":
+        token = (os.getenv("VENDOR_IMPORT_TOKEN", "") or "").strip()
+        if token and x_import_token == token:
+            pass
+        else:
+            _require_admin(request)
+
     fname = (file.filename or "").lower()
     imported = 0
 
