@@ -2128,11 +2128,12 @@ async def _ensure_vendor_quotes_schema():
 
 @startup
 async def _ensure_v_vendor_blend_latest_view():
-    await run_ddl_multi("""                        
+        await run_ddl_multi("""                        
     DROP VIEW IF EXISTS public.v_vendor_blend_latest;
     CREATE OR REPLACE VIEW public.v_vendor_blend_latest AS
-    WITH latest_date AS (
-      SELECT MAX(sheet_date) AS d FROM vendor_quotes
+    WITH latest_batch AS (
+      SELECT date_trunc('day', MAX(inserted_at)) AS d
+      FROM vendor_quotes
     ),
     latest_per_vendor AS (
       SELECT DISTINCT ON (vq.vendor, COALESCE(m.material_canonical, vq.material))
@@ -2143,8 +2144,8 @@ async def _ensure_v_vendor_blend_latest_view():
       FROM vendor_quotes vq
       LEFT JOIN vendor_material_map m
         ON m.vendor = vq.vendor AND m.material_vendor = vq.material
-      JOIN latest_date ld
-        ON vq.sheet_date = ld.d
+      JOIN latest_batch lb
+        ON date_trunc('day', vq.inserted_at) = lb.d
       WHERE vq.price_per_lb IS NOT NULL
         AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
       ORDER BY vq.vendor, COALESCE(m.material_canonical, vq.material), vq.inserted_at DESC
@@ -2158,7 +2159,6 @@ async def _ensure_v_vendor_blend_latest_view():
     FROM latest_per_vendor
     GROUP BY material;
     """)
-
 # ===== Vendor Quotes (ingest + pricing blend) =====
 
 # ------     Billing & International DDL -----
@@ -2995,7 +2995,7 @@ async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)
     Used by the admin dashboard Vendor Pricing card.
     """
     # Find the latest sheet_date in vendor_quotes
-    row = await database.fetch_one("SELECT MAX(sheet_date) AS d FROM vendor_quotes")
+    row = await database.fetch_one("SELECT date_trunc('day', MAX(inserted_at))::date AS d FROM vendor_quotes")
     if not row or not row["d"]:
         return []
 
@@ -3004,7 +3004,7 @@ async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)
         """
         SELECT vendor, category, material, price_per_lb, unit_raw, sheet_date
         FROM vendor_quotes
-        WHERE sheet_date = :d
+        WHERE date_trunc('day', inserted_at)::date = :d
         ORDER BY vendor, category, material
         LIMIT :lim
         """,
@@ -3015,7 +3015,7 @@ async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)
 @app.get("/admin/vendor/pricing/latest", tags=["Admin"], summary="Admin: latest vendor blended pricing", status_code=200)
 async def admin_vendor_pricing_latest(limit: int = Query(500, ge=1, le=5000)):
     # Latest sheet_date
-    drow = await database.fetch_one("SELECT MAX(sheet_date) AS d FROM vendor_quotes")
+    drow = await database.fetch_one("SELECT date_trunc('day', MAX(inserted_at))::date AS d FROM vendor_quotes")
     sheet_date = drow["d"] if drow and drow["d"] else None
 
     rows = []
@@ -3112,18 +3112,21 @@ async def get_br_index_current():
     that have a mapping into scrap_instrument.
     """
     rows = await database.fetch_all("""
-        WITH latest_vendor_instr AS (
+        WITH latest_batch AS (
+          SELECT date_trunc('day', MAX(inserted_at)) AS d
+          FROM vendor_quotes
+        ),
+        latest_vendor_instr AS (
             SELECT
                 vq.vendor,
                 vq.price_per_lb,
-                vq.sheet_date,
+                vq.inserted_at,
                 vmm.instrument_code,
                 si.core_code,
                 si.material_canonical,
                 ROW_NUMBER() OVER (
                     PARTITION BY vq.vendor, vmm.instrument_code
-                    ORDER BY vq.sheet_date DESC NULLS LAST,
-                             vq.inserted_at DESC
+                    ORDER BY vq.inserted_at DESC
                 ) AS rn
             FROM vendor_quotes vq
             JOIN vendor_material_map vmm
@@ -3131,7 +3134,9 @@ async def get_br_index_current():
              AND vq.material = vmm.material_vendor
             JOIN scrap_instrument si
               ON vmm.instrument_code = si.instrument_code
-            WHERE vq.sheet_date IS NOT NULL
+            JOIN latest_batch lb
+              ON date_trunc('day', vq.inserted_at) = lb.d
+            WHERE vq.price_per_lb IS NOT NULL
               AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
         ),
         dedup AS (
@@ -12229,16 +12234,6 @@ async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
     row = await database.fetch_one("""
       SELECT 1 FROM user_permissions
       WHERE user_id=:u AND tenant_id=:t AND (perm=:p OR perm='*') LIMIT 1
-    """, {"u": user_id, "t": tenant_id, "p": perm})
-    return bool(row)
-
-async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
-    if not (user_id and tenant_id):
-        return False
-    row = await database.fetch_one("""
-      SELECT 1 FROM user_permissions
-      WHERE user_id=:u AND tenant_id=:t AND (perm=:p OR perm='*')
-      LIMIT 1
     """, {"u": user_id, "t": tenant_id, "p": perm})
     return bool(row)
 

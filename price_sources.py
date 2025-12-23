@@ -99,6 +99,7 @@ async def pull_comex_home_once(pool):
     except Exception:        
         pass
 
+
 # ---------- DB insert ----------
 async def _insert_ref_price(pool, symbol, source, price, ts_market, snippet):
     symbol = _norm_symbol(symbol)
