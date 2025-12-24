@@ -882,8 +882,12 @@ async def prices_copper_last():
             FROM reference_prices
             WHERE symbol = :sym
             ORDER BY
-              (source = 'seed_csv') DESC,
-              COALESCE(ts_market, ts_server) DESC
+                (CASE
+                    WHEN source IN ('seed_csv','CSV','XLSX')
+                    AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
+                    THEN 1 ELSE 0
+                END) DESC,
+                COALESCE(ts_market, ts_server) DESC
             LIMIT 1
             """,
             {"sym": "COMEX_CU"},
@@ -2763,6 +2767,70 @@ def _parse_prometal_quote_xlsx(raw: bytes, filename: str) -> list[dict]:
                 "unit": "LB",
                 "date": sheet_date.isoformat(),
             })
+
+    return out
+
+def _rows_from_pro_metal_atl_price_sheet(df, *, filename: str) -> list[dict]:
+    """
+    Parse 'ATL PRICE SHEET' layout (two tables side-by-side) into canonical rows
+    expected by _normalize_vendor_row(): vendor/category/material/price/unit/date.
+    """
+    import pandas as pd
+    import re
+    from datetime import date as _date
+
+    # Keep vendor name stable (matches what you already have in vendor_quotes)
+    vendor = "C&Y Global, Inc. / Pro Metal Recycling"
+
+    # Prefer the sheet's embedded date (cell G2 in Excel -> df.iloc[1,6] in pandas)
+    sheet_date = None
+    try:
+        ts = df.iloc[1, 6]
+        if ts is not None and str(ts) != "nan":
+            sheet_date = pd.to_datetime(ts).date()
+    except Exception:
+        sheet_date = None
+
+    # Fallback: derive from filename like "as 12-23-2025"
+    if sheet_date is None:
+        m = re.search(r"(\d{1,2})-(\d{1,2})-(\d{4})", filename)
+        if m:
+            mm, dd, yyyy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            sheet_date = _date(yyyy, mm, dd)
+
+    # Column names vary slightly; lock to expected indices if present
+    cols = list(df.columns)
+    # Typical Pro Metal: [Unnamed:0, PRO METAL (CHI) - CHICAGO, Unnamed:2, Unnamed:3, Unnamed:4, Unnamed:5, Unnamed:6]
+    col_cat_l = cols[0] if len(cols) > 0 else None
+    col_mat_l = cols[1] if len(cols) > 1 else None
+    col_px_l  = cols[2] if len(cols) > 2 else None
+
+    col_cat_r = cols[4] if len(cols) > 4 else None
+    col_mat_r = cols[5] if len(cols) > 5 else None
+    col_px_r  = cols[6] if len(cols) > 6 else None
+
+    out: list[dict] = []
+
+    def _add(cat, mat, px):
+        if not isinstance(cat, str) or not isinstance(mat, str):
+            return
+        pxn = pd.to_numeric(px, errors="coerce")
+        if pd.isna(pxn):
+            return
+        out.append({
+            "vendor": vendor,
+            "category": cat.strip(),
+            "material": mat.strip(),
+            "price": float(pxn),
+            "unit": "LB",
+            "date": (sheet_date.isoformat() if sheet_date else None),
+        })
+
+    for _, r in df.iterrows():
+        if col_cat_l and col_mat_l and col_px_l:
+            _add(r.get(col_cat_l), r.get(col_mat_l), r.get(col_px_l))
+        if col_cat_r and col_mat_r and col_px_r:
+            _add(r.get(col_cat_r), r.get(col_mat_r), r.get(col_px_r))
 
     return out
 
@@ -7405,7 +7473,11 @@ async def _fetch_base(symbol: str):
         FROM reference_prices
         WHERE symbol = $1
         ORDER BY
-          (source = 'seed_csv') DESC,
+          (CASE
+             WHEN source IN ('seed_csv','CSV','XLSX')
+              AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
+             THEN 1 ELSE 0
+           END) DESC,
           COALESCE(ts_market, ts_server) DESC
         LIMIT 1
         """,
@@ -7419,6 +7491,12 @@ REF_SYMBOL_ALIASES = {
     "BR-AU": "COMEX_AU",  # gold
     "BR-AG": "COMEX_AG",  # silver
     "BR-PA": "COMEX_PA",  # palladium
+    "BR-PT": "COMEX_PT",  # platinum
+    "BR-Rhd": "COMEX_Rh",   # rhodium
+    "BR-NI": "LME_NI",    # nickel
+    "BR-ZN": "LME_ZN",    # zinc
+    "BR-PB": "LME_PB",    # lead 
+
     #  extend later as needed
 }
 
@@ -7463,7 +7541,7 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
         ts_market = r["Date"].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         rows.append({
             "symbol": "COMEX_CU",
-            "source": "CSV",
+            "source": "seed_csv", 
             "price": float(r["Price"]),
             "ts_market": ts_market,
             "raw_snippet": None,
@@ -7515,7 +7593,11 @@ async def get_latest(symbol: str):
         FROM reference_prices
         WHERE symbol = $1
         ORDER BY
-          (source = 'seed_csv') DESC,
+          (CASE
+             WHEN source IN ('seed_csv','CSV','XLSX')
+              AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
+             THEN 1 ELSE 0
+           END) DESC,
           COALESCE(ts_market, ts_server) DESC
         LIMIT 1
         """,
@@ -7876,7 +7958,7 @@ async def indices_backfill(start: date = Query(...), end: date = Query(...)):
 
         while day <= end:
             # For each base index root (COMEX_CU, etc.) pull that day’s price
-            # We'll cache base prices per day in-memory for this loop.
+            # cache base prices per day in-memory for this loop.
             base_cache: dict[str, float] = {}
 
             for dfn in def_rows:
@@ -7901,7 +7983,7 @@ async def indices_backfill(start: date = Query(...), end: date = Query(...)):
                 base_symbol = dfn["base_symbol"]
                 base_price = base_cache.get(base_symbol)
                 if base_price is None:
-                    continue  # nothing for this base on this day
+                    continue  
 
                 factor = float(dfn["factor"])
                 idx_sym = dfn["symbol"]
@@ -8011,7 +8093,7 @@ async def ingest_csv_generic(
         ts_market = r[date_col].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         rows.append({
             "symbol": symbol,
-            "source": "CSV",
+            "source": "seed_csv",
             "price": float(r[price_col]),
             "ts_market": ts_market,
             "raw_snippet": None,
@@ -8069,7 +8151,7 @@ async def ingest_excel_generic(
         ts_market = r[date_col].to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         rows.append({
             "symbol": symbol,
-            "source": "XLSX",
+            "source": "seed_csv",
             "price": float(r[price_col]),
             "ts_market": ts_market,
             "raw_snippet": None,
