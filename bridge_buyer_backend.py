@@ -874,7 +874,7 @@ async def prices_copper_last():
             "note": "db connect failed; using static default",
         }
 
-    # 1) Pull latest COMEX_CU from reference_prices, preferring seed_csv
+    # 1) Pull latest COMEX_CU from reference_prices
     try:
         row = await database.fetch_one(
             """
@@ -883,9 +883,14 @@ async def prices_copper_last():
             WHERE symbol = :sym
             ORDER BY
                 (CASE
+                    WHEN source IN ('manual') THEN 3
+                    WHEN source IN ('vendor','vendor_blend','vendor_mapped')
+                    AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '14 days'
+                    THEN 2
                     WHEN source IN ('seed_csv','CSV','XLSX')
                     AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
-                    THEN 1 ELSE 0
+                    THEN 1
+                    ELSE 0
                 END) DESC,
                 COALESCE(ts_market, ts_server) DESC
             LIMIT 1
@@ -934,9 +939,32 @@ async def market_snapshot(
     group: str | None = Query(None),
     limit_indices: int = Query(20, ge=1, le=200),
 ):
-    # 1) references: latest per symbol (keep it small; expand later)
-    ref_syms = ["COMEX_CU", "LME_AL", "COMEX_AU", "COMEX_AG"]
+    # 1) references: latest per symbol
+    ref_syms = []
     refs = []
+        
+    try:
+        vrows = await database.fetch_all("""
+          SELECT material, blended_lb, vendor_count, px_min, px_max
+          FROM v_vendor_blend_latest
+          ORDER BY material
+          LIMIT 50
+        """)
+        for r in vrows:
+            refs.append({
+                "symbol": str(r["material"]),
+                "price": float(r["blended_lb"] or 0.0) * 2000.0,   # show $/ton to the UI
+                "currency": "USD",
+                "unit": "USD/ton",
+                "source": "VENDOR_BLEND",
+                "vendor_count": int(r["vendor_count"] or 0),
+                "px_min": float(r["px_min"] or 0.0) * 2000.0,
+                "px_max": float(r["px_max"] or 0.0) * 2000.0,
+                "reference_timestamp": None,
+            })
+    except Exception:
+        pass
+
     try:
         rows = await database.fetch_all("""
           SELECT DISTINCT ON (symbol)
@@ -2894,6 +2922,15 @@ async def _ingest_vendor_file_path(p: _Path) -> dict:
         source="watcher",
         force=False,
     )
+
+    # If we actually ingested (not skipped), publish blend + indices
+    try:
+        if res.get("ok") and not res.get("file_skipped"):
+            await upsert_vendor_to_reference()
+            await vendor_snapshot_to_indices()
+    except Exception:
+        pass
+
     return res
 
 # --- watcher status (for ops) ---
@@ -3743,6 +3780,17 @@ async def admin_vendor_import(file: UploadFile = File(...)):
     except Exception:
         pass
 
+        # ---- publish vendor blend as source-of-truth (best-effort) ----
+    try:
+        await upsert_vendor_to_reference()
+    except Exception:
+        pass
+
+    try:
+        await vendor_snapshot_to_indices()
+    except Exception:
+        pass
+    
     return {
         "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "vendor_last_import_at": last,
@@ -7463,8 +7511,7 @@ except Exception:
 # -------- Pricing & Indices Routers (drop-in) -------------------------
 async def _fetch_base(symbol: str):
     """
-    Same selection logic as /reference_prices/latest:
-    prefer seed_csv rows, then fall back to any source.
+    Same selection logic as /reference_prices/latest:    
     Used by the pricing engine to compute scrap from COMEX/LME.
     """
     row = await app.state.db_pool.fetchrow(
@@ -7473,13 +7520,18 @@ async def _fetch_base(symbol: str):
         FROM reference_prices
         WHERE symbol = $1
         ORDER BY
-          (CASE
-             WHEN source IN ('seed_csv','CSV','XLSX')
-              AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
-             THEN 1 ELSE 0
-           END) DESC,
-          COALESCE(ts_market, ts_server) DESC
-        LIMIT 1
+            (CASE
+                WHEN source IN ('manual') THEN 3
+                WHEN source IN ('vendor','vendor_blend','vendor_mapped')
+                AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '14 days'
+                THEN 2
+                WHEN source IN ('seed_csv','CSV','XLSX')
+                AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
+                THEN 1
+                ELSE 0
+            END) DESC,
+            COALESCE(ts_market, ts_server) DESC
+            LIMIT 1
         """,
         symbol,
     )
@@ -7577,12 +7629,7 @@ async def pull_now_all():
 
 @router_prices.get("/latest", summary="Get latest stored reference price")
 async def get_latest(symbol: str):
-    """
-    Prefer seeded CSV history first (source='seed_csv'), then fall back
-    to any other source (scraper, manual, etc.), ordered by ts_market/ts_server.
-    Supports customer-facing BR-* aliases (BR-CU, BR-AL, etc.) which map to
-    backend symbols like COMEX_CU, LME_AL.
-    """
+
     # Normalize & map BR-* → underlying reference symbol
     requested = (symbol or "").upper()
     backend_symbol = REF_SYMBOL_ALIASES.get(requested, requested)
@@ -7593,13 +7640,18 @@ async def get_latest(symbol: str):
         FROM reference_prices
         WHERE symbol = $1
         ORDER BY
-          (CASE
-             WHEN source IN ('seed_csv','CSV','XLSX')
-              AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
-             THEN 1 ELSE 0
-           END) DESC,
-          COALESCE(ts_market, ts_server) DESC
-        LIMIT 1
+            (CASE
+                WHEN source IN ('manual') THEN 3
+                WHEN source IN ('vendor','vendor_blend','vendor_mapped')
+                AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '14 days'
+                THEN 2
+                WHEN source IN ('seed_csv','CSV','XLSX')
+                AND COALESCE(ts_market, ts_server) >= NOW() - INTERVAL '7 days'
+                THEN 1
+                ELSE 0
+            END) DESC,
+            COALESCE(ts_market, ts_server) DESC
+            LIMIT 1
         """,
         backend_symbol,
     )
@@ -7735,7 +7787,6 @@ async def quote(
     # -------------------------
     # V1 LEGACY MODE (no tons)
     # -------------------------
-    # keep your old behavior exactly (category/material -> price_per_lb)
     category = category or ""
     row = await database.fetch_one("""
         WITH latest_vendor AS (

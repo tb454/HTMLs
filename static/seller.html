@@ -1132,7 +1132,9 @@ onReady(async () => {
           try {
             const r  = await api(`/reference_prices/latest?symbol=${encodeURIComponent(s.sym)}`);
             const j  = await r.json();
-            const px = Number(j.price || j.price_close || j.last || 0);
+            const pxRaw = Number(j.price ?? j.price_close ?? j.last ?? 0);            
+            const assumeUsdPerLb = ['BR-CU','BR-AU','BR-AG','BR-PA','BR-PT','BR-RHD'].includes(String(s.sym || '').toUpperCase());
+            const px = assumeUsdPerLb ? (pxRaw * 2000.0) : pxRaw;
             const ts = j.ts_market || j.as_of || '';
             if (!px) continue;
             rows.push({
@@ -1146,12 +1148,11 @@ onReady(async () => {
               vol:    j.volume ?? '',
               time:   ts || '—'
             });
-          } catch {
-            // skip bad row
+          } catch {            
           }
         }
 
-        if (!rows.length) return; // keep static demo if API fails
+        if (!rows.length) return; 
 
         const fmtNum = (n, dp=2) =>
           Number(n || 0).toLocaleString(
@@ -1172,8 +1173,7 @@ onReady(async () => {
             <td>${r.time}</td>
           </tr>
         `).join('');
-      } catch {
-        // leave static rows alone on error
+      } catch {        
       }
     }
 
