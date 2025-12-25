@@ -4780,14 +4780,22 @@ class ApplicationRow(BaseModel):
 @onboard_router.get("/applications", response_model=List[ApplicationRow])
 async def list_applications(reviewed: Optional[bool] = None):
     q = """
-      SELECT id, created_at, entity_type, role, org_name,
-             monthly_volume_tons, contact_name, email, phone,
-             plan, is_reviewed
-      FROM applications
+      SELECT application_id AS id,
+             created_at,
+             entity_type,
+             role,
+             org_name,
+             monthly_volume_tons,
+             contact_name,
+             email,
+             phone,
+             plan,
+             (status = 'approved') AS is_reviewed
+      FROM tenant_applications
     """
     params = {}
     if reviewed is not None:
-        q += " WHERE is_reviewed = :r"
+        q += " WHERE (status = 'approved') = :r"
         params["r"] = reviewed
     q += " ORDER BY created_at DESC"
     rows = await database.fetch_all(q, params)
@@ -4801,7 +4809,7 @@ class ApplicationUpdate(BaseModel):
 @onboard_router.patch("/applications/{app_id}", response_model=ApplicationRow)
 async def update_application(app_id: str, body: ApplicationUpdate):
     existing = await database.fetch_one(
-        "SELECT * FROM applications WHERE id = :id", {"id": app_id}
+        "SELECT * FROM tenant_applications WHERE application_id = :id", {"id": app_id}
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Application not found")
@@ -4810,13 +4818,26 @@ async def update_application(app_id: str, body: ApplicationUpdate):
         data[k] = v
     row = await database.fetch_one(
         """
-        UPDATE applications
-           SET is_reviewed = COALESCE(:r, is_reviewed),
-               notes       = COALESCE(:n, notes)
-         WHERE id = :id
-         RETURNING id, created_at, entity_type, role, org_name,
-                   monthly_volume_tons, contact_name, email, phone,
-                   plan, is_reviewed
+        UPDATE tenant_applications
+           SET status = CASE
+                         WHEN :r IS NULL THEN status
+                         WHEN :r = TRUE  THEN 'approved'
+                         ELSE status
+                       END,
+               notes = COALESCE(:n, notes)
+         WHERE application_id = :id
+         RETURNING
+           application_id AS id,
+           created_at,
+           entity_type,
+           role,
+           org_name,
+           monthly_volume_tons,
+           contact_name,
+           email,
+           phone,
+           plan,
+           (status = 'approved') AS is_reviewed
         """,
         {"id": app_id, "r": body.is_reviewed, "n": body.notes},
     )
@@ -13042,6 +13063,23 @@ async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
     """, {"u": user_id, "t": tenant_id, "p": perm})
     return bool(row)
 
+async def _ensure_org_exists(org: str) -> None:
+    """
+    DB has FKs that require orgs(org) to exist for buyer/seller/seller rows.
+    This is idempotent and safe.
+    """
+    o = (org or "").strip()
+    if not o:
+        return
+    try:
+        await database.execute(
+            "INSERT INTO public.orgs(org, display_name) VALUES (:o, :d) ON CONFLICT (org) DO NOTHING",
+            {"o": o, "d": o},
+        )
+    except Exception:
+        # never block hot paths on org registry noise
+        pass
+
 def _slugify_member(member: str) -> str:
     """
     'Winski Brothers' -> 'winski-brothers'
@@ -15095,30 +15133,124 @@ async def public_indices_csv(days: int = 365, region: Optional[str] = None, mate
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
 
-@app.post("/indices/snapshot_blended", tags=["Indices"], summary="Snapshot 70/30 blended (bench/vendor) into indices_daily", status_code=200)
-async def indices_snapshot_blended():
-    await database.execute("""
-        INSERT INTO indices_daily(symbol, ts, region, price)
-        SELECT CONCAT('BR-', REPLACE(b.symbol, ' ', '-')) AS symbol,
-               NOW(), 'blended',
-               0.70 * b.price_lb + 0.30 * v.vendor_lb AS price
-        FROM (
-          SELECT symbol, price_lb
-          FROM reference_prices
-          WHERE ts = (SELECT MAX(ts) FROM reference_prices)
-        ) b
-        JOIN (
-          SELECT m.material_canonical AS symbol, AVG(v.price_per_lb) AS vendor_lb
-          FROM vendor_quotes v
-          JOIN vendor_material_map m
-            ON m.vendor=v.vendor AND m.material_vendor=v.material
-          WHERE v.unit_raw IN ('LB','LBS','POUND','POUNDS','')
-            AND v.price_per_lb IS NOT NULL
-            AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-          GROUP BY 1
-        ) v ON v.symbol = b.symbol
-    """)
-    return {"ok": True}
+@app.post(
+    "/indices/snapshot_blended",
+    tags=["Indices"],
+    summary="Snapshot blended benchmark+vendor into indices_daily (correct writer)",
+    status_code=200,
+)
+async def indices_snapshot_blended(
+    as_of: date | None = Query(None, description="As-of date (UTC). Default=today."),
+    region: str = Query("blended", description="indices_daily.region to write into (default 'blended')"),
+    w_ref: float = Query(0.70, ge=0.0, le=1.0, description="Weight on reference_prices (0..1)"),
+    w_vendor: float = Query(0.30, ge=0.0, le=1.0, description="Weight on vendor blend (0..1)"),
+):
+    """
+    Correct writer for indices_daily.
+
+    Inputs:
+      - v_vendor_blend_latest.material, blended_lb
+      - reference_prices.symbol, price (assumed $/lb) for the SAME canonical symbol when present
+
+    Output (per material):
+      blended_ton = (w_ref * bench_lb + w_vendor * vendor_lb) * 2000
+
+    Writes:
+      indices_daily(as_of_date, region, material, avg_price, volume_tons, currency, ts, price, symbol)
+    """
+
+    # ---- normalize weights safely (never divide by zero) ----
+    try:
+        wf = float(w_ref)
+        wv = float(w_vendor)
+        s = wf + wv
+        if s <= 0:
+            wf, wv = 0.70, 0.30
+            s = 1.0
+        wf /= s
+        wv /= s
+    except Exception:
+        wf, wv = 0.70, 0.30
+
+    d = as_of or utcnow().date()
+    reg = (region or "blended").strip() or "blended"
+
+    # ---- canonical: vendor blend universe ----
+    # bench = latest reference_prices row per symbol (for symbols that exist)
+    # vendor = v_vendor_blend_latest (latest day blend)
+    #
+    # NOTE: reference_prices.price is assumed to be $/lb for canonical material symbols.
+    # If bench is missing for a material, we fall back to vendor price only.
+    await database.execute(
+        """
+        WITH vendor AS (
+          SELECT material, blended_lb
+          FROM public.v_vendor_blend_latest
+          WHERE material IS NOT NULL AND material <> ''
+        ),
+        bench AS (
+          SELECT DISTINCT ON (rp.symbol)
+                 rp.symbol,
+                 rp.price,
+                 rp.ts_market,
+                 rp.ts_server,
+                 rp.source
+          FROM public.reference_prices rp
+          JOIN vendor v ON v.material = rp.symbol
+          WHERE rp.price IS NOT NULL
+          ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
+        ),
+        calc AS (
+          SELECT
+            :as_of::date AS as_of_date,
+            :region      AS region,
+            v.material   AS material,
+            -- bench_lb is reference_prices.price when present, otherwise vendor blended_lb
+            (COALESCE(b.price, v.blended_lb))::numeric AS bench_lb,
+            (v.blended_lb)::numeric                   AS vendor_lb
+          FROM vendor v
+          LEFT JOIN bench b ON b.symbol = v.material
+        )
+        INSERT INTO public.indices_daily(
+          as_of_date, region, material,
+          avg_price, volume_tons,
+          currency, ts, price, symbol
+        )
+        SELECT
+          c.as_of_date,
+          c.region,
+          c.material,
+          -- store blended $/ton in BOTH avg_price and price so all your readers work
+          ((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0 AS avg_price,
+          0::numeric AS volume_tons,
+          'USD'::text AS currency,
+          NOW() AS ts,
+          ((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0 AS price,
+          c.material AS symbol
+        FROM calc c
+        ON CONFLICT (as_of_date, region, material) DO UPDATE
+          SET avg_price   = EXCLUDED.avg_price,
+              price       = EXCLUDED.price,
+              ts          = EXCLUDED.ts,
+              currency    = EXCLUDED.currency,
+              volume_tons = EXCLUDED.volume_tons,
+              symbol      = EXCLUDED.symbol
+        """,
+        {"as_of": d, "region": reg, "wf": wf, "wv": wv},
+    )
+
+    # ---- report rows written for this date/region ----
+    row = await database.fetch_one(
+        "SELECT COUNT(*) AS c FROM public.indices_daily WHERE as_of_date = :d AND region = :r",
+        {"d": d, "r": reg},
+    )
+    return {
+        "ok": True,
+        "as_of_date": str(d),
+        "region": reg,
+        "weights": {"reference": round(wf, 4), "vendor": round(wv, 4)},
+        "rows_written": int(row["c"] or 0) if row else 0,
+    }
 # --------- Daily index snapshot ---------
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
@@ -15567,7 +15699,9 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     tons_dec  = _coerce_decimal(contract.weight_tons, "weight_tons")
 
     qty    = float(tons_dec)
-    seller = (contract.seller or "").strip()
+    seller = (contract.seller or "").strip()    
+    await _ensure_org_exists(contract.buyer)
+    await _ensure_org_exists(contract.seller)
     price_val = float(quantize_money(price_dec))
     sku    = (contract.material or "").strip()
 
