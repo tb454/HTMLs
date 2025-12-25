@@ -2509,7 +2509,13 @@ async def _ingest_vendor_file_rows(
         norm.append(d)
 
     # 3) upsert into vendor_quotes
-    # NOTE: this depends on uq_vendor_quotes_vendor_material_sheetdate
+    try:
+        vendors_in_file = {d["vendor"] for d in norm if d.get("vendor")}
+        for v in vendors_in_file:
+            await _ensure_org_exists(v)
+    except Exception:
+        pass
+
     values = []
     now = utcnow()
     for d in norm:
@@ -10855,6 +10861,7 @@ async def _manual_upsert_absolute_tx(
 ):
     s, k = seller.strip(), sku.strip()
     k_norm = k.upper()
+    await _ensure_org_exists(s)
 
     cur = await database.fetch_one(
         "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
