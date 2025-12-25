@@ -39,17 +39,49 @@ def to_price_per_lb(price, uom: str) -> float:
 
 
 def parse_sheet_date(row: dict) -> dt.date:
+    # 1) Prefer explicit sheet_date/date in ISO (YYYY-MM-DD)
     for key in ("sheet_date", "date"):
         v = (row.get(key) or "").strip()
         if v:
-            return dt.date.fromisoformat(v)
+            try:
+                return dt.date.fromisoformat(v[:10])
+            except Exception:
+                pass
 
+    # 2) Try month formats:
+    #    - YYYY-MM
+    #    - YYYY-MM-DD
+    #    - MM/YYYY
+    #    - MM-YYYY
     m = (row.get("month") or "").strip()
     if m:
-        y, mm = m.split("-")
-        return dt.date(int(y), int(mm), 1)
+        m2 = m.strip()
 
-    # fallback: today (only if your CSV truly has no date/month)
+        # YYYY-MM or YYYY-MM-DD
+        if len(m2) >= 7 and m2[4] in ("-", "/"):
+            try:
+                y = int(m2[0:4])
+                mm = int(m2[5:7])
+                if 1 <= mm <= 12:
+                    return dt.date(y, mm, 1)
+            except Exception:
+                pass
+
+        # MM/YYYY or MM-YYYY
+        if ("/" in m2 or "-" in m2) and len(m2) >= 7:
+            sep = "/" if "/" in m2 else "-"
+            parts = [p.strip() for p in m2.split(sep) if p.strip()]
+            if len(parts) >= 2:
+                try:
+                    # if first part looks like month
+                    mm = int(parts[0])
+                    y = int(parts[1][:4])
+                    if 1 <= mm <= 12:
+                        return dt.date(y, mm, 1)
+                except Exception:
+                    pass
+
+    # 3) Last resort: today
     return dt.date.today()
 
 
