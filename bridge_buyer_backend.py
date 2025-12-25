@@ -2646,9 +2646,10 @@ async def vq_snapshot_to_indices(as_of: date = None):
     for r in rows:
         await database.execute("""
           INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons)
-          VALUES (:d, 'vendor', :m, :p, NULL)
+          VALUES (:d, 'vendor', :m, :p, 0)
           ON CONFLICT (as_of_date, region, material) DO UPDATE
-            SET avg_price=EXCLUDED.avg_price
+            SET avg_price=EXCLUDED.avg_price,
+                volume_tons=EXCLUDED.volume_tons
         """, {"d": asof, "m": r["material"], "p": float(r["avg_lb"]) * 2000.0})  # store as $/ton if you want
     return {"ok": True, "date": str(asof), "materials": len(rows)}
 
