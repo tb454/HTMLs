@@ -1,9 +1,17 @@
 import os
+import glob
 import datetime as dt
 import psycopg2
 import openpyxl
 
-EXCEL_PATH = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\archive\20251223T210834Z__ingested__20251223T210226Z__exception__20251223T204521Z__exception__Pro Metal Quotation Chicago as 12-23-2025 CMX 5.53.xlsx"
+# Auto-pick newest C&Y quote sheet from archive
+ARCHIVE_DIR = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\archive"
+candidates = glob.glob(os.path.join(ARCHIVE_DIR, "*Pro Metal Quotation Chicago*.xlsx"))
+if not candidates:
+    raise RuntimeError(f"No matching C&Y quote sheet found in {ARCHIVE_DIR}")
+EXCEL_PATH = max(candidates, key=os.path.getmtime)
+print("Using:", EXCEL_PATH)
+
 VENDOR_CANON = "C&Y Global, Inc. / Pro Metal Recycling"
 SHEET_NAME = "ATL PRICE SHEET"
 UNIT_RAW = "LBS"
