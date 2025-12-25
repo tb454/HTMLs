@@ -5073,7 +5073,7 @@ async def list_qbo_events(limit: int = 50):
     return [QboEventRow(**dict(r)) for r in rows]
 
 class DeadLetterRow(BaseModel):
-    id: int
+    id: str
     event_type: str
     status_code: Optional[int]
     response: Optional[str]
