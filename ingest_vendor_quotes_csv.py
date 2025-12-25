@@ -1,31 +1,30 @@
 import os
-import csv
 import glob
+import csv
 import datetime as dt
 from decimal import Decimal, InvalidOperation
 
 import psycopg2
 
 
-# ---- CONFIG ----
-CSV_PATH = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\prices for vendor quotes(Sheet1).csv"
+# ---- CONFIG: auto-pick newest multi-vendor CSV from _failed ----
+FAILED_DIR = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\_failed"
+candidates = glob.glob(os.path.join(FAILED_DIR, "*prices for vendor quotes*Sheet1*.csv"))
+if not candidates:
+    # fallback: any "prices for vendor quotes" csv
+    candidates = glob.glob(os.path.join(FAILED_DIR, "*prices for vendor quotes*.csv"))
+if not candidates:
+    raise RuntimeError(f"No matching 'prices for vendor quotes' CSV found in {FAILED_DIR}")
 
-# If you want it to auto-pick the newest matching file in that folder instead:
-# BASE_DIR = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes"
-# candidates = glob.glob(os.path.join(BASE_DIR, "*prices for vendor quotes*.csv"))
-# if not candidates:
-#     raise RuntimeError(f"No matching vendor quotes CSV found in {BASE_DIR}")
-# CSV_PATH = max(candidates, key=os.path.getmtime)
+CSV_PATH = max(candidates, key=os.path.getmtime)
+print("Using:", CSV_PATH)
 
 DEFAULT_CATEGORY = "vendor_sheet"
-DEFAULT_UNIT_RAW = None  # will use CSV uom if present, else None
 
 
 def to_price_per_lb(price, uom: str) -> float:
-    """Convert price to $/lb if needed."""
     u = (uom or "").strip().upper()
 
-    # already per pound
     if u in ("LB", "LBS", "$/LB", "USD/LB"):
         return float(price)
 
@@ -37,24 +36,15 @@ def to_price_per_lb(price, uom: str) -> float:
     if u in ("GT", "GROSS TON", "$/GT", "USD/GT"):
         return float(price) / 2240.0
 
-    # If uom is blank, assume $/lb ONLY if the price looks like a small decimal (e.g. 0.25)
+    # guess if blank
     if u == "":
         p = float(price)
-        if p < 10:
-            return p
-        # otherwise likely per ton
-        return p / 2000.0
+        return p if p < 10 else (p / 2000.0)
 
     raise ValueError(f"Unknown uom='{uom}' for price={price}")
 
 
 def parse_sheet_date(row: dict) -> dt.date:
-    """
-    Accepts any of:
-      - sheet_date: YYYY-MM-DD
-      - date: YYYY-MM-DD
-      - month: YYYY-MM   (interprets as first day of month)
-    """
     for key in ("sheet_date", "date"):
         v = (row.get(key) or "").strip()
         if v:
@@ -65,7 +55,7 @@ def parse_sheet_date(row: dict) -> dt.date:
         y, mm = m.split("-")
         return dt.date(int(y), int(mm), 1)
 
-    # fallback to today (not ideal, but prevents hard failure)
+    # fallback: today (only if your CSV truly has no date/month)
     return dt.date.today()
 
 
@@ -86,52 +76,54 @@ def parse_price(x) -> float:
 def main():
     db = os.environ["DATABASE_URL"]
 
-    if not os.path.exists(CSV_PATH):
-        raise FileNotFoundError(CSV_PATH)
-
-    print("Using:", CSV_PATH)
-
-    # Read CSV
     with open(CSV_PATH, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         if not reader.fieldnames:
             raise RuntimeError("CSV has no header row")
-
-        # Expected columns (flexible):
-        # vendor, material, price, uom, sheet_date/date/month, category, delivery, location, notes
         rows_in = list(reader)
 
     if not rows_in:
         raise RuntimeError("No rows found in CSV")
 
-    # Normalize rows to insert
     inserts = []
     vendors_seen = set()
     dates_seen = set()
 
     for r in rows_in:
-        vendor = clean_str(r.get("vendor"))
-        material = clean_str(r.get("material") or r.get("material_vendor") or r.get("sku") or r.get("grade"))
+        vendor = clean_str(r.get("vendor") or r.get("Vendor") or r.get("VENDOR"))
+        material = clean_str(
+            r.get("material")
+            or r.get("material_vendor")
+            or r.get("Material")
+            or r.get("sku")
+            or r.get("grade")
+        )
+
         if not vendor or not material:
             continue
 
-        price_raw = parse_price(r.get("price") or r.get("price_per_lb") or r.get("value") or r.get("rate"))
-        uom = clean_str(r.get("uom") or r.get("unit") or DEFAULT_UNIT_RAW)
+        price_raw = parse_price(
+            r.get("price")
+            or r.get("Price")
+            or r.get("price_per_lb")
+            or r.get("value")
+            or r.get("rate")
+        )
+        uom = clean_str(r.get("uom") or r.get("UOM") or r.get("unit") or r.get("Unit") or "")
         sheet_date = parse_sheet_date(r)
-        category = clean_str(r.get("category")) or DEFAULT_CATEGORY
-        source_file = os.path.basename(CSV_PATH)
+        category = clean_str(r.get("category") or r.get("Category")) or DEFAULT_CATEGORY
 
         price_per_lb = to_price_per_lb(price_raw, uom)
+        source_file = os.path.basename(CSV_PATH)
 
         vendors_seen.add(vendor)
         dates_seen.add(sheet_date)
-
-        inserts.append((vendor, category, material, price_per_lb, uom or "", sheet_date, source_file))
+        inserts.append((vendor, category, material, price_per_lb, uom, sheet_date, source_file))
 
     print(f"Parsed rows: {len(inserts)} | Vendors: {len(vendors_seen)} | Dates: {len(dates_seen)}")
 
     if not inserts:
-        raise RuntimeError("No valid rows parsed (check vendor/material/price columns).")
+        raise RuntimeError("No valid rows parsed. Check column names: vendor/material/price/uom/date.")
 
     conn = psycopg2.connect(db)
     cur = conn.cursor()
@@ -147,16 +139,14 @@ def main():
             (v, v),
         )
 
-    # Insert vendor quotes (append-only by default).
-    # If you want to replace existing rows for same vendor+date+source_file, uncomment the delete block below.
-    #
-    # cur.execute(
-    #     """
-    #     DELETE FROM public.vendor_quotes
-    #     WHERE source_file = %s
-    #     """,
-    #     (os.path.basename(CSV_PATH),),
-    # )
+    # Optional: remove prior rows from this same source file (keeps reruns clean)
+    cur.execute(
+        """
+        DELETE FROM public.vendor_quotes
+        WHERE source_file = %s
+        """,
+        (os.path.basename(CSV_PATH),),
+    )
 
     cur.executemany(
         """
@@ -168,10 +158,7 @@ def main():
         inserts,
     )
 
-    conn.commit()
-
-    # Ensure vendor_material_map rows exist so mapping/canonicalization can be applied later
-    # NOTE: requires your unique constraint on (vendor, material_vendor)
+    # Ensure vendor_material_map rows exist for later canonical overrides
     cur.execute(
         """
         INSERT INTO public.vendor_material_map (vendor, material_vendor, material_canonical)
@@ -186,7 +173,6 @@ def main():
     conn.commit()
     cur.close()
     conn.close()
-
     print("Ingest complete.")
 
 
