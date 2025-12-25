@@ -2092,7 +2092,7 @@ async def vendor_snapshot_to_indices():
         'blended'                                  AS region,
         b.symbol                                   AS material,
         (0.30*b.price + 0.50*v.vendor_lb + 0.20*COALESCE(c.contract_lb, b.price)) * 2000.0 AS avg_price,
-        NULL::numeric                               AS volume_tons,
+        0::numeric                               AS volume_tons,
         'USD'                                       AS currency
       FROM (
         SELECT rp.symbol, rp.price
@@ -2127,6 +2127,7 @@ async def vendor_snapshot_to_indices():
       ) c ON c.symbol = b.symbol
       ON CONFLICT (as_of_date, region, material) DO UPDATE
         SET avg_price = EXCLUDED.avg_price,
+            volume_tons = EXCLUDED.volume_tons,
             currency  = EXCLUDED.currency
     """)
     return {"ok": True}
