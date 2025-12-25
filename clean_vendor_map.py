@@ -1,3 +1,4 @@
+# clean_vendor_map.py
 import csv
 
 INPUT = "vendor_material_map.csv"

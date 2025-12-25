@@ -61,6 +61,7 @@ from datetime import datetime as _dt, timezone as _tz
 from fastapi import Depends
 from uuid import UUID 
 from starlette.middleware.base import BaseHTTPMiddleware 
+from fastapi import Request as _Request
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
@@ -1206,12 +1207,25 @@ class TraderOrder(BaseModel):
     qty_open: float
     status: str
 
-from fastapi import Request as _Request
 async def get_username_session(request: _Request) -> str:
-    # Pull username from session; fallback to email or anonymous
-    return (request.session.get("username")
-            or request.session.get("email")
-            or "anonymous")
+    """
+    Return the canonical username for the logged-in identity.
+    Session may contain username OR email depending on login path.
+    """
+    ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    if not ident:
+        return "anonymous"
+
+    row = await database.fetch_one(
+        """
+        SELECT username
+        FROM public.users
+        WHERE lower(username) = :i OR lower(coalesce(email,'')) = :i
+        LIMIT 1
+        """,
+        {"i": ident.lower()},
+    )
+    return (row["username"] if row and row["username"] else ident)
 
 @trader_router.get("/orders", response_model=List[TraderOrder])
 async def trader_orders(username: str = Depends(get_username_session)):
@@ -3285,16 +3299,60 @@ async def _ensure_account_user_map():
         return
 
     await run_ddl_multi("""
-    CREATE TABLE IF NOT EXISTS account_users(
+    -- account_users: maps users to trading accounts
+    -- Canonical shape (matches your current DB):
+    --   account_id UUID NOT NULL
+    --   user_id    UUID NOT NULL
+    --   username   TEXT NOT NULL
+    -- PK: (account_id, user_id)
+
+    CREATE TABLE IF NOT EXISTS public.account_users(
       account_id UUID NOT NULL,
+      user_id    UUID NOT NULL,
       username   TEXT NOT NULL,
-      PRIMARY KEY (account_id, username)
+      PRIMARY KEY (account_id, user_id)
     );
+
+    -- If table existed in older shape, ensure columns exist
+    ALTER TABLE public.account_users
+      ADD COLUMN IF NOT EXISTS user_id UUID,
+      ADD COLUMN IF NOT EXISTS username TEXT;
+
+    -- Helpful index for username lookups (Trader views use username)
+    CREATE INDEX IF NOT EXISTS idx_account_users_username
+      ON public.account_users (username);
+
+    -- Helpful index for user_id lookups (future-proof)
+    CREATE INDEX IF NOT EXISTS idx_account_users_user_id
+      ON public.account_users (user_id);
     """)
+
 # =====  account - user ownership =====
 
 # ===== Admin Accounts & Account-Users =====
 accounts_router = APIRouter(prefix="/admin/accounts", tags=["Admin/Accounts"])
+
+async def _resolve_user_for_ident(ident: str) -> tuple[str, str]:
+    """
+    Accepts username OR email.
+    Returns (user_id, username).
+    """
+    i = (ident or "").strip().lower()
+    if not i:
+        raise HTTPException(status_code=422, detail="username required")
+
+    row = await database.fetch_one(
+        """
+        SELECT id::text AS id, username
+        FROM public.users
+        WHERE lower(username) = :i OR lower(coalesce(email,'')) = :i
+        LIMIT 1
+        """,
+        {"i": i},
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found (must exist in public.users)")
+    return (row["id"], row["username"])
 
 class AccountIn(BaseModel):
     name: str
@@ -3351,30 +3409,43 @@ async def admin_attach_user(
     if not acc:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    # upsert mapping (one user per account_id in this simple mapping)
+    # Resolve the user row (accept username OR email)
+    user_id, username = await _resolve_user_for_ident(body.username)
+
+    # Upsert mapping 
     await database.execute(
         """
-        INSERT INTO account_users(account_id, username)
-        VALUES (:id, :u)
-        ON CONFLICT (account_id, username) DO NOTHING
+        INSERT INTO public.account_users(account_id, user_id, username)
+        VALUES (:aid, :uid, :uname)
+        ON CONFLICT (account_id, user_id) DO UPDATE
+          SET username = EXCLUDED.username
         """,
-        {"id": account_id, "u": body.username.strip()},
+        {"aid": account_id, "uid": user_id, "uname": username},
     )
-    return {"ok": True, "account_id": account_id, "username": body.username.strip()}
+
+    return {"ok": True, "account_id": account_id, "user_id": user_id, "username": username}
+
 
 @accounts_router.get("/{account_id}/users", summary="Get users linked to account")
 async def admin_get_account_user(account_id: str, request: Request):
     _require_admin(request)
 
     rows = await database.fetch_all(
-        "SELECT username FROM account_users WHERE account_id=:id ORDER BY username",
+        """
+        SELECT username, user_id::text AS user_id
+        FROM public.account_users
+        WHERE account_id = :id
+        ORDER BY username
+        """,
         {"id": account_id},
     )
     usernames = [r["username"] for r in rows]
+    user_ids  = [r["user_id"] for r in rows]
 
     # Backward compatible: keep "username" as the first user (or None)
     return {
         "account_id": account_id,
+        "user_ids": user_ids,
         "usernames": usernames,
         "username": (usernames[0] if usernames else None),
     }
