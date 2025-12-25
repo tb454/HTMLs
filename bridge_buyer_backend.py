@@ -778,51 +778,6 @@ async def indices_latest(
         "group": group,
         "indices": out,
     }
-
-    fallback = {
-        "symbol": symbol,
-        "name": symbol,
-        "value": None,
-        "unit": None,
-        "currency": None,
-        "as_of": None,
-        "source_note": "No index history yet",
-    }
-
-    try:
-        row = await database.fetch_one(
-            """
-            SELECT dt AS as_of, close_price, unit, currency, source_note
-            FROM bridge_index_history
-            WHERE symbol = :s
-            ORDER BY dt DESC
-            LIMIT 1
-            """,
-            {"s": symbol},
-        )
-
-        if not row:
-            # No history yet: return an empty-but-200 payload so UI just says "No market data"
-            return fallback
-
-        # Shape it the way the frontend expects
-        return {
-            "symbol": symbol,
-            "name": symbol,
-            "value": row["close_price"],
-            "unit": row["unit"],
-            "currency": row["currency"],
-            "as_of": row["as_of"],
-            "source_note": row["source_note"],
-        }
-
-    except Exception as e:
-        try:
-            logger.warn("indices_latest_error", err=str(e))
-        except Exception:
-            pass
-        # On error, behave like "no history" instead of 500/404
-        return fallback
 # --- Safe latest index handler ---
 
 # === Prices endpoint ===
@@ -2148,6 +2103,8 @@ async def vendor_snapshot_to_indices():
 
 @startup
 async def _ensure_vendor_quotes_schema():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS vendor_quotes(
       id            BIGSERIAL PRIMARY KEY,
@@ -2175,6 +2132,8 @@ async def _ensure_vendor_quotes_schema():
 
 @startup
 async def _ensure_vendor_ingest_schema():
+    if not BOOTSTRAP_DDL:
+        return
     # audit trail + dedupe keys for vendor quote ingest
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS vendor_ingest_runs (
@@ -2231,7 +2190,9 @@ async def _ensure_vendor_ingest_schema():
 
 @startup
 async def _ensure_v_vendor_blend_latest_view():
-        await run_ddl_multi("""                        
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""                      
     DROP VIEW IF EXISTS public.v_vendor_blend_latest;
     CREATE OR REPLACE VIEW public.v_vendor_blend_latest AS
     WITH latest_batch AS (
@@ -2267,6 +2228,8 @@ async def _ensure_v_vendor_blend_latest_view():
 # ------     Billing & International DDL -----
 @startup
 async def _ensure_billing_and_international_schema():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     -- Orgs / Plans / Plan Prices
     CREATE TABLE IF NOT EXISTS orgs(
@@ -3144,6 +3107,8 @@ async def _ensure_users_minimal_for_tests():
     env = os.getenv("ENV", "").lower()
     init = os.getenv("INIT_DB", "0").lower() in ("1","true","yes")
     if env in {"ci", "test"} or init:
+        if not BOOTSTRAP_DDL:
+            return
         try:
             await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
         except Exception:
@@ -3244,6 +3209,8 @@ async def _connect_db_first():
 # ----- idem key cache -----
 @startup
 async def _ensure_http_idem_table():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS http_idempotency (
       key TEXT PRIMARY KEY,
@@ -3483,6 +3450,8 @@ YARD_RULES_DDL = """
 
 @startup
 async def _ensure_yard_rules():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi(YARD_RULES_DDL)
 
 yard_rules_router = APIRouter(tags=["Yard Rules"])
@@ -4057,6 +4026,8 @@ async def surveil_recent(limit: int = 25):
 # =====  invites log =====
 @startup
 async def _ensure_invites_log():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS invites_log(
       invite_id UUID PRIMARY KEY,
@@ -4072,6 +4043,8 @@ async def _ensure_invites_log():
 # ----- Uniq ref guard -----
 @startup
 async def _uniq_ref_guard():
+    if not BOOTSTRAP_DDL:
+        return
     try:
         await database.execute("""
         DO $$
@@ -4125,6 +4098,8 @@ async def _ensure_backend_expected_uniques():
 
 @startup
 async def _ensure_more_indexes():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_settlements_symbol_asof ON public.settlements(symbol, as_of DESC)",
         "CREATE INDEX IF NOT EXISTS idx_clob_trades_symbol_time ON public.clob_trades(symbol, created_at DESC)",
@@ -4136,6 +4111,68 @@ async def _ensure_more_indexes():
         except Exception as e:
             logger.warn("extra_index_bootstrap_failed", sql=s[:100], err=str(e))
 # ----- Extra indexes -----
+
+# ----- Missing DDL patch (tables/columns referenced by code) -----
+@startup
+async def _ensure_missing_schema_patch():
+    if not BOOTSTRAP_DDL:
+        return
+
+    await run_ddl_multi("""
+    -- 1) position_limits (used by /limits/positions)
+    CREATE TABLE IF NOT EXISTS public.position_limits (
+      id BIGSERIAL PRIMARY KEY,
+      member TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      limit_lots NUMERIC NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(member, symbol)
+    );
+
+    -- 2) tenant_signups (used by /tenants/signups)
+    CREATE TABLE IF NOT EXISTS public.tenant_signups (
+      signup_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL DEFAULT 'pending',
+      yard_name TEXT NOT NULL,
+      contact_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT,
+      plan TEXT NOT NULL DEFAULT 'starter',
+      monthly_volume_tons INT,
+      region TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tenant_signups_created
+      ON public.tenant_signups(created_at DESC);
+
+    -- 3) data_msg_counters (used when BILL_INTERNAL_WS=1)
+    CREATE TABLE IF NOT EXISTS public.data_msg_counters (
+      id BIGSERIAL PRIMARY KEY,
+      member TEXT NOT NULL,
+      count BIGINT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_data_msg_counters_member_ts
+      ON public.data_msg_counters(member, ts DESC);
+
+    -- 4) bols created_at/updated_at (your code orders/filters by these)
+    ALTER TABLE public.bols
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    CREATE INDEX IF NOT EXISTS idx_bols_created_at
+      ON public.bols(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_bols_updated_at
+      ON public.bols(updated_at DESC);
+
+    -- 5) reference_prices.currency (local/CI bootstrap mismatch)
+    ALTER TABLE public.reference_prices
+      ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+
+    -- 6) receivables.tenant_id (insert path uses it)
+    ALTER TABLE public.receivables
+      ADD COLUMN IF NOT EXISTS tenant_id UUID;
+    """)
+# ----- /Missing DDL patch -----
 
 # ----- Billing core -----
 billing_router = APIRouter(prefix="/billing", tags=["Billing"])
@@ -4715,6 +4752,8 @@ app.include_router(limits_router)
 # ------ Access-control bootstrap (tenants↔users, perms, billing shell) -------
 @startup
 async def _ensure_access_control_schema():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
                         
@@ -5404,6 +5443,8 @@ async def _ensure_usage_events_schema():
     by itself yet – but gives you a clean table to aggregate meters, compare
     against Stripe, or export for analytics.
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS usage_events(
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -5423,6 +5464,8 @@ async def _ensure_usage_events_schema():
 
 @startup
 async def _ensure_billing_core():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS fees_ledger(
       id UUID PRIMARY KEY,
@@ -5751,6 +5794,8 @@ async def billing_member_summary_alias(
 # ----- billing contacts and email logs -----
 @startup
 async def _ensure_billing_contacts_and_email_logs():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_contacts (
       member TEXT PRIMARY KEY,
@@ -5879,6 +5924,8 @@ async def notify_humans(event: str, *, member: str, subject: str, html: str,
 # ===== member plan items =====
 @startup
 async def _ensure_member_plan_items():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS member_plan_items(
       member TEXT PRIMARY KEY,
@@ -6008,6 +6055,8 @@ async def _provision_member(member: str, *, email: str | None, plan: str | None)
 # ---- Ensure Policy Details ----
 @startup
 async def _ensure_policies_table():
+    if not BOOTSTRAP_DDL:
+        return
     POLICY_DDL = """
     CREATE TABLE IF NOT EXISTS user_policy_acceptance (
         id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -6085,6 +6134,9 @@ app.include_router(policy_router)
 # =====  Billing payment profiles (Stripe customers + payment methods) =====
 @startup
 async def _ensure_payment_profiles():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_payment_profiles(
       member TEXT PRIMARY KEY,                 -- your 'org_name' or normalized member key
@@ -6242,14 +6294,25 @@ async def finalize_subscription_from_session(sess: str, member: Optional[str] = 
         # Ensure column exists once; then persist stripe_subscription_id
         sub_id = (sub.get("id") if isinstance(sub, dict) else sub) or None
         if sub_id:
-            await database.execute("""
-              ALTER TABLE member_plans
-              ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT
-            """)
-            await database.execute("""
-              UPDATE member_plans SET stripe_subscription_id=:sid, updated_at=NOW()
-              WHERE member=:m
-            """, {"sid": sub_id, "m": m})
+            # Never run DDL when managed schema is the boss.
+            if BOOTSTRAP_DDL:
+                try:
+                    await database.execute("""
+                      ALTER TABLE member_plans
+                      ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT
+                    """)
+                except Exception:
+                    pass
+
+            # Update will work if the column exists; otherwise it fails gracefully.
+            try:
+                await database.execute("""
+                  UPDATE member_plans
+                     SET stripe_subscription_id=:sid, updated_at=NOW()
+                   WHERE member=:m
+                """, {"sid": sub_id, "m": m})
+            except Exception:
+                pass
 
         # Upsert stripe_customer_id without fabricating email
         cust_id = (cust.get("id") if isinstance(cust, dict) else (cust if isinstance(cust, str) else None)) or None
@@ -6543,6 +6606,9 @@ async def _fetch_invoice(invoice_id: str):
 # ----- billing prefs -----
 @startup
 async def _ensure_billing_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_preferences (
       member TEXT PRIMARY KEY,
@@ -6671,6 +6737,9 @@ async def _ws_meter_flush():
 # ----- plans tables -----
 @startup
 async def _ensure_plans_tables():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS billing_plans (
       plan_code TEXT PRIMARY KEY,         -- 'starter','standard','enterprise'
@@ -6694,6 +6763,9 @@ async def _ensure_plans_tables():
 # ----- plan caps and limits -----
 @startup
 async def _ensure_plan_caps_and_limits():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     -- Plan catalog (already created earlier, kept here for clarity)
     CREATE TABLE IF NOT EXISTS billing_plans (
@@ -6752,6 +6824,9 @@ async def _ensure_plan_caps_and_limits():
 # ----- Products -----
 @startup
 async def _ensure_products_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS public.products (
       symbol TEXT PRIMARY KEY,
@@ -6802,6 +6877,9 @@ async def _ensure_anomaly_scores_schema():
 # ----- Index contracts -----
 @startup
 async def _ensure_index_contracts_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS public.index_contracts (
       tradable_symbol TEXT PRIMARY KEY,   -- e.g., 'BR-CU-2025M'
@@ -6822,6 +6900,9 @@ async def _ensure_index_contracts_schema():
 #----- Fee schedule ----
 @startup
 async def _ensure_fee_schedule_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS fee_schedule (
       symbol TEXT PRIMARY KEY,
@@ -6840,6 +6921,9 @@ async def _ensure_fee_schedule_schema():
 # ---- Settlement Publishing ---- 
 @startup
 async def _ensure_settlements_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS settlements (
       as_of DATE NOT NULL,
@@ -6859,6 +6943,9 @@ async def _ensure_settlements_schema():
 # ---- Indices (daily + snapshots) bootstrap ----
 @startup
 async def _ensure_indices_tables():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS indices_daily (
       as_of_date DATE NOT NULL,
@@ -6881,6 +6968,9 @@ async def _ensure_indices_tables():
 # #------ Surveillance / Alerts ------
 @startup
 async def _ensure_surveillance_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS surveil_alerts (
       alert_id UUID PRIMARY KEY,
@@ -6945,7 +7035,8 @@ async def _retention_cron():
 # -------- DDL and hydrate ----------
 @startup
 async def _ensure_runtime_risk_tables():
-    await run_ddl_multi("""
+    if BOOTSTRAP_DDL:
+        await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_price_bands(
       symbol TEXT PRIMARY KEY,
       lower NUMERIC,
@@ -7085,6 +7176,9 @@ async def privacy_appendix_page():
 # -------- Regulatory: Rulebook & Policies (versioned) --------
 @startup
 async def _ensure_rulebook_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS rulebook_versions(
       version TEXT PRIMARY KEY,
@@ -7138,6 +7232,9 @@ async def rulebook_upsert(version: str, effective_date: date, file_path: str, re
 # === QBO OAuth Relay • Table  ===
 @startup
 async def _ensure_qbo_oauth_events_table():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS qbo_oauth_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -7343,6 +7440,9 @@ async def favicon():
 # -------- Risk controls (kill switch, price bands, entitlements) --------
 @startup
 async def _ensure_risk_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = [
         """
         CREATE TABLE IF NOT EXISTS clob_position_limits (
@@ -7361,7 +7461,8 @@ async def _ensure_risk_schema():
 
 @startup
 async def _ensure_entitlements_table():
-    await run_ddl_multi("""
+    if BOOTSTRAP_DDL:
+        await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS runtime_entitlements(
       username TEXT NOT NULL,
       feature  TEXT NOT NULL,
@@ -7411,6 +7512,9 @@ async def grant_entitlement(user: str, feature: str, request: Request):
 # -------- Ensure public.users has id/email/username/is_active --------
 @startup
 async def _ensure_users_columns():
+    if not BOOTSTRAP_DDL:
+        return
+
     # Make sure gen_random_uuid() is available
     try:
         await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
@@ -7703,10 +7807,12 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
         return {"ok": True, "inserted": 0}
 
     # Upsert semantics: keep most recent for a given (symbol, ts_market)
-    with engine.begin() as conn:
-        conn.exec_driver_sql("""
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);
-        """)
+        with engine.begin() as conn:
+            if BOOTSTRAP_DDL:
+                conn.exec_driver_sql("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);
+                """)
+
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
@@ -8261,7 +8367,8 @@ async def ingest_csv_generic(
         return {"ok": True, "inserted": 0}
 
     with engine.begin() as conn:
-        conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+        if BOOTSTRAP_DDL:
+            conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
@@ -8319,7 +8426,8 @@ async def ingest_excel_generic(
         return {"ok": True, "inserted": 0}
 
     with engine.begin() as conn:
-        conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+        if BOOTSTRAP_DDL:
+            conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
@@ -8398,6 +8506,8 @@ app.include_router(router_pricing)
 
 @startup
 async def _ensure_risk_and_marks_tables():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS risk_events (
       event_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -9730,6 +9840,8 @@ async def me(request: Request):
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
 @startup
 async def _ensure_compliance_schema():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS compliance_members(
       username TEXT PRIMARY KEY,
@@ -10205,6 +10317,9 @@ def _require_hmac_in_this_env() -> bool:
 # ===== FUTURES schema bootstrap =====
 @startup
 async def _ensure_futures_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = [
         """
         CREATE TABLE IF NOT EXISTS futures_products (
@@ -10302,6 +10417,9 @@ async def _ensure_futures_tables_if_missing():
 # ===== TRADING & CLEARING SCHEMA bootstrap =====
 @startup
 async def _ensure_trading_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     try:
         await database.execute("""
         DO $$
@@ -10397,6 +10515,9 @@ async def _ensure_trading_schema():
 
 @startup
 async def _ensure_eventlog_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS matching_events(
       id BIGSERIAL PRIMARY KEY,
@@ -10411,6 +10532,9 @@ async def _ensure_eventlog_schema():
 # ===== TRADING HARDENING: risk limits, audit, trading status =====
 @startup
 async def _ensure_trading_hardening():
+    if not BOOTSTRAP_DDL:
+        return
+
     # 1) columns / tables (safe to run every boot)
     ddl = [
         """
@@ -10672,6 +10796,9 @@ async def _receipts_backfill_columns():
 # ===== EXPORT RULES schema bootstrap (idempotent) =====
 @startup
 async def _ensure_export_rules():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS export_rules(
       hs_prefix TEXT NOT NULL,
@@ -10712,6 +10839,9 @@ async def _ensure_stocks_schema():
 # -------- Warranting & Chain of Title --------
 @startup
 async def _ensure_warrant_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     # 1) Create table without FK (order-safe)
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS public.warrants(
@@ -10812,7 +10942,11 @@ async def _ensure_receivables_schema():
 # ===== Buyer positions schema bootstrap =====
 @startup
 async def _ensure_buyer_positions_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
+
     CREATE TABLE IF NOT EXISTS buyer_positions (
       position_id      UUID PRIMARY KEY,
       contract_id      UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
@@ -11319,6 +11453,8 @@ async def _ensure_contracts_bols_schema():
 # ===== CONTRACTS: delivery fields =====
 @startup
 async def _ensure_contract_delivery_fields():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     ALTER TABLE contracts
       ADD COLUMN IF NOT EXISTS delivered_at           TIMESTAMPTZ,
@@ -11332,6 +11468,9 @@ async def _ensure_contract_delivery_fields():
 # ===== AUDIT LOG schema bootstrap (idempotent) =====
 @startup
 async def _ensure_audit_log_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_log (
         id BIGSERIAL PRIMARY KEY,
@@ -11374,6 +11513,9 @@ async def _ensure_audit_chain_schema():
 
 @startup
 async def _ensure_audit_seal_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = [
         "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS sealed BOOLEAN NOT NULL DEFAULT FALSE;",
         """
@@ -11689,6 +11831,8 @@ async def inventory_import_excel(
 # ----------- Startup tasks -----------
 @startup
 async def _ensure_pgcrypto():
+    if not BOOTSTRAP_DDL:
+        return
     try:
         await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     except Exception as e:
@@ -11696,6 +11840,8 @@ async def _ensure_pgcrypto():
 
 @startup
 async def _ensure_perf_indexes():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = [
         "CREATE INDEX IF NOT EXISTS idx_contracts_mat_status ON contracts(material, created_at DESC, status)",
         "CREATE INDEX IF NOT EXISTS idx_inv_mov_sku_time ON inventory_movements(seller, sku, created_at DESC)",
@@ -11713,6 +11859,8 @@ async def _ensure_perf_indexes():
 # DB safety checks (non-negative inventory quantities)
 @startup
 async def _ensure_inventory_constraints():
+    if not BOOTSTRAP_DDL:
+        return
     try:
         await database.execute("""
         DO $$
@@ -11744,6 +11892,8 @@ async def _ensure_contract_enums_and_fks():
 #-------- Dead Letter Startup --------
 @startup
 async def _ensure_dead_letters():
+    if not BOOTSTRAP_DDL:
+        return
     try:
         await run_ddl_multi("""
         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -11796,6 +11946,8 @@ async def _ensure_dossier_ingest_queue():
       - sent:    successfully delivered
       - failed:  last attempt failed; will be retried by admin batch
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS dossier_ingest_queue (
       id            BIGSERIAL PRIMARY KEY,
@@ -11824,6 +11976,8 @@ async def _ensure_dossier_ingest_queue_schema():
     Safe in CI/prod (IF NOT EXISTS). We also expose admin APIs to inspect
     and drain this queue into the Dossier HR ingest endpoint.
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS dossier_ingest_queue (
       id            BIGSERIAL PRIMARY KEY,
@@ -12097,6 +12251,9 @@ async def list_rfqs(scope: Optional[str] = None, username: str = Depends(get_use
 
 @startup
 async def _ensure_rfq_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = [
         """
         CREATE TABLE IF NOT EXISTS rfqs (
@@ -12145,6 +12302,8 @@ async def _ensure_rfq_schema():
 # ------ Contracts refs index ------
 @startup
 async def _idx_refs():
+    if not BOOTSTRAP_DDL:
+        return
     try:
         await database.execute("CREATE INDEX IF NOT EXISTS idx_contracts_ref ON contracts(reference_source, reference_symbol)")
     except Exception:
@@ -12154,6 +12313,8 @@ async def _idx_refs():
 # ------ Indices Migration ------
 @startup
 async def _indices_daily_migration_add_cols():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     ALTER TABLE indices_daily
       ADD COLUMN IF NOT EXISTS symbol   TEXT,
@@ -12169,6 +12330,8 @@ async def _indices_daily_migration_add_cols():
 # ------ ICE delivery log ------
 @startup
 async def _ensure_ice_delivery_log():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     /* base table (idempotent) */
     CREATE TABLE IF NOT EXISTS public.ice_delivery_log(
@@ -12196,6 +12359,9 @@ async def _ensure_ice_delivery_log():
 # ------ Statements router ------
 @startup
 async def _ensure_statements_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = """
     CREATE TABLE IF NOT EXISTS statement_runs (
       run_id UUID PRIMARY KEY,
@@ -12213,6 +12379,9 @@ async def _ensure_statements_schema():
 # ------ CLOB router ------
 @startup
 async def _ensure_clob_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     ddl = [
         # simple symbol-level order book (separate from futures_* tables)
         """
@@ -13033,6 +13202,8 @@ def _org_from_request(request: Request) -> Optional[str]:
 
 @startup
 async def _ensure_multitenant_columns():
+    if not BOOTSTRAP_DDL:
+        return
     """
     Ensure core business tables all have a tenant_id column so the new
     tenant_scoped filters and ingestion paths can safely write to it.
@@ -13640,7 +13811,11 @@ async def qbo_peek(state: str = Query(...), request: Request = None):
 # -------- Security: key registry & rotation (scaffold) --------
 @startup
 async def _ensure_key_registry():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
+
     CREATE TABLE IF NOT EXISTS key_registry(
       key_name TEXT PRIMARY KEY,
       version INT NOT NULL DEFAULT 1,
@@ -16158,16 +16333,22 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 async def products_add(p: ProductIn):
     try:
         quality_json = json.dumps(p.quality or {}, separators=(",", ":"), ensure_ascii=False)
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS public.products (
-            symbol TEXT PRIMARY KEY,
-            description TEXT NOT NULL,
-            unit TEXT NOT NULL,
-            quality JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        """)
+        # Never do DDL in request path when managed schema is active.
+        if BOOTSTRAP_DDL:
+            try:
+                await database.execute("""
+                  CREATE TABLE IF NOT EXISTS public.products (
+                    symbol TEXT PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    unit TEXT NOT NULL,
+                    quality JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                  );
+                """)
+            except Exception:
+                pass
+
         await database.execute("""
           INSERT INTO public.products(symbol, description, unit, quality)
           VALUES (:s, :d, :u, :q::jsonb)
@@ -16278,6 +16459,9 @@ class ApplicationOut(BaseModel):
 
 @startup
 async def _ensure_tenant_applications_schema():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS tenant_applications (
       application_id UUID PRIMARY KEY,
@@ -16316,6 +16500,8 @@ async def _ensure_tenant_schema():
     - tenants table (one row per yard/org/tenant)
     - tenant_id columns on core tables (nullable for now)
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     --------------------------------------------------
     -- Tenants (one row per yard/org/tenant)
@@ -16388,6 +16574,8 @@ async def _ensure_multitenant_schema() -> None:
     - tenants: one row per tenant/org (e.g. Winski, Lewis, etc.)
     - tenant_id columns: added to core tables so we can later scope queries.
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS tenants (
       id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -16447,6 +16635,8 @@ async def _ensure_yard_config_schema() -> None:
 
     Safe to run in CI and prod (IF NOT EXISTS everywhere).
     """
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS yard_profiles (
       id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17975,16 +18165,22 @@ class AlertIn(BaseModel):
 async def surveil_create(a: AlertIn):
     try:
         aid = str(uuid.uuid4())
-        await database.execute("""
-          CREATE TABLE IF NOT EXISTS surveil_alerts (
-            alert_id UUID PRIMARY KEY,
-            rule TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            data JSONB NOT NULL,
-            severity TEXT NOT NULL CHECK (severity IN ('info','warn','high')),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        """)
+
+        if BOOTSTRAP_DDL:
+            try:
+                await database.execute("""
+                  CREATE TABLE IF NOT EXISTS surveil_alerts (
+                    alert_id UUID PRIMARY KEY,
+                    rule TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    data JSONB NOT NULL,
+                    severity TEXT NOT NULL CHECK (severity IN ('info','warn','high')),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                  );
+                """)
+            except Exception:
+                pass
+
         await database.execute("""
           INSERT INTO surveil_alerts(alert_id, rule, subject, data, severity)
           VALUES (:id,:r,:s,:d::jsonb,:sev)
@@ -18261,6 +18457,8 @@ async def _flywheel_anomaly_cron():
 # =============== CONTRACTS & BOLs ===============
 @startup
 async def _ensure_requested_indexes_and_fx():
+    if not BOOTSTRAP_DDL:
+        return
     await run_ddl_multi("""
       CREATE INDEX IF NOT EXISTS idx_contracts_status_date ON contracts (status, created_at);
       CREATE INDEX IF NOT EXISTS idx_bols_contract_id_status ON bols (contract_id, status);
@@ -18271,6 +18469,9 @@ async def _ensure_requested_indexes_and_fx():
 # -------- Surveillance: case management + rules --------
 @startup
 async def _ensure_surv_cases():
+    if not BOOTSTRAP_DDL:
+        return
+
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS surveil_cases(
       case_id UUID PRIMARY KEY,
@@ -19958,6 +20159,9 @@ async def run_variation(body: VariationRunIn):
 # -------- Clearinghouse Economics (guaranty fund + waterfall) --------
 @startup
 async def _ensure_ccp_schema():
+    if not BOOTSTRAP_DDL:
+        return
+    
     await run_ddl_multi("""
     CREATE TABLE IF NOT EXISTS guaranty_fund(
       member TEXT PRIMARY KEY,
