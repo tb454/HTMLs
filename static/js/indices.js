@@ -196,7 +196,7 @@ async function viewSymbol(sym){
   if(showForecast){
     const fc = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
     const series = fc.map(r=>({dt:r.forecast_date, value:+r.predicted_price}));
-    const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.conf_low ?? r.predicted_price), high:+(r.conf_high ?? r.predicted_price)}));
+    const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.confidence_low ?? r.predicted_price), high:+(r.confidence_high ?? r.predicted_price)}));
     $('#forecastChart').classList.remove('hidden');   // was style.display = ''
     drawLine($('#forecastChart'), series, {color:'#2563eb', ci});
   } else {

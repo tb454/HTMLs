@@ -8033,11 +8033,18 @@ async def run_forecast_now():
 @router_fc.get("/latest", summary="Get latest forecast curve for a symbol")
 async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
     try:
-        q = """SELECT forecast_date, predicted_price, conf_low, conf_high, model_name
-               FROM bridge_forecasts
-               WHERE symbol=$1 AND horizon_days=$2
-               ORDER BY forecast_date"""
-        rows = await app.state.db_pool.fetch(q, symbol, horizon_days)
+        q = """
+        SELECT
+          forecast_date,
+          predicted_price,
+          confidence_low  AS confidence_low,
+          confidence_high AS confidence_high,
+          model           AS model
+        FROM public.bridge_forecasts
+        WHERE symbol = $1
+        ORDER BY forecast_date
+        """
+        rows = await app.state.db_pool.fetch(q, symbol)
         if not rows:
             raise HTTPException(404, "No forecasts available")
         return [dict(r) for r in rows]
@@ -8718,7 +8725,7 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
 
         CREATE TABLE IF NOT EXISTS model_runs (
             id bigserial PRIMARY KEY,
-            model_name text NOT NULL,
+            model text NOT NULL,
             symbol text NOT NULL,
             train_start date NOT NULL,
             train_end date NOT NULL,
@@ -8731,15 +8738,13 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
         CREATE TABLE IF NOT EXISTS bridge_forecasts (
             id bigserial PRIMARY KEY,
             symbol text NOT NULL,
-            horizon_days int NOT NULL,
             forecast_date date NOT NULL,
             predicted_price numeric(16,6) NOT NULL,
-            conf_low numeric(16,6),
-            conf_high numeric(16,6),
-            model_name text NOT NULL,
-            run_id bigint,
+            model text NOT NULL,
+            confidence_low numeric(16,6),
+            confidence_high numeric(16,6),
             generated_at timestamptz DEFAULT now(),
-            UNIQUE(symbol, horizon_days, forecast_date, model_name)
+            UNIQUE(symbol, forecast_date, model)
         );
         """)
 # ---------------------------------------------------------------------------
@@ -10881,6 +10886,8 @@ async def _manual_upsert_absolute_tx(
     new_qty = float(qty_on_hand_tons)
     delta = new_qty - old
     delta_is_zero = abs(delta) < 1e-12
+    if abs(delta) < 1e-12:    
+        return old, new_qty, delta
 
     await database.execute("""
       UPDATE inventory_items
@@ -17297,7 +17304,7 @@ async def cancel_contract(contract_id: str):
             row = await database.fetch_one("""
                 UPDATE contracts
                 SET status='Cancelled'
-                WHERE id=:id AND status IN('Left Open', 'Open')
+                WHERE id=:id AND status IN('Open')
                 RETURNING seller, material, weight_tons
             """, {"id": contract_id})
             if not row:

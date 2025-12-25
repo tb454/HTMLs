@@ -2450,7 +2450,7 @@ async def run_forecast_now():
 @router_fc.get("/latest", summary="Get latest forecast curve for a symbol")
 async def get_latest_forecasts(symbol: str, horizon_days: int = 30):
     try:
-        q = """SELECT forecast_date, predicted_price, conf_low, conf_high, model_name
+        q = """SELECT forecast_date, predicted_price, conf_low, confidence_high, model
                FROM bridge_forecasts
                WHERE symbol=$1 AND horizon_days=$2
                ORDER BY forecast_date"""
@@ -2635,7 +2635,7 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
 
         CREATE TABLE IF NOT EXISTS model_runs (
             id bigserial PRIMARY KEY,
-            model_name text NOT NULL,
+            model text NOT NULL,
             symbol text NOT NULL,
             train_start date NOT NULL,
             train_end date NOT NULL,
@@ -2652,11 +2652,11 @@ def _bootstrap_prices_indices_schema_if_needed(sqlalchemy_engine):
             forecast_date date NOT NULL,
             predicted_price numeric(16,6) NOT NULL,
             conf_low numeric(16,6),
-            conf_high numeric(16,6),
-            model_name text NOT NULL,
+            confidence_high numeric(16,6),
+            model text NOT NULL,
             run_id bigint,
             generated_at timestamptz DEFAULT now(),
-            UNIQUE(symbol, horizon_days, forecast_date, model_name)
+            UNIQUE(symbol, horizon_days, forecast_date, model)
         );
         """)
 

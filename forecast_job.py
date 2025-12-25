@@ -82,26 +82,26 @@ def rolling_backtest(y: pd.Series, ex: pd.DataFrame, window: int = 60):
     mape = float(np.mean(err / np.maximum(np.array(actuals), 1e-6))) * 100.0
     return mae, mape
 
-async def save_run(conn, model_name, symbol, train_start, train_end, features_used, mae, mape):
-    q = """INSERT INTO model_runs (model_name, symbol, train_start, train_end, features_used, backtest_mae, backtest_mape)
+async def save_run(conn, model, symbol, train_start, train_end, features_used, mae, mape):
+    q = """INSERT INTO model_runs (model, symbol, train_start, train_end, features_used, backtest_mae, backtest_mape)
            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id"""
-    rid = await conn.fetchval(q, model_name, symbol, train_start, train_end, features_used, mae, mape)
+    rid = await conn.fetchval(q, model, symbol, train_start, train_end, features_used, mae, mape)
     return rid
 
-async def save_forecasts(conn, symbol, horizon, fcs, conf, model_name, run_id):
+async def save_forecasts(conn, symbol, horizon, fcs, conf, model, run_id):
     # fcs: list of (dt, pred), conf: list of (lo, hi)
-    q = """INSERT INTO bridge_forecasts (symbol, horizon_days, forecast_date, predicted_price, conf_low, conf_high, model_name, run_id)
+    q = """INSERT INTO bridge_forecasts (symbol, horizon_days, forecast_date, predicted_price, confidence_low, confidence_high, model, run_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (symbol, horizon_days, forecast_date, model_name)
+           ON CONFLICT (symbol, horizon_days, forecast_date, model)
            DO UPDATE SET predicted_price=EXCLUDED.predicted_price,
-                         conf_low=EXCLUDED.conf_low,
-                         conf_high=EXCLUDED.conf_high,
+                         confidence_low=EXCLUDED.confidence_low,
+                         confidence_high=EXCLUDED.confidence_high,
                          run_id=EXCLUDED.run_id"""
     for (fdt, pred), (lo, hi) in zip(fcs, conf):
         await conn.execute(q, symbol, horizon, fdt, float(pred),
                            float(lo) if lo is not None else None,
                            float(hi) if hi is not None else None,
-                           model_name, run_id)
+                           model, run_id)
 
 async def run_all():
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=10, max_size=20)
