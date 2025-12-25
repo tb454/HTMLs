@@ -3,7 +3,7 @@ import datetime as dt
 import psycopg2
 import openpyxl
 
-EXCEL_PATH = r"C:\Users\tbyer\BRidge-html\HTMLs\Pro Metal Quotation Chicago as 12-23-2025 CMX 5.53.xlsx"
+EXCEL_PATH = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\archive\20251223T210834Z__ingested__20251223T210226Z__exception__20251223T204521Z__exception__Pro Metal Quotation Chicago as 12-23-2025 CMX 5.53.xlsx"
 VENDOR_CANON = "C&Y Global, Inc. / Pro Metal Recycling"
 SHEET_NAME = "ATL PRICE SHEET"
 UNIT_RAW = "LBS"
