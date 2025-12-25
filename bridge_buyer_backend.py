@@ -5084,7 +5084,7 @@ async def list_dead_letters(limit: int = 50):
     rows = await database.fetch_all(
         """
         SELECT
-          id,
+          id::text AS id,
           event AS event_type,
           status_code,
           response_text AS response,
