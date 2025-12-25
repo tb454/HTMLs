@@ -10,12 +10,6 @@ import psycopg2
 # ---- CONFIG: auto-pick newest multi-vendor CSV from _failed ----
 FAILED_DIR = r"C:\Users\tbyer\BRidge-html\HTMLs\Vendor Quotes\_failed"
 candidates = glob.glob(os.path.join(FAILED_DIR, "*prices for vendor quotes*Sheet1*.csv"))
-if not candidates:
-    # fallback: any "prices for vendor quotes" csv
-    candidates = glob.glob(os.path.join(FAILED_DIR, "*prices for vendor quotes*.csv"))
-if not candidates:
-    raise RuntimeError(f"No matching 'prices for vendor quotes' CSV found in {FAILED_DIR}")
-
 CSV_PATH = max(candidates, key=os.path.getmtime)
 print("Using:", CSV_PATH)
 
@@ -139,7 +133,7 @@ def main():
             (v, v),
         )
 
-    # Optional: remove prior rows from this same source file (keeps reruns clean)
+    # Remove prior rows from this same source file (keeps reruns clean)
     cur.execute(
         """
         DELETE FROM public.vendor_quotes
