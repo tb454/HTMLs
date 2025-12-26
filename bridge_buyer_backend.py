@@ -321,6 +321,18 @@ def _rget(row, key, default=None):
 
 load_dotenv()
 
+# ===== Environment: single source of truth (C1) =====
+ENV = os.getenv("ENV", "development").lower().strip()
+IS_PROD = (ENV == "production")
+IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).lower().strip() in ("1", "true", "yes", "y", "on")
+
+def _is_prod() -> bool:
+    return IS_PROD
+# ===== /Environment =====
+
 # ---- Unified lifespan + startup/shutdown hook system (moved earlier to avoid NameError) ----
 _STARTUPS: list = []
 _SHUTDOWNS: list = []
@@ -736,11 +748,10 @@ allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 # - RAW_BOOTSTRAP_DDL reflects env intent
 # - BOOTSTRAP_DDL is forced OFF in production (managed schema)
 RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
-PROD = os.getenv("ENV", "").lower() == "production"
-BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not PROD))
+BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
 
 def _is_prod() -> bool:
-    return os.getenv("ENV", "").lower() == "production"
+    return IS_PROD
 
 def _dev_only(reason: str = "dev-only"):
     if _is_prod():
@@ -787,11 +798,18 @@ ENFORCE_RL = (
     or ENV in {"production", "prod", "test", "testing", "ci"}
 )
 
+# Force rate limit storage to memory during pytest so CI doesn't depend on external backends
+_rl_storage = (os.getenv("RATELIMIT_STORAGE_URL") or "").strip()
+if IS_PYTEST:
+    _rl_storage = "memory://"
+
 limiter = Limiter(
     key_func=get_remote_address,
     headers_enabled=False,
     enabled=ENFORCE_RL,
+    storage_uri=(_rl_storage or None),
 )
+
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
@@ -7919,14 +7937,22 @@ async def ops_smoke(request: Request):
         # actual resolver behavior
         resolved = current_member_from_request(request)
 
-        # ✅ Policy:
+        # ✅ Policy (prod):
         # - non-admin: query MUST NOT override session
-        # - admin: query MAY override session (only if q_member provided)
+        # - admin: query MAY override ONLY WITH SIGNED HEADERS
         if role == "admin" and q_member:
-            if resolved != q_member:
-                raise RuntimeError(f"admin override expected but did not resolve: resolved={resolved} q_member={q_member} session={sess_member}")
+            # If it resolved, it must have been signed
+            if resolved == q_member:
+                return {
+                    "mode": "admin_override_signed",
+                    "role": role,
+                    "session_member": sess_member,
+                    "query_member": q_member,
+                    "resolved": resolved,
+                }
+            # If not resolved, that's acceptable (missing/invalid signature)
             return {
-                "mode": "admin_override_allowed",
+                "mode": "admin_override_denied",
                 "role": role,
                 "session_member": sess_member,
                 "query_member": q_member,
@@ -8019,6 +8045,22 @@ def _plan_allowlist(name: str) -> str | None:
         "vendor_blend_view": "SELECT * FROM v_vendor_blend_latest ORDER BY material LIMIT 50",
     }
     return plans.get(name)
+
+@app.get("/admin/schema/status", tags=["Admin"], summary="Schema/migrations status", status_code=200)
+async def admin_schema_status(request: Request):
+    _require_admin(request)
+    head = None
+    try:
+        r = await database.fetch_one("SELECT MAX(version) AS v FROM public.schema_migrations")
+        head = (r["v"] if r else None)
+    except Exception:
+        head = None
+    return {
+        "env": ENV,
+        "is_prod": IS_PROD,
+        "bootstrap_ddl_effective": bool(BOOTSTRAP_DDL),
+        "migration_head": head,
+    }
 
 @app.get("/ops/prod_safety", tags=["Ops"], summary="Prod safety toggles (proof)")
 def ops_prod_safety():
@@ -8165,6 +8207,19 @@ def _safe_env_snapshot() -> dict:
         "SNAPSHOT_BACKEND","VENDOR_WATCH_ENABLED",
     ]
     return {k: os.getenv(k) for k in allow}
+
+@startup
+async def _ensure_schema_migrations_table():
+    # If managed schema (BOOTSTRAP_DDL off), this should already exist via migrations.
+    # In dev/CI, create it so schema status is always available.
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS public.schema_migrations (
+      version    TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """)
 
 async def _schema_fingerprint() -> dict:
     rows = await database.fetch_all("""
@@ -8470,7 +8525,7 @@ async def store_perf_floor(body: dict, request: Request):
     """, {"v": json.dumps(body)})
     return {"ok": True}
 
-@app.post("/admin/demo/reset", tags=["Admin"], summary="Reset demo data (NON-PROD only)")
+@app.post("/admin/demo/reset", tags=["Admin"], summary="Reset demo data (NON-PROD only)", include_in_schema=(not IS_PROD))
 async def admin_demo_reset(request: Request):
     _dev_only("demo reset")
 
@@ -9808,7 +9863,7 @@ async def create_user(
 
     return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
-@app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)")
+@app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)", include_in_schema=(not IS_PROD))
 async def admin_demo_seed(request: Request):
     _dev_only("demo seed")
 
@@ -14019,18 +14074,6 @@ async def _ensure_multitenant_columns():
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
 
-# ===== Environment: single source of truth =====
-ENV = os.getenv("ENV", "development").lower().strip()
-IS_PROD = (ENV == "production")
-IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
-
-def _env_bool(name: str, default: str = "0") -> bool:
-    return os.getenv(name, default).lower().strip() in ("1", "true", "yes", "y", "on")
-
-def _is_prod() -> bool:
-    return IS_PROD
-# ===== Environment: single source of truth =====
-
 # -------- Permission helpers --------
 async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
     if not (user_id and tenant_id):
@@ -14057,6 +14100,40 @@ async def _ensure_org_exists(org: str) -> None:
     except Exception:
         # never block hot paths on org registry noise
         pass
+
+def _verify_admin_override(request: Request, member: str) -> bool:
+    """
+    ICE-grade admin override:
+      - In production: requires HMAC signature + timestamp (short TTL)
+      - In non-prod: allow (dev convenience)
+    Headers:
+      X-Admin-Override-Ts: unix seconds
+      X-Admin-Override-Sig: hex hmac-sha256(secret, f"{member}:{ts}")
+    """
+    if not IS_PROD:
+        return True
+
+    secret = (os.getenv("ADMIN_OVERRIDE_SECRET") or "").strip()
+    if not secret:
+        return False  # fail-closed in prod
+
+    ts = (request.headers.get("X-Admin-Override-Ts") or "").strip()
+    sig = (request.headers.get("X-Admin-Override-Sig") or "").strip()
+    if not ts or not sig:
+        return False
+
+    try:
+        ts_i = int(ts)
+    except Exception:
+        return False
+
+    now = int(time.time())
+    if abs(now - ts_i) > 60:
+        return False
+
+    msg = f"{member}:{ts_i}".encode("utf-8")
+    want = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, sig)
 
 def _slugify_member(member: str) -> str:
     """
@@ -14112,9 +14189,10 @@ def current_member_from_request(request: Request) -> Optional[str]:
 
     # Production rules
     if prod:
-        if role == "admin" and q_member:
-            return q_member  # admin override wins in prod
-        return sess_member  # non-admin OR admin without override: session only
+        # Admin override only with signed proof (HMAC + TTL)
+        if role == "admin" and q_member and _verify_admin_override(request, q_member):
+            return q_member
+        return sess_member  # session only in prod unless signed override
 
     # Non-prod rules
     return sess_member or q_member
