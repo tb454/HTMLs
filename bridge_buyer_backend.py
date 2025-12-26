@@ -727,7 +727,7 @@ def _require_qbo_relay_auth(request: Request):
 # ===== Trusted hosts + session cookie =====
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
-prod = os.getenv("ENV", "development").lower() == "production"
+prod = IS_PROD
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 
 # When BRIDGE_BOOTSTRAP_DDL=0 in the environment, we will NOT run any of the
@@ -743,9 +743,9 @@ def _is_prod() -> bool:
     return os.getenv("ENV", "").lower() == "production"
 
 def _dev_only(reason: str = "dev-only"):
-    # fail closed in prod
     if _is_prod():
-        raise HTTPException(status_code=403, detail=f"{reason} disabled in production")
+        # Must look like the route does not exist in prod
+        raise HTTPException(status_code=404, detail="Not Found")
 
 def _allow_test_login_bypass() -> bool:
     # Explicit allowlist; must be OFF in prod.
@@ -11898,7 +11898,7 @@ async def _manual_upsert_absolute_tx(
             qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
           )
           VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW(),:tenant_id)
-          ON CONFLICT (seller, sku) DO NOTHING
+          ON CONFLICT DO NOTHING
         """, {
             "s": s,
             "k": k_norm,
@@ -11950,12 +11950,12 @@ async def _manual_upsert_absolute_tx(
     await database.execute("""
       INSERT INTO inventory_movements (
         seller, sku, movement_type, qty,
-        uom, ref_contract, contract_id_uuid, bol_id_uuid,
+        uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
         meta, tenant_id, created_at
       )
       VALUES (
         :seller, :sku, :mt, :qty,
-        :uom, :ref_contract, :cid_uuid, :bid_uuid,
+        :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
         CAST(:meta AS jsonb), :tenant_id, NOW()
       )
     """, {
@@ -14018,6 +14018,18 @@ async def _ensure_multitenant_columns():
     ALTER TABLE dossier_ingest_queue
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
+
+# ===== Environment: single source of truth =====
+ENV = os.getenv("ENV", "development").lower().strip()
+IS_PROD = (ENV == "production")
+IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).lower().strip() in ("1", "true", "yes", "y", "on")
+
+def _is_prod() -> bool:
+    return IS_PROD
+# ===== Environment: single source of truth =====
 
 # -------- Permission helpers --------
 async def _has_perm(user_id: str, tenant_id: str | None, perm: str) -> bool:
@@ -16844,12 +16856,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                         await database.execute("""
                             INSERT INTO inventory_movements (
                                 seller, sku, movement_type, qty,
-                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                                uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
                                 meta, tenant_id, created_at
                             )
                             VALUES (
                                 :seller, :sku, :mt, :qty,
-                                :uom, :ref_contract, :cid_uuid, :bid_uuid,
+                                :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
                                 CAST(:meta AS jsonb), :tenant_id, NOW()
                             )
                         """, {
@@ -16887,12 +16899,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
                     :seller, :sku, :mt, :qty,
-                    :uom, :ref_contract, :cid_uuid, :bid_uuid,
+                    :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
                     CAST(:meta AS jsonb), :tenant_id, NOW()
                 )
             """, {
@@ -18317,12 +18329,12 @@ async def cancel_contract(contract_id: str):
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
                     :seller, :sku, 'unreserve', :qty,
-                    'ton', :ref_contract, :cid_uuid, NULL,
+                    'ton', :ref_contract_text, :cid_uuid, NULL,
                     CAST(:meta AS jsonb), NULL, NOW()
                 )
             """, {
