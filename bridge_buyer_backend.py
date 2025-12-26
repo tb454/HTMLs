@@ -14003,20 +14003,8 @@ def _slugify_member(member: str) -> str:
     return m.strip("-") or m
 
 def current_member_from_request(request: Request) -> Optional[str]:
-    """
-    Tenant identity rules:
-
-    - In production:
-        - Non-admin: MUST come from session only (query-string cannot override).
-        - Admin: MAY override via query-string (e.g. ?member=...) for investigations.
-          If no override is provided, session is used.
-
-    - In non-production:
-        - Prefer session if present, else allow query-string (dev convenience).
-    """
     prod = os.getenv("ENV", "").lower() == "production"
 
-    # Safely read role + session
     role = ""
     sess_member = None
     if hasattr(request, "session"):
@@ -14033,7 +14021,7 @@ def current_member_from_request(request: Request) -> Optional[str]:
         except Exception:
             sess_member = None
 
-    # Read possible query override
+    # Read possible query override (allowed only in non-prod)
     q_member = None
     try:
         qp = getattr(request, "query_params", None)
@@ -14046,13 +14034,11 @@ def current_member_from_request(request: Request) -> Optional[str]:
     except Exception:
         q_member = None
 
-    # Production rules
     if prod:
-        if role == "admin" and q_member:
-            return q_member  # admin override
-        return sess_member  # non-admin OR admin without override: session only
+        # ✅ HARD RULE: production always uses session identity; query params never override.
+        return sess_member
 
-    # Non-prod rules
+    # non-prod convenience
     return sess_member or q_member
 
 async def current_tenant_id(request: Request) -> Optional[str]:
