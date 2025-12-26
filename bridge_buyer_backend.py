@@ -1229,40 +1229,9 @@ async def trader_page(request: Request):
 
 trader_router = APIRouter(prefix="/trader", tags=["Trader"])
 
-class BookLevel(BaseModel):
-    price: Decimal
-    qty_lots: Decimal
-
 class BookSide(BaseModel):
     price: float
     qty_lots: float
-
-class BookSnapshot(BaseModel):
-    bids: List[BookSide]
-    asks: List[BookSide]
-
-@trader_router.get("/book")
-async def get_book(symbol: str = Query(...)):
-    rows = await database.fetch_all(
-        """
-        SELECT price, side, SUM(qty_open) AS qty_open
-        FROM clob_orders
-        WHERE symbol = :sym AND status = 'open'
-        GROUP BY price, side
-        """,
-        {"sym": symbol},
-    )
-    bids, asks = [], []
-    for r in rows:
-        d = dict(r)
-        lvl = {"price": d["price"], "qty_lots": d["qty_open"]}
-        if d["side"] == "buy":
-            bids.append(lvl)
-        else:
-            asks.append(lvl)
-    bids.sort(key=lambda x: x["price"], reverse=True)
-    asks.sort(key=lambda x: x["price"])
-    return {"symbol": symbol, "bids": bids, "asks": asks}
 
 class TraderOrder(BaseModel):
     symbol_root: Optional[str] = None
@@ -3722,7 +3691,7 @@ class HedgeRec(BaseModel):
     suggested_lots: float
 
 @yard_rules_router.get("/hedge/recommendations", response_model=List[HedgeRec])
-async def hedge_recommendations(yard: str):
+async def hedge_recommendations_simple(yard: str):
     """
     Very simple hedge recs: look at inventory_items for this seller,
     join yard_rules for target_hedge_ratio and min_tons, assume 20t per lot.
@@ -4980,7 +4949,7 @@ class ApplicationRow(BaseModel):
     is_reviewed: bool
 
 @onboard_router.get("/applications", response_model=List[ApplicationRow])
-async def list_applications(reviewed: Optional[bool] = None):
+async def list_onboarding_applications(reviewed: Optional[bool] = None):
     q = """
       SELECT application_id AS id,
              created_at,
@@ -5542,7 +5511,7 @@ class ProductRow(BaseModel):
     quality: dict
 
 @products_router.get("", response_model=List[ProductRow])
-async def list_products():
+async def list_products_catalog():
     rows = await database.fetch_all(
         "SELECT symbol, description, unit, quality FROM products ORDER BY symbol"
     )
@@ -13728,112 +13697,6 @@ async def update_yard_hedge_rule(
     return YardHedgeRuleOut(**dict(row))
 app.include_router(yard_router)
 
-# ---------- Yard Profiles / Pricing / Hedge Models ----------
-class YardProfileBase(BaseModel):
-    yard_code: str
-    name: str
-    city: Optional[str] = None
-    region: Optional[str] = None
-    default_currency: str = "USD"
-    default_hedge_ratio: float = 0.6  # 60%
-
-class YardProfileCreate(YardProfileBase):
-    pass
-
-class YardProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    city: Optional[str] = None
-    region: Optional[str] = None
-    default_currency: Optional[str] = None
-    default_hedge_ratio: Optional[float] = None
-
-class YardProfileOut(YardProfileBase):
-    id: UUID
-    created_at: datetime
-
-    class Config:
-        from_attributes = True  # pydantic v2 style
-        # If you’re still on v1, use: orm_mode = True
-
-
-class YardPricingRuleBase(BaseModel):
-    material: str
-    formula: str                       # e.g. 'COMEX - 0.10 - freight - fee'
-    loss_min_pct: float = 0.0
-    loss_max_pct: float = 0.08
-    min_margin_usd_ton: float = 0.0
-    active: bool = True
-
-class YardPricingRuleCreate(YardPricingRuleBase):
-    pass
-
-class YardPricingRuleUpdate(BaseModel):
-    material: Optional[str] = None
-    formula: Optional[str] = None
-    loss_min_pct: Optional[float] = None
-    loss_max_pct: Optional[float] = None
-    min_margin_usd_ton: Optional[float] = None
-    active: Optional[bool] = None
-
-class YardPricingRuleOut(YardPricingRuleBase):
-    id: UUID
-    yard_id: UUID
-    updated_at: datetime
-
-
-class YardHedgeRuleBase(BaseModel):
-    material: str
-    min_tons: float
-    target_hedge_ratio: float          # 0–1
-    futures_symbol_root: str
-    auto_hedge: bool = False
-
-class YardHedgeRuleCreate(YardHedgeRuleBase):
-    pass
-
-class YardHedgeRuleUpdate(BaseModel):
-    material: Optional[str] = None
-    min_tons: Optional[float] = None
-    target_hedge_ratio: Optional[float] = None
-    futures_symbol_root: Optional[str] = None
-    auto_hedge: Optional[bool] = None
-
-class YardHedgeRuleOut(YardHedgeRuleBase):
-    id: UUID
-    yard_id: UUID
-    updated_at: datetime
-
-# ---------- Pricing & Hedge Helper Models ----------
-
-class PricingQuoteRequest(BaseModel):
-    yard_id: UUID
-    material: str
-    reference_symbol: Optional[str] = None   # e.g. "COMEX_HG"
-    reference_price: float                   # price per lb or per ton, your choice
-    tons: float
-
-
-class PricingQuoteResponse(BaseModel):
-    yard_id: UUID
-    material: str
-    reference_symbol: Optional[str] = None
-    reference_price: float
-    tons: float
-    price_per_ton: float
-    band_low: float
-    band_high: float
-    formula: str
-
-
-class HedgeRecommendationOut(BaseModel):
-    material: str
-    on_hand_tons: float
-    target_hedge_ratio: float
-    current_hedged_tons: float
-    hedge_more_tons: float
-    hedge_more_lots: int
-    futures_symbol_root: str
-
 # -------- Contracts & BOLs --------
 class BOLIn(BaseModel):
     contract_id: uuid.UUID
@@ -16344,9 +16207,18 @@ async def quote_from_formula(body: PricingQuoteRequest):
     return resp
 # ---------- Pricing Helper Endpoint ----------
 
-# ---------- Hedge Recommendation Endpoint ----------
+# ----- Hedge Recommendation Endpoint ----------
 
 HEDGE_TAG = ["Hedge"]
+
+class HedgeRecommendationOut(BaseModel):
+    material: str
+    on_hand_tons: float
+    target_hedge_ratio: float
+    current_hedged_tons: float
+    hedge_more_tons: float
+    hedge_more_lots: int
+    futures_symbol_root: str
 
 @app.get(
     "/hedge/recommendations/by_yard_id",
@@ -16360,7 +16232,7 @@ HEDGE_TAG = ["Hedge"]
     ),
     status_code=200,
 )
-async def hedge_recommendations(yard_id: UUID):
+async def hedge_recommendations_by_yard_id(yard_id: UUID):
     yard_row = await database.fetch_one(
         "SELECT id, name FROM yard_profiles WHERE id = :yard_id",
         {"yard_id": str(yard_id)},
@@ -17607,7 +17479,7 @@ class AdminApplicationRow(BaseModel):
     ref_code: Optional[str] = None
 
 @app.get("/admin/applications", tags=["Admin"], response_model=List[AdminApplicationRow], summary="List applications")
-async def list_applications(limit: int = 200):
+async def list_admin_applications(limit: int = 200):
     try:
         rows = await database.fetch_all(
             """
@@ -18538,7 +18410,7 @@ async def publish_mark(body: PublishMarkIn):
     return {"listing_id": body.listing_id, "mark_date": str(body.mark_date or _date.today()), "mark_price": mark_price, "method": method}
 
 @futures_router.get("/products", summary="List products")
-async def list_products():
+async def list_futures_products_admin():
     rows = await database.fetch_all("""
         SELECT 
             id::text AS id,  -- Cast UUID to text to prevent Pydantic validation errors
