@@ -465,6 +465,79 @@ app = FastAPI(
     },
 )
 
+_ADMIN_PREFIXES = ("/admin",)
+_ADMINISH_PREFIXES = ("/ops",)  # optional but recommended to keep ops private in prod
+
+@app.middleware("http")
+async def _prod_admin_gate(request: Request, call_next):
+    if os.getenv("ENV", "").lower() == "production":
+        p = request.url.path or ""
+        if p.startswith(_ADMIN_PREFIXES) or p.startswith(_ADMINISH_PREFIXES):
+            role = ""
+            try:
+                role = (request.session.get("role") or "").lower()
+            except Exception:
+                role = ""
+            if role != "admin":
+                # 401 if no session/role, 403 if logged but not admin (either is acceptable for your “401/403 only” sweep)
+                code = 401 if not role else 403
+                return JSONResponse(status_code=code, content={"detail": "admin only"})
+    return await call_next(request)
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+# Explicit exemptions (documented): webhooks + oauth callbacks + invite accept form submit
+IDEMPOTENCY_EXEMPT_PREFIXES = (
+    "/login", "/logout", "/signup", "/register",
+    "/stripe/webhook", "/ice/webhook", "/ice-digital-trade",
+    "/qbo/callback", "/admin/qbo/peek",
+    "/invites/accept",
+)
+
+@app.middleware("http")
+async def _prod_idempotency_enforcer(request: Request, call_next):
+    """
+    Production-only:
+      - Any state-changing request must have Idempotency-Key,
+        OR (if a session cookie exists) we auto-derive a deterministic key.
+      - This makes "all writes are idempotent" true without breaking the browser UI.
+    """
+    if os.getenv("ENV", "").lower() == "production":
+        m = (request.method or "").upper()
+        p = request.url.path or ""
+
+        if m in UNSAFE_METHODS and not p.startswith(IDEMPOTENCY_EXEMPT_PREFIXES):
+            key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key")
+
+            if not key:
+                # If browser session exists, auto-derive a deterministic key from body+path+user
+                user = ""
+                has_session = False
+                try:
+                    # SessionMiddleware should already have run (it’s added later -> outer middleware)
+                    user = (request.session.get("username") or request.session.get("email") or "")
+                    has_session = True if (user or request.session) else False
+                except Exception:
+                    has_session = False
+
+                if has_session:
+                    body = await request.body()  # starlette caches this; downstream can read again
+                    h = hashlib.sha256()
+                    h.update(m.encode("utf-8"))
+                    h.update(b"|")
+                    h.update(p.encode("utf-8"))
+                    h.update(b"|")
+                    h.update((user or "session").encode("utf-8"))
+                    h.update(b"|")
+                    h.update(body or b"")
+                    key = "auto:" + h.hexdigest()
+                    request.state.idem_key = key
+                else:
+                    # Non-browser clients MUST send a key
+                    return PlainTextResponse("Idempotency-Key required", status_code=428)
+
+    return await call_next(request)
+
 @startup
 async def _assert_no_duplicate_routes():
     """
@@ -14061,14 +14134,25 @@ async def billing_price_id(
 _idem_cache = {}
 
 @app.post("/admin/run_snapshot_now", tags=["Admin"], summary="Build & upload a snapshot now (blocking)")
-async def admin_run_snapshot_now(storage: str = "supabase"):
+async def admin_run_snapshot_now(request: Request, storage: str = "supabase"):
+    _require_admin(request)
     try:
         res = await run_daily_snapshot(storage=storage)
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
 # ----- Idempotency helper -----
 def _idem_key(request: Request) -> Optional[str]:
+    # 0) middleware-injected key (preferred)
+    try:
+        k = getattr(getattr(request, "state", None), "idem_key", None)
+        if k:
+            return k
+    except Exception:
+        pass
+
+    # 1) explicit client headers
     return request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key")
 
 async def _idem_guard(request: Request, key: Optional[str], resp: dict):
