@@ -8288,6 +8288,25 @@ async def store_perf_floor(body: dict, request: Request):
       ON CONFLICT (key) DO UPDATE SET value=:v, updated_at=NOW()
     """, {"v": json.dumps(body)})
     return {"ok": True}
+
+@app.post("/admin/demo/reset", tags=["Admin"], summary="Reset demo data (NON-PROD only)")
+async def admin_demo_reset(request: Request):
+    if os.getenv("ENV","").lower() == "production":
+        raise HTTPException(403, "disabled in production")
+
+    demo_slug = "demo-yard"
+    t = await database.fetch_one("SELECT id FROM tenants WHERE slug=:s", {"s": demo_slug})
+    if not t:
+        return {"ok": True, "note": "no demo tenant"}
+
+    tid = t["id"]
+    # best-effort deletes
+    await database.execute("DELETE FROM bols WHERE tenant_id=:t", {"t": tid})
+    await database.execute("DELETE FROM contracts WHERE tenant_id=:t", {"t": tid})
+    await database.execute("DELETE FROM inventory_items WHERE tenant_id=:t", {"t": tid})
+    await database.execute("DELETE FROM tenants WHERE id=:t", {"t": tid})
+    return {"ok": True}
+
 # -------- Pricing & Indices Routers -------------------------
 async def _fetch_base(symbol: str):
     """
@@ -20596,7 +20615,7 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
         if not (os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE")):
             return {"ok": True, "skipped": "supabase env missing", "path": path}
         res = await _upload_to_supabase(path, data)
-        return {**res, "sha256": sha}
+        return {**res, "sha256": sha256}
 
     except Exception as e:
         try:

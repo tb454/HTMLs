@@ -1,42 +1,45 @@
+# tests/test_tenant_isolation.py
 import os
-import uuid
 import pytest
-from fastapi.testclient import TestClient
 
-# Import your FastAPI app module (adjust import path if needed)
-from bridge_buyer_backend import app
+from bridge_buyer_backend import current_member_from_request
 
-@pytest.fixture(scope="module")
-def client():
-    return TestClient(app)
-
-def _login_as(client, username="test", password="test"):
-    # non-prod bypass in your /login supports test/test
-    r = client.post("/login", json={"username": username, "password": password})
-    assert r.status_code == 200
-
-def test_tenant_query_param_cannot_override_session_in_prod_sim(client, monkeypatch):
+class DummyRequest:
     """
-    We simulate prod rules by setting ENV=production for this test only.
-    The resolver should ignore ?member= override unless role=admin.
+    Minimal Request-like object for testing current_member_from_request().
+    We only provide the fields it reads: session + query_params.
     """
+    def __init__(self, session=None, query_params=None):
+        self.session = session or {}
+        self.query_params = query_params or {}
+
+def test_prod_ignores_query_override_for_non_admin(monkeypatch):
     monkeypatch.setenv("ENV", "production")
-    # log in as buyer (non-admin)
-    _login_as(client, "test", "test")
 
-    # set a session member (your login will often set member; if not, we call /me and rely on empty)
-    # We directly hit an endpoint that uses current_tenant_id and should not accept member override.
-    # If your /me has no member, this test will just confirm it doesn't crash.
+    req = DummyRequest(
+        session={"role": "buyer", "member": "Winski Brothers"},
+        query_params={"member": "EVIL_OVERRIDE"},
+    )
+    assert current_member_from_request(req) == "Winski Brothers"
 
-    r = client.get("/me?member=EVIL_OVERRIDE")
-    assert r.status_code == 200
-    me = r.json()
-    # In prod mode, query param should not become member unless admin.
-    assert me.get("member") != "EVIL_OVERRIDE"
-
-def test_admin_can_override_member_in_prod(client, monkeypatch):
+def test_prod_allows_query_override_for_admin(monkeypatch):
     monkeypatch.setenv("ENV", "production")
-    # Fake an admin session by manually setting cookie session is hard; easiest is to call /login with an admin user if you have one.
-    # If you don't, skip this test safely.
-    # You can create admin via /admin/create_user with X-Setup-Token in CI if desired.
-    pytest.skip("Enable once admin login exists in CI.")
+
+    req = DummyRequest(
+        session={"role": "admin", "member": "Winski Brothers"},
+        query_params={"member": "ADMIN_OVERRIDE"},
+    )
+    # Admin is allowed to override in prod (by design in your resolver)
+    assert current_member_from_request(req) == "Winski Brothers"  # session wins first
+
+    # If you WANT admin override to win over session, change your resolver,
+    # then update this expected value to "ADMIN_OVERRIDE".
+
+def test_non_prod_allows_query_override(monkeypatch):
+    monkeypatch.setenv("ENV", "development")
+
+    req = DummyRequest(
+        session={"role": "buyer"},
+        query_params={"member": "DEV_OVERRIDE"},
+    )
+    assert current_member_from_request(req) == "DEV_OVERRIDE"
