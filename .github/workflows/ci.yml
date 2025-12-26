@@ -24,6 +24,7 @@ jobs:
       SESSION_SECRET: test-secret
       JWT_SECRET: test-jwt
       STRIPE_SECRET: ""
+      BRIDGE_TEST_DB: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +41,16 @@ jobs:
           pip install pytest fastapi "sqlalchemy" "asyncpg" "psycopg[binary]" \
                       reportlab itsdangerous slowapi structlog \
                       prometheus-client sentry-sdk python-multipart uvicorn \
-                      "databases[postgres]" passlib[bcrypt] python-dotenv requests psycopg
+                      "databases[postgres]" passlib[bcrypt] python-dotenv requests
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..40}; do
+            pg_isready -h localhost -p 5432 -U postgres && exit 0
+            sleep 1
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
 
       - name: Bootstrap CI DB
         run: |
@@ -48,11 +58,18 @@ jobs:
           import os, psycopg
           with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as con:
               con.execute("""
-              CREATE TABLE IF NOT EXISTS idempotency_keys (key text PRIMARY KEY, created_at timestamptz DEFAULT now());
+              CREATE TABLE IF NOT EXISTS idempotency_keys (
+                key text PRIMARY KEY,
+                created_at timestamptz DEFAULT now()
+              );
+
               CREATE TABLE IF NOT EXISTS webhook_events (
                 id bigserial PRIMARY KEY,
-                source text, headers_json jsonb, body_json jsonb,
-                signature_valid boolean, created_at timestamptz DEFAULT now()
+                source text,
+                headers_json jsonb,
+                body_json jsonb,
+                signature_valid boolean,
+                created_at timestamptz DEFAULT now()
               );
               """)
           PY

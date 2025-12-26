@@ -6,49 +6,55 @@ import pathlib
 import pytest
 from fastapi.testclient import TestClient
 
-# --- 1) Point Python at your repo root so we can import the backend ---
-THIS_FILE = pathlib.Path(__file__).resolve()
-REPO_ROOT = THIS_FILE.parents[1]  # .../HTMLs
-sys.path.insert(0, str(REPO_ROOT))
-
-# --- 2) CI env + DB DSN *before* importing the backend module ---
+# -------------------------------------------------------------------
+# 0) Environment MUST be set BEFORE importing the backend module
+# -------------------------------------------------------------------
 os.environ.setdefault("ENV", "ci")
-# Adjust DB name if your CI service uses a different one
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/bridge",
-)
+os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/bridge")
+
+# ✅ required for your backend to connect DB under pytest
+os.environ.setdefault("BRIDGE_TEST_DB", "1")
+
 # Optional but harmless: make sure DDL bootstraps run in CI
 os.environ.setdefault("BRIDGE_BOOTSTRAP_DDL", "1")
 os.environ.setdefault("INIT_DB", "1")
+
 # Kill Stripe / external integrations in CI
 os.environ.setdefault("ENABLE_STRIPE", "0")
 os.environ.setdefault("DOSSIER_SYNC", "0")
 
-# --- 3) Import the real backend app ---
-# If your file is named differently, change this to `import backend as bridge_buyer_backend`
+# -------------------------------------------------------------------
+# 1) Point Python at repo root
+# -------------------------------------------------------------------
+THIS_FILE = pathlib.Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[1]  # .../HTMLs
+sys.path.insert(0, str(REPO_ROOT))
+
+# -------------------------------------------------------------------
+# 2) Import the real backend app
+# -------------------------------------------------------------------
+# If your file is named differently, change this to: `import backend as backend`
 import bridge_buyer_backend as backend
 
 app = backend.app
 
-# --- 4) Patch auth/permissions so tests don't get 401/403 ---
-
-# All your protected endpoints call `await require_perm(request, "perm")`.
-# For CI, we just no-op it.
+# -------------------------------------------------------------------
+# 3) Patch auth/permissions so tests don't get 401/403
+# -------------------------------------------------------------------
 async def _require_perm_noop(request, perm: str):
     return None
 
 backend.require_perm = _require_perm_noop  # monkey-patch in the module
 
 
-# Admin-only endpoints use `_require_admin(request)`; no-op that too.
 def _require_admin_noop(request):
     return None
 
 backend._require_admin = _require_admin_noop  # monkey-patch in the module
 
-
-# --- 5) Shared TestClient fixture (starts FastAPI lifespan/startup once) ---
+# -------------------------------------------------------------------
+# 4) Shared TestClient fixture (starts FastAPI lifespan/startup once)
+# -------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def client():
     """
@@ -59,8 +65,9 @@ def client():
     with TestClient(app) as c:
         yield c
 
-
-# --- 6) Seed minimal inventory so contracts/BOL tests don't 409 ---
+# -------------------------------------------------------------------
+# 5) Seed minimal inventory so contracts/BOL tests don't 409
+# -------------------------------------------------------------------
 @pytest.fixture(scope="session", autouse=True)
 def seed_inventory(client: TestClient):
     """
@@ -92,5 +99,4 @@ def seed_inventory(client: TestClient):
         ],
     }
     r = client.post("/inventory/bulk_upsert", json=payload)
-    # Don't hard-fail CI on this, but assert in case something is really broken
     assert r.status_code == 200, f"Inventory seed failed: {r.status_code} {r.text}"
