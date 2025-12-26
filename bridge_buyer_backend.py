@@ -31,6 +31,7 @@ import tempfile
 import pathlib
 from typing import Any, Dict  
 import json, hashlib, base64, hmac
+import traceback
 from passlib.hash import bcrypt as passlib_bcrypt
 from dotenv import load_dotenv
 from reportlab.lib.pagesizes import LETTER
@@ -289,8 +290,16 @@ _STARTUPS: list = []
 _SHUTDOWNS: list = []
 
 def startup(fn):
-    _STARTUPS.append(fn)
+    """
+    Startup hook registry.
+    - Enforces _connect_db_first as the *first* startup hook (single source of truth).
+    """
+    if fn.__name__ == "_connect_db_first":
+        _STARTUPS.insert(0, fn)
+    else:
+        _STARTUPS.append(fn)
     return fn
+
 
 def shutdown(fn):
     _SHUTDOWNS.append(fn)
@@ -303,10 +312,7 @@ async def _run_callable(fn):
     return await fn() if inspect.iscoroutinefunction(fn) else fn()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # ensure databases backend is live (required for database.execute / database.fetch)
-    if not database.is_connected:
-        await database.connect()
+async def lifespan(app: FastAPI):    
     # ensure the registry exists before any startup hook can append to it
     app.state._bg_tasks = getattr(app.state, "_bg_tasks", [])
     # 1) startup hooks
@@ -426,6 +432,36 @@ app = FastAPI(
     },
 )
 
+@startup
+async def _assert_no_duplicate_routes():
+    """
+    ICE readiness: fail fast if we accidentally register two handlers for the same (method,path).
+    """
+    prod = os.getenv("ENV", "").lower() == "production"
+    seen = {}
+    dups = []
+
+    for r in app.routes:
+        path = getattr(r, "path", None)
+        methods = getattr(r, "methods", None)
+        if not path or not methods:
+            continue
+        for m in sorted(list(methods)):
+            key = (m, path)
+            if key in seen:
+                dups.append({"method": m, "path": path, "first": seen[key], "second": getattr(r, "name", "")})
+            else:
+                seen[key] = getattr(r, "name", "")
+
+    if dups:
+        msg = f"Duplicate route definitions detected: {dups[:10]} (showing first 10)"
+        try:
+            logger.error("duplicate_routes", dups=dups)
+        except Exception:
+            pass
+        if prod:
+            raise RuntimeError(msg)
+
 # -----  Apply Page Relaxed for Stripe Access ----
 BASE_DIR = Path(__file__).resolve().parent
 APPLY_PATH = (BASE_DIR / "static" / "apply.html")
@@ -531,7 +567,7 @@ async def _utf8_and_cache_headers(request, call_next):
     return resp
 
 instrumentator = Instrumentator()
-instrumentator.instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+instrumentator.instrument(app).expose(app, endpoint="internal/metrics", include_in_schema=False)
 # ---- Ensure Cache-Control exists on every GET/HEAD -------
 
 # === QBO OAuth Relay • Config ===
@@ -556,6 +592,14 @@ allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 # when pointing at a managed schema (e.g. Supabase) that already has these
 # tables defined.
 BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
+
+@startup
+async def _assert_bootstrap_disabled_in_prod():
+    """
+    Production must treat the DB as managed (migrations outside the app).
+    """
+    if os.getenv("ENV", "").lower() == "production" and BOOTSTRAP_DDL:
+        raise RuntimeError("BRIDGE_BOOTSTRAP_DDL must be 0 in production (managed schema / migrations discipline).")
 
 if not prod or allow_local:
     allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
@@ -811,15 +855,8 @@ async def prices_copper_last():
             "source": "cache",
         }
 
-    # 0.5) Make sure the async DB client is connected; if this fails, we still fall back.
-    try:
-        if not database.is_connected:
-            await database.connect()
-    except Exception as e:
-        try:
-            logger.warn("prices_copper_last_connect_error", err=str(e))
-        except Exception:
-            pass
+    # 0.5) Never connect in request path (prod discipline).
+    if not database.is_connected:
         last = 4.25
         _PRICE_CACHE["copper_last"] = last
         _PRICE_CACHE["ts"] = now
@@ -827,7 +864,7 @@ async def prices_copper_last():
             "last": last,
             "base_minus_025": round(last - 0.25, 4),
             "source": "fallback",
-            "note": "db connect failed; using static default",
+            "note": "db not connected; startup should connect",
         }
 
     # 1) Pull latest COMEX_CU from reference_prices
@@ -1105,22 +1142,6 @@ trader_router = APIRouter(prefix="/trader", tags=["Trader"])
 class BookLevel(BaseModel):
     price: Decimal
     qty_lots: Decimal
-
-
-class TraderOrder(BaseModel):
-    order_id: str
-    symbol: str
-    side: str
-    price: Decimal
-    qty_lots: Decimal
-    qty_open: Decimal
-    status: str
-    created_at: datetime
-
-
-class TraderPosition(BaseModel):
-    symbol: str
-    net_lots: Decimal
 
 class BookSide(BaseModel):
     price: float
@@ -1968,37 +1989,53 @@ async def locale_middleware(request: Request, call_next):
 # ===== Startup DB connect + bootstrap =====
 @startup
 async def startup_bootstrap_and_connect():
+    """
+    NON-PROD bootstrap only.
+
+    IMPORTANT:
+    - No DB connect here (single source of truth is _connect_db_first)
+    - Only runs optional bootstrap helpers in dev/ci/test/staging
+    """
     env = os.getenv("ENV", "").lower()
     init_flag = os.getenv("INIT_DB", "0").lower() in ("1", "true", "yes")
+
+    # never bootstrap in prod
     if env in {"production", "prod"}:
         return
-    
+
     # Respect managed schema (Supabase): never run local bootstraps when disabled.
     if not BOOTSTRAP_DDL:
-        try:
-            await database.connect()
-        except Exception:
-            pass
         return
-    
-    # 1) Target database BEFORE touching `engine` or any bootstrap that uses it
-    try:
-        _ensure_database_exists(SYNC_DATABASE_URL.replace("+psycopg", "")) 
-    except Exception:
-        pass
 
-    # 2) Safe to run any sync bootstraps that use `engine` 
-    if env in {"ci", "test", "staging"} or init_flag:
+    # Optional local/CI schema helpers (safe)
+    if env in {"ci", "test", "testing", "staging", "development", "dev"} or init_flag:
         try:
             _bootstrap_prices_indices_schema_if_needed(engine)
         except Exception as e:
-            print(f"[bootstrap] non-fatal init error: {e}")
+            try:
+                logger.warn("bootstrap_prices_indices_failed", err=str(e))
+            except Exception:
+                pass
 
-    # 3) Bring up the async connection/pool
-    try:
-        await database.connect()
-    except Exception as e:
-        print(f"[startup] database connect failed: {e}")
+@startup
+async def _assert_no_duplicate_endpoint_names():
+    if os.getenv("ENV","").lower() != "production":
+        return
+
+    seen = {}
+    dups = []
+    for r in app.routes:
+        name = getattr(r, "name", None)
+        path = getattr(r, "path", None)
+        if not name or not path:
+            continue
+        if name in seen and seen[name] != path:
+            dups.append({"name": name, "first_path": seen[name], "second_path": path})
+        else:
+            seen[name] = path
+
+    if dups:
+        raise RuntimeError(f"Duplicate route names detected: {dups[:10]}")
 # ===== Startup DB connect + bootstrap =====
 
 # ------- DB ensure-database-exists (for local/CI) -------
@@ -3179,6 +3216,39 @@ async def _create_db_if_missing_async(db_url: str) -> None:
         pass
 # ---------- Create database (dev/test/CI)------------
 
+# ===================== PERF / POOL ASSERTS (I) =====================
+
+@startup
+async def _assert_pool_sizing():
+    """
+    Enforce sane pool sizing in production.
+    - sync SQLAlchemy: DB_POOL_SIZE / DB_MAX_OVERFLOW
+    - async asyncpg:   ASYNC_POOL_MAX (default 5 currently; make explicit)
+    """
+    if os.getenv("ENV", "").lower() != "production":
+        return
+
+    # SQLAlchemy pool expectations
+    try:
+        ps = int(os.getenv("DB_POOL_SIZE", "10"))
+        mo = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+        if ps < 5:
+            raise RuntimeError("DB_POOL_SIZE too small for production (min 5).")
+        if mo < 0:
+            raise RuntimeError("DB_MAX_OVERFLOW must be >= 0.")
+    except ValueError:
+        raise RuntimeError("DB_POOL_SIZE/DB_MAX_OVERFLOW must be integers.")
+
+    # asyncpg pool expectations (make it configurable)
+    try:
+        ap_max = int(os.getenv("ASYNC_POOL_MAX", "5"))
+        if ap_max < 5:
+            raise RuntimeError("ASYNC_POOL_MAX too small for production (min 5).")
+    except ValueError:
+        raise RuntimeError("ASYNC_POOL_MAX must be an integer.")
+
+# =========== PERF / POOL ASSERTS (I) ===============
+
 # =====  Database (async + sync) =====
 @startup
 async def _connect_db_first():
@@ -3192,7 +3262,8 @@ async def _connect_db_first():
             await database.connect()
         if getattr(app.state, "db_pool", None) is None:
             import asyncpg
-            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, min_size=1, max_size=5)
+            ap_max = int(os.getenv("ASYNC_POOL_MAX", "5"))
+            app.state.db_pool = await asyncpg.create_pool(ASYNC_DATABASE_URL, min_size=1, max_size=ap_max)
 
     try:
         await _do_connect()
@@ -7018,6 +7089,23 @@ async def _http_idem_ttl_job():
     app.state._bg_tasks.append(t)
 # ===== Total cleanup job =====
 
+@startup
+async def _ensure_backup_proof_table():
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS backup_proofs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      backend TEXT NOT NULL,              -- supabase|s3|other
+      path TEXT,                          -- object path/key
+      ok BOOLEAN NOT NULL DEFAULT TRUE,
+      details JSONB,                      -- response/status_code/error
+      sha256 TEXT                         -- optional hash of bytes (if computed)
+    );
+    CREATE INDEX IF NOT EXISTS idx_backup_proofs_ran_at ON backup_proofs(ran_at DESC);
+    """)
+
 # ===== Retention cron =====
 @startup
 async def _retention_cron():
@@ -7640,6 +7728,176 @@ def ops_deps():
       "platform": platform.platform(),
       "packages": {d.project_name: d.version for d in pkg_resources.working_set}
     }
+
+@app.get("/ops/smoke", tags=["Ops"], summary="Smoke test (no writes)", status_code=200)
+async def ops_smoke(request: Request):
+    """
+    Read-only smoke checks:
+      - DB reachable
+      - key tables exist
+      - quick counts
+      - tenant override protection sanity (prod)
+    """
+    if os.getenv("ENV","").lower() == "production":
+        _require_admin(request)
+
+    t0 = time.time()
+    out = {"ok": True, "checks": [], "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    async def _check(name: str, fn):
+        t = time.time()
+        try:
+            res = await fn()
+            out["checks"].append({"name": name, "ok": True, "ms": int((time.time()-t)*1000), "detail": res})
+        except Exception as e:
+            out["ok"] = False
+            out["checks"].append({"name": name, "ok": False, "ms": int((time.time()-t)*1000), "error": str(e)})
+
+    await _check("db_select_1", lambda: database.fetch_one("SELECT 1 AS ok"))
+    await _check("table_contracts_exists", lambda: database.fetch_one("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='contracts'"))
+    await _check("table_bols_exists", lambda: database.fetch_one("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='bols'"))
+    await _check("table_inventory_items_exists", lambda: database.fetch_one("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='inventory_items'"))
+    await _check("table_users_exists", lambda: database.fetch_one("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='users'"))
+
+    await _check("count_contracts", lambda: database.fetch_one("SELECT COUNT(*) AS c FROM contracts"))
+    await _check("count_bols", lambda: database.fetch_one("SELECT COUNT(*) AS c FROM bols"))
+
+    # tenant override sanity: in prod the query-string must not override session
+    async def _tenant_override_check():
+        prod = os.getenv("ENV","").lower() == "production"
+        if not prod:
+            return {"skipped": True}
+        # If session has a member, query param must NOT override
+        sess_member = (request.session.get("member") or request.session.get("org") or "").strip()
+        if not sess_member:
+            return {"skipped": True, "reason": "no session member"}
+        # simulate a query override attempt
+        # (we can only check resolver behavior directly)
+        resolved = current_member_from_request(request)
+        if resolved != sess_member:
+            raise RuntimeError(f"tenant override detected: resolved={resolved} session={sess_member}")
+        return {"session_member": sess_member, "resolved": resolved}
+
+    await _check("tenant_override_protection", _tenant_override_check)
+
+    out["ms_total"] = int((time.time()-t0)*1000)
+    return out
+
+@app.get("/ops/perf_floor", tags=["Ops"], summary="Perf floor (latency + basic indexed queries)")
+async def ops_perf_floor(request: Request):
+    """
+    Minimal perf contract:
+      - DB roundtrip p50-ish
+      - common queries return under a rough threshold
+    In production: admin-only.
+    """
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
+
+    import time as _tm
+    out = {"as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "ok": True, "checks": []}
+
+    async def _timeit(name: str, fn, warn_ms: int):
+        t0 = _tm.perf_counter()
+        try:
+            res = await fn()
+            ms = int((_tm.perf_counter() - t0) * 1000)
+            ok = ms <= warn_ms
+            out["checks"].append({"name": name, "ms": ms, "warn_ms": warn_ms, "ok": ok, "detail": res})
+            if not ok:
+                out["ok"] = False
+        except Exception as e:
+            ms = int((_tm.perf_counter() - t0) * 1000)
+            out["checks"].append({"name": name, "ms": ms, "warn_ms": warn_ms, "ok": False, "error": str(e)})
+            out["ok"] = False
+
+    # 1) DB round trip
+    await _timeit("db_select_1", lambda: database.fetch_one("SELECT 1 AS ok"), warn_ms=250)
+
+    # 2) contracts count (should be fast with basic table)
+    await _timeit("contracts_count", lambda: database.fetch_one("SELECT COUNT(*) AS c FROM contracts"), warn_ms=500)
+
+    # 3) latest contracts (uses created_at ordering; your indexes likely help)
+    await _timeit(
+        "contracts_latest_50",
+        lambda: database.fetch_all("SELECT id, created_at FROM contracts ORDER BY created_at DESC NULLS LAST LIMIT 50"),
+        warn_ms=600
+    )
+
+    # 4) latest bols (pickup_time ordering)
+    await _timeit(
+        "bols_latest_50",
+        lambda: database.fetch_all("SELECT bol_id, pickup_time FROM bols ORDER BY pickup_time DESC NULLS LAST LIMIT 50"),
+        warn_ms=600
+    )
+
+    # 5) view query (optional)
+    await _timeit(
+        "vendor_blend_latest_50",
+        lambda: database.fetch_all("SELECT material, blended_lb, vendor_count FROM v_vendor_blend_latest ORDER BY material LIMIT 50"),
+        warn_ms=800
+    )
+
+    return out
+
+def _plan_allowlist(name: str) -> str | None:
+    """
+    Allowlisted EXPLAIN targets only (no arbitrary SQL injection).
+    """
+    plans = {
+        "contracts_latest": "SELECT * FROM contracts ORDER BY created_at DESC NULLS LAST LIMIT 50",
+        "contracts_filter_status": "SELECT * FROM contracts WHERE status ILIKE 'Signed' ORDER BY created_at DESC NULLS LAST LIMIT 50",
+        "bols_latest": "SELECT * FROM bols ORDER BY pickup_time DESC NULLS LAST LIMIT 50",
+        "inventory_lookup": "SELECT * FROM inventory_items WHERE LOWER(seller)=LOWER('Winski Brothers') LIMIT 50",
+        "vendor_blend_view": "SELECT * FROM v_vendor_blend_latest ORDER BY material LIMIT 50",
+    }
+    return plans.get(name)
+
+@app.get("/ops/plan_sample", tags=["Ops"], summary="Query plan sample (EXPLAIN ANALYZE JSON)")
+async def ops_plan_sample(request: Request, name: str = Query(...)):
+    """
+    EXPLAIN ANALYZE is safe-ish but can be heavy on massive tables.
+    Keep it allowlisted and admin-only in production.
+    """
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
+
+    sql = _plan_allowlist(name)
+    if not sql:
+        raise HTTPException(422, "unknown plan name (allowlisted only)")
+
+    # Prefer asyncpg pool if present, else databases.execute
+    try:
+        pool = getattr(app.state, "db_pool", None)
+        if pool:
+            row = await pool.fetchrow("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql)
+            # asyncpg returns a single column 'QUERY PLAN' as json string sometimes
+            val = row[0]
+            try:
+                # val can already be parsed JSON
+                plan = val if isinstance(val, (dict, list)) else json.loads(val)
+            except Exception:
+                plan = val
+            return {"name": name, "sql": sql, "plan": plan}
+    except Exception:
+        pass
+
+    # fallback through databases
+    try:
+        row = await database.fetch_one("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql)
+        # databases might return key like 'QUERY PLAN'
+        plan_val = None
+        try:
+            plan_val = row.get("QUERY PLAN") if hasattr(row, "get") else row["QUERY PLAN"]
+        except Exception:
+            plan_val = dict(row).get("QUERY PLAN") if row else None
+        try:
+            plan = plan_val if isinstance(plan_val, (dict, list)) else json.loads(plan_val)
+        except Exception:
+            plan = plan_val
+        return {"name": name, "sql": sql, "plan": plan}
+    except Exception as e:
+        raise HTTPException(500, f"explain failed: {e}")
 # -------- Health --------
 
 # -------- Global --------
@@ -7716,7 +7974,321 @@ except Exception:
     pass
 # -------------------------------------------------------------------
 
-# -------- Pricing & Indices Routers (drop-in) -------------------------
+def _safe_env_snapshot() -> dict:
+    """
+    Safe env snapshot: excludes secrets by only including allowlisted keys.
+    """
+    allow = [
+        "ENV","BRIDGE_BOOTSTRAP_DDL","DB_POOL_SIZE","DB_MAX_OVERFLOW",
+        "ENFORCE_RATE_LIMIT","BILL_MODE","ENABLE_STRIPE","BILLING_PUBLIC_URL",
+        "SNAPSHOT_BACKEND","VENDOR_WATCH_ENABLED",
+    ]
+    return {k: os.getenv(k) for k in allow}
+
+async def _schema_fingerprint() -> dict:
+    rows = await database.fetch_all("""
+      SELECT table_name, column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema='public'
+      ORDER BY table_name, ordinal_position
+    """)
+    blob = json.dumps([dict(r) for r in rows], separators=(",", ":"), default=str)
+    return {"sha256": hashlib.sha256(blob.encode("utf-8")).hexdigest(), "columns": len(rows)}
+
+# ===================== OPS / FORENSICS (E) =====================
+
+def _redact_headers(headers: dict) -> dict:
+    """
+    Keep correlation headers + safe client hints; drop auth/cookies.
+    """
+    if not headers:
+        return {}
+    allow = {
+        "x-request-id",
+        "user-agent",
+        "content-type",
+        "accept",
+        "accept-language",
+        "origin",
+        "referer",
+        "x-forwarded-for",
+        "x-forwarded-proto",
+        "cf-connecting-ip",
+    }
+    out = {}
+    for k, v in headers.items():
+        lk = (k or "").lower()
+        if lk in allow:
+            out[k] = v
+    return out
+
+def _log_schema_doc() -> dict:
+    """
+    Single source of truth describing how to correlate events.
+    """
+    return {
+        "request_log_event": {
+            "event": "req",
+            "fields": {
+                "id": "X-Request-ID (uuid) also returned in response header",
+                "path": "request url path",
+                "method": "HTTP method",
+                "status": "HTTP status code",
+                "ms": "elapsed millis",
+            },
+            "correlate": [
+                "Search logs for `id=<RID>`",
+                "Use /admin/ops/forensics/lookup?rid=<RID> for pointers + DB crumbs",
+            ],
+        },
+        "notes": [
+            "Do NOT log secrets. Session cookies/auth headers are redacted.",
+            "In production, require X-Request-ID from upstream when possible; otherwise server mints it.",
+        ],
+    }
+
+@app.get("/admin/ops/log_schema.json", tags=["Admin"], summary="Log schema + correlation keys")
+async def admin_ops_log_schema(request: Request):
+    _require_admin(request)
+    return {"as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "schema": _log_schema_doc()}
+
+async def _db_meta_quick() -> dict:
+    """
+    Quick DB metadata for correlation (best-effort, never raises).
+    """
+    out = {"ok": True}
+    try:
+        r = await database.fetch_one("SELECT current_database() AS db, current_user AS usr, now() AS now")
+        if r:
+            out["current_database"] = r.get("db")
+            out["current_user"] = r.get("usr")
+            out["db_now"] = _to_utc_z(r.get("now"))
+    except Exception as e:
+        out["ok"] = False
+        out["error"] = str(e)
+    return out
+
+@app.get("/admin/ops/forensics/lookup", tags=["Admin"], summary="Request-ID correlation pointers")
+async def admin_ops_forensics_lookup(request: Request, rid: str = Query(..., min_length=8, max_length=128)):
+    """
+    This does NOT read application logs (Render logs are external).
+    It provides pointers + DB breadcrumbs to correlate incidents.
+    """
+    _require_admin(request)
+
+    rid = rid.strip()
+
+    # best-effort: show any recent DLQ, idempotency, and audit rows (not guaranteed)
+    out = {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "request_id": rid,
+        "log_search_hints": [
+            f"Search logs for: id={rid}",
+            f"If you proxy via Cloudflare/NGINX, also search upstream logs for: X-Request-ID: {rid}",
+        ],
+        "headers_allowlisted": _redact_headers(dict(request.headers)),
+        "db_meta": await _db_meta_quick(),
+        "recent": {
+            "webhook_dead_letters": [],
+            "http_idempotency": [],
+            "audit_log": [],
+        },
+    }
+
+    # DLQ: last 20
+    try:
+        rows = await database.fetch_all("""
+          SELECT id::text AS id, event, status_code, created_at
+          FROM webhook_dead_letters
+          ORDER BY created_at DESC
+          LIMIT 20
+        """)
+        out["recent"]["webhook_dead_letters"] = [
+            {"id": r["id"], "event": r["event"], "status_code": r["status_code"],
+             "created_at": _to_utc_z(r["created_at"])}
+            for r in rows
+        ]
+    except Exception:
+        pass
+
+    # idempotency: last 20
+    try:
+        rows = await database.fetch_all("""
+          SELECT key, created_at
+          FROM http_idempotency
+          ORDER BY created_at DESC
+          LIMIT 20
+        """)
+        out["recent"]["http_idempotency"] = [{"key": r["key"], "created_at": _to_utc_z(r["created_at"])} for r in rows]
+    except Exception:
+        pass
+
+    # audit_log: last 20
+    try:
+        rows = await database.fetch_all("""
+          SELECT id::text AS id, actor, action, entity_id, created_at
+          FROM audit_log
+          ORDER BY created_at DESC
+          LIMIT 20
+        """)
+        out["recent"]["audit_log"] = [
+            {"id": r["id"], "actor": r["actor"], "action": r["action"], "entity_id": r["entity_id"],
+             "created_at": _to_utc_z(r["created_at"])}
+            for r in rows
+        ]
+    except Exception:
+        pass
+
+    return out
+
+@app.get("/admin/ops/forensics_pack.zip", tags=["Admin"], summary="Structured forensics pack (ZIP)")
+async def admin_ops_forensics_pack(request: Request):
+    """
+    Bigger than /admin/ops/bundle.zip:
+    - log schema doc
+    - env snapshot (allowlist)
+    - DB meta + schema fingerprint
+    - route surface
+    - recent DLQ/idempotency/audit crumbs
+    """
+    _require_admin(request)
+
+    nowz = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    fp = await _schema_fingerprint()
+    db_meta = await _db_meta_quick()
+
+    # routes summary
+    routes = []
+    for r in app.routes:
+        p = getattr(r, "path", None)
+        m = sorted(list(getattr(r, "methods", []) or []))
+        if p and m:
+            routes.append({"path": p, "methods": m, "name": getattr(r, "name", "")})
+    routes.sort(key=lambda x: (x["path"], ",".join(x["methods"])))
+
+    recent = {"webhook_dead_letters": [], "http_idempotency": [], "audit_log": []}
+    try:
+        rows = await database.fetch_all("""
+          SELECT id::text AS id, event, status_code, response_text, created_at
+          FROM webhook_dead_letters
+          ORDER BY created_at DESC
+          LIMIT 50
+        """)
+        recent["webhook_dead_letters"] = [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    try:
+        rows = await database.fetch_all("""
+          SELECT key, created_at
+          FROM http_idempotency
+          ORDER BY created_at DESC
+          LIMIT 50
+        """)
+        recent["http_idempotency"] = [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    try:
+        rows = await database.fetch_all("""
+          SELECT id::text AS id, actor, action, entity_id, details, created_at
+          FROM audit_log
+          ORDER BY created_at DESC
+          LIMIT 50
+        """)
+        recent["audit_log"] = [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    payload = {
+        "as_of": nowz,
+        "env": _safe_env_snapshot(),
+        "db_meta": db_meta,
+        "schema_fingerprint": fp,
+        "route_count": len(routes),
+        "log_schema": _log_schema_doc(),
+    }
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt",
+            "BRidge Forensics Pack\n"
+            "- summary.json: env allowlist + schema fingerprint + db meta\n"
+            "- log_schema.json: how to correlate by X-Request-ID\n"
+            "- routes.json: full route surface\n"
+            "- recent/*.json: recent DLQ/idempotency/audit crumbs\n"
+        )
+        zf.writestr("summary.json", json.dumps(payload, indent=2, default=str))
+        zf.writestr("log_schema.json", json.dumps(_log_schema_doc(), indent=2, default=str))
+        zf.writestr("routes.json", json.dumps(routes, indent=2, default=str))
+        zf.writestr("recent/webhook_dead_letters.json", json.dumps(recent["webhook_dead_letters"], indent=2, default=str))
+        zf.writestr("recent/http_idempotency.json", json.dumps(recent["http_idempotency"], indent=2, default=str))
+        zf.writestr("recent/audit_log.json", json.dumps(recent["audit_log"], indent=2, default=str))
+    mem.seek(0)
+    return StreamingResponse(
+        mem,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=bridge_forensics_pack.zip"},
+    )
+# ===================== OPS / FORENSICS (E) =====================
+
+@app.get("/admin/ops/bundle.zip", tags=["Admin"], summary="ICE evidence bundle (ZIP)")
+async def admin_ops_bundle(request: Request):
+    _require_admin(request)
+
+    nowz = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    fp = await _schema_fingerprint()
+
+    routes = []
+    for r in app.routes:
+        p = getattr(r, "path", None)
+        m = sorted(list(getattr(r, "methods", []) or []))
+        if p and m:
+            routes.append({"path": p, "methods": m, "name": getattr(r, "name", "")})
+    routes.sort(key=lambda x: (x["path"], ",".join(x["methods"])))
+
+    db_ok = True
+    try:
+        await database.fetch_one("SELECT 1")
+    except Exception:
+        db_ok = False
+
+    payload = {
+        "as_of": nowz,
+        "env": _safe_env_snapshot(),
+        "db_ok": db_ok,
+        "schema_fingerprint": fp,
+        "route_count": len(routes),
+    }
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("ops_summary.json", json.dumps(payload, indent=2))
+        zf.writestr("routes.json", json.dumps(routes, indent=2))
+        zf.writestr(
+            "README.txt",
+            "BRidge ICE Evidence Bundle\n"
+            "- ops_summary.json: env + schema fingerprint + readiness basics\n"
+            "- routes.json: full route surface\n"
+            "For data retention export, use /admin/export_all (ZIP of core CSVs).\n"
+        )
+    mem.seek(0)
+    return StreamingResponse(
+        mem,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=bridge_ops_bundle.zip"},
+    )
+
+@app.post("/admin/ops/perf_floor/store", tags=["Admin"])
+async def store_perf_floor(body: dict, request: Request):
+    _require_admin(request)
+    await database.execute("""
+      INSERT INTO schema_meta(key,value)
+      VALUES ('perf_floor_last', :v)
+      ON CONFLICT (key) DO UPDATE SET value=:v, updated_at=NOW()
+    """, {"v": json.dumps(body)})
+    return {"ok": True}
+# -------- Pricing & Indices Routers -------------------------
 async def _fetch_base(symbol: str):
     """
     Same selection logic as /reference_prices/latest:    
@@ -9031,6 +9603,45 @@ async def create_user(
 
     return NewUserOut(ok=True, email=email, role=payload.role, created=True)
 
+@app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)")
+async def admin_demo_seed(request: Request):
+    if os.getenv("ENV","").lower() == "production":
+        raise HTTPException(403, "demo seed disabled in production")
+
+    demo_member = "Demo Yard"
+    demo_slug = _slugify_member(demo_member)
+
+    # Ensure pgcrypto for UUID helpers if needed
+    try:
+        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+    except Exception:
+        pass
+
+    # tenant
+    await database.execute("""
+      INSERT INTO tenants(id, slug, name, region)
+      VALUES (gen_random_uuid(), :slug, :name, 'IN')
+      ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name
+    """, {"slug": demo_slug, "name": demo_member})
+    trow = await database.fetch_one("SELECT id FROM tenants WHERE slug=:s", {"s": demo_slug})
+    tenant_id = str(trow["id"]) if trow else None
+
+    # inventory
+    await database.execute("""
+      INSERT INTO inventory_items(seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
+      VALUES (:seller, 'SHRED', 250, 0, 0, :tid)
+      ON CONFLICT (seller, sku) DO UPDATE SET qty_on_hand=EXCLUDED.qty_on_hand, tenant_id=EXCLUDED.tenant_id
+    """, {"seller": demo_member, "tid": tenant_id})
+
+    # contract
+    cid = str(uuid.uuid4())
+    await database.execute("""
+      INSERT INTO contracts(id, buyer, seller, material, weight_tons, price_per_ton, status, currency, tenant_id)
+      VALUES (:id, 'OPEN', :seller, 'Shred Steel', 40, 245, 'Open', 'USD', :tid)
+    """, {"id": cid, "seller": demo_member, "tid": tenant_id})
+
+    return {"ok": True, "tenant_id": tenant_id, "demo_contract_id": cid}
+
 @app.post("/admin/plans/seed_mode_a", tags=["Admin"])
 async def seed_mode_a_plans(request: Request=None):
     try:
@@ -10293,6 +10904,63 @@ async def admin_export_behavior():
     }
 # --- ZIP export (all core data) ---
 
+@app.get("/admin/retention/runbook", tags=["Admin"], summary="Retention + backup runbook (machine readable)")
+async def admin_retention_runbook(request: Request):
+    _require_admin(request)
+
+    # last proofs
+    proofs = []
+    try:
+        rows = await database.fetch_all("""
+          SELECT ran_at, backend, path, ok, details, sha256
+          FROM backup_proofs
+          ORDER BY ran_at DESC
+          LIMIT 20
+        """)
+        proofs = [
+            {
+                "ran_at": _to_utc_z(r["ran_at"]),
+                "backend": r["backend"],
+                "path": r["path"],
+                "ok": bool(r["ok"]),
+                "sha256": r["sha256"],
+                "details": r["details"],
+            }
+            for r in rows
+        ]
+    except Exception:
+        proofs = []
+
+    # simple policy summary (you can expand later)
+    runbook = {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "retention_targets": {
+            "core_records_min_years": 7,
+            "notes": [
+                "Contracts/BOLs/audit retained >= 7 years (policy target).",
+                "Use /admin/export_all for human export; use nightly snapshot for DR.",
+            ],
+        },
+        "backups": {
+            "nightly_job": {
+                "enabled_when": "ENV=production",
+                "time_utc": "03:30Z (approx)",
+                "backend_env": "SNAPSHOT_BACKEND (default=supabase)",
+                "outputs": [
+                    "export_all.zip style bundle (contracts, bols, inventory, users, index_snapshots, audit)",
+                ],
+            },
+            "proofs_last_20": proofs,
+        },
+        "restore_runbook": [
+            "1) Fetch newest successful backup_proofs row (ok=true).",
+            "2) Download object (Supabase Storage or S3) referenced by path.",
+            "3) Unzip; import CSVs into staging DB; validate counts vs /admin/backup/selfcheck.",
+            "4) Promote staging -> prod or run targeted restores.",
+        ],
+    }
+    return runbook
+
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 @app.get("/admin/dr/objectives", tags=["Admin"])
 def dr_objectives():
@@ -10308,6 +10976,19 @@ def backup_selfcheck():
             except Exception:
                 counts[tbl] = None
         return {"ok": True, "table_counts": counts}
+
+@app.get("/admin/backup/verify_latest", tags=["Admin"], summary="Verify latest backup_proofs entry (exists + ok)")
+async def verify_latest_backup(request: Request):
+    _require_admin(request)
+    row = await database.fetch_one("""
+      SELECT ran_at, backend, path, ok, sha256
+      FROM backup_proofs
+      ORDER BY ran_at DESC
+      LIMIT 1
+    """)
+    if not row:
+        return {"ok": False, "reason": "no backup_proofs rows"}
+    return {"ok": bool(row["ok"]), "ran_at": _to_utc_z(row["ran_at"]), "backend": row["backend"], "path": row["path"], "sha256": row["sha256"]}
 # -------- DR: snapshot self-verify & RTO/RPO exposure --------
 
 # ===== HMAC gating for inventory endpoints =====
@@ -13278,20 +13959,32 @@ def _slugify_member(member: str) -> str:
 
 def current_member_from_request(request: Request) -> Optional[str]:
     """
-    Order:
-      1) ?member=
-      2) session['member'] / session['org'] / session['yard_name']
-      3) session['seller']
+    Tenant identity MUST come from the session in production.
+    Query-string overrides are allowed only for:
+      - non-production (dev/ci/test), OR
+      - admin sessions (prod)
     """
-    for key in ("member", "org", "yard_name", "seller"):
-        v = request.query_params.get(key)
-        if v:
-            return v.strip()
+    prod = os.getenv("ENV", "").lower() == "production"
+    role = ""
     if hasattr(request, "session"):
+        try:
+            role = (request.session.get("role") or "").lower()
+        except Exception:
+            role = ""
+
+        # ✅ production source of truth: session
         for key in ("member", "org", "yard_name", "seller"):
             v = request.session.get(key)
             if v:
                 return str(v).strip()
+
+    # allow query override only in non-prod OR admin
+    if (not prod) or (role == "admin"):
+        for key in ("member", "org", "yard_name", "seller"):
+            v = request.query_params.get(key)
+            if v:
+                return v.strip()
+
     return None
 
 async def current_tenant_id(request: Request) -> Optional[str]:
@@ -15875,7 +16568,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     # -------- historical mode detection + created_at override -----------
     import_mode = request.headers.get("X-Import-Mode", "").lower() == "historical"
     if os.getenv("ENV", "").lower() == "production" and import_mode:
-        pass  # allow historical import without admin during backfill
+        _require_admin(request)
 
     created_at_override: datetime | None = None
     if import_mode:
@@ -16819,7 +17512,7 @@ async def ice_rotate_secret():
 # ----- ICE Logs/Testing/Resend/Rotate -----
 
 # --- Admin listings/approve/export ---
-class ApplicationRow(BaseModel):
+class AdminApplicationRow(BaseModel):
     application_id: str
     created_at: datetime
     status: str
@@ -16832,7 +17525,7 @@ class ApplicationRow(BaseModel):
     plan: str
     ref_code: Optional[str] = None
 
-@app.get("/admin/applications", tags=["Admin"], response_model=List[ApplicationRow], summary="List applications")
+@app.get("/admin/applications", tags=["Admin"], response_model=List[AdminApplicationRow], summary="List applications")
 async def list_applications(limit: int = 200):
     try:
         rows = await database.fetch_all(
@@ -16845,7 +17538,7 @@ async def list_applications(limit: int = 200):
             """,
             {"limit": limit}, 
         )
-        return [ApplicationRow(**dict(r)) for r in rows]
+        return [AdminApplicationRow(**dict(r)) for r in rows]
     except Exception:
         return []
 
@@ -17119,13 +17812,6 @@ async def create_bol_pg(bol: BOLIn, request: Request):
         "delivery_time": None,
     }
 
-    resp = {
-        **bol.model_dump(),
-        "bol_id": _rget(row, "bol_id", bol_id_str),
-        "status": _rget(row, "status", "Scheduled"),
-        "delivery_signature": None,
-        "delivery_time": None,
-    }
     # Dossier ingest: BOL_SCHEDULED
     try:
         if row:
@@ -19894,6 +20580,7 @@ async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
 
 async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
     data = await build_export_zip()
+    sha256 = hashlib.sha256(data).hexdigest()
     now = datetime.now(timezone.utc)
     day = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
@@ -19908,7 +20595,8 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
 
         if not (os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE")):
             return {"ok": True, "skipped": "supabase env missing", "path": path}
-        return await _upload_to_supabase(path, data)
+        res = await _upload_to_supabase(path, data)
+        return {**res, "sha256": sha}
 
     except Exception as e:
         try:
@@ -19953,6 +20641,20 @@ async def _nightly_snapshot_cron():
                 # Run snapshot once per cycle
                 try:
                     res = await run_daily_snapshot(storage=backend)
+                    # record proof (best-effort)
+                    try:
+                        await database.execute("""
+                        INSERT INTO backup_proofs(backend, path, ok, details, sha256)
+                        VALUES (:b, :p, :ok, :d::jsonb, :h)
+                        """, {
+                            "b": backend,
+                            "p": res.get("path"),
+                            "ok": bool(res.get("ok", True)),
+                            "d": json.dumps(res, default=str),
+                            "h": res.get("sha256"),
+                        })
+                    except Exception:
+                        pass
                     try:
                         logger.info("snapshot_nightly", backend=backend, **res)
                     except Exception:
