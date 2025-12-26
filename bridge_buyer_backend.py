@@ -7904,17 +7904,46 @@ async def ops_smoke(request: Request):
     async def _tenant_override_check():
         prod = os.getenv("ENV","").lower() == "production"
         if not prod:
-            return {"skipped": True}
-        # If session has a member, query param must NOT override
+            return {"skipped": True, "env": "non-prod"}
+
+        # Session member must exist for this check to mean anything
         sess_member = (request.session.get("member") or request.session.get("org") or "").strip()
         if not sess_member:
             return {"skipped": True, "reason": "no session member"}
-        # simulate a query override attempt
-        # (we can only check resolver behavior directly)
+
+        role = (request.session.get("role") or "").lower()
+
+        # did caller attempt override?
+        q_member = (request.query_params.get("member") or request.query_params.get("org") or "").strip() or None
+
+        # actual resolver behavior
         resolved = current_member_from_request(request)
+
+        # ✅ Policy:
+        # - non-admin: query MUST NOT override session
+        # - admin: query MAY override session (only if q_member provided)
+        if role == "admin" and q_member:
+            if resolved != q_member:
+                raise RuntimeError(f"admin override expected but did not resolve: resolved={resolved} q_member={q_member} session={sess_member}")
+            return {
+                "mode": "admin_override_allowed",
+                "role": role,
+                "session_member": sess_member,
+                "query_member": q_member,
+                "resolved": resolved,
+            }
+
+        # Everyone else: must stay on session member
         if resolved != sess_member:
-            raise RuntimeError(f"tenant override detected: resolved={resolved} session={sess_member}")
-        return {"session_member": sess_member, "resolved": resolved}
+            raise RuntimeError(f"tenant override detected: resolved={resolved} session={sess_member} q_member={q_member}")
+
+        return {
+            "mode": "session_only",
+            "role": role,
+            "session_member": sess_member,
+            "query_member": q_member,
+            "resolved": resolved,
+        }
 
     await _check("tenant_override_protection", _tenant_override_check)
 
@@ -10617,10 +10646,19 @@ async def login(request: Request):
 
 @app.get("/me", tags=["Auth"])
 async def me(request: Request):
+    sess_member = (request.session.get("member") or request.session.get("org") or "")
+    q_member = request.query_params.get("member") or request.query_params.get("org") or ""
+    try:
+        resolved = current_member_from_request(request)
+    except Exception:
+        resolved = sess_member
+
     return {
         "username": (request.session.get("username") or "Guest"),
         "role": (request.session.get("role") or ""),
-        "member": (request.session.get("member") or request.session.get("org") or ""),
+        "member": sess_member,
+        "query_member": q_member,
+        "resolved_member": resolved,
     }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
