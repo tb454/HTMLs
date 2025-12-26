@@ -63,6 +63,12 @@ from fastapi import Depends
 from uuid import UUID 
 from starlette.middleware.base import BaseHTTPMiddleware 
 from fastapi import Request as _Request
+from pydantic import BaseModel, EmailStr
+from urllib.parse import quote
+import io, csv as _csv
+from contextlib import suppress
+import asyncio
+from decimal import Decimal, ROUND_HALF_UP
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
@@ -227,8 +233,7 @@ def _lot_size(symbol: str) -> float:
     except Exception:
         return 1.0
 
-def _round2(x: float) -> float:
-    from decimal import Decimal, ROUND_HALF_UP
+def _round2(x: float) -> float:    
     return float(Decimal(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 def quantize_money(value: Decimal | float | str) -> Decimal:
@@ -304,9 +309,6 @@ def startup(fn):
 def shutdown(fn):
     _SHUTDOWNS.append(fn)
     return fn
-
-from contextlib import suppress
-import asyncio
 
 async def _run_callable(fn):
     return await fn() if inspect.iscoroutinefunction(fn) else fn()
@@ -462,6 +464,44 @@ async def _assert_no_duplicate_routes():
         if prod:
             raise RuntimeError(msg)
 
+# ===================== ICE: duplicate def / overwrite guard (B) =====================
+@startup
+async def _assert_no_duplicate_defs_or_classes():
+    """
+    ICE readiness: prevent silent overwrites from repeated `def`/`class` names in this file.
+    - We scan the module source via AST and fail fast in production if duplicates exist.
+    - This is the safety net while you consolidate/split the file.
+    """
+    if os.getenv("ENV", "").lower() != "production":
+        return
+
+    try:
+        import ast
+        src = Path(__file__).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+
+        names: dict[str, list[int]] = {}
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                nm = node.name
+                ln = getattr(node, "lineno", None) or -1
+                names.setdefault(nm, []).append(ln)
+
+        dups = {k: v for k, v in names.items() if len(v) > 1}
+
+        if dups:
+            try:
+                logger.error("duplicate_defs_detected", dups=dups)
+            except Exception:
+                pass
+            raise RuntimeError(f"Duplicate def/class names in backend.py (silent overwrite risk): {dups}")
+
+    except Exception as e:
+        # If the detector itself fails, fail closed in prod.
+        raise RuntimeError(f"duplicate-def detector failed: {type(e).__name__}: {e}")
+# ============ ICE duplicate def / overwrite guard =============
+
 # -----  Apply Page Relaxed for Stripe Access ----
 BASE_DIR = Path(__file__).resolve().parent
 APPLY_PATH = (BASE_DIR / "static" / "apply.html")
@@ -588,10 +628,27 @@ prod = os.getenv("ENV", "development").lower() == "production"
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 
 # When BRIDGE_BOOTSTRAP_DDL=0 in the environment, we will NOT run any of the
-# idempotent CREATE TABLE / ALTER TABLE bootstrap blocks. This is important
-# when pointing at a managed schema (e.g. Supabase) that already has these
-# tables defined.
-BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
+# idempotent CREATE TABLE / ALTER TABLE bootstrap blocks.
+# Discipline:
+# - RAW_BOOTSTRAP_DDL reflects env intent
+# - BOOTSTRAP_DDL is forced OFF in production (managed schema)
+RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
+PROD = os.getenv("ENV", "").lower() == "production"
+BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not PROD))
+
+def _is_prod() -> bool:
+    return os.getenv("ENV", "").lower() == "production"
+
+def _dev_only(reason: str = "dev-only"):
+    # fail closed in prod
+    if _is_prod():
+        raise HTTPException(status_code=403, detail=f"{reason} disabled in production")
+
+def _allow_test_login_bypass() -> bool:
+    # Explicit allowlist; must be OFF in prod.
+    if _is_prod():
+        return False
+    return os.getenv("ALLOW_TEST_LOGIN_BYPASS", "0").lower() in ("1","true","yes")
 
 @startup
 async def _assert_bootstrap_disabled_in_prod():
@@ -601,7 +658,7 @@ async def _assert_bootstrap_disabled_in_prod():
     """
     if os.getenv("PYTEST_CURRENT_TEST"):
         return
-    if os.getenv("ENV", "").lower() == "production" and BOOTSTRAP_DDL:
+    if os.getenv("ENV", "").lower() == "production" and RAW_BOOTSTRAP_DDL:
         raise RuntimeError("BRIDGE_BOOTSTRAP_DDL must be 0 in production (managed schema / migrations discipline).")
 
 if not prod or allow_local:
@@ -8299,8 +8356,7 @@ async def store_perf_floor(body: dict, request: Request):
 
 @app.post("/admin/demo/reset", tags=["Admin"], summary="Reset demo data (NON-PROD only)")
 async def admin_demo_reset(request: Request):
-    if os.getenv("ENV","").lower() == "production":
-        raise HTTPException(403, "disabled in production")
+    _dev_only("demo reset")
 
     demo_slug = "demo-yard"
     t = await database.fetch_one("SELECT id FROM tenants WHERE slug=:s", {"s": demo_slug})
@@ -9044,7 +9100,9 @@ from datetime import date as _date
 from sqlalchemy import text as _t
 
 @router_prices.post("/ensure_unique_index", summary="Create unique index on (symbol, ts_market)")
-async def rp_ensure_unique_index():
+async def rp_ensure_unique_index(request: Request):
+    if _is_prod():
+        _require_admin(request)
     with engine.begin() as conn:
         conn.exec_driver_sql("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
@@ -9632,8 +9690,7 @@ async def create_user(
 
 @app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)")
 async def admin_demo_seed(request: Request):
-    if os.getenv("ENV","").lower() == "production":
-        raise HTTPException(403, "demo seed disabled in production")
+    _dev_only("demo seed")
 
     demo_member = "Demo Yard"
     demo_slug = _slugify_member(demo_member)
@@ -10415,7 +10472,7 @@ async def login(request: Request):
     # --- TEST/CI bypass: accept test/test in non-production so rate-limit test can hammer 10x and still get 200s ---
     _env = os.getenv("ENV", "").lower()
     # Allow test bypass in non-prod OR when running under pytest (even if ENV=production).
-    if (os.getenv("PYTEST_CURRENT_TEST") or (_env not in {"production", "prod"})) and ident == "test" and pwd == "test":
+    if _allow_test_login_bypass() and ident == "test" and pwd == "test":
         request.session.clear()
         request.session["username"] = "test"
         request.session["role"] = "buyer"
@@ -10544,9 +10601,6 @@ async def set_member_plan(member: str, plan_code: str, request: Request=None):
 # ======= Member plan ========================
 
 # ------ Admin invite links -------
-from pydantic import BaseModel, EmailStr
-from urllib.parse import quote
-
 class InviteCreateIn(BaseModel):
     email: EmailStr
     member: str
@@ -13988,33 +14042,56 @@ def _slugify_member(member: str) -> str:
 
 def current_member_from_request(request: Request) -> Optional[str]:
     """
-    Tenant identity MUST come from the session in production.
-    Query-string overrides are allowed only for:
-      - non-production (dev/ci/test), OR
-      - admin sessions (prod)
+    Tenant identity rules:
+
+    - In production:
+        - Non-admin: MUST come from session only (query-string cannot override).
+        - Admin: MAY override via query-string (e.g. ?member=...) for investigations.
+          If no override is provided, session is used.
+
+    - In non-production:
+        - Prefer session if present, else allow query-string (dev convenience).
     """
     prod = os.getenv("ENV", "").lower() == "production"
+
+    # Safely read role + session
     role = ""
+    sess_member = None
     if hasattr(request, "session"):
         try:
             role = (request.session.get("role") or "").lower()
         except Exception:
             role = ""
+        try:
+            for key in ("member", "org", "yard_name", "seller"):
+                v = request.session.get(key)
+                if v:
+                    sess_member = str(v).strip()
+                    break
+        except Exception:
+            sess_member = None
 
-        # ✅ production source of truth: session
-        for key in ("member", "org", "yard_name", "seller"):
-            v = request.session.get(key)
-            if v:
-                return str(v).strip()
+    # Read possible query override
+    q_member = None
+    try:
+        qp = getattr(request, "query_params", None)
+        if qp is not None:
+            for key in ("member", "org", "yard_name", "seller"):
+                v = qp.get(key)
+                if v:
+                    q_member = str(v).strip()
+                    break
+    except Exception:
+        q_member = None
 
-    # allow query override only in non-prod OR admin
-    if (not prod) or (role == "admin"):
-        for key in ("member", "org", "yard_name", "seller"):
-            v = request.query_params.get(key)
-            if v:
-                return v.strip()
+    # Production rules
+    if prod:
+        if role == "admin" and q_member:
+            return q_member  # admin override
+        return sess_member  # non-admin OR admin without override: session only
 
-    return None
+    # Non-prod rules
+    return sess_member or q_member
 
 async def current_tenant_id(request: Request) -> Optional[str]:
     """
@@ -19620,7 +19697,7 @@ async def _build_member_statement_monthly(member: str, month: str) -> tuple[str,
         daymap[k]["delivered"] += float(b["delivered_tons"] or 0)
 
     # CSV
-    import io, csv as _csv
+    
     csv_buf = io.StringIO()
     w = _csv.writer(csv_buf)
     w.writerow(["date","symbol","contract_tons","contract_notional_usd","delivered_tons"])

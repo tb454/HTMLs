@@ -4,42 +4,45 @@ import pytest
 
 from bridge_buyer_backend import current_member_from_request
 
-class DummyRequest:
-    """
-    Minimal Request-like object for testing current_member_from_request().
-    We only provide the fields it reads: session + query_params.
-    """
-    def __init__(self, session=None, query_params=None):
+
+class DummyReq:
+    def __init__(self, session=None, query=None):
         self.session = session or {}
-        self.query_params = query_params or {}
+        self.query_params = query or {}
+
 
 def test_prod_ignores_query_override_for_non_admin(monkeypatch):
     monkeypatch.setenv("ENV", "production")
-
-    req = DummyRequest(
+    req = DummyReq(
         session={"role": "buyer", "member": "Winski Brothers"},
-        query_params={"member": "EVIL_OVERRIDE"},
+        query={"member": "EVIL_OVERRIDE"},
     )
     assert current_member_from_request(req) == "Winski Brothers"
 
+
 def test_prod_allows_query_override_for_admin(monkeypatch):
     monkeypatch.setenv("ENV", "production")
-
-    req = DummyRequest(
+    req = DummyReq(
         session={"role": "admin", "member": "Winski Brothers"},
-        query_params={"member": "ADMIN_OVERRIDE"},
+        query={"member": "ICE_AUDIT_OVERRIDE"},
     )
-    # Admin is allowed to override in prod (by design in your resolver)
-    assert current_member_from_request(req) == "Winski Brothers"  # session wins first
+    assert current_member_from_request(req) == "ICE_AUDIT_OVERRIDE"
 
-    # If you WANT admin override to win over session, change your resolver,
-    # then update this expected value to "ADMIN_OVERRIDE".
 
-def test_non_prod_allows_query_override(monkeypatch):
+def test_non_prod_allows_query_override_when_session_missing(monkeypatch):
     monkeypatch.setenv("ENV", "development")
-
-    req = DummyRequest(
-        session={"role": "buyer"},
-        query_params={"member": "DEV_OVERRIDE"},
+    req = DummyReq(
+        session={"role": "buyer"},              # no member in session
+        query={"member": "DEV_OVERRIDE"},
     )
     assert current_member_from_request(req) == "DEV_OVERRIDE"
+
+
+def test_non_prod_prefers_session_when_present(monkeypatch):
+    monkeypatch.setenv("ENV", "development")
+    req = DummyReq(
+        session={"role": "buyer", "member": "SessionTenant"},
+        query={"member": "QueryTenant"},
+    )
+    assert current_member_from_request(req) == "SessionTenant"
+
