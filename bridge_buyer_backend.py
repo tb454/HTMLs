@@ -7991,6 +7991,20 @@ def _plan_allowlist(name: str) -> str | None:
     }
     return plans.get(name)
 
+@app.get("/ops/prod_safety", tags=["Ops"], summary="Prod safety toggles (proof)")
+def ops_prod_safety():
+    env = os.getenv("ENV","").lower()
+    raw_boot = os.getenv("BRIDGE_BOOTSTRAP_DDL","1").lower() in ("1","true","yes")
+    prod = env == "production"
+    bootstrap_effective = (raw_boot and (not prod))
+    return {
+        "env": env,
+        "raw_bootstrap_env": raw_boot,
+        "bootstrap_effective": bootstrap_effective,
+        "allow_test_login_bypass": os.getenv("ALLOW_TEST_LOGIN_BYPASS","0"),
+        "block_harvester": os.getenv("BLOCK_HARVESTER",""),
+    }
+
 @app.get("/ops/plan_sample", tags=["Ops"], summary="Query plan sample (EXPLAIN ANALYZE JSON)")
 async def ops_plan_sample(request: Request, name: str = Query(...)):
     """
