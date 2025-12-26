@@ -845,6 +845,11 @@ async def admin_run_snapshot_bg(background: BackgroundTasks, storage: str = "sup
     background.add_task(_snapshot_task, storage)
     return {"ok": True, "queued": True}
 
+@app.post("/admin/session/member", tags=["Admin"], summary="Set session member (admin only)")
+async def admin_set_session_member(request: Request, member: str = Body(..., embed=True)):
+    _require_admin(request)
+    request.session["member"] = member
+    return {"ok": True, "member": request.session.get("member")}
 
 # --- Safe latest index handler (idempotent empty state) ---
 @app.get(
