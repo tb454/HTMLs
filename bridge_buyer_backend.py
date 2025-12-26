@@ -6186,6 +6186,10 @@ PLAN_LOOKUP_TO_ADDON_KEYS = {
 _price_lookup_cache: Dict[str, str] = {}
 
 def _price_id_for_lookup(lookup_key: str) -> str:
+    # Guard: Stripe must be enabled and imported
+    if not (USE_STRIPE and stripe and STRIPE_API_KEY):
+        raise RuntimeError("Stripe is disabled in this environment")
+
     # Fast path: memoized
     if lookup_key in _price_lookup_cache:
         return _price_lookup_cache[lookup_key]
@@ -7807,19 +7811,18 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
         return {"ok": True, "inserted": 0}
 
     # Upsert semantics: keep most recent for a given (symbol, ts_market)
-        with engine.begin() as conn:
+    with engine.begin() as conn:
             if BOOTSTRAP_DDL:
                 conn.exec_driver_sql("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);
                 """)
-
-        conn.execute(_t("""
-            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
-            VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
-            ON CONFLICT (symbol, ts_market) DO UPDATE
-              SET price = EXCLUDED.price,
-                  source = EXCLUDED.source
-        """), rows)
+            conn.execute(_t("""
+                INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+                VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
+                ON CONFLICT (symbol, ts_market) DO UPDATE
+                SET price = EXCLUDED.price,
+                    source = EXCLUDED.source
+            """), rows)
 
     return {"ok": True, "inserted_or_updated": len(rows), "symbol": "COMEX_CU"}
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
@@ -13342,60 +13345,7 @@ async def require_perm(request: Request, perm: str):
         raise HTTPException(403, f"missing permission: {perm}")
 # -------- Permission helpers --------
 
-# -------- Tenant / member helpers --------
-def _slugify_member(member: str) -> str:
-    """
-    Very simple slug for tenants: 'Winski Brothers' -> 'winski-brothers'.
-    Keep it stable; DB rows in tenants.slug should use this.
-    """
-    m = (member or "").strip().lower()
-    # collapse spaces and punctuation to '-'
-    m = re.sub(r"[^a-z0-9]+", "-", m)
-    return m.strip("-") or m
-
-def current_member_from_request(request: Request) -> Optional[str]:
-    """
-    Best-effort member/org resolution from the request/session.
-    Priority:
-      1) explicit ?member= query param
-      2) session['member'] / session['org'] / session['yard_name']
-      3) session['seller'] as a last resort
-    """
-    # query params first
-    for key in ("member", "org", "yard_name", "seller"):
-        v = request.query_params.get(key)
-        if v:
-            return v.strip()
-    # session hints
-    if hasattr(request, "session"):
-        for key in ("member", "org", "yard_name", "seller"):
-            v = request.session.get(key)
-            if v:
-                return str(v).strip()
-    return None
-
-async def current_tenant_id(request: Request) -> Optional[str]:
-    """
-    Resolve a tenant_id UUID for this request, based on the inferred member key.
-    Returns string UUID or None if no matching tenant row exists.
-    """
-    member = current_member_from_request(request)
-    if not member:
-        return None
-    slug = _slugify_member(member)
-    try:
-        row = await database.fetch_one(
-            "SELECT id FROM tenants WHERE slug = :slug",
-            {"slug": slug},
-        )
-        if row and row["id"]:
-            return str(row["id"])
-    except Exception:
-        # Don't block the request on mapping issues
-        return None
-    return None
-# -------- Tenant / member helpers --------
-
+#-------- Billing / Pricing API --------
 async def _org_plan(org: Optional[str]) -> str:
     # Swap for real org→plan mapping if you store it; default NONMEM unless you signal MEMBER.
     return "MEMBER" if org else "NONMEM"
@@ -13422,6 +13372,7 @@ async def billing_price_id(
     pid = await resolve_price_id(eff_org, product)
     plan = await _org_plan(eff_org)
     return BillingPriceOut(org=eff_org or "", plan=plan, product=product.upper(), stripe_price_id=pid)
+#-------- Billing / Pricing API --------
 
 # ===== Idempotency cache for POST/Inventory/Purchase =====
 _idem_cache = {}
@@ -16769,23 +16720,56 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
 
         # In FREE mode, auto-create member + role so they can log in immediately
     if is_free_mode():
+        # Best-effort: create tenant + user + membership using existing tables.
         try:
-            # upsert tenant/member (adjust to your table/columns)
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
+
+        email_l = payload.email.strip().lower()
+        base_username = email_l.split("@", 1)[0][:64]
+        role_eff = "seller" if (payload.role in ("seller", "both")) else "buyer"
+
+        # 1) tenants (idempotent on slug)
+        try:
+            slug = _slugify_member(payload.org_name)
             await database.execute("""
-            INSERT INTO members (member_id, org_name, email, role, is_active)
-            VALUES (:mid, :org, :email, :role, true)
-            ON CONFLICT (email) DO UPDATE
-              SET org_name = EXCLUDED.org_name,
-                  role = EXCLUDED.role,
-                  is_active = true
-            """, {
-                "mid": str(uuid.uuid4()),
-                "org": payload.org_name,
-                "email": payload.email,
-                "role": (payload.role or "buyer").lower()
-            })
-        except Exception as e:
-            print("[WARN] free-mode auto-create failed:", e)
+              INSERT INTO tenants(id, slug, name, region)
+              VALUES (gen_random_uuid(), :slug, :name, :region)
+              ON CONFLICT (slug) DO UPDATE
+                SET name = EXCLUDED.name,
+                    region = COALESCE(EXCLUDED.region, tenants.region)
+            """, {"slug": slug, "name": payload.org_name, "region": payload.region})
+        except Exception:
+            pass
+
+        # 2) public.users (idempotent on lower(email))
+        try:
+            await database.execute("""
+              INSERT INTO public.users(email, username, password_hash, role, is_active, email_verified)
+              VALUES (:e, :u, crypt('TempBridge123!', gen_salt('bf')), :r, TRUE, TRUE)
+              ON CONFLICT ((lower(email))) DO UPDATE
+                SET username = EXCLUDED.username,
+                    role = EXCLUDED.role,
+                    is_active = TRUE
+            """, {"e": email_l, "u": base_username, "r": role_eff})
+        except Exception:
+            pass
+
+        # 3) tenant_memberships (best-effort)
+        try:
+            slug = _slugify_member(payload.org_name)
+            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug=:s", {"s": slug})
+            urow = await database.fetch_one("SELECT id FROM public.users WHERE lower(email)=:e", {"e": email_l})
+            if trow and urow:
+                await database.execute("""
+                  INSERT INTO tenant_memberships(tenant_id, user_id, role)
+                  VALUES (:tid, :uid, :role)
+                  ON CONFLICT (tenant_id, user_id) DO UPDATE
+                    SET role = EXCLUDED.role
+                """, {"tid": trow["id"], "uid": urow["id"], "role": role_eff})
+        except Exception:
+            pass
 
     # Best-effort audit (ignore failures)
     try:
@@ -20208,5 +20192,4 @@ async def waterfall_apply(member: str, shortfall_usd: float):
                            {"i":str(uuid.uuid4()),"m":member,"a":shortfall_usd,"n":f"IM/VM used={use_imvm}"})
     return {"ok": rem <= 0, "remaining_shortfall": rem}
 app.include_router(clearing_router)
-app.include_router(analytics_router)
 # ===================== /CLEARING (Margin & Variation) =====================
