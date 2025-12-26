@@ -14017,15 +14017,21 @@ def _slugify_member(member: str) -> str:
     return m.strip("-") or m
 
 def current_member_from_request(request: Request) -> Optional[str]:
+    """
+    HARD TENANT IDENTITY RULES:
+
+    - Production:
+        - ONLY session-derived identity is allowed.
+        - Query params NEVER override, even for admin.
+
+    - Non-production:
+        - Convenience: allow ?member=... if session member is missing.
+    """
     prod = os.getenv("ENV", "").lower() == "production"
 
-    role = ""
+    # 1) Session-derived member (preferred everywhere)
     sess_member = None
     if hasattr(request, "session"):
-        try:
-            role = (request.session.get("role") or "").lower()
-        except Exception:
-            role = ""
         try:
             for key in ("member", "org", "yard_name", "seller"):
                 v = request.session.get(key)
@@ -14035,7 +14041,11 @@ def current_member_from_request(request: Request) -> Optional[str]:
         except Exception:
             sess_member = None
 
-    # Read possible query override (allowed only in non-prod)
+    if prod:
+        # ✅ HARD RULE: production always uses session identity; query params never override.
+        return sess_member
+
+    # 2) Non-prod convenience: allow query string ONLY if session is missing
     q_member = None
     try:
         qp = getattr(request, "query_params", None)
@@ -14048,11 +14058,6 @@ def current_member_from_request(request: Request) -> Optional[str]:
     except Exception:
         q_member = None
 
-    if prod:
-        # ✅ HARD RULE: production always uses session identity; query params never override.
-        return sess_member
-
-    # non-prod convenience
     return sess_member or q_member
 
 async def current_tenant_id(request: Request) -> Optional[str]:
