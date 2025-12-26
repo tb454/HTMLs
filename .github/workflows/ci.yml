@@ -25,6 +25,7 @@ jobs:
       JWT_SECRET: test-jwt
       STRIPE_SECRET: ""
       BRIDGE_TEST_DB: "1"
+      ALLOW_TEST_LOGIN_BYPASS: "1"
 
     steps:
       - uses: actions/checkout@v4
