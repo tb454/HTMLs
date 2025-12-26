@@ -14018,20 +14018,26 @@ def _slugify_member(member: str) -> str:
 
 def current_member_from_request(request: Request) -> Optional[str]:
     """
-    HARD TENANT IDENTITY RULES:
+    Tenant identity rules:
 
-    - Production:
-        - ONLY session-derived identity is allowed.
-        - Query params NEVER override, even for admin.
+    - In production:
+        - Non-admin: MUST come from session only (query-string cannot override).
+        - Admin: MAY override via query-string (e.g. ?member=...) for investigations.
+          If no override is provided, session is used.
 
-    - Non-production:
-        - Convenience: allow ?member=... if session member is missing.
+    - In non-production:
+        - Prefer session if present, else allow query-string (dev convenience).
     """
     prod = os.getenv("ENV", "").lower() == "production"
 
-    # 1) Session-derived member (preferred everywhere)
+    # Safely read role + session
+    role = ""
     sess_member = None
     if hasattr(request, "session"):
+        try:
+            role = (request.session.get("role") or "").lower()
+        except Exception:
+            role = ""
         try:
             for key in ("member", "org", "yard_name", "seller"):
                 v = request.session.get(key)
@@ -14041,11 +14047,7 @@ def current_member_from_request(request: Request) -> Optional[str]:
         except Exception:
             sess_member = None
 
-    if prod:
-        # ✅ HARD RULE: production always uses session identity; query params never override.
-        return sess_member
-
-    # 2) Non-prod convenience: allow query string ONLY if session is missing
+    # Read possible query override
     q_member = None
     try:
         qp = getattr(request, "query_params", None)
@@ -14058,6 +14060,13 @@ def current_member_from_request(request: Request) -> Optional[str]:
     except Exception:
         q_member = None
 
+    # Production rules
+    if prod:
+        if role == "admin" and q_member:
+            return q_member  # admin override wins in prod
+        return sess_member  # non-admin OR admin without override: session only
+
+    # Non-prod rules
     return sess_member or q_member
 
 async def current_tenant_id(request: Request) -> Optional[str]:
