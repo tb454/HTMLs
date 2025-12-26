@@ -70,6 +70,39 @@ def _maybe_to_per_lb(symbol: str, price: float) -> float:
         return price / _MT_TO_LB
     return price
 
+
+# ---------- HTML -> text + Last Trade extractor ----------
+def _html_to_text(html: str) -> str:
+    # drop scripts/styles first
+    html = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.I | re.S)
+    html = re.sub(r"<style\b[^>]*>.*?</style>", " ", html, flags=re.I | re.S)
+    # strip tags
+    text = re.sub(r"<[^>]+>", " ", html)
+    # normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+_LAST_TRADE_RE = re.compile(
+    r"Last\s*Trade\s*Change\s*Change\s*in\s*%[\s:]*([0-9][0-9,]*\.?[0-9]*)",
+    re.I,
+)
+
+def _extract_last_trade_price(html: str) -> float | None:
+    """
+    Extract numeric immediately after "Last Trade Change Change in %"
+    Example: "Last Trade Change Change in % 5.8515 +0.2765 +4.96%"
+    """
+    text = _html_to_text(html)
+    m = _LAST_TRADE_RE.search(text)
+    if not m:
+        return None
+    s = m.group(1).replace(",", "").strip()
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
 async def pull_comex_home_once(pool):
     """
     Scrape comexlive.org homepage table and insert latest readings for key symbols.
@@ -87,7 +120,7 @@ async def pull_comex_home_once(pool):
                 price = _extract_near(html, [label])
                 if price and price > 0:
                     price_norm = _maybe_to_per_lb(symbol, float(price))
-                    ts = _market_ts(html)  # homepage also carries the "As on ..." banner
+                    ts = _market_ts(html)  # homepage also carries the "As on ..." banner (optional)
                     await _insert_ref_price(
                         pool,
                         symbol=symbol,
@@ -95,22 +128,29 @@ async def pull_comex_home_once(pool):
                         price=price_norm,
                         ts_market=ts,
                         snippet=f"{label} {price}"
-                    )            
-    except Exception:        
+                    )
+    except Exception:
         pass
 
 
 # ---------- DB insert ----------
 async def _insert_ref_price(pool, symbol, source, price, ts_market, snippet):
     symbol = _norm_symbol(symbol)
-    # ignore page timestamp; use ET trading date instead
+
+    # authoritative trading-day timestamp for storage (UTC midnight of ET trading date)
     ts_market = _et_trading_date()
+
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO reference_prices (symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES ($1, $2, $3, $4, now(), $5)
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+              SET price = EXCLUDED.price,
+                  source = EXCLUDED.source,
+                  ts_server = now(),
+                  raw_snippet = EXCLUDED.raw_snippet
         """, symbol, source, price, ts_market, (snippet or "")[:2000])
+
 
 # ---------- Generic extractors ----------
 _FLOAT = r"([-+]?\d+(?:\.\d+)?)"
@@ -141,22 +181,55 @@ def _market_ts(text: str):
             pass
     return None
 
+
 # ---------- Pullers ----------
 async def _pull_one(client, pool, symbol, url, anchors=None, unit_hint="per lb"):
     try:
         r = await client.get(url)
         r.raise_for_status()
         html = r.text
-        price = _extract_near(html, anchors) if anchors else _first_float(html)
-        ts = _market_ts(html)
-        if price and price > 0:
-            # NOTE: Many pages are in $/lb already; if you later find $/tonne, convert here.
-            await _insert_ref_price(pool, symbol, url, float(price), ts, html[:1200])
+
+        # Prefer "Last Trade" box for comexlive commodity pages (not HOME)
+        price = None
+        if symbol.startswith("COMEX_") and "comexlive.org" in url and symbol != "COMEX_HOME":
+            price = _extract_last_trade_price(html)
+
+        # Fallback to older heuristic
+        if price is None:
+            price = _extract_near(html, anchors) if anchors else _first_float(html)
+
+        if not price or price <= 0:
+            return
+
+        # normalize / unit adjustments
+        price = _maybe_to_per_lb(symbol, float(price))
+
+        # Hard sanity bands so we never poison reference_prices with junk
+        sanity = {
+            "COMEX_CU": (2.0, 10.0),        # copper $/lb
+            "COMEX_AL": (0.2, 5.0),         # aluminum $/lb-ish
+            "COMEX_ZN": (0.2, 5.0),         # zinc $/lb-ish
+            "COMEX_AU": (500.0, 20000.0),   # gold $/oz
+            "COMEX_AG": (5.0, 500.0),       # silver $/oz
+            "COMEX_PL": (200.0, 20000.0),
+            "COMEX_PA": (200.0, 20000.0),
+        }
+        lo_hi = sanity.get(symbol)
+        if lo_hi:
+            lo, hi = lo_hi
+            if not (lo <= float(price) <= hi):
+                # Do NOT insert suspicious values (e.g., 1.0 defaults)
+                return
+
+        ts = _market_ts(html)  # optional; DB insert uses ET trading date anyway
+        await _insert_ref_price(pool, symbol, url, float(price), ts, html[:1200])
+
     except Exception:
         pass
 
+
 async def pull_comexlive_once(pool):
-    # Anchors bias extraction to the right commodity label
+    # Anchors are now only a fallback; Last Trade parsing is primary
     anchors_map = {
         "COMEX_CU": ["COPPER", "CU"],
         "COMEX_AL": ["ALUMINIUM", "ALUMINUM", "AL"],
@@ -183,6 +256,7 @@ async def pull_lme_once(pool):
             await _pull_one(client, pool, sym, url, anchors_map.get(sym))
             await asyncio.sleep(1.2)
 
+
 # ---------- API helpers ----------
 async def latest_price(pool, symbol: str):
     symbol = _norm_symbol(symbol)
@@ -190,7 +264,7 @@ async def latest_price(pool, symbol: str):
       SELECT price, ts_market, ts_server, source
       FROM reference_prices
       WHERE symbol = $1
-      ORDER BY ts_market DESC NULLS LAST, ts_server DESC
+      ORDER BY ts_market DESC, ts_server DESC
       LIMIT 1
     """
     async with pool.acquire() as conn:
@@ -204,4 +278,3 @@ async def latest_price(pool, symbol: str):
         "ts_server": row["ts_server"].isoformat(),
         "source": row["source"]
     }
-
