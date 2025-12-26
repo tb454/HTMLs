@@ -1,0 +1,27 @@
+HTTP/1.1 200 OK
+Date: Fri, 26 Dec 2025 21:22:55 GMT
+Content-Type: application/json; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+CF-RAY: 9b43a2e67caed4d9-LAX
+Cache-Control: private, max-age=10
+cross-origin-embedder-policy: require-corp
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-site
+permissions-policy: geolocation=()
+referrer-policy: strict-origin-when-cross-origin
+rndr-id: fe064495-2567-42e9
+Set-Cookie: session=eyJ1c2VybmFtZSI6ICJhZG1pbiIsICJyb2xlIjogImFkbWluIn0=.aU78rw.12CbD_3tTYnEVbjmk6Cj81NbhLw; path=/; Max-Age=28800; httponly; samesite=lax; secure
+strict-transport-security: max-age=63072000; includeSubDomains; preload
+vary: Authorization, Cookie
+vary: Accept-Encoding
+x-content-type-options: nosniff
+x-download-options: noopen
+x-perf-ms: 48.86
+x-permitted-cross-domain-policies: none
+x-render-origin-server: uvicorn
+x-request-id: a6dbe1ae-c437-4968-98a7-f1beb3069a03
+cf-cache-status: DYNAMIC
+Server: cloudflare
+alt-svc: h3=":443"; ma=86400
+
