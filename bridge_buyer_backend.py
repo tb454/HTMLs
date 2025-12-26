@@ -7254,51 +7254,68 @@ def legal_export(): return FileResponse("static/legal/export-control.html")
 @app.get("/legal/country-restrictions", response_class=HTMLResponse, tags=["Legal"])
 def legal_country_restrictions(): return FileResponse("static/legal/country-restrictions.html")
 
-# Cookie Notice (alias: /legal/cookies and /cookies)
+# Cookie Notice 
 @app.get("/legal/cookies", include_in_schema=True, tags=["Legal"],
          summary="Cookie Notice", description="View the BRidge Cookie Notice.", status_code=200)
-@app.get("/legal/cookies.html", include_in_schema=False)
 async def cookies_page():
     return FileResponse("static/legal/cookies.html")
 
-# Subprocessors (alias: /legal/subprocessors and /subprocessors)
+@app.get("/legal/cookies.html", include_in_schema=False)
+async def cookies_page_html():
+    return FileResponse("static/legal/cookies.html")
+
+# Subprocessors
 @app.get("/legal/subprocessors", include_in_schema=True, tags=["Legal"],
-         summary="Subprocessors",
-         description="View the current list of BRidge subprocessors.", status_code=200)
-@app.get("/legal/subprocessors.html", include_in_schema=False)
+         summary="Subprocessors", description="View the current list of BRidge subprocessors.", status_code=200)
 async def subprocessors_page():
     return FileResponse("static/legal/subprocessors.html")
 
-# Data Processing Addendum (alias: /legal/dpa and /dpa)
+@app.get("/legal/subprocessors.html", include_in_schema=False)
+async def subprocessors_page_html():
+    return FileResponse("static/legal/subprocessors.html")
+
+# Data Processing Addendum (DPA)
 @app.get("/legal/dpa", include_in_schema=True, tags=["Legal"],
          summary="Data Processing Addendum (DPA)",
          description="View the BRidge Data Processing Addendum.", status_code=200)
-@app.get("/legal/dpa.html", include_in_schema=False)
 async def dpa_page():
     return FileResponse("static/legal/dpa.html")
 
-# Service Level Addendum (alias: /legal/sla and /sla)
+@app.get("/legal/dpa.html", include_in_schema=False)
+async def dpa_page_html():
+    return FileResponse("static/legal/dpa.html")
+
+# Service Level Addendum (SLA)
 @app.get("/legal/sla", include_in_schema=True, tags=["Legal"],
          summary="Service Level Addendum (SLA)",
          description="View the BRidge Service Level Addendum.", status_code=200)
-@app.get("/legal/sla.html", include_in_schema=False)
 async def sla_page():
     return FileResponse("static/legal/sla.html")
 
-# Security Controls Overview (alias: /legal/security and /security)
+@app.get("/legal/sla.html", include_in_schema=False)
+async def sla_page_html():
+    return FileResponse("static/legal/sla.html")
+
+# Security Controls Overview
 @app.get("/legal/security", include_in_schema=True, tags=["Legal"],
          summary="Security Controls Overview",
          description="View the BRidge Security Controls Overview / Security Whitepaper.", status_code=200)
-@app.get("/legal/security.html", include_in_schema=False)
 async def security_page():
     return FileResponse("static/legal/security.html")
 
-# Jurisdictional Privacy Appendix (alias: /legal/privacy-appendix and /privacy/appendix)
+@app.get("/legal/security.html", include_in_schema=False)
+async def security_page_html():
+    return FileResponse("static/legal/security.html")
+
+# Jurisdictional Privacy Appendix
 @app.get("/legal/privacy-appendix", include_in_schema=True, tags=["Legal"],
          summary="Jurisdictional Privacy Appendix (APAC & Canada)",
          description="View region-specific privacy disclosures for APAC & Canada.", status_code=200)
-@app.get("/legal/privacy-appendix.html", include_in_schema=False)
 async def privacy_appendix_page():
+    return _static_or_placeholder("legal/privacy-appendix.html", "Privacy Appendix")
+
+@app.get("/legal/privacy-appendix.html", include_in_schema=False)
+async def privacy_appendix_page_html():
     return _static_or_placeholder("legal/privacy-appendix.html", "Privacy Appendix")
 # -------- Legal pages --------
 
@@ -7392,20 +7409,29 @@ def _static_or_placeholder(filename: str, title: str):
 
 # Ferrous
 @app.get("/static/spec-ferrous", include_in_schema=False)
+async def spec_ferrous():
+    return _static_or_placeholder("spec-ferrous.html", "Ferrous Spec Sheet")
+
 @app.get("/static/spec-ferrous.html", include_in_schema=False)
-async def _spec_ferrous():
+async def spec_ferrous_html():
     return _static_or_placeholder("spec-ferrous.html", "Ferrous Spec Sheet")
 
 # Nonferrous
 @app.get("/static/spec-nonferrous", include_in_schema=False)
+async def spec_nonferrous():
+    return _static_or_placeholder("spec-nonferrous.html", "Nonferrous Spec Sheet")
+
 @app.get("/static/spec-nonferrous.html", include_in_schema=False)
-async def _spec_nonferrous():
+async def spec_nonferrous_html():
     return _static_or_placeholder("spec-nonferrous.html", "Nonferrous Spec Sheet")
 
 # Contract specs
 @app.get("/static/contract-specs", include_in_schema=False)
+async def contract_specs():
+    return _static_or_placeholder("contract-specs.html", "Contract Specifications")
+
 @app.get("/static/contract-specs.html", include_in_schema=False)
-async def _contract_specs():
+async def contract_specs_html():
     return _static_or_placeholder("contract-specs.html", "Contract Specifications")
 
 # 1 year for versioned static files
