@@ -69,6 +69,37 @@ import io, csv as _csv
 from contextlib import suppress
 import asyncio
 from decimal import Decimal, ROUND_HALF_UP
+import pandas as pd
+from sqlalchemy import text as _t
+from fastapi import Body
+import boto3
+from collections import defaultdict
+from datetime import date as _d
+from datetime import datetime, timedelta, timezone as _tz
+import statistics
+from pydantic import BaseModel, AnyUrl
+from typing import Optional
+from fastapi import Body, Depends, HTTPException, Request
+from pathlib import Path
+import tempfile
+from fastapi import Response as _Resp
+from fastapi.responses import StreamingResponse
+from datetime import date, datetime as _dt
+import uuid as _uuid
+from pydantic import BaseModel
+from fastapi import Body
+from fastapi import Form
+import hmac, hashlib, base64, time, json
+from sqlalchemy import text as _t
+import ast
+import shutil
+from pathlib import Path as _Path
+from uuid import uuid4
+from fastapi import APIRouter, Query
+from math import ceil
+import pytz
+import secrets
+
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
@@ -475,8 +506,7 @@ async def _assert_no_duplicate_defs_or_classes():
     if os.getenv("ENV", "").lower() != "production":
         return
 
-    try:
-        import ast
+    try:        
         src = Path(__file__).read_text(encoding="utf-8")
         tree = ast.parse(src)
 
@@ -2671,8 +2701,7 @@ async def vq_ingest_csv(file: UploadFile = File(...), force: bool = False):
 async def vq_ingest_excel(file: UploadFile = File(...), force: bool = False):
     raw = await file.read()
     file_sha = _sha256_bytes(raw)
-
-    import pandas as pd
+    
     df = pd.read_excel(io.BytesIO(raw))
     rows = df.to_dict(orient="records")
 
@@ -2751,8 +2780,6 @@ async def _vendor_blended_lb(material: str) -> float | None:
 app.include_router(vendor_router)
 
 # ========= Vendor Quotes: Folder Watcher ==========
-import shutil
-from pathlib import Path as _Path
 
 # Env toggles (OFF by default)
 VENDOR_WATCH_ENABLED = os.getenv("VENDOR_WATCH_ENABLED", "0").lower() in ("1", "true", "yes")
@@ -2802,8 +2829,7 @@ def _parse_prometal_quote_xlsx(raw: bytes, filename: str) -> list[dict]:
     Pro Metal Quotation Chicago format:
       Two tables side-by-side with headers: Description + UnitPrice.
       Returns normalized rows compatible with _normalize_vendor_row().
-    """
-    import pandas as pd
+    """    
     df = pd.read_excel(io.BytesIO(raw), header=None)
 
     # Find the header row containing Description + UnitPrice
@@ -2884,10 +2910,7 @@ def _rows_from_pro_metal_atl_price_sheet(df, *, filename: str) -> list[dict]:
     """
     Parse 'ATL PRICE SHEET' layout (two tables side-by-side) into canonical rows
     expected by _normalize_vendor_row(): vendor/category/material/price/unit/date.
-    """
-    import pandas as pd
-    import re
-    from datetime import date as _date
+    """  
 
     # Keep vendor name stable (matches what you already have in vendor_quotes)
     vendor = "C&Y Global, Inc. / Pro Metal Recycling"
@@ -2963,8 +2986,7 @@ async def _read_vendor_rows_from_path(p: _Path) -> tuple[list[dict], bytes]:
             rows = _parse_prometal_quote_xlsx(raw, p.name)
             return rows, raw
 
-        # Generic Excel fallback
-        import pandas as pd
+        # Generic Excel fallback        
         df = pd.read_excel(io.BytesIO(raw))
         rows = df.to_dict(orient="records")
         return rows, raw
@@ -3841,8 +3863,7 @@ async def tons_by_yard_this_month():
     """
     Returns [{"yard_id": <seller>, "tons_month": <float>}...] for the current calendar month,
     using BOLs delivered in the window.
-    """
-    from datetime import date as _d
+    """    
     today = _d.today()
     start = _d(today.year, today.month, 1)
     end   = _d(today.year + (today.month // 12), (today.month % 12) + 1, 1)
@@ -5160,8 +5181,7 @@ async def admin_provision_user(p: dict, request: Request, _=Depends(csrf_protect
     """
     # Gate in prod like your other admin endpoints
     _require_admin(request)
-
-    from uuid import uuid4
+    
     email = (p.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "email required")
@@ -5384,10 +5404,6 @@ app.include_router(keys_router)
 # ----- Integrations, Logs, Keys -----
 
 # ----- Materials Benchmark ------
-from pydantic import BaseModel
-from decimal import Decimal
-from typing import List, Optional
-
 class MaterialBenchmark(BaseModel):
     symbol: str
     name: str
@@ -5401,9 +5417,6 @@ class MaterialBenchmarkPage(BaseModel):
     page: int
     page_size: int
     total: int
-
-from fastapi import APIRouter, Query
-from math import ceil
 
 benchmarks_router = APIRouter(prefix="/benchmarks", tags=["Benchmarks"])
 
@@ -5713,8 +5726,7 @@ async def _member_totals(member: str, start: date, end: date):
 
 @fees_router.get("/preview", summary="Preview monthly charges per member")
 async def billing_preview(member: str, month: str):
-    y, m = map(int, month.split("-", 1))
-    from datetime import date as _d
+    y, m = map(int, month.split("-", 1))    
     start = _d(y, m, 1)
     end = _d(y + (m // 12), (m % 12) + 1, 1)
     by_ev, subtotal, mmi, trueup = await _member_totals(member, start, end)
@@ -5727,8 +5739,7 @@ async def billing_preview(member: str, month: str):
 async def billing_run(member: str, month: str, force: bool=False, request: Request=None):
     if os.getenv("ENV","").lower()=="production":
         _require_admin(request)
-    y, m = map(int, month.split("-", 1))
-    from datetime import date as _d
+    y, m = map(int, month.split("-", 1))    
     start = _d(y, m, 1)
     end = _d(y + (m // 12), (m % 12) + 1, 1)
 
@@ -5806,8 +5817,7 @@ async def billing_member_summary(
       - latest invoice for that month (if exists)
       - preview of event totals + MMI true-up for that month
     """
-    # 1) Resolve month window [start, end)
-    from datetime import date as _d
+    # 1) Resolve month window [start, end)    
 
     if month:
         try:
@@ -5908,9 +5918,6 @@ async def billing_member_summary(
 # ----- /Billing plans + member summary -----
 
 # ------- billing member alias -----
-from typing import Optional
-from fastapi import Query
-
 @app.get(
     "/billing/member_summary",
     tags=["Billing"],
@@ -6529,7 +6536,6 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
     except Exception:
         pass
 # === Stripe Meter Events: WS messages ===
-from pydantic import BaseModel, EmailStr
 
 class PmSetupIn(BaseModel):
     member: str
@@ -6798,7 +6804,6 @@ async def _ensure_billing_schema():
 # ----- billing prefs -----
 
 # ---- billing cron -----
-import pytz
 @startup
 async def _billing_cron():
     # BILL_MODE=subscriptions → Stripe Subscriptions + Meters bill everything; skip internal cron
@@ -7221,8 +7226,6 @@ async def _ensure_runtime_risk_tables():
 # -------- DDL and hydrate ----------
 
 # -------- Legal pages --------
-from fastapi.responses import RedirectResponse
-
 @app.get("/fees", include_in_schema=False)
 async def _fees_alias():
     return RedirectResponse("/legal/fees", status_code=307)
@@ -7405,7 +7408,6 @@ async def _ensure_qbo_oauth_events_table():
 # === QBO OAuth Relay • Table ===
 
 # -------- Static HTML --------
-from pathlib import Path
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 def _static_or_placeholder(filename: str, title: str):
@@ -7587,8 +7589,7 @@ async def yard_alias_slash():
     return RedirectResponse("/seller", status_code=307)
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    from pathlib import Path
+async def favicon():    
     p = Path("static/favicon.ico")
     if p.exists():
         return FileResponse(str(p))
@@ -7740,8 +7741,7 @@ async def health_alias(request: Request):
     # 1) issue CSRF token bound to the session    
     try:
         token = _csrf_get_or_create(request)  # your helper
-    except NameError:
-        import secrets
+    except NameError:        
         token = secrets.token_urlsafe(16)
 
     # 2) do the same health check you already had
@@ -8418,7 +8418,9 @@ REF_SYMBOL_ALIASES = {
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
 @router_prices.post("/ingest_csv/copper", summary="Ingest historical COMEX copper from CSV (one-time)")
-async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Data(in).csv"):
+async def ingest_copper_csv(request: Request, path: str = "/mnt/data/Copper Futures Historical Data(in).csv"):
+    if _is_prod():
+        _require_admin(request)
     """
     Expects columns like: Date, Price, Open, High, Low, Vol., Change %
     Writes into BRidge-compatible reference_prices:
@@ -8427,8 +8429,6 @@ async def ingest_copper_csv(path: str = "/mnt/data/Copper Futures Historical Dat
       - price:  numeric
       - ts_market: midnight UTC for that Date
     """
-    import pandas as pd
-    from sqlalchemy import text as _t
 
     try:
         df = pd.read_csv(path)
@@ -8987,14 +8987,14 @@ app.include_router(router_fc)
 # --- Generic reference price ingesters (CSV / Excel) ------------------
 @router_prices.post("/ingest_csv/generic", summary="Ingest a CSV time series into reference_prices")
 async def ingest_csv_generic(
+    request: Request,
     symbol: str,
     path: str,
     date_col: str = "Date",
     price_col: str = "Price"
 ):
-    import pandas as pd
-    from sqlalchemy import text as _t
-
+    if _is_prod():
+        _require_admin(request)
     try:
         df = pd.read_csv(path)
     except Exception as e:
@@ -9040,15 +9040,15 @@ async def ingest_csv_generic(
 
 @router_prices.post("/ingest_excel/generic", summary="Ingest an Excel time series into reference_prices")
 async def ingest_excel_generic(
+    request: Request,
     symbol: str,
     path: str,
     sheet_name: str | int | None = None,
     date_col: str = "Date",
     price_col: str = "Price"
 ):
-    import pandas as pd
-    from sqlalchemy import text as _t
-
+    if _is_prod():
+        _require_admin(request)
     try:
         df = pd.read_excel(path, sheet_name=sheet_name)
     except Exception as e:
@@ -9096,8 +9096,6 @@ async def ingest_excel_generic(
 
     return {"ok": True, "inserted_or_updated": len(rows), "symbol": symbol}
 # ---------- ADMIN: reference_prices maintenance (Windows-friendly) ----------
-from datetime import date as _date
-from sqlalchemy import text as _t
 
 @router_prices.post("/ensure_unique_index", summary="Create unique index on (symbol, ts_market)")
 async def rp_ensure_unique_index(request: Request):
@@ -9111,7 +9109,9 @@ async def rp_ensure_unique_index(request: Request):
     return {"ok": True}
 
 @router_prices.post("/override_close", summary="Upsert official close for a specific trading date")
-async def rp_override_close(symbol: str, d: _date, price: float, source: str = "manual"):
+async def rp_override_close(request: Request, symbol: str, d: _date, price: float, source: str = "manual"):
+    if _is_prod():
+        _require_admin(request)
     # normalize to UTC midnight for that trading date
     ts_market = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
     with engine.begin() as conn:
@@ -9130,7 +9130,9 @@ async def rp_override_close(symbol: str, d: _date, price: float, source: str = "
     return {"ok": True, "symbol": symbol.upper(), "date": str(d), "price": float(price)}
 
 @router_prices.post("/dedupe_day", summary="Keep newest ts_server for (symbol, day), delete older dups")
-async def rp_dedupe_day(symbol: str, d: _date):
+async def rp_dedupe_day(request: Request, symbol: str, d: _date):
+    if _is_prod():
+        _require_admin(request)
     with engine.begin() as conn:
         # rank all rows for that (symbol, date), keep rn=1 (newest by ts_server), delete the rest
         conn.execute(_t("""
@@ -9146,7 +9148,9 @@ async def rp_dedupe_day(symbol: str, d: _date):
     return {"ok": True, "symbol": symbol.upper(), "date": str(d)}
 
 @router_prices.get("/debug/day", summary="List rows for (symbol, day) — debug only")
-async def rp_debug_day(symbol: str, d: _date):
+async def rp_debug_day(request: Request, symbol: str, d: _date):
+    if _is_prod():
+        _require_admin(request)
     rows = []
     with engine.begin() as conn:
         rs = conn.execute(_t("""
@@ -9421,7 +9425,7 @@ async def _daily_indices_job():
             await run_indices_builder()
         except Exception:
             pass        
-        from datetime import datetime, timezone, timedelta
+        
         now = datetime.now(timezone.utc)
         tomorrow = (now + timedelta(days=1)).date()
         next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
@@ -9816,8 +9820,6 @@ async def upsert_fee(symbol: str, maker_bps: float = 0.0, taker_bps: float = 0.0
     """, {"s": symbol, "m": maker_bps, "t": taker_bps, "c": min_fee_cents})
     return {"symbol": symbol, "maker_bps": maker_bps, "taker_bps": taker_bps, "min_fee_cents": min_fee_cents}
 
-from fastapi import Body
-
 @app.post("/billing/pay/checkout", tags=["Billing"], summary="Create Stripe Checkout Session for an invoice")
 async def create_checkout_session(invoice_id: str = Body(..., embed=True)):
     if not (USE_STRIPE and stripe and STRIPE_API_KEY):
@@ -9951,8 +9953,6 @@ async def create_pi_ach(invoice_id: str = Body(..., embed=True)):
         metadata={"invoice_id": invoice_id, "member": inv["member"]}
     )
     return {"client_secret": pi.client_secret}
-
-from fastapi import Header
 
 @app.post("/stripe/webhook", include_in_schema=False)
 async def stripe_webhook(payload: bytes = Body(...), stripe_signature: str = Header(None, alias="Stripe-Signature")):
@@ -10371,8 +10371,7 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
 @app.get("/billing/reports", tags=["Billing"], summary="Monthly billing report (PDF/CSV)")
 async def billing_reports(member: str, month: str = Query(..., description="YYYY-MM"), fmt: Literal["pdf","csv"]="pdf"):
     # month bounds
-    y, m = map(int, month.split("-", 1))
-    from datetime import date as _d
+    y, m = map(int, month.split("-", 1))    
     start = _d(y, m, 1)
     end   = _d(y + (m // 12), (m % 12) + 1, 1)
 
@@ -10976,8 +10975,7 @@ def admin_export_all(request: Request = None):
         )
 
 @app.get("/admin/export_behavior.json", tags=["Admin"], summary="Behavioral export (contracts, BOLs) for Dossier", status_code=200)
-async def admin_export_behavior():
-    import json
+async def admin_export_behavior():    
     contracts = await database.fetch_all("SELECT * FROM contracts ORDER BY created_at DESC LIMIT 2000")
     bols      = await database.fetch_all("SELECT * FROM bols ORDER BY created_at DESC LIMIT 2000")
     return {
@@ -11889,9 +11887,6 @@ async def emit_event_safe(event_type: str, payload: Dict[str, Any]) -> Dict[str,
         except Exception:
             pass
         return {"ok": False, "status_code": None, "response": "exception"}
-
-
-import hmac, hashlib, base64, time, json
 
 def _sign_payload(secret: str, body_bytes: bytes, ts: str) -> str:
     msg = ts.encode("utf-8") + b"." + body_bytes
@@ -14397,9 +14392,6 @@ async def audit_append(actor: str, action: str, entity_type: str, entity_id: str
 # ------------------- Hash-chained audit events (per-day chain) ----
 
 # --------- AUDIT Logging (safe models + guarded) ---------------------
-from pydantic import BaseModel
-from fastapi import Body
-
 class AuditAppendIn(BaseModel):
     actor: str = "system"
     action: str = "note"
@@ -14602,8 +14594,6 @@ def verify_signed_token(token: str, max_age_sec: int = 900) -> dict:
     except BadSignature:
         raise HTTPException(status_code=401, detail="Bad link signature")
 
-from fastapi import Form
-
 def _map_invited_role_to_user_role(invited: str) -> str:
     # Keep public.users.role stable (admin|buyer|seller) and add org roles via entitlements
     return "admin" if invited == "admin" else "buyer"
@@ -14710,9 +14700,6 @@ async def invites_accept_submit(token: str = Form(...), email: str = Form(...), 
 # ===== Link signing (itsdangerous) =====
 
 # --- Admin exports ---
-from fastapi import Response as _Resp
-from fastapi.responses import StreamingResponse
-
 @admin_exports.get("/bols.csv", summary="BOLs CSV (streamed)")
 async def admin_bols_csv():
     rows = await database.fetch_all("""
@@ -14763,8 +14750,6 @@ async def admin_contracts_csv_head():
 # ---  Admin exports ----
 
 # -------- Documents: BOL PDF --------
-from pathlib import Path
-import tempfile
 def _local(ts, tzname: str | None = None):
     if not ts:
         return "—"
@@ -15404,9 +15389,7 @@ async def export_contracts_csv():
         def _norm(v):
             try:
                 if v is None: return ""
-                if isinstance(v, (int, float, str)): return v
-                from datetime import date, datetime as _dt
-                import uuid as _uuid
+                if isinstance(v, (int, float, str)): return v                
                 if isinstance(v, (date, _dt)): return v.isoformat()
                 if isinstance(v, Decimal): return float(v)
                 if isinstance(v, _uuid.UUID): return str(v)
@@ -15696,10 +15679,6 @@ async def purchase_contract(
 # --- Idempotent purchase (contract sign + BOL + buyer_position) ---
 
 # ------ BOL Delivery -------
-from pydantic import BaseModel, AnyUrl
-from typing import Optional
-from fastapi import Body, Depends, HTTPException, Request
-
 class DeliveryConfirmIn(BaseModel):
     notes: Optional[str] = None
     proof_url: Optional[AnyUrl] = None
@@ -15951,8 +15930,7 @@ async def indices_run():
             pass
         return {"ok": False, "skipped": True, "error": str(e)}
 
-def flag_outliers(prices, z=3.0):
-    import statistics
+def flag_outliers(prices, z=3.0):    
     if len(prices) < 10: return []
     mu = statistics.mean(prices)
     sd = statistics.pstdev(prices) or 1
@@ -16476,8 +16454,6 @@ class ContractInExtended(ContractIn):
     reference_timestamp: Optional[datetime] = None
     currency: Optional[str] = "USD"
 
-from datetime import datetime, timedelta, timezone as _tz
-
 def _parse_optional_dt(v: str | None) -> datetime | None:
     """
     Best-effort parser for query-string dates:
@@ -16686,8 +16662,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                     dt = datetime.fromisoformat(hdr + "T00:00:00")
                 else:
                     dt = datetime.fromisoformat(hdr.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    from datetime import timezone as _tz
+                if dt.tzinfo is None:                    
                     dt = dt.replace(tzinfo=_tz.utc)
                 else:
                     dt = dt.astimezone(_tz.utc)
@@ -19647,7 +19622,7 @@ async def _build_member_statement(member: str, as_of: date):
 def _month_bounds_slow(month: str):
     # 'YYYY-MM' -> (date_start, date_end_exclusive)
     y, m = map(int, month.split("-", 1))
-    from datetime import date as _d
+    
     start = _d(y, m, 1)
     end   = _d(y + (m // 12), (m % 12) + 1, 1)
     return start, end
@@ -19685,8 +19660,7 @@ async def _build_member_statement_monthly(member: str, month: str) -> tuple[str,
        GROUP BY symbol, d
        ORDER BY d ASC, symbol
     """, {"m": member, "s": start, "e": end})
-
-    from collections import defaultdict
+   
     daymap = defaultdict(lambda: {"tons":0.0,"notional":0.0,"delivered":0.0})
     for r in rows:
         k = (str(r["d"]), r["symbol"])
@@ -20676,7 +20650,7 @@ async def _upload_to_supabase(path: str, data: bytes) -> Dict[str, Any]:
         return {"ok": True, "path": path, "status_code": r.status_code}
 
 async def _upload_to_s3(path: str, data: bytes) -> Dict[str, Any]:
-    import boto3
+    
     s3 = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
     bucket = os.getenv("S3_BUCKET")
     if not bucket:
