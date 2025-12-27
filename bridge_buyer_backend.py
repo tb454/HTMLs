@@ -325,6 +325,9 @@ load_dotenv()
 ENV = os.getenv("ENV", "development").lower().strip()
 IS_PROD = (ENV == "production")
 IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
+def _is_pytest() -> bool:
+    # PYTEST_CURRENT_TEST is set for each test case in CI.
+    return bool(os.getenv("PYTEST_CURRENT_TEST"))
 
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).lower().strip() in ("1", "true", "yes", "y", "on")
@@ -3215,6 +3218,9 @@ async def _vendor_watch_loop():
 
 @startup
 async def _start_vendor_watch_folder():
+    if _is_pytest():
+        return
+
     """
     Enables "drop file in folder" ingestion.
     OFF by default. Turn on with:
@@ -6876,7 +6882,9 @@ async def _ensure_billing_schema():
 
 # ---- billing cron -----
 @startup
-async def _billing_cron():
+async def _billing_cron():    
+    if _is_pytest():
+        return
     # BILL_MODE=subscriptions → Stripe Subscriptions + Meters bill everything; skip internal cron
     if os.getenv("BILL_MODE", "subscriptions").lower() == "subscriptions":
         return
@@ -6927,6 +6935,9 @@ async def _ws_meter_flush():
     Hourly: sum new WS message counts from data_msg_counters and emit to Stripe as raw counts.
     Assumes table: data_msg_counters(member TEXT, count BIGINT, ts TIMESTAMPTZ).
     """
+    if _is_pytest():
+        return
+
     async def _run():
         last_ts = None
         while True:
@@ -7219,6 +7230,9 @@ async def _rehydrate_queue():
 # ----- Total cleanup job -----
 @startup
 async def _http_idem_ttl_job():
+    if _is_pytest():
+        return
+
     async def _run():
         while True:
             try:
@@ -7250,6 +7264,9 @@ async def _ensure_backup_proof_table():
 # ===== Retention cron =====
 @startup
 async def _retention_cron():
+    if _is_pytest():
+        return
+
     async def _run():
         while True:
             try:
@@ -9576,12 +9593,16 @@ async def _price_refresher():
 
 @startup
 async def _kickoff_refresher():
+    if _is_pytest():
+        return
     t = asyncio.create_task(_price_refresher())
     app.state._bg_tasks.append(t)
 
 # Nightly index close snapshot at ~01:00 UTC
 @startup
 async def _nightly_index_cron():
+    if _is_pytest():
+        return
     async def _runner():
         while True:
             now = utcnow()
@@ -9640,6 +9661,8 @@ async def docsign_webhook(request: Request):
 # -------- Daily Indices Job ---------
 @startup
 async def _start_daily_indices():
+    if _is_pytest():
+        return
     t = asyncio.create_task(_daily_indices_job())
     app.state._bg_tasks.append(t)
 
@@ -12949,7 +12972,9 @@ DOSSIER_INGEST_URL    = (os.getenv("DOSSIER_INGEST_URL", "").strip()
 DOSSIER_INGEST_SECRET = os.getenv("DOSSIER_INGEST_SECRET", "").strip()
 
 @startup
-async def _nightly_dossier_sync():
+async def _nightly_dossier_sync():   
+    if _is_pytest():
+        return 
     # feature gate
     if os.getenv("DOSSIER_SYNC", "").lower() not in ("1","true","yes"):
         return
@@ -19143,6 +19168,8 @@ async def ml_anomaly(a: AnomIn):
     
 @startup
 async def _flywheel_anomaly_cron():
+    if _is_pytest():
+        return
     """
     Nightly flywheel job (vendor-aware):
 
@@ -20828,6 +20855,8 @@ async def run_daily_snapshot(storage: str = "supabase") -> Dict[str, Any]:
 
 @startup
 async def _nightly_snapshot_cron():
+    if _is_pytest():
+        return
     """
     Nightly backup job:
     - Runs only when ENV=production
