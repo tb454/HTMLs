@@ -325,6 +325,52 @@ load_dotenv()
 ENV = os.getenv("ENV", "development").lower().strip()
 IS_PROD = (ENV == "production")
 IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+def _force_tenant_scoping(request: Request | None, tenant_scoped: bool) -> bool:
+    """
+    Enforce tenant scoping rules.
+
+    - Production:
+        - Non-admin: tenant scoping is ALWAYS ON (caller cannot disable via ?tenant_scoped=false).
+        - Admin: may disable ONLY with signed admin override proof (HMAC + TTL).
+        - Fail-closed: if request/session isn't available, force scoping ON.
+    - Non-production:
+        - Respect caller-provided tenant_scoped (dev convenience).
+    """
+    # Non-prod: honor caller flag
+    if os.getenv("ENV", "").lower().strip() != "production":
+        return bool(tenant_scoped)
+
+    # Prod: fail-closed if no request/session
+    if request is None or not hasattr(request, "session"):
+        return True
+
+    # Prod: non-admin always forced scoped
+    role = ""
+    try:
+        role = (request.session.get("role") or "").lower()
+    except Exception:
+        role = ""
+
+    if role != "admin":
+        return True
+
+    # Prod: admin can disable ONLY with signed override proof
+    if tenant_scoped is False:
+        try:
+            # Member string used for signature binding (must match what client signs)
+            member = (
+                (request.query_params.get("member") if getattr(request, "query_params", None) else None)
+                or (request.session.get("member") if request.session else None)
+                or "admin"
+            )
+            if not _verify_admin_override(request, str(member)):
+                return True
+        except Exception:
+            return True
+
+    return bool(tenant_scoped)
+
 def _is_pytest() -> bool:    
     return bool(os.getenv("PYTEST_CURRENT_TEST"))
 
@@ -593,7 +639,7 @@ async def _assert_no_duplicate_routes():
         if prod:
             raise RuntimeError(msg)
 
-# ===================== ICE: duplicate def / overwrite guard (B) =====================
+# =========  duplicate def / overwrite guard  ==========
 @startup
 async def _assert_no_duplicate_defs_or_classes():
     """
@@ -821,6 +867,41 @@ limiter = Limiter(
 
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+
+@startup
+async def _assert_prod_safety_flags():
+    """
+    ICE-grade: Fail closed if any dev-only toggles are enabled in production.
+    """
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+
+    if os.getenv("ENV", "").lower().strip() != "production":
+        return
+
+    # Any of these true in prod means misconfiguration / hole
+    forbidden_truthy = [
+        "ALLOW_TEST_LOGIN_BYPASS",
+        "VENDOR_WATCH_ENABLED",
+        "PUSH_INTERNAL_ITEMS_TO_STRIPE",
+        "BRIDGE_BOOTSTRAP_DDL",
+        "INIT_DB",
+    ]
+
+    bad = []
+    for k in forbidden_truthy:
+        v = (os.getenv(k) or "").strip().lower()
+        if v in ("1", "true", "yes", "y", "on"):
+            bad.append(k)
+
+    # BRIDGE_BOOTSTRAP_DDL must be explicitly 0 in prod
+    v_boot = (os.getenv("BRIDGE_BOOTSTRAP_DDL") or "").strip().lower()
+    if v_boot in ("", "1", "true", "yes", "y", "on"):
+        if "BRIDGE_BOOTSTRAP_DDL" not in bad:
+            bad.append("BRIDGE_BOOTSTRAP_DDL")
+
+    if bad:
+        raise RuntimeError(f"PROD SAFETY VIOLATION: dev-only flags enabled in production: {bad}")
 
 @app.exception_handler(RateLimitExceeded)
 async def ratelimit_handler(request, exc):
@@ -2093,12 +2174,17 @@ def _split_sql_statements(sql: str) -> list[str]:
 async def run_ddl_multi(sql: str):
     """
     Runs DDL safely statement-by-statement.
-    Handles DO $$ blocks, views, functions, quotes, etc.
-    Never raises; logs and continues.
+
+    Production rule:
+      - DDL is NEVER allowed at runtime in prod.
     """
-    # If managed schema is the boss (Supabase), do NOT run any bootstrapping DDL.
+    if os.getenv("ENV", "").lower().strip() == "production":
+        # fail closed; schema must be managed by migrations
+        raise RuntimeError("DDL attempted in production. Use migrations / managed schema.")
+
     if not BOOTSTRAP_DDL:
         return
+
     for stmt in _split_sql_statements(sql):
         s = (stmt or "").strip()
         if not s:
@@ -8211,6 +8297,20 @@ engine = create_engine(
 
 database = databases.Database(ASYNC_DATABASE_URL)
 
+def _is_ddl_sql(sql: str) -> bool:
+    s = (sql or "").lstrip().lower()
+    return s.startswith(("create ", "alter ", "drop ", "truncate ", "comment ", "grant ", "revoke "))
+
+_real_execute = database.execute
+_real_execute_many = getattr(database, "execute_many", None)
+
+async def _execute_guarded(query: str, values: dict | None = None):
+    if os.getenv("ENV", "").lower().strip() == "production" and _is_ddl_sql(query):
+        raise RuntimeError("DDL blocked in production (migration discipline).")
+    return await _real_execute(query, values)
+
+database.execute = _execute_guarded  # type: ignore[assignment]
+
 # Optional one-time sanity log 
 try:
     _sync_tail  = SYNC_DATABASE_URL.split("@")[-1]
@@ -12155,6 +12255,7 @@ class InventoryRowOut(BaseModel):
     response_model=List[InventoryRowOut],
     status_code=200
 )
+
 async def list_inventory(
     seller: str = Query(..., description="Seller name"),
     sku: Optional[str] = Query(None),
@@ -12166,6 +12267,8 @@ async def list_inventory(
     ),
     request: Request = None,
 ):
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
+
     # Infer tenant for this request (if any)
     tenant_id = await current_tenant_id(request) if request is not None else None
 
@@ -12177,7 +12280,7 @@ async def list_inventory(
         vals["sku"] = sku
 
     if tenant_scoped and tenant_id:        
-        q += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
+        q += " AND tenant_id = :tenant_id"
         vals["tenant_id"] = tenant_id
 
     q += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
@@ -12206,6 +12309,7 @@ async def list_movements(
     ),
     request: Request = None,
 ):
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
     tenant_id = await current_tenant_id(request) if request is not None else None
 
     q = "SELECT * FROM inventory_movements WHERE LOWER(seller)=LOWER(:seller)"
@@ -12227,7 +12331,7 @@ async def list_movements(
         vals["end"] = end
 
     if tenant_scoped and tenant_id:
-        q += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
+        q += " AND tenant_id = :tenant_id"
         vals["tenant_id"] = tenant_id
 
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
@@ -12283,6 +12387,7 @@ async def finished_goods(
     ),
     request: Request = None,
 ):
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
     """
     Available finished = max(qty_on_hand - qty_reserved - qty_committed, 0) in TONS → return as POUNDS.
     wip_lbs is 0 until you split WIP tracking.
@@ -12305,7 +12410,7 @@ async def finished_goods(
     params: Dict[str, Any] = {"seller": seller}
 
     if tenant_scoped and tenant_id:
-        base_sql += " AND (tenant_id = :tenant_id OR tenant_id IS NULL)"
+        base_sql += " AND tenant_id = :tenant_id"
         params["tenant_id"] = tenant_id
 
     base_sql += " ORDER BY sku"
@@ -14247,6 +14352,18 @@ def _slugify_member(member: str) -> str:
     m = re.sub(r"[^a-z0-9]+", "-", m)
     return m.strip("-") or m
 
+    # Admin: allow disabling only with signed override proof
+    # (reuse the same override validator)
+    try:
+        if tenant_scoped is False:
+            # require signed override header + TTL 
+            # proof that caller is doing an intentional admin override.
+            if not _verify_admin_override(request, (request.query_params.get("member") or request.session.get("member") or "admin")):
+                return True
+        return bool(tenant_scoped)
+    except Exception:
+        return True
+
 def current_member_from_request(request: Request) -> Optional[str]:
     """
     Tenant identity rules:
@@ -15365,6 +15482,8 @@ async def get_all_bols_pg(
 ):
     q = "SELECT * FROM bols"
     cond, vals = [], {}
+    
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
 
     tenant_id = await current_tenant_id(request) if request is not None else None
     if tenant_scoped and tenant_id:
@@ -15505,7 +15624,8 @@ async def get_all_contracts(
     status   = status.strip()   if isinstance(status, str) else status
     reference_source = reference_source.strip() if isinstance(reference_source, str) else reference_source
     reference_symbol = reference_symbol.strip() if isinstance(reference_symbol, str) else reference_symbol
-
+    
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
     tenant_id = await current_tenant_id(request) if request is not None else None
 
         # --- parse start/end from query ---
@@ -17902,6 +18022,8 @@ async def list_bols_admin(
 ):
     where = []
     params: Dict[str, Any] = {}
+
+    tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
 
     tenant_id = await current_tenant_id(request)
     if tenant_scoped and tenant_id:
