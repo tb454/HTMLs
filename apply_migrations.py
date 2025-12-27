@@ -1,4 +1,5 @@
-﻿import os, glob, hashlib
+﻿# apply_migrations.py
+import os, glob, hashlib
 import psycopg
 
 def norm_db_url(url: str) -> str:
@@ -38,7 +39,13 @@ def main() -> int:
         for path in files:
             ver = os.path.basename(path)
             raw = open(path, "r", encoding="utf-8-sig").read()
-            sql = raw.lstrip("\ufeff")
+            sql = raw.lstrip("\ufeff").strip()
+
+            # Skip empty/whitespace-only migration files
+            if not sql:
+                print(f"skip-empty {ver}")
+                continue
+
             ch = sha256_text(sql)
 
             row = conn.execute(
