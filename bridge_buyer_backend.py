@@ -325,15 +325,15 @@ load_dotenv()
 ENV = os.getenv("ENV", "development").lower().strip()
 IS_PROD = (ENV == "production")
 IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
-def _is_pytest() -> bool:
-    # PYTEST_CURRENT_TEST is set for each test case in CI.
+def _is_pytest() -> bool:    
     return bool(os.getenv("PYTEST_CURRENT_TEST"))
 
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).lower().strip() in ("1", "true", "yes", "y", "on")
 
-def _is_prod() -> bool:
-    return IS_PROD
+def _is_prod() -> bool:    
+    return os.getenv("ENV", "development").lower().strip() == "production"
+
 # ===== /Environment =====
 
 # ---- Unified lifespan + startup/shutdown hook system (moved earlier to avoid NameError) ----
@@ -9894,6 +9894,7 @@ async def create_user(
 
 @app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)", include_in_schema=(not IS_PROD))
 async def admin_demo_seed(request: Request):
+    _dev_only("demo seed")
 
     async with database.transaction():
         demo_member = "Demo Yard"
@@ -19924,6 +19925,8 @@ async def _sequencer_worker():
 @startup
 async def _start_sequencer():
     global _SEQUENCER_STARTED
+    if _is_pytest():
+        return
     if not _SEQUENCER_STARTED:
         t = asyncio.create_task(_sequencer_worker())
         app.state._bg_tasks.append(t)
