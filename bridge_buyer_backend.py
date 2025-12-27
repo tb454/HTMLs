@@ -504,6 +504,10 @@ IDEMPOTENCY_EXEMPT_PREFIXES = (
     "/stripe/webhook", "/ice/webhook", "/ice-digital-trade",
     "/qbo/callback", "/admin/qbo/peek",
     "/invites/accept",
+
+    # Dev-only endpoints must behave like 404 in prod (tests expect this),
+    # so they must bypass the idempotency gate.
+    "/admin/demo",
 )
 
 @app.middleware("http")
@@ -14106,7 +14110,7 @@ def _verify_admin_override(request: Request, member: str) -> bool:
       X-Admin-Override-Ts: unix seconds
       X-Admin-Override-Sig: hex hmac-sha256(secret, f"{member}:{ts}")
     """
-    if not IS_PROD:
+    if os.getenv("ENV", "").lower() != "production":
         return True
 
     secret = (os.getenv("ADMIN_OVERRIDE_SECRET") or "").strip()
