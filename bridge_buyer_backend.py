@@ -484,6 +484,12 @@ _ADMINISH_PREFIXES = ("/ops",)  # optional but recommended to keep ops private i
 async def _prod_admin_gate(request: Request, call_next):
     if os.getenv("ENV", "").lower() == "production":
         p = request.url.path or ""
+
+        # Dev-only endpoints must behave like they don't exist in prod (404),
+        # so they must bypass the admin-gate middleware and let the handler raise 404.
+        if p.startswith("/admin/demo"):
+            return await call_next(request)
+
         if p.startswith(_ADMIN_PREFIXES) or p.startswith(_ADMINISH_PREFIXES):
             role = ""
             try:
@@ -491,7 +497,7 @@ async def _prod_admin_gate(request: Request, call_next):
             except Exception:
                 role = ""
             if role != "admin":
-                # 401 if no session/role, 403 if logged but not admin (either is acceptable for your “401/403 only” sweep)
+                # 401 if no session/role, 403 if logged but not admin
                 code = 401 if not role else 403
                 return JSONResponse(status_code=code, content={"detail": "admin only"})
     return await call_next(request)
@@ -14113,7 +14119,12 @@ def _verify_admin_override(request: Request, member: str) -> bool:
     if os.getenv("ENV", "").lower() != "production":
         return True
 
-    secret = (os.getenv("ADMIN_OVERRIDE_SECRET") or "").strip()
+    secret = (
+        os.getenv("ADMIN_OVERRIDE_SECRET")
+        or os.getenv("LINK_SIGNING_SECRET")
+        or os.getenv("SESSION_SECRET")
+        or ""
+    ).strip()
     if not secret:
         return False  # fail-closed in prod
 
