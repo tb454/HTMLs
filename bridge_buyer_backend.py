@@ -9871,11 +9871,10 @@ async def create_user(
 
 @app.post("/admin/demo/seed", tags=["Admin"], summary="Seed demo tenant + objects (NON-PROD only)", include_in_schema=(not IS_PROD))
 async def admin_demo_seed(request: Request):
-    _dev_only("demo seed")
 
-    demo_member = "Demo Yard"
-    demo_slug = _slugify_member(demo_member)
-
+    async with database.transaction():
+        demo_member = "Demo Yard"
+        demo_slug = _slugify_member(demo_member)
     # Ensure pgcrypto for UUID helpers if needed
     try:
         await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
@@ -14128,8 +14127,10 @@ def _verify_admin_override(request: Request, member: str) -> bool:
     if not secret:
         return False  # fail-closed in prod
 
-    ts = (request.headers.get("X-Admin-Override-Ts") or "").strip()
-    sig = (request.headers.get("X-Admin-Override-Sig") or "").strip()
+    hdrs = getattr(request, "headers", {}) or {}
+    ts = (hdrs.get("X-Admin-Override-Ts") or "").strip()
+    sig = (hdrs.get("X-Admin-Override-Sig") or "").strip()
+
     if not ts or not sig:
         return False
 
