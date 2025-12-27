@@ -722,7 +722,7 @@ async def _utf8_and_cache_headers(request, call_next):
     return resp
 
 instrumentator = Instrumentator()
-instrumentator.instrument(app).expose(app, endpoint="internal/metrics", include_in_schema=False)
+instrumentator.instrument(app).expose(app, endpoint="/internal/metrics", include_in_schema=False)
 # ---- Ensure Cache-Control exists on every GET/HEAD -------
 
 # === QBO OAuth Relay • Config ===
@@ -749,9 +749,6 @@ allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 # - BOOTSTRAP_DDL is forced OFF in production (managed schema)
 RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
 BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
-
-def _is_prod() -> bool:
-    return IS_PROD
 
 def _dev_only(reason: str = "dev-only"):
     if _is_prod():
@@ -792,7 +789,6 @@ if prod:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 
 # =====  rate limiting =====
-ENV = os.getenv("ENV", "development").lower()
 ENFORCE_RL = (
     os.getenv("ENFORCE_RATE_LIMIT", "1") in ("1", "true", "yes")
     or ENV in {"production", "prod", "test", "testing", "ci"}
