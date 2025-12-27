@@ -38,41 +38,42 @@ create index if not exists idx_receipts_tenant_created_at
   where tenant_id is not null;
 
 -- Optional FK constraints (safe with NULL tenant_id)
-do .\migrations\2025_12_27_02_users_unique_lower.sql
-begin
-  if not exists (select 1 from pg_constraint where conname='fk_contracts_tenant') then
-    alter table public.contracts
-      add constraint fk_contracts_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_contracts_tenant') THEN
+    ALTER TABLE public.contracts
+      ADD CONSTRAINT fk_contracts_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
 
-  if not exists (select 1 from pg_constraint where conname='fk_bols_tenant') then
-    alter table public.bols
-      add constraint fk_bols_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_bols_tenant') THEN
+    ALTER TABLE public.bols
+      ADD CONSTRAINT fk_bols_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
 
-  if not exists (select 1 from pg_constraint where conname='fk_inventory_items_tenant') then
-    alter table public.inventory_items
-      add constraint fk_inventory_items_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_inventory_items_tenant') THEN
+    ALTER TABLE public.inventory_items
+      ADD CONSTRAINT fk_inventory_items_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
 
-  if not exists (select 1 from pg_constraint where conname='fk_inventory_movements_tenant') then
-    alter table public.inventory_movements
-      add constraint fk_inventory_movements_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_inventory_movements_tenant') THEN
+    ALTER TABLE public.inventory_movements
+      ADD CONSTRAINT fk_inventory_movements_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
 
-  if not exists (select 1 from pg_constraint where conname='fk_buyer_positions_tenant') then
-    alter table public.buyer_positions
-      add constraint fk_buyer_positions_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_buyer_positions_tenant') THEN
+    ALTER TABLE public.buyer_positions
+      ADD CONSTRAINT fk_buyer_positions_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
 
-  if not exists (select 1 from pg_constraint where conname='fk_receipts_tenant') then
-    alter table public.receipts
-      add constraint fk_receipts_tenant
-      foreign key (tenant_id) references public.tenants(id) not valid;
-  end if;
-end .\migrations\2025_12_27_02_users_unique_lower.sql;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_receipts_tenant') THEN
+    ALTER TABLE public.receipts
+      ADD CONSTRAINT fk_receipts_tenant
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) NOT VALID;
+  END IF;
+END
+$$;
