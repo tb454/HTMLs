@@ -37,7 +37,8 @@ def main() -> int:
 
         for path in files:
             ver = os.path.basename(path)
-            sql = open(path, "r", encoding="utf-8").read()
+            raw = open(path, "r", encoding="utf-8-sig").read()
+            sql = raw.lstrip("\ufeff")
             ch = sha256_text(sql)
 
             row = conn.execute(
