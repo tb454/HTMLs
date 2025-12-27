@@ -12001,12 +12001,12 @@ async def _manual_upsert_absolute_tx(
     await database.execute("""
       INSERT INTO inventory_movements (
         seller, sku, movement_type, qty,
-        uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
+        uom, ref_contract, contract_id_uuid, bol_id_uuid,
         meta, tenant_id, created_at
       )
       VALUES (
         :seller, :sku, :mt, :qty,
-        :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
+        :uom, :ref_contract, :cid_uuid, :bid_uuid,
         CAST(:meta AS jsonb), :tenant_id, NOW()
       )
     """, {
@@ -16930,12 +16930,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                         await database.execute("""
                             INSERT INTO inventory_movements (
                                 seller, sku, movement_type, qty,
-                                uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
+                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
                                 meta, tenant_id, created_at
                             )
                             VALUES (
                                 :seller, :sku, :mt, :qty,
-                                :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
+                                :uom, :ref_contract, :cid_uuid, :bid_uuid,
                                 CAST(:meta AS jsonb), :tenant_id, NOW()
                             )
                         """, {
@@ -16973,12 +16973,12 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
                     :seller, :sku, :mt, :qty,
-                    :uom, :ref_contract_text, :cid_uuid, :bid_uuid,
+                    :uom, :ref_contract, :cid_uuid, :bid_uuid,
                     CAST(:meta AS jsonb), :tenant_id, NOW()
                 )
             """, {
@@ -18403,12 +18403,12 @@ async def cancel_contract(contract_id: str):
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
-                    uom, ref_contract_text, contract_id_uuid, bol_id_uuid,
+                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
                     meta, tenant_id, created_at
                 )
                 VALUES (
                     :seller, :sku, 'unreserve', :qty,
-                    'ton', :ref_contract_text, :cid_uuid, NULL,
+                    'ton', :ref_contract, :cid_uuid, NULL,
                     CAST(:meta AS jsonb), NULL, NOW()
                 )
             """, {
