@@ -12379,8 +12379,8 @@ async def list_movements(
 
 # ---- Buyer Positions: list by buyer/status ----
 class BuyerPositionRow(BaseModel):
-    position_id: str
-    contract_id: str
+    position_id: UUID
+    contract_id: UUID
     buyer: str
     seller: str
     material: str

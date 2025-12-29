@@ -36,8 +36,8 @@ services:
     env_file: .env
     environment:
       <<: *default-env
-      ALLOW_LOCALHOST_IN_PROD: "1"
-      ALLOW_PUBLIC_SELLER_SIGNUP: "1"
+      ALLOW_LOCALHOST_IN_PROD: "0"
+      ALLOW_PUBLIC_SELLER_SIGNUP: "0"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
       GUNICORN_CMD_ARGS: "--timeout 90"
       BRIDGE_BOOTSTRAP_DDL: "0"
@@ -70,7 +70,7 @@ services:
     env_file: .env
     environment:
       <<: *default-env
-      ALLOW_LOCALHOST_IN_PROD: "1"
+      ALLOW_LOCALHOST_IN_PROD: "0"
       DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}"
       BRIDGE_BOOTSTRAP_DDL: "0"
     command: ["python","-u","worker.py"]
