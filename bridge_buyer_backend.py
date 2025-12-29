@@ -319,7 +319,8 @@ def _rget(row, key, default=None):
             return default
 # ---- /common utils ----
 
-load_dotenv()
+if os.getenv("ENV", "").lower() != "production":
+    load_dotenv()
 
 # ===== Environment: single source of truth (C1) =====
 ENV = os.getenv("ENV", "development").lower().strip()
