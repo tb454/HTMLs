@@ -11921,6 +11921,8 @@ async def _ensure_export_rules():
 # -------- STOCKS schema bootstrap (idempotent) --------
 @startup
 async def _ensure_stocks_schema():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = """
     CREATE TABLE IF NOT EXISTS public.locations(
       location TEXT PRIMARY KEY,
@@ -12029,6 +12031,8 @@ async def warrant_release(warrant_id: str):
 # ------ RECEIVABLES schema bootstrap (idempotent) =====
 @startup
 async def _ensure_receivables_schema():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = """
     CREATE TABLE IF NOT EXISTS public.receivables (
       id UUID PRIMARY KEY,
@@ -12600,6 +12604,8 @@ async def _ensure_audit_log_schema():
 # ===== AUDIT CHAIN schema bootstrap (idempotent) =====
 @startup
 async def _ensure_audit_chain_schema():
+    if not BOOTSTRAP_DDL:
+        return
     ddl = """
     CREATE TABLE IF NOT EXISTS audit_events (
       chain_date DATE NOT NULL,
