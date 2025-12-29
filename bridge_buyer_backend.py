@@ -326,6 +326,16 @@ ENV = os.getenv("ENV", "development").lower().strip()
 IS_PROD = (ENV == "production")
 IS_PYTEST = bool(os.getenv("PYTEST_CURRENT_TEST"))
 
+def _no_runtime_ddl_in_prod():
+    """
+    ICE-grade discipline:
+    Any endpoint that performs engine-level DB surgery (DDL or “maintenance” DML)
+    must not exist in production. In prod, schema/data maintenance is via migrations
+    or direct DB ops—not runtime HTTP.
+    """
+    if IS_PROD:
+        raise HTTPException(status_code=404, detail="Not Found")
+
 def _force_tenant_scoping(request: Request | None, tenant_scoped: bool) -> bool:
     """
     Enforce tenant scoping rules.
@@ -871,7 +881,7 @@ app.add_middleware(SlowAPIMiddleware)
 @startup
 async def _assert_prod_safety_flags():
     """
-    ICE-grade: Fail closed if any dev-only toggles are enabled in production.
+    Industrial-grade: Fail closed if any dev-only toggles are enabled in production.
     """
     if os.getenv("PYTEST_CURRENT_TEST"):
         return
@@ -880,10 +890,15 @@ async def _assert_prod_safety_flags():
         return
 
     # Any of these true in prod means misconfiguration / hole
-    forbidden_truthy = [
+    forbidden_truthy = [        
         "ALLOW_TEST_LOGIN_BYPASS",
+        "ALLOW_LOCALHOST_IN_PROD",
+        "BLOCK_HARVESTER",  
         "VENDOR_WATCH_ENABLED",
-        "PUSH_INTERNAL_ITEMS_TO_STRIPE",
+        "DOSSIER_SYNC",
+        "BILL_INTERNAL_WS",        
+        "ALLOW_PUBLIC_SELLER_SIGNUP",        
+        "PUSH_INTERNAL_ITEMS_TO_STRIPE",        
         "BRIDGE_BOOTSTRAP_DDL",
         "INIT_DB",
     ]
@@ -3391,6 +3406,7 @@ async def _ensure_users_minimal_for_tests():
     if env in {"ci", "test"} or init:
         if not BOOTSTRAP_DDL:
             return
+    if BOOTSTRAP_DDL:
         try:
             await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
         except Exception:
@@ -6276,10 +6292,11 @@ async def _provision_member(member: str, *, email: str | None, plan: str | None)
         desired_role = "buyer"
 
     # 2) Ensure user exists (idempotent). If 'both', create a 'buyer' user and grant seller entitlement later.
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
     # lookup
     u = await database.fetch_one("SELECT email, role FROM public.users WHERE lower(email)=:e", {"e": email}) if email else None
     if not u:
@@ -7874,10 +7891,11 @@ async def _ensure_users_columns():
         return
 
     # Make sure gen_random_uuid() is available
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
 
     # Add columns if they don't exist
     try:
@@ -8177,12 +8195,26 @@ def ops_prod_safety():
     raw_boot = os.getenv("BRIDGE_BOOTSTRAP_DDL","1").lower() in ("1","true","yes")
     prod = env == "production"
     bootstrap_effective = (raw_boot and (not prod))
+
+    keys = [
+        "ALLOW_TEST_LOGIN_BYPASS",
+        "ALLOW_LOCALHOST_IN_PROD",
+        "BLOCK_HARVESTER",
+        "VENDOR_WATCH_ENABLED",
+        "DOSSIER_SYNC",
+        "BILL_INTERNAL_WS",
+        "ALLOW_PUBLIC_SELLER_SIGNUP",
+        "PUSH_INTERNAL_ITEMS_TO_STRIPE",
+        "BRIDGE_BOOTSTRAP_DDL",
+        "INIT_DB",
+    ]
+    vals = {k: (os.getenv(k, "") or "") for k in keys}
+
     return {
         "env": env,
         "raw_bootstrap_env": raw_boot,
         "bootstrap_effective": bootstrap_effective,
-        "allow_test_login_bypass": os.getenv("ALLOW_TEST_LOGIN_BYPASS","0"),
-        "block_harvester": os.getenv("BLOCK_HARVESTER",""),
+        "toggles": vals,
     }
 
 @app.get("/ops/plan_sample", tags=["Ops"], summary="Query plan sample (EXPLAIN ANALYZE JSON)")
@@ -8712,7 +8744,8 @@ REF_SYMBOL_ALIASES = {
 # Routers
 router_prices = APIRouter(prefix="/reference_prices", tags=["Reference Prices"])
 @router_prices.post("/ingest_csv/copper", summary="Ingest historical COMEX copper from CSV (one-time)")
-async def ingest_copper_csv(request: Request, path: str = "/mnt/data/Copper Futures Historical Data(in).csv"):
+async def ingest_copper_csv(request: Request, path: str = "/mnt/data/Copper Futures Historical Data(in).csv"):   
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
     """
@@ -8761,17 +8794,13 @@ async def ingest_copper_csv(request: Request, path: str = "/mnt/data/Copper Futu
 
     # Upsert semantics: keep most recent for a given (symbol, ts_market)
     with engine.begin() as conn:
-            if BOOTSTRAP_DDL:
-                conn.exec_driver_sql("""
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);
-                """)
-            conn.execute(_t("""
-                INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
-                VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
-                ON CONFLICT (symbol, ts_market) DO UPDATE
-                SET price = EXCLUDED.price,
-                    source = EXCLUDED.source
-            """), rows)
+        conn.execute(_t("""
+            INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
+            VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
+            ON CONFLICT (symbol, ts_market) DO UPDATE
+            SET price = EXCLUDED.price,
+                source = EXCLUDED.source
+        """), rows)
 
     return {"ok": True, "inserted_or_updated": len(rows), "symbol": "COMEX_CU"}
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
@@ -9134,6 +9163,7 @@ async def run_indices_now():
 
 @router_idx.post("/backfill", summary="Backfill indices for a date range (inclusive)")
 async def indices_backfill(start: date = Query(...), end: date = Query(...)):
+    _no_runtime_ddl_in_prod()
     """
     v2: Build BR-Index history directly from reference_prices + bridge_index_definitions.
 
@@ -9287,8 +9317,10 @@ async def ingest_csv_generic(
     date_col: str = "Date",
     price_col: str = "Price"
 ):
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
+
     try:
         df = pd.read_csv(path)
     except Exception as e:
@@ -9318,9 +9350,7 @@ async def ingest_csv_generic(
     if not rows:
         return {"ok": True, "inserted": 0}
 
-    with engine.begin() as conn:
-        if BOOTSTRAP_DDL:
-            conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+    with engine.begin() as conn:        
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
@@ -9340,7 +9370,8 @@ async def ingest_excel_generic(
     sheet_name: str | int | None = None,
     date_col: str = "Date",
     price_col: str = "Price"
-):
+):    
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
     try:
@@ -9377,9 +9408,7 @@ async def ingest_excel_generic(
     if not rows:
         return {"ok": True, "inserted": 0}
 
-    with engine.begin() as conn:
-        if BOOTSTRAP_DDL:
-            conn.exec_driver_sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts ON reference_prices(symbol, ts_market);""")
+    with engine.begin() as conn:       
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:symbol, :source, :price, :ts_market, NOW(), :raw_snippet)
@@ -9393,8 +9422,9 @@ async def ingest_excel_generic(
 
 @router_prices.post("/ensure_unique_index", summary="Create unique index on (symbol, ts_market)")
 async def rp_ensure_unique_index(request: Request):
-    if _is_prod():
-        _require_admin(request)
+    _no_runtime_ddl_in_prod()
+
+    # dev-only convenience:
     with engine.begin() as conn:
         conn.exec_driver_sql("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
@@ -9403,16 +9433,13 @@ async def rp_ensure_unique_index(request: Request):
     return {"ok": True}
 
 @router_prices.post("/override_close", summary="Upsert official close for a specific trading date")
-async def rp_override_close(request: Request, symbol: str, d: _date, price: float, source: str = "manual"):
+async def rp_override_close(request: Request, symbol: str, d: _date, price: float, source: str = "manual"):  
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
     # normalize to UTC midnight for that trading date
     ts_market = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-    with engine.begin() as conn:
-        conn.exec_driver_sql("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_refprices_sym_ts
-            ON reference_prices(symbol, ts_market);
-        """)
+    with engine.begin() as conn:        
         conn.execute(_t("""
             INSERT INTO reference_prices(symbol, source, price, ts_market, ts_server, raw_snippet)
             VALUES (:s, :src, :p, :ts, NOW(), NULL)
@@ -9424,7 +9451,8 @@ async def rp_override_close(request: Request, symbol: str, d: _date, price: floa
     return {"ok": True, "symbol": symbol.upper(), "date": str(d), "price": float(price)}
 
 @router_prices.post("/dedupe_day", summary="Keep newest ts_server for (symbol, day), delete older dups")
-async def rp_dedupe_day(request: Request, symbol: str, d: _date):
+async def rp_dedupe_day(request: Request, symbol: str, d: _date):    
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
     with engine.begin() as conn:
@@ -9442,7 +9470,8 @@ async def rp_dedupe_day(request: Request, symbol: str, d: _date):
     return {"ok": True, "symbol": symbol.upper(), "date": str(d)}
 
 @router_prices.get("/debug/day", summary="List rows for (symbol, day) — debug only")
-async def rp_debug_day(request: Request, symbol: str, d: _date):
+async def rp_debug_day(request: Request, symbol: str, d: _date):    
+    _no_runtime_ddl_in_prod()
     if _is_prod():
         _require_admin(request)
     rows = []
@@ -9937,11 +9966,12 @@ async def create_user(
     if existing:
         return NewUserOut(ok=True, email=existing["email"], role=existing["role"], created=False)
 
-    # best-effort: enable pgcrypto; ignore perms errors
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    # best-effort: enable pgcrypto; ignore perms errors    
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
 
     async def _try_insert_with_username(u: str) -> bool:
         try:
@@ -10000,10 +10030,11 @@ async def admin_demo_seed(request: Request):
         demo_member = "Demo Yard"
         demo_slug = _slugify_member(demo_member)
     # Ensure pgcrypto for UUID helpers if needed
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
 
     # tenant
     await database.execute("""
@@ -11000,10 +11031,11 @@ async def public_signup(payload: SignupIn, request: Request):
     if existing:
         return SignupOut(ok=True, created=False, email=existing["email"], role=existing["role"], redirect="/buyer")
 
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
 
     base_username = email.split("@",1)[0][:64]
     username = base_username
@@ -11117,10 +11149,11 @@ async def register(body: RegisterIn):
     )
     if not existing:
         # ensure pgcrypto
-        try:
-            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-        except Exception:
-            pass
+        if BOOTSTRAP_DDL:
+            try:
+                await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+            except Exception:
+                pass
         # create user row
         base_username = email.split("@",1)[0][:64]
         username = base_username
@@ -14997,10 +15030,11 @@ async def invites_accept_submit(token: str = Form(...), email: str = Form(...), 
         raise HTTPException(400, "Email mismatch")
 
     # ensure pgcrypto for crypt()
-    try:
-        await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-    except Exception:
-        pass
+    if BOOTSTRAP_DDL:
+        try:
+            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        except Exception:
+            pass
 
     user_role = _map_invited_role_to_user_role(invited_role)
     base_username = inv_email.split("@",1)[0][:64]
@@ -17848,10 +17882,11 @@ async def public_apply(payload: ApplicationIn, request: Request, _=Depends(csrf_
         # In FREE mode, auto-create member + role so they can log in immediately
     if is_free_mode():
         # Best-effort: create tenant + user + membership using existing tables.
-        try:
-            await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-        except Exception:
-            pass
+        if BOOTSTRAP_DDL:
+            try:
+                await database.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+            except Exception:
+                pass
 
         email_l = payload.email.strip().lower()
         base_username = email_l.split("@", 1)[0][:64]
