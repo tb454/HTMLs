@@ -843,7 +843,14 @@ async def _assert_bootstrap_disabled_in_prod():
         raise RuntimeError("BRIDGE_BOOTSTRAP_DDL must be 0 in production (managed schema / migrations discipline).")
 
 if not prod or allow_local:
-    allowed += ["localhost", "127.0.0.1", "testserver", "0.0.0.0"]
+    allowed += [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "testserver",
+        "api",
+        "api:8000",   
+    ]
 
 app.add_middleware(
     SessionMiddleware,
