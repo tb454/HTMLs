@@ -16955,6 +16955,11 @@ async def public_indices_json(
             pass
         return []
 
+@app.get("/api/public/indices", include_in_schema=False)
+async def api_public_indices(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+    # Reuse the canonical public indices JSON output
+    return await public_indices_json(days=days, region=region, material=material)
+
 @app.get("/public/indices/daily.csv", tags=["Analytics"], summary="Public daily index CSV")
 async def public_indices_csv(
     request: Request,
