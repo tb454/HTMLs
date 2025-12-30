@@ -16260,6 +16260,102 @@ async def prices_over_time(material: str, window: str = "1M"):
     """, {"m": f"%{material}%", "days": days})
     return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
 
+@app.get("/analytics/prices_over_time", tags=["Analytics"], summary="Daily avg $/ton for a material over a window")
+async def analytics_prices_over_time(material: str, window: str = "1M"):
+    """
+    UI expects this exact route.
+    Returns: [{"date":"YYYY-MM-DD","avg_price": <float>}]
+    """
+    lookbacks = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+    days = lookbacks.get((window or "1M").upper(), 30)
+
+    rows = await database.fetch_all("""
+      SELECT
+        (created_at AT TIME ZONE 'utc')::date AS d,
+        AVG(price_per_ton) AS avg_ton
+      FROM contracts
+      WHERE material ILIKE :m
+        AND created_at >= NOW() - make_interval(days => :days)
+        AND price_per_ton IS NOT NULL
+      GROUP BY d
+      ORDER BY d
+    """, {"m": f"%{material}%", "days": days})
+
+    return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
+
+
+@app.get("/analytics/surveil_recent", tags=["Analytics"], summary="Recent surveillance alerts (UI compat)")
+async def analytics_surveil_recent(limit: int = 25):
+    """
+    UI expects this exact route.
+    Returns: [{"rule":..,"subject":..,"severity":..,"opened_at":..}]
+    """
+    # If table doesn't exist yet, return [] instead of 500
+    try:
+        rows = await database.fetch_all("""
+          SELECT rule, subject, severity, created_at
+          FROM surveil_alerts
+          ORDER BY created_at DESC
+          LIMIT :limit
+        """, {"limit": limit})
+    except Exception:
+        return []
+
+    out = []
+    for r in rows:
+        out.append({
+            "rule": r["rule"],
+            "subject": r["subject"],
+            "severity": r["severity"],
+            "opened_at": r["created_at"],
+        })
+    return out
+
+
+@app.get("/rfqs", tags=["RFQ"], summary="List RFQs (UI compat)")
+async def rfqs_list(scope: str | None = None, request: Request = None):
+    """
+    trader.js calls /rfqs?scope=mine
+    """
+    # "mine" logged-in session
+    user = ""
+    try:
+        if request is not None and hasattr(request, "session"):
+            user = (request.session.get("username") or request.session.get("email") or "").strip()
+    except Exception:
+        user = ""
+
+    try:
+        if scope == "mine":
+            if not user:                
+                return []
+            rows = await database.fetch_all("""
+              SELECT rfq_id, symbol, side, quantity_lots, expires_at
+              FROM rfqs
+              WHERE creator = :u
+              ORDER BY created_at DESC
+            """, {"u": user})
+        else:
+            rows = await database.fetch_all("""
+              SELECT rfq_id, symbol, side, quantity_lots, expires_at
+              FROM rfqs
+              ORDER BY created_at DESC
+              LIMIT 50
+            """)
+    except Exception:
+        return []
+
+    return [
+        {
+            "rfq_id": str(r["rfq_id"]),
+            "symbol": r["symbol"],
+            "side": r["side"],
+            "quantity_lots": float(r["quantity_lots"] or 0.0),
+            "expires_at": r["expires_at"],
+        }
+        for r in rows
+    ]
+
 @app.get("/analytics/contracts_by_day", tags=["Analytics"], summary="Contract count per day")
 async def analytics_contracts_by_day(days: int = 30):
     rows = await database.fetch_all("""
