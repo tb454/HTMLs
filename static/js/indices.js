@@ -121,105 +121,137 @@ let historyDays = 30;
 let showForecast = false;
 
 async function getJSON(url) {
-  const res = await api(url);
-  if (!res.ok) {
-    console.error('getJSON error', url, res.status);
-    throw new Error(`Request failed ${res.status}`);
-  }
-  return res.json();
+  const data = await apiJSON(url);
+  return (data == null ? [] : data);
 }
 
 async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
   showSkeleton(tbody, 5);
+
   try{
-    universe = sanitizeUniverseRows(await getJSON('/indices/universe?page=1&page_size=500'));
-    const note = document.getElementById('detailNote');
-    if (note){
-      note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d. Universe loaded ' +
-        new Date().toISOString().slice(0,19).replace('T',' ') + 'Z';
-    }
-    tbody.innerHTML = '';
+    // ✅ BR-Index universe (vendor quotes only)
+    const rows = await getJSON('/api/br-index/current');
 
-    // apply filter if any
+    universe = (rows || []).map(r => {
+      const last = (r.px_median ?? r.px_avg ?? r.px_min ?? null);
+      return {
+        symbol: r.instrument_code,
+        last:   (last != null ? +last : null),
+      };
+    });
+
+    // filter
     const q = ($('#filterInput')?.value || '').trim().toLowerCase();
-    const filter = (row) => {
-      if(!q) return true;
-      const sym = (row.symbol||'').toLowerCase();
-      return sym.includes(q);
-    };
+    const filter = (row) => !q || (row.symbol||'').toLowerCase().includes(q);
 
+    tbody.innerHTML = '';
     for (const row of universe.filter(filter)){
       const sym = row.symbol;
-      let last=null, prev=null, updated=null;
-      try{
-        const hist = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
-        if(hist.length){
-          last = hist[hist.length-1]?.close_price;
-          if(hist.length>1) prev = hist[hist.length-2]?.close_price;
-          updated = hist[hist.length-1]?.dt;
-        }
-      }catch(e){}
-      const delta = (last!=null && prev!=null) ? (last - prev) : null;
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><b>${sym}</b></td>
-        <td>${last!=null ? (+last).toFixed(4) : '-'}</td>
-        <td class="${delta>0?'positive':delta<0?'negative':''}">${delta!=null ? (delta>0?'+':'')+delta.toFixed(4) : '-'}</td>
-        <td class="muted">${updated || '-'}</td>
+        <td>${row.last!=null ? (+row.last).toFixed(4) : '-'}</td>
+        <td class="muted">-</td>
+        <td class="muted">-</td>
         <td><button class="btn" data-view="${sym}">View</button></td>
       `;
-
       tbody.appendChild(tr);
     }
+
     if (!tbody.children.length){
       tbody.innerHTML = `<tr><td colspan="5" class="muted">No rows match your filter.</td></tr>`;
     }
-    bleachExchangeText(document);
-      }catch(e){
-        tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load universe.</td></tr>`;
-        toast('Could not load index universe');
-      }
+
+    // BR-only note
+    const note = document.getElementById('detailNote');
+    if (note){
+      note.textContent =
+        'BR-Index (vendor quotes only). USD/lb. No CME/LME shown. Loaded ' +
+        new Date().toISOString().slice(0,19).replace('T',' ') + 'Z';
     }
+
+    // Disable COMEX/LME-facing buttons + forecast UI in this dashboard
+    try {
+      ['pullRefs','runIndices','runForecasts','toggleForecast','dlDailyJson','dlDailyCsv']
+        .forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.disabled = true;
+            el.style.opacity = '0.45';
+            el.title = 'Disabled in BR-Index mode (vendor quotes only).';
+          }
+        });
+      showForecast = false;
+      const fc = document.getElementById('forecastChart');
+      if (fc) fc.classList.add('hidden');
+    } catch {}
+
+    bleachExchangeText(document);
+
+  } catch(e){
+    console.error(e);
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load BR-Index universe.</td></tr>`;
+    toast('Could not load BR-Index universe');
+  }
+}
 
 async function viewSymbol(sym){
   selectedSymbol = sym;
+
   const title = $('#detailTitle'); if (title) title.textContent = sym;
-  const note  = $('#detailNote');  if (note)  note.textContent = 'History (USD/lb); toggle forecast overlay to view 7/30/90d.';
+  const note  = $('#detailNote');
+  if (note) note.textContent = 'BR-Index history (vendor quotes). USD/lb.';
 
-  // history for chart
-  const histAll = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
-  const trim = histAll.slice(-historyDays).map(r=>({dt:r.dt, value:+r.close_price}));
-  drawLine($('#chart'), trim, {color:'#111827'});
+  // ✅ BR-Index history (vendor quotes only)
+  const histRows = await getJSON(`/api/br-index/history?instrument=${encodeURIComponent(sym)}&days=${historyDays}`);
 
-  // forecast overlay
-  if(showForecast){
-    const fc = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(sym)}&horizon_days=90`);
-    const series = fc.map(r=>({dt:r.forecast_date, value:+r.predicted_price}));
-    const ci = fc.map(r=>({dt:r.forecast_date, low:+(r.confidence_low ?? r.predicted_price), high:+(r.confidence_high ?? r.predicted_price)}));
-    $('#forecastChart').classList.remove('hidden');   // was style.display = ''
-    drawLine($('#forecastChart'), series, {color:'#2563eb', ci});
-  } else {
-    $('#forecastChart').classList.add('hidden');      // was style.display = 'none'
-  }
+  const series = (histRows || [])
+    .filter(r => r && r.sheet_date)
+    .map(r => ({
+      dt: r.sheet_date,
+      value: +(r.px_median ?? r.px_avg ?? r.px_min ?? 0)
+    }));
 
-  // provenance (as-of, method, integrity hash)
+  drawLine($('#chart'), series, {color:'#111827'});
+
+  // Update provenance + delta
   try {
-    const latest = histAll[histAll.length-1];
-    const asof = latest ? latest.dt : null;    
-
-    const enc = new TextEncoder();
-    const data = JSON.stringify(histAll.slice(-historyDays));
-    const buf = await crypto.subtle.digest('SHA-256', enc.encode(data));
-    const hash = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,12);
+    const last = series.length ? series[series.length - 1].value : null;
+    const prev = series.length > 1 ? series[series.length - 2].value : null;
+    const delta = (last!=null && prev!=null) ? (last - prev) : null;
+    const updated = series.length ? series[series.length - 1].dt : null;
 
     const asofLine   = document.getElementById('asofLine');
     const methodLine = document.getElementById('methodLine');
     const hashLine   = document.getElementById('hashLine');
-    if (asofLine)   asofLine.textContent   = `As of: ${asof || '—'} (UTC)`;
-    if (methodLine) methodLine.textContent = '';
-    if (hashLine)   hashLine.textContent   = `Hash: ${hash}`;
+
+    if (asofLine)   asofLine.textContent = `As of: ${updated || '—'} (sheet_date)`;
+    if (methodLine) methodLine.textContent = `Method: vendor_quotes → vendor_material_map → scrap_instrument`;
+
+    if (hashLine) {
+      const enc = new TextEncoder();
+      const data = JSON.stringify(series);
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode(data));
+      const hash = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,12);
+      hashLine.textContent = `Hash: ${hash}`;
+    }
+
+    // Update row display in the table (nice polish)
+    const all = Array.from(document.querySelectorAll('#universeTbl tbody tr'));
+    const rowEl = all.find(r => (r.cells?.[0]?.innerText || '').trim() === sym);
+    if (rowEl){
+      rowEl.cells[1].innerText = (last!=null ? (+last).toFixed(4) : '-');
+      rowEl.cells[2].innerText = (delta!=null ? (delta>0?'+':'') + delta.toFixed(4) : '-');
+      rowEl.cells[2].className = (delta>0?'positive':delta<0?'negative':'muted');
+      rowEl.cells[3].innerText = (updated || '-');
+    }
   } catch {}
+
+  // BR-only dashboard: no forecast overlay
+  const fc = $('#forecastChart');
+  if (fc) fc.classList.add('hidden');
 }
 
 // interactions
@@ -245,15 +277,18 @@ document.getElementById('toggleForecast')?.addEventListener('click', (ev)=>{
 });
 
 // exports
-document.getElementById('exportUniverse')?.addEventListener('click', ()=>{
-  const rows = universe.map(r=>({symbol:r.symbol}));
-  csvDownload('bridge_index_universe.csv', rows);
+document.getElementById('exportUniverse')?.addEventListener('click', async ()=>{
+  const rows = await getJSON('/api/br-index/current');
+  const out = (rows||[]).map(r=>({symbol:r.instrument_code}));
+  csvDownload('br_index_universe.csv', out);
 });
+
 document.getElementById('exportHistory')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast('Select a ticker first.');
-  const rows = await getJSON(`/indices/history?symbol=${encodeURIComponent(selectedSymbol)}`);
+  const rows = await getJSON(`/api/br-index/history?instrument=${encodeURIComponent(selectedSymbol)}&days=365`);
   csvDownload(`${selectedSymbol}_history.csv`, rows);
 });
+
 document.getElementById('exportForecast')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast('Select a ticker first.');
   const rows = await getJSON(`/forecasts/latest?symbol=${encodeURIComponent(selectedSymbol)}&horizon_days=90`);
