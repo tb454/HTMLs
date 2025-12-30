@@ -7672,6 +7672,7 @@ app.mount(
     name="static",
 )
 # -------- /Static HTML --------
+
 # ---- Public indices mirror (static files) ----
 PUBLIC_INDICES_PATH = (STATIC_DIR / "public-indices.html")
 PUBLIC_INDEX_DETAIL_PATH = (STATIC_DIR / "public-index-detail.html")
