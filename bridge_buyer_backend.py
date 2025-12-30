@@ -4219,10 +4219,12 @@ async def get_br_index_current():
     Live BR-Index per instrument, derived from latest vendor_quotes rows
     that have a mapping into scrap_instrument.
     """
-    rows = await database.fetch_all("""
-        WITH latest_batch AS (
-          SELECT date_trunc('day', MAX(inserted_at)) AS d
-          FROM vendor_quotes
+    rows = await database.fetch_all(
+        """
+        WITH latest_sheet AS (
+            SELECT MAX(sheet_date) AS d
+            FROM vendor_quotes
+            WHERE sheet_date IS NOT NULL
         ),
         latest_vendor_instr AS (
             SELECT
@@ -4238,14 +4240,17 @@ async def get_br_index_current():
                 ) AS rn
             FROM vendor_quotes vq
             JOIN vendor_material_map vmm
-              ON vq.vendor   = vmm.vendor
+              ON vq.vendor = vmm.vendor
              AND vq.material = vmm.material_vendor
             JOIN scrap_instrument si
               ON vmm.instrument_code = si.instrument_code
-            JOIN latest_batch lb
-              ON date_trunc('day', vq.inserted_at) = lb.d
+            JOIN latest_sheet ls
+              ON vq.sheet_date = ls.d
             WHERE vq.price_per_lb IS NOT NULL
-              AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+              AND (
+                    vq.unit_raw IS NULL
+                 OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS','')
+              )
         ),
         dedup AS (
             SELECT *
@@ -4256,22 +4261,23 @@ async def get_br_index_current():
             instrument_code,
             core_code,
             material_canonical,
-            COUNT(*)                    AS vendor_count,
-            MIN(price_per_lb)           AS px_min,
-            MAX(price_per_lb)           AS px_max,
-            AVG(price_per_lb)           AS px_avg,
+            COUNT(*) AS vendor_count,
+            MIN(price_per_lb) AS px_min,
+            MAX(price_per_lb) AS px_max,
+            AVG(price_per_lb) AS px_avg,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_per_lb) AS px_median
         FROM dedup
         GROUP BY instrument_code, core_code, material_canonical
-        ORDER BY core_code, instrument_code;
-    """)
+        ORDER BY core_code, instrument_code
+        """
+    )
 
     return [
         BRIndexRow(
             instrument_code=r["instrument_code"],
             core_code=r["core_code"],
             material_canonical=r["material_canonical"],
-            vendor_count=r["vendor_count"],
+            vendor_count=int(r["vendor_count"] or 0),
             px_min=r["px_min"],
             px_max=r["px_max"],
             px_avg=r["px_avg"],
