@@ -851,7 +851,7 @@ if not prod or allow_local:
 
     if allow_local:
         allowed += []
-        
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
@@ -7672,6 +7672,384 @@ app.mount(
     name="static",
 )
 # -------- /Static HTML --------
+# ---- Public indices mirror (static files) ----
+PUBLIC_INDICES_PATH = (STATIC_DIR / "public-indices.html")
+PUBLIC_INDEX_DETAIL_PATH = (STATIC_DIR / "public-index-detail.html")
+
+PUBLIC_INDEX_DELAY_DAYS_DEFAULT = int(os.getenv("PUBLIC_INDEX_DELAY_DAYS", "7"))   # public sees T-1 close
+PUBLIC_INDEX_POINTS_PUBLIC = int(os.getenv("PUBLIC_INDEX_POINTS_PUBLIC", "10"))   # public chart length
+PUBLIC_INDEX_POINTS_SUBSCR = int(os.getenv("PUBLIC_INDEX_POINTS_SUBSCR", "365"))  # subscriber chart length
+
+# Optional: API key subscriber gate 
+PUBLIC_INDEX_API_KEYS = [k.strip() for k in (os.getenv("PUBLIC_INDEX_API_KEYS") or "").split(",") if k.strip()]
+
+def _public_is_subscriber(request: Request) -> bool:
+    """
+    Subscriber detection (additive):
+      - admin session => subscriber
+      - API key header/query matches env allowlist => subscriber
+      - (optional) runtime entitlement md.read => subscriber
+    """
+    # 1) Admin session
+    try:
+        if (request.session.get("role") or "").lower() == "admin":
+            return True
+    except Exception:
+        pass
+
+    # 2) API key allowlist
+    if PUBLIC_INDEX_API_KEYS:
+        k = (
+            (request.headers.get("X-API-Key") or "").strip()
+            or (request.headers.get("X-Index-Key") or "").strip()
+            or (request.query_params.get("key") or "").strip()
+        )
+        if k and k in PUBLIC_INDEX_API_KEYS:
+            return True
+
+    # 3) Optional entitlement
+    try:
+        ident = (request.session.get("username") or request.session.get("email") or "").strip()
+        if ident and ("md.read" in _ENTITLEMENTS.get(ident, set())):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _public_delay_days(request: Request) -> int:
+    """
+    Public sees delayed data by default; subscribers see real-time (delay=0).
+    """
+    if _public_is_subscriber(request):
+        return 0
+    try:
+        d = int(PUBLIC_INDEX_DELAY_DAYS_DEFAULT)
+        return max(0, d)
+    except Exception:
+        return 1
+
+
+async def _public_target_index_date(request: Request) -> date | None:
+    """
+    Choose the effective "public" index date:
+      - Find MAX(as_of_date) from indices_daily
+      - Apply delay (T - delay_days)
+      - If delayed date has no rows, fall back to MAX(as_of_date)
+    """
+    # latest date
+    drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM public.indices_daily")
+    if not drow or not drow["d"]:
+        return None
+    latest = drow["d"]
+
+    delay = _public_delay_days(request)
+    if delay <= 0:
+        return latest
+
+    target = latest - _td(days=delay)
+
+    # ensure target exists
+    chk = await database.fetch_one(
+        "SELECT 1 FROM public.indices_daily WHERE as_of_date = :d LIMIT 1",
+        {"d": target},
+    )
+    return target if chk else latest
+
+
+def _public_points(request: Request) -> int:
+    return int(PUBLIC_INDEX_POINTS_SUBSCR if _public_is_subscriber(request) else PUBLIC_INDEX_POINTS_PUBLIC)
+
+
+def _serve_public_html_file(request: Request, path: Path) -> Response:
+    """
+    Serve a static HTML file with:
+      - CSP nonce replacement if {{NONCE}} exists
+      - XSRF-TOKEN cookie minted (same pattern as other pages)
+    """
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{path.name} not found")
+
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
+    html = path.read_text(encoding="utf-8")
+
+    # optional nonce placeholder
+    if "{{NONCE}}" in html:
+        html = html.replace("{{NONCE}}", nonce)
+
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV", "").lower() == "production"
+
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-{nonce}'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net; "
+        "form-action 'self'"
+    )
+
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
+
+# ---- Public mirror pages (static HTML) ----
+@app.get("/public-indices", include_in_schema=False)
+async def public_indices_page(request: Request):
+    return _serve_public_html_file(request, PUBLIC_INDICES_PATH)
+
+@app.get("/public-indices.html", include_in_schema=False)
+async def public_indices_page_html(request: Request):
+    return _serve_public_html_file(request, PUBLIC_INDICES_PATH)
+
+# NOTE: you already serve the detail HTML at /index/{ticker}
+# This adds a data endpoint the JS can call:
+@app.get("/public/index/{ticker}/data", tags=["Public"], summary="Public index detail (delayed for public)")
+async def public_index_detail_data(
+    request: Request,
+    ticker: str,
+    region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
+):
+    target = await _public_target_index_date(request)
+    if not target:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "subscriber": _public_is_subscriber(request),
+            "delay_days": _public_delay_days(request),
+            "ticker": ticker,
+            "region": region,
+            "index_date": None,
+            "latest": None,
+            "history": [],
+        }
+
+    pts = _public_points(request)
+    reg = (region or "blended").strip() or "blended"
+    mat = (ticker or "").strip()
+
+    # latest row (as_of_date == target)
+    latest = None
+    try:
+        r = await database.fetch_one(
+            """
+            SELECT as_of_date, region, material,
+                   COALESCE(price, avg_price) AS px_ton,
+                   COALESCE(currency,'USD')   AS currency,
+                   volume_tons
+            FROM public.indices_daily
+            WHERE as_of_date = :d
+              AND region ILIKE :r
+              AND material ILIKE :m
+            LIMIT 1
+            """,
+            {"d": target, "r": reg, "m": mat},
+        )
+        if r and r["px_ton"] is not None:
+            latest = {
+                "as_of_date": str(r["as_of_date"]),
+                "region": r["region"],
+                "material": r["material"],
+                "index_price_per_ton": float(r["px_ton"]),
+                "currency": (r["currency"] or "USD"),
+                "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+            }
+    except Exception:
+        latest = None
+
+    # history <= target
+    rows = []
+    try:
+        rows = await database.fetch_all(
+            """
+            SELECT as_of_date,
+                   COALESCE(price, avg_price) AS px_ton,
+                   COALESCE(currency,'USD')   AS currency,
+                   volume_tons
+            FROM public.indices_daily
+            WHERE material ILIKE :m
+              AND region ILIKE :r
+              AND as_of_date <= :d
+            ORDER BY as_of_date DESC
+            LIMIT :lim
+            """,
+            {"m": mat, "r": reg, "d": target, "lim": pts},
+        )
+    except Exception:
+        rows = []
+
+    hist = []
+    for x in reversed(list(rows)):
+        hist.append({
+            "as_of_date": str(x["as_of_date"]),
+            "index_price_per_ton": (float(x["px_ton"]) if x["px_ton"] is not None else None),
+            "currency": (x["currency"] or "USD"),
+            "volume_tons": (float(x["volume_tons"]) if x["volume_tons"] is not None else None),
+        })
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "subscriber": _public_is_subscriber(request),
+        "delay_days": _public_delay_days(request),
+        "ticker": ticker,
+        "region": reg,
+        "index_date": str(target),
+        "latest": latest,
+        "history": hist,
+    }
+
+# ---- Public mirror APIs (delayed for public, real-time for subscriber) ----
+@app.get("/public/indices/universe", tags=["Public"], summary="Public index universe (delayed)")
+async def public_indices_universe(
+    request: Request,
+    region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
+    limit: int = Query(2000, ge=1, le=20000),
+):
+    target = await _public_target_index_date(request)
+    if not target:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "subscriber": _public_is_subscriber(request),
+            "delay_days": _public_delay_days(request),
+            "index_date": None,
+            "region": region,
+            "tickers": [],
+        }
+
+    reg = (region or "blended").strip() or "blended"
+
+    rows = await database.fetch_all(
+        """
+        SELECT DISTINCT material
+        FROM public.indices_daily
+        WHERE as_of_date = :d
+          AND region ILIKE :r
+        ORDER BY material
+        LIMIT :lim
+        """,
+        {"d": target, "r": reg, "lim": limit},
+    )
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "subscriber": _public_is_subscriber(request),
+        "delay_days": _public_delay_days(request),
+        "index_date": str(target),
+        "region": reg,
+        "tickers": [str(r["material"]) for r in rows if r and r["material"]],
+    }
+
+@app.get("/public/indices/latest", tags=["Public"], summary="Public latest indices snapshot (delayed)")
+async def public_indices_latest(
+    request: Request,
+    region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
+    limit: int = Query(250, ge=1, le=5000),
+):
+    target = await _public_target_index_date(request)
+    if not target:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "subscriber": _public_is_subscriber(request),
+            "delay_days": _public_delay_days(request),
+            "index_date": None,
+            "region": region,
+            "indices": [],
+        }
+
+    reg = (region or "blended").strip() or "blended"
+
+    rows = await database.fetch_all(
+        """
+        SELECT region, material,
+               COALESCE(price, avg_price) AS px_ton,
+               COALESCE(currency,'USD')   AS currency,
+               volume_tons
+        FROM public.indices_daily
+        WHERE as_of_date = :d
+          AND region ILIKE :r
+        ORDER BY material
+        LIMIT :lim
+        """,
+        {"d": target, "r": reg, "lim": limit},
+    )
+
+    out = []
+    for r in rows:
+        out.append({
+            "material": r["material"],
+            "index_price_per_ton": (float(r["px_ton"]) if r["px_ton"] is not None else None),
+            "currency": (r["currency"] or "USD"),
+            "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+        })
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "subscriber": _public_is_subscriber(request),
+        "delay_days": _public_delay_days(request),
+        "index_date": str(target),
+        "region": reg,
+        "indices": out,
+    }
+
+@app.get("/public/indices/history", tags=["Public"], summary="Public index history for a ticker (delayed)")
+async def public_indices_history(
+    request: Request,
+    ticker: str = Query(..., description="material key used in indices_daily.material"),
+    region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
+):
+    target = await _public_target_index_date(request)
+    if not target:
+        return {
+            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "subscriber": _public_is_subscriber(request),
+            "delay_days": _public_delay_days(request),
+            "index_date": None,
+            "ticker": ticker,
+            "region": region,
+            "rows": [],
+        }
+
+    reg = (region or "blended").strip() or "blended"
+    pts = _public_points(request)
+
+    rows = await database.fetch_all(
+        """
+        SELECT as_of_date,
+               COALESCE(price, avg_price) AS px_ton,
+               COALESCE(currency,'USD')   AS currency,
+               volume_tons
+        FROM public.indices_daily
+        WHERE material ILIKE :m
+          AND region ILIKE :r
+          AND as_of_date <= :d
+        ORDER BY as_of_date DESC
+        LIMIT :lim
+        """,
+        {"m": (ticker or "").strip(), "r": reg, "d": target, "lim": pts},
+    )
+
+    out = []
+    for r in reversed(list(rows)):
+        out.append({
+            "as_of_date": str(r["as_of_date"]),
+            "index_price_per_ton": (float(r["px_ton"]) if r["px_ton"] is not None else None),
+            "currency": (r["currency"] or "USD"),
+            "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+        })
+
+    return {
+        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "subscriber": _public_is_subscriber(request),
+        "delay_days": _public_delay_days(request),
+        "index_date": str(target),
+        "ticker": ticker,
+        "region": reg,
+        "rows": out,
+    }
+# ------------------- /Public Indices Mirror -----------------
 
 @app.head("/", include_in_schema=False)
 async def head_root():
@@ -7793,6 +8171,17 @@ async def indices_page(request: Request):
     resp = FileResponse("static/indices.html")
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
+
+@app.get("/index/{ticker}", include_in_schema=False)
+async def public_index_detail_page(request: Request, ticker: str):
+    """
+    Public read-only index detail page.
+    """
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower() == "production"
+
+    if not PUBLIC_INDEX_DETAIL_PATH.exists():
+        raise HTTPException(status_code=404, detail="static/public-index-detail.html not found")
 
 @app.get("/static/indices.html", include_in_schema=False)
 async def indices_legacy(request: Request):
@@ -16489,55 +16878,130 @@ async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
         return {"ok": False, "skipped": True}
 
 @app.get("/public/indices/daily.json", tags=["Analytics"], summary="Public daily index JSON")
-async def public_indices_json(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+async def public_indices_json(
+    request: Request,
+    # keep days param for backward compatibility, but clamp to points
+    days: int = 365,
+    region: Optional[str] = None,
+    material: Optional[str] = None,
+    api_key: Optional[str] = Query(None, description="Optional subscriber key (query)"),
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+):
+    """
+    Public mirror rules:
+      - Unpaid (no valid key): delayed by PUBLIC_INDEX_DELAY_DAYS_DEFAULT, capped to PUBLIC_INDEX_POINTS_PUBLIC
+      - Paid (valid key): no delay, capped to PUBLIC_INDEX_POINTS_SUBSCR
+
+    NOTE: This endpoint is READ-ONLY and performs NO DDL.
+    """
     try:
+        # --- subscriber detection (query or header) ---
+        k = (api_key or x_api_key or "").strip()
+        is_subscriber = bool(k) and (k in PUBLIC_INDEX_API_KEYS)
+
+        # --- delay + points ---
+        delay_days = 0 if is_subscriber else int(PUBLIC_INDEX_DELAY_DAYS_DEFAULT)
+        points = int(PUBLIC_INDEX_POINTS_SUBSCR) if is_subscriber else int(PUBLIC_INDEX_POINTS_PUBLIC)
+
+        # Clamp caller-provided days to points cap
+        try:
+            days_eff = max(1, min(int(days), points))
+        except Exception:
+            days_eff = points
+
+        # Public cutoff date = today - delay
+        end_date = (utcnow().date() - timedelta(days=delay_days))
+        start_date = end_date - timedelta(days=max(days_eff - 1, 0))
+
         q = """
         SELECT as_of_date, region, material, avg_price, volume_tons
           FROM indices_daily
-         WHERE as_of_date >= CURRENT_DATE - (:days || ' days')::interval
+         WHERE as_of_date >= :start_date
+           AND as_of_date <= :end_date
         """
-        vals = {"days": days}
+        vals: Dict[str, Any] = {"start_date": start_date, "end_date": end_date}
+
         if region:
-            q += " AND region = :region";   vals["region"] = region.lower()
+            q += " AND region = :region"
+            vals["region"] = region.lower().strip()
         if material:
-            q += " AND material = :material"; vals["material"] = material
+            q += " AND material = :material"
+            vals["material"] = material.strip()
+
         q += " ORDER BY as_of_date DESC, region, material"
+
         rows = await database.fetch_all(q, vals)
+
         out = []
         for r in rows:
-            ap = r["avg_price"]; vt = r["volume_tons"]
+            ap = r["avg_price"]
+            vt = r["volume_tons"]
             out.append({
-                "as_of_date": r["as_of_date"].isoformat(),
-                "region": r["region"],
-                "material": r["material"],
+                "as_of_date": r["as_of_date"].isoformat() if r.get("as_of_date") else None,
+                "region": r.get("region"),
+                "material": r.get("material"),
                 "avg_price": (float(ap) if ap is not None else None),
                 "volume_tons": (float(vt) if vt is not None else None),
+                "tier": ("subscriber" if is_subscriber else "public"),
+                "delay_days": delay_days,
             })
+
         return out
     except Exception as e:
-        try: logger.warn("public_indices_json_failed", err=str(e))
-        except: pass
+        try:
+            logger.warn("public_indices_json_failed", err=str(e))
+        except Exception:
+            pass
         return []
 
 @app.get("/public/indices/daily.csv", tags=["Analytics"], summary="Public daily index CSV")
-async def public_indices_csv(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+async def public_indices_csv(
+    request: Request,
+    days: int = 365,
+    region: Optional[str] = None,
+    material: Optional[str] = None,
+    api_key: Optional[str] = Query(None),
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+):
     try:
-        data = await public_indices_json(days=days, region=region, material=material)
-        out = io.StringIO(); w = csv.writer(out)
-        w.writerow(["as_of_date","region","material","avg_price","volume_tons"])
+        data = await public_indices_json(
+            request=request,
+            days=days,
+            region=region,
+            material=material,
+            api_key=api_key,
+            x_api_key=x_api_key,
+        )
+
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["as_of_date", "region", "material", "avg_price", "volume_tons", "tier", "delay_days"])
         for r in data:
-            w.writerow([r["as_of_date"], r["region"], r["material"],
-                        ("" if r["avg_price"] is None else r["avg_price"]),
-                        ("" if r["volume_tons"] is None else r["volume_tons"])])
+            w.writerow([
+                r.get("as_of_date"),
+                r.get("region"),
+                r.get("material"),
+                ("" if r.get("avg_price") is None else r.get("avg_price")),
+                ("" if r.get("volume_tons") is None else r.get("volume_tons")),
+                r.get("tier"),
+                r.get("delay_days"),
+            ])
         out.seek(0)
-        return StreamingResponse(iter([out.read()]), media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
-    except Exception as e:
-        try: logger.warn("public_indices_csv_failed", err=str(e))
-        except: pass
-        return StreamingResponse(iter(["as_of_date,region,material,avg_price,volume_tons\n"]),
+        return StreamingResponse(
+            iter([out.read()]),
             media_type="text/csv",
-            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'})
+            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'}
+        )
+    except Exception as e:
+        try:
+            logger.warn("public_indices_csv_failed", err=str(e))
+        except Exception:
+            pass
+        return StreamingResponse(
+            iter(["as_of_date,region,material,avg_price,volume_tons,tier,delay_days\n"]),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="indices_daily.csv"'}
+        )
 
 @app.post(
     "/indices/snapshot_blended",
