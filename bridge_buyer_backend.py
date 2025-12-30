@@ -806,17 +806,12 @@ def _require_qbo_relay_auth(request: Request):
         raise HTTPException(status_code=401, detail="bad relay auth")
 # === QBO OAuth Relay • Config ===
 
-# ===== Trusted hosts + session cookie =====
+# ----- Trusted hosts + session cookie -----
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
 prod = IS_PROD
 allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
 
-# When BRIDGE_BOOTSTRAP_DDL=0 in the environment, we will NOT run any of the
-# idempotent CREATE TABLE / ALTER TABLE bootstrap blocks.
-# Discipline:
-# - RAW_BOOTSTRAP_DDL reflects env intent
-# - BOOTSTRAP_DDL is forced OFF in production (managed schema)
 RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
 BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
 
@@ -849,9 +844,14 @@ if not prod or allow_local:
         "0.0.0.0",
         "testserver",
         "api",
-        "api:8000",   
+        "api:8000",
+        "localhost:8000",
+        "127.0.0.1:8000",   
     ]
 
+    if allow_local:
+        allowed += []
+        
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
@@ -864,6 +864,7 @@ app.add_middleware(
 if prod:
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
+# ----- Trusted hosts + session cookie -----
 
 # =====  rate limiting =====
 ENFORCE_RL = (
