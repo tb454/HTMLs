@@ -2363,38 +2363,45 @@ async def vendor_latest(limit: int = 200):
     """, {"limit": limit})
     return [dict(r) for r in rows]
 
-@vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot vendor-blended prices into indices_daily (region='vendor')", status_code=200)
-async def vendor_snapshot_to_indices():    
+@vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot blended benchmark+vendor+contracts into indices_daily (region='blended')", status_code=200)
+async def vendor_snapshot_to_indices():
     await database.execute("""
-      INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
-      SELECT
-        CURRENT_DATE                               AS as_of_date,
-        'blended'                                  AS region,
-        b.symbol                                   AS material,
-        (0.30*b.price + 0.50*v.vendor_lb + 0.20*COALESCE(c.contract_lb, b.price)) * 2000.0 AS avg_price,
-        0::numeric                               AS volume_tons,
-        'USD'                                       AS currency
-      FROM (
-        SELECT rp.symbol, rp.price
-        FROM reference_prices rp
-        JOIN (
-          SELECT symbol, MAX(COALESCE(ts_market, ts_server)) AS last_ts
-          FROM reference_prices
-          GROUP BY symbol
-        ) last ON last.symbol = rp.symbol
-              AND COALESCE(rp.ts_market, rp.ts_server) = last.last_ts
-      ) b
-      JOIN (
-        SELECT m.material_canonical AS symbol,
-               AVG(v.price_per_lb)  AS vendor_lb
+      WITH latest_vendor_mat AS (
+        SELECT DISTINCT ON (
+          lower(trim(v.vendor)),
+          lower(trim(m.material_canonical))
+        )
+          m.material_canonical AS symbol,
+          v.vendor,
+          v.price_per_lb,
+          v.sheet_date,
+          v.inserted_at
         FROM vendor_quotes v
         JOIN vendor_material_map m
-          ON m.vendor = v.vendor AND m.material_vendor = v.material
-        WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
-          AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-        GROUP BY 1
-      ) v ON v.symbol = b.symbol
-      LEFT JOIN (
+          ON m.vendor = v.vendor
+         AND m.material_vendor = v.material
+        WHERE v.price_per_lb IS NOT NULL
+          AND (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+        ORDER BY
+          lower(trim(v.vendor)),
+          lower(trim(m.material_canonical)),
+          v.sheet_date DESC NULLS LAST,
+          v.inserted_at DESC NULLS LAST
+      ),
+      v AS (
+        SELECT symbol, AVG(price_per_lb) AS vendor_lb
+        FROM latest_vendor_mat
+        GROUP BY symbol
+      ),
+      b AS (
+        SELECT DISTINCT ON (rp.symbol)
+          rp.symbol,
+          rp.price AS bench_lb
+        FROM reference_prices rp
+        WHERE rp.price IS NOT NULL
+        ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
+      ),
+      c AS (
         SELECT
           mim.symbol,
           AVG(c.price_per_ton / 2000.0) AS contract_lb
@@ -2404,11 +2411,26 @@ async def vendor_snapshot_to_indices():
         WHERE c.status IN ('Signed','Dispatched','Fulfilled')
           AND c.created_at >= NOW() - INTERVAL '30 days'
         GROUP BY mim.symbol
-      ) c ON c.symbol = b.symbol
+      )
+      INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
+      SELECT
+        CURRENT_DATE AS as_of_date,
+        'blended'    AS region,
+        v.symbol     AS material,
+        (
+          0.30 * COALESCE(b.bench_lb, v.vendor_lb)
+        + 0.50 * v.vendor_lb
+        + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
+        ) * 2000.0 AS avg_price,
+        0::numeric AS volume_tons,
+        'USD'      AS currency
+      FROM v
+      LEFT JOIN b ON b.symbol = v.symbol
+      LEFT JOIN c ON c.symbol = v.symbol
       ON CONFLICT (as_of_date, region, material) DO UPDATE
-        SET avg_price = EXCLUDED.avg_price,
+        SET avg_price   = EXCLUDED.avg_price,
             volume_tons = EXCLUDED.volume_tons,
-            currency  = EXCLUDED.currency
+            currency    = EXCLUDED.currency
     """)
     return {"ok": True}
 
@@ -2503,27 +2525,29 @@ async def _ensure_vendor_ingest_schema():
 async def _ensure_v_vendor_blend_latest_view():
     if not BOOTSTRAP_DDL:
         return
-    await run_ddl_multi("""                      
+    await run_ddl_multi("""
     DROP VIEW IF EXISTS public.v_vendor_blend_latest;
     CREATE OR REPLACE VIEW public.v_vendor_blend_latest AS
-    WITH latest_batch AS (
-      SELECT date_trunc('day', MAX(inserted_at)) AS d
-      FROM vendor_quotes
-    ),
-    latest_per_vendor AS (
-      SELECT DISTINCT ON (vq.vendor, COALESCE(m.material_canonical, vq.material))
+    WITH latest_per_vendor AS (
+      SELECT DISTINCT ON (
+        lower(trim(vq.vendor)),
+        lower(trim(COALESCE(m.material_canonical, vq.material)))
+      )
         COALESCE(m.material_canonical, vq.material) AS material,
         vq.vendor,
         vq.price_per_lb,
+        vq.sheet_date,
         vq.inserted_at
       FROM vendor_quotes vq
       LEFT JOIN vendor_material_map m
         ON m.vendor = vq.vendor AND m.material_vendor = vq.material
-      JOIN latest_batch lb
-        ON date_trunc('day', vq.inserted_at) = lb.d
       WHERE vq.price_per_lb IS NOT NULL
         AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
-      ORDER BY vq.vendor, COALESCE(m.material_canonical, vq.material), vq.inserted_at DESC
+      ORDER BY
+        lower(trim(vq.vendor)),
+        lower(trim(COALESCE(m.material_canonical, vq.material))),
+        vq.sheet_date DESC NULLS LAST,
+        vq.inserted_at DESC NULLS LAST
     )
     SELECT
       material,
@@ -15774,21 +15798,38 @@ async def upsert_vendor_to_reference():
       reference_prices(symbol, source, price, ts_market, ts_server, currency)
     """
     await database.execute("""
+      WITH latest_vendor_mat AS (
+        SELECT DISTINCT ON (
+          lower(trim(v.vendor)),
+          lower(trim(m.material_canonical))
+        )
+          m.material_canonical AS symbol,
+          v.vendor,
+          v.price_per_lb,
+          v.sheet_date,
+          v.inserted_at
+        FROM vendor_quotes v
+        JOIN vendor_material_map m
+          ON m.vendor = v.vendor
+         AND m.material_vendor = v.material
+        WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+          AND v.price_per_lb IS NOT NULL
+        ORDER BY
+          lower(trim(v.vendor)),
+          lower(trim(m.material_canonical)),
+          v.sheet_date DESC NULLS LAST,
+          v.inserted_at DESC NULLS LAST
+      )
       INSERT INTO reference_prices (symbol, source, price, ts_market, ts_server, currency)
       SELECT
-        m.material_canonical AS symbol,
-        'vendor'             AS source,
-        AVG(v.price_per_lb)  AS price,
-        MAX(v.sheet_date)::timestamptz AS ts_market,
-        NOW()                AS ts_server,
-        'USD'                AS currency
-      FROM vendor_quotes v
-      JOIN vendor_material_map m
-        ON m.vendor=v.vendor AND m.material_vendor=v.material
-      WHERE (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
-        AND v.price_per_lb IS NOT NULL
-        AND v.sheet_date = (SELECT MAX(sheet_date) FROM vendor_quotes)
-      GROUP BY m.material_canonical
+        symbol,
+        'vendor' AS source,
+        AVG(price_per_lb) AS price,
+        NOW()::timestamptz AS ts_market,
+        NOW() AS ts_server,
+        'USD' AS currency
+      FROM latest_vendor_mat
+      GROUP BY symbol
     """)
     return {"ok": True}
 # ----- Reference Prices -----
