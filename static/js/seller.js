@@ -9,6 +9,10 @@ let BRINDEX_ROWS = [];
 let BRINDEX_LAST_FETCH_MS = 0;
 const BRINDEX_TTL_MS = 25000; // refetch if older than 25s
 
+function _bleach(s){  
+  return String(s || '').replace(/(COMEX|LME|CME)/ig, 'BR-Index');
+}
+
 function _arr(x){
   return Array.isArray(x) ? x : (x?.items || x?.rows || x?.data || []);
 }
@@ -79,9 +83,11 @@ async function _ensureBRIndexRows(force=false){
 
     out.push({
       symbol: sym,
-      // Use notes if present; otherwise show base_symbol/method as “material-ish”
-      name: (d.notes || d.name || d.base_symbol || sym),
-      category: (d.base_symbol || d.method || ''),
+
+      name: _bleach(d.notes || d.name || ''),
+
+      category: '',
+
       last_ton,
       delta_ton,
       dt
@@ -115,7 +121,7 @@ async function loadMarketSnapshot() {
     tbody.innerHTML = top10.map(r => `
       <tr>
         <td>${r.symbol}</td>
-        <td>${r.name || '—'}</td>
+        <td>${_bleach(r.name) || '—'}</td>
         <td class="text-end">${r.last_ton.toFixed(2)}</td>
       </tr>
     `).join('');
@@ -130,51 +136,52 @@ async function loadMarketSnapshot() {
 // FULL MATERIALS BENCHMARK TABLE
 // ----------------------------------------
 async function loadMaterialBenchmarks(page = 1) {
-  const tbody = document.getElementById('materials-table-body');
-  const label = document.getElementById('materials-page-label');
+  const table = document.getElementById('metals-market-table');
+  const tbody = table?.querySelector('tbody');
   if (!tbody) return;
 
   try {
     await _ensureBRIndexRows(false);
 
-    const total = BRINDEX_ROWS.length;
-    const maxPage = Math.max(1, Math.ceil(total / MATERIALS_PAGE_SIZE));
-    materialsPage = Math.min(Math.max(page, 1), maxPage);
+    // sort stable (optional)
+    const rows = [...BRINDEX_ROWS].sort((a,b) => String(a.symbol).localeCompare(String(b.symbol)));
 
-    const start = (materialsPage - 1) * MATERIALS_PAGE_SIZE;
-    const end   = Math.min(start + MATERIALS_PAGE_SIZE, total);
-    const rows  = BRINDEX_ROWS.slice(start, end);
-
-    if (!rows.length){
-      tbody.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No BR-Index rows yet.</td></tr>`;
-      if (label) label.textContent = '';
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-muted text-center py-2">No BR-Index rows yet.</td></tr>`;
       return;
     }
 
+    const fmt = (n, dp=2) =>
+      Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
     tbody.innerHTML = rows.map(r => {
-      const chg = r.delta_ton;
-      const chgStr = (chg == null || !Number.isFinite(chg)) ? '—' : (chg >= 0 ? '+' : '') + chg.toFixed(2);
+      const last = Number.isFinite(r.last_ton) ? r.last_ton : null;
+      const chg  = (r.delta_ton == null || !Number.isFinite(r.delta_ton)) ? null : r.delta_ton;
+
       return `
         <tr>
-          <td>${r.symbol}</td>
-          <td>${r.name || '—'}</td>
-          <td>${r.category || '—'}</td>
-          <td class="text-end">${Number(r.last_ton).toFixed(2)}</td>
-          <td class="text-end">${chgStr}</td>
+          <td>${_bleach(r.symbol)}</td>
+          <td>${_bleach(r.name) || _bleach(r.symbol)}</td>
+          <td>${last == null ? '—' : fmt(last, 2)}</td>
+          <td>${chg == null ? '—' : (chg >= 0 ? '+' : '') + fmt(chg, 2)}</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>${_bleach(r.dt || '—')}</td>
         </tr>
       `;
     }).join('');
 
-    if (label) label.textContent = `Showing ${start + 1}–${end} of ${total} materials`;
-
-    const prevBtn = document.getElementById('materials-prev');
-    const nextBtn = document.getElementById('materials-next');
-    if (prevBtn) prevBtn.disabled = (materialsPage <= 1);
-    if (nextBtn) nextBtn.disabled = (materialsPage >= maxPage);
+    // If the old 5-col table still exists in HTML, blank it so it can’t leak anything.
+    const oldBody = document.getElementById('materials-table-body');
+    if (oldBody) oldBody.innerHTML = '';
+    const oldLabel = document.getElementById('materials-page-label');
+    if (oldLabel) oldLabel.textContent = '';
 
   } catch (err) {
-    console.error('Error loading BR-Index materials:', err);
-    tbody.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">BR-Index unavailable.</td></tr>`;
+    console.error('Error loading BR-Index overview:', err);
+    tbody.innerHTML = `<tr><td colspan="9" class="text-muted text-center py-2">BR-Index unavailable.</td></tr>`;
   }
 }
 
