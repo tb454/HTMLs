@@ -1,6 +1,7 @@
 // indices.js — BR-Index mode (bridge_index_definitions + bridge_index_history)
 
 // ---------- tiny helpers ----------
+const $ = (sel) => document.querySelector(sel);
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 
 function csvDownload(filename, rows){
@@ -141,10 +142,22 @@ async function loadUniverse(){
 
   try{
     const rows = await getJSON('/indices/universe');
-    // Expect {symbol,...}; keep only enabled if field exists
-    const defs = (rows || []).filter(r => r && r.symbol && (r.enabled == null || r.enabled === true));
+    const arr  = Array.isArray(rows) ? rows : (rows?.items || rows?.rows || rows?.data || []);
+    const defs = arr.filter(r => r && r.symbol && (r.enabled == null || r.enabled === true));
 
-    universe = defs.map(d => ({ symbol: d.symbol }));
+    const lastRows = await getJSON('/indices/last?limit=500');
+    const lastArr  = Array.isArray(lastRows) ? lastRows : (lastRows?.items || lastRows?.rows || lastRows?.data || []);
+
+    const lastMap = new Map(lastArr.map(r => [r.symbol, r]));
+
+    universe = defs.map(d => {
+      const L = lastMap.get(d.symbol);
+      const last = (L?.close_price ?? null);
+      const prev = (L?.prev_close_price ?? null);
+      const delta = (last != null && prev != null) ? (last - prev) : null;
+      const updated = L?.dt ?? null;
+      return { symbol: d.symbol, last, delta, updated };
+    });
 
     // filter
     const q = ($('#filterInput')?.value || '').trim().toLowerCase();
@@ -154,11 +167,16 @@ async function loadUniverse(){
     for (const row of universe.filter(filter)){
       const sym = row.symbol;
       const tr = document.createElement('tr');
+      const lastTxt  = (row.last != null && Number.isFinite(+row.last)) ? (+row.last).toFixed(4) : '-';
+      const deltaTxt = (row.delta != null && Number.isFinite(+row.delta)) ? ((row.delta > 0 ? '+' : '') + (+row.delta).toFixed(4)) : '-';
+      const deltaCls = (row.delta > 0) ? 'positive' : (row.delta < 0) ? 'negative' : 'muted';
+      const updTxt   = row.updated || '-';
+
       tr.innerHTML = `
         <td><b>${sym}</b></td>
-        <td class="muted">-</td>
-        <td class="muted">-</td>
-        <td class="muted">-</td>
+        <td>${lastTxt}</td>
+        <td class="${deltaCls}">${deltaTxt}</td>
+        <td class="muted">${updTxt}</td>
         <td><button class="btn" data-view="${sym}">View</button></td>
       `;
       tbody.appendChild(tr);
