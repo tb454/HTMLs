@@ -131,7 +131,7 @@ async function loadUniverse(){
 
   try{
     // ✅ BR-Index universe (vendor quotes only)
-    const rows = await getJSON('/api/br-index/current');
+    const rows = await getJSON('/indices/universe?page=1&page_size=500');
 
     universe = (rows || []).map(r => {
       const last = (r.px_median ?? r.px_avg ?? r.px_min ?? null);
@@ -205,7 +205,7 @@ async function viewSymbol(sym){
   if (note) note.textContent = 'BR-Index history (vendor quotes). USD/lb.';
 
   // ✅ BR-Index history (vendor quotes only)
-  const histRows = await getJSON(`/api/br-index/history?instrument=${encodeURIComponent(sym)}&days=${historyDays}`);
+  const histRows = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
 
   const series = (histRows || [])
     .filter(r => r && r.sheet_date)
@@ -278,7 +278,7 @@ document.getElementById('toggleForecast')?.addEventListener('click', (ev)=>{
 
 // exports
 document.getElementById('exportUniverse')?.addEventListener('click', async ()=>{
-  const rows = await getJSON('/api/br-index/current');
+  const rows = await getJSON('/indices/universe?page=1&page_size=500');
   const out = (rows||[]).map(r=>({symbol:r.instrument_code}));
   csvDownload('br_index_universe.csv', out);
 });
