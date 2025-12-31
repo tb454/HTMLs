@@ -1111,7 +1111,7 @@ onReady(async () => {
       }
     }
 
-    // ========= Metals table from reference_prices =========
+    // ========= BR-Index overview  =========
     async function loadMetalsOverview() {
       const table = document.getElementById('metals-market-table');
       if (!table) return;
@@ -1119,62 +1119,77 @@ onReady(async () => {
       if (!tbody) return;
 
       const symbols = [
-        { sym: 'BR-CU', label: 'Bare Bright Copper',    code: 'BBCOP' },
-        { sym: 'BR-AL',   label: 'Base Aluminum',    code: 'ALU'   },
-        { sym: 'BR-AU', label: 'Gold',      code: 'GC'    },
-        { sym: 'BR-AG', label: 'Silver',    code: 'SI'    },
-        { sym: 'BR-PA', label: 'Palladium', code: 'PA'    },
+        { sym: 'BR-CU',    label: 'Base Copper' },
+        { sym: 'BR-AL',    label: 'Base Aluminum' },
+        { sym: 'BR-HMS',   label: 'HMS' },
+        { sym: 'BR-PS',    label: 'Plate & Structural' },
+        { sym: 'BR-SHRED', label: 'Shred' },
+        { sym: 'BR-SS304', label: 'Stainless 304' },
+        { sym: 'BR-SS316', label: 'Stainless 316' },
+        { sym: 'BR-ZN',    label: 'Base Zinc' },
+        { sym: 'BR-NI',    label: 'Base Nickel' },
+        { sym: 'BR-PB',    label: 'Base Lead' },
       ];
+
+      const fmtNum = (n, dp=2) =>
+        Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
       try {
         const rows = [];
+
         for (const s of symbols) {
           try {
-            const r  = await api(`/reference_prices/latest?symbol=${encodeURIComponent(s.sym)}`);
-            const j  = await r.json();
-            const pxRaw = Number(j.price ?? j.price_close ?? j.last ?? 0);            
-            const assumeUsdPerLb = ['BR-CU','BR-AU','BR-AG','BR-PA','BR-PT','BR-RHD'].includes(String(s.sym || '').toUpperCase());
-            const px = assumeUsdPerLb ? (pxRaw * 2000.0) : pxRaw;
-            const ts = j.ts_market || j.as_of || '';
-            if (!px) continue;
+            const r = await api(`/indices/history?symbol=${encodeURIComponent(s.sym)}`);
+            const hist = await r.json();
+
+            const series = (hist || [])
+              .filter(x => x && (x.dt || x.as_of_date))
+              .map(x => ({ dt: (x.dt || x.as_of_date), v: +(x.close_price ?? x.close ?? x.value ?? 0) }))
+              .filter(x => x.dt && Number.isFinite(x.v))
+              .sort((a,b)=> new Date(a.dt) - new Date(b.dt));
+
+            if (!series.length) continue;
+
+            const last = series[series.length - 1];
+            const prev = series.length > 1 ? series[series.length - 2] : null;
+
+            const lastTon = last.v * 2000.0;
+            const prevTon = prev ? (prev.v * 2000.0) : null;
+            const chgTon  = (prevTon == null) ? null : (lastTon - prevTon);
+
             rows.push({
-              symbol: s.code,
-              name:   s.label,
-              last:   px,
-              change: j.change ?? 0,
-              open:   j.open   ?? '',
-              high:   j.high   ?? '',
-              low:    j.low    ?? '',
-              vol:    j.volume ?? '',
-              time:   ts || '—'
+              symbol: s.sym,
+              name: s.label,
+              last: lastTon,
+              change: chgTon,
+              open: '—',
+              high: '—',
+              low:  '—',
+              vol:  '—',
+              time: last.dt || '—'
             });
-          } catch {            
-          }
+          } catch {}
         }
 
-        if (!rows.length) return; 
-
-        const fmtNum = (n, dp=2) =>
-          Number(n || 0).toLocaleString(
-            undefined,
-            { minimumFractionDigits: dp, maximumFractionDigits: dp }
-          );
+        if (!rows.length) {
+          tbody.innerHTML = `<tr><td colspan="9" class="text-muted text-center py-2">No BR-Index data yet.</td></tr>`;
+          return;
+        }
 
         tbody.innerHTML = rows.map(r => `
           <tr>
             <td>${r.symbol}</td>
             <td>${r.name}</td>
-            <td>${fmtNum(r.last)}</td>
-            <td>${r.change >= 0 ? '+'+fmtNum(r.change) : fmtNum(r.change)}</td>
-            <td>${r.open || '—'}</td>
-            <td>${r.high || '—'}</td>
-            <td>${r.low  || '—'}</td>
-            <td>${r.vol  || '—'}</td>
+            <td>${r.last != null ? fmtNum(r.last) : '—'}</td>
+            <td>${r.change == null ? '—' : (r.change >= 0 ? '+' : '') + fmtNum(r.change)}</td>
+            <td>${r.open}</td>
+            <td>${r.high}</td>
+            <td>${r.low}</td>
+            <td>${r.vol}</td>
             <td>${r.time}</td>
           </tr>
         `).join('');
-      } catch {        
-      }
+      } catch {}
     }
 
     // Seller logic
@@ -1314,7 +1329,7 @@ onReady(async () => {
         tax_percent: null
       };
 
-      // LIVE only: create contract must reserve inventory (no silent import fallback)
+      // LIVE only: create contract must reserve inventory
       const idem = (crypto.randomUUID?.() || String(Date.now()));
 
       try {
