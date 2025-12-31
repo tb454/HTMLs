@@ -145,6 +145,8 @@ async function loadUniverse(){
 
   try{
     const rows = await getJSON('/indices/universe');
+    const arr = Array.isArray(rows) ? rows : (rows?.items || rows?.rows || rows?.data || []);
+
     // Expect {symbol,...}; keep only enabled if field exists
     const defs = (rows || []).filter(r => r && r.symbol && (r.enabled == null || r.enabled === true));
 
