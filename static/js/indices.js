@@ -139,6 +139,31 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+async function getLastFromHistory(sym){
+  try{
+    const histRows = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
+    const seriesAll = (histRows || [])
+      .filter(r => r && (r.dt || r.as_of_date))
+      .map(r => ({
+        dt: (r.dt || r.as_of_date),
+        value: +(r.close_price ?? r.close ?? r.value ?? 0)
+      }))
+      .filter(p => p.dt && Number.isFinite(p.value))
+      .sort((a,b)=> new Date(a.dt) - new Date(b.dt));
+
+    const n = seriesAll.length;
+    const last = n ? seriesAll[n-1].value : null;
+    const prev = n > 1 ? seriesAll[n-2].value : null;
+    const delta = (last!=null && prev!=null) ? (last - prev) : null;
+    const updated = n ? seriesAll[n-1].dt : null;
+
+    return { last, delta, updated };
+  } catch(e){
+    console.warn('getLastFromHistory failed', sym, e);
+    return { last:null, delta:null, updated:null };
+  }
+}
+
 async function loadUniverse(){
   const tbody = $('#universeTbl tbody');
   showSkeleton(tbody, 5);
@@ -158,11 +183,12 @@ async function loadUniverse(){
     for (const row of universe.filter(filter)){
       const sym = row.symbol;
       const tr = document.createElement('tr');
+      tr.setAttribute('data-sym', sym);
       tr.innerHTML = `
         <td><b>${sym}</b></td>
-        <td class="muted">-</td>
-        <td class="muted">-</td>
-        <td class="muted">-</td>
+        <td class="muted">…</td>
+        <td class="muted">…</td>
+        <td class="muted">…</td>
         <td><button class="btn" data-view="${sym}">View</button></td>
       `;
       tbody.appendChild(tr);
@@ -170,6 +196,19 @@ async function loadUniverse(){
 
     if (!tbody.children.length){
       tbody.innerHTML = `<tr><td colspan="5" class="muted">No rows match your filter.</td></tr>`;
+    }
+
+    // Fill Last/Δ/Updated using existing /indices/history for each symbol
+    const rowsToFill = Array.from(tbody.querySelectorAll('tr[data-sym]'));
+    // Do it sequentially to avoid hammering the backend
+    for (const tr of rowsToFill){
+      const sym = tr.getAttribute('data-sym');
+      const { last, delta, updated } = await getLastFromHistory(sym);
+
+      tr.cells[1].innerText = (last!=null ? (+last).toFixed(4) : '-');
+      tr.cells[2].innerText = (delta!=null ? (delta>0?'+':'') + (+delta).toFixed(4) : '-');
+      tr.cells[2].className = (delta>0?'positive':delta<0?'negative':'muted');
+      tr.cells[3].innerText = (updated || '-');
     }
 
     const note = document.getElementById('detailNote');
