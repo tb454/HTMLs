@@ -4250,7 +4250,7 @@ async def get_br_index_current():
             FROM vendor_quotes
             WHERE sheet_date IS NOT NULL
         ),
-        latest_vendor_instr AS (
+        WITH latest_vendor_instr AS (
             SELECT
                 vq.vendor,
                 vq.price_per_lb,
