@@ -5,7 +5,6 @@
 // Optional (if you have it): /forecasts/latest?symbol=...&horizon_days=90
 
 // ---------- tiny helpers ----------
-const $ = (sel) => document.querySelector(sel);
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 
 function csvDownload(filename, rows){
