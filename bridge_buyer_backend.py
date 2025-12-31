@@ -4245,11 +4245,6 @@ async def get_br_index_current():
     """
     rows = await database.fetch_all(
         """
-        WITH latest_sheet AS (
-            SELECT MAX(sheet_date) AS d
-            FROM vendor_quotes
-            WHERE sheet_date IS NOT NULL
-        ),
         WITH latest_vendor_instr AS (
             SELECT
                 vq.vendor,
@@ -4264,17 +4259,12 @@ async def get_br_index_current():
                 ) AS rn
             FROM vendor_quotes vq
             JOIN vendor_material_map vmm
-              ON vq.vendor = vmm.vendor
-             AND vq.material = vmm.material_vendor
+            ON vq.vendor = vmm.vendor
+            AND vq.material = vmm.material_vendor
             JOIN scrap_instrument si
-              ON vmm.instrument_code = si.instrument_code
-            JOIN latest_sheet ls
-              ON vq.sheet_date = ls.d
+            ON vmm.instrument_code = si.instrument_code
             WHERE vq.price_per_lb IS NOT NULL
-              AND (
-                    vq.unit_raw IS NULL
-                 OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS','')
-              )
+            AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
         ),
         dedup AS (
             SELECT *
