@@ -160,7 +160,8 @@ async function loadMaterialBenchmarks(page = 1) {
 
       return `
         <tr>
-          <td>${_bleach(r.symbol)}</td>          
+          <td>${_bleach(r.symbol)}</td>
+          <td>${_bleach(r.name) || _bleach(r.symbol)}</td>         
           <td>${last == null ? '—' : fmt(last, 2)}</td>
           <td>${chg == null ? '—' : (chg >= 0 ? '+' : '') + fmt(chg, 2)}</td>
           <td>—</td>
