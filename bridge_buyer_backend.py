@@ -226,6 +226,61 @@ _INSTRUMENTS = {
     "CU-1M":       {"lot": 20.0, "tick": 0.0005, "desc": "Copper 1-Month (USD/lb)"},
 }
 
+# ===================== DB INIT (single source of truth) =====================
+import os as _os
+import hashlib as _hashlib
+import databases as _databases
+from sqlalchemy import create_engine as _create_engine
+
+BASE_DATABASE_URL = (_os.getenv("DATABASE_URL", "") or "").strip()
+
+# Normalize legacy scheme
+if BASE_DATABASE_URL.startswith("postgres://"):
+    BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# SQLAlchemy (sync) wants a driver prefix
+SYNC_DATABASE_URL = BASE_DATABASE_URL
+if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL:
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+
+# databases/asyncpg must NOT have "+driver" in the scheme
+ASYNC_DATABASE_URL = BASE_DATABASE_URL
+if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
+    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+
+engine = _create_engine(
+    SYNC_DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
+    pool_size=int(_os.getenv("DB_POOL_SIZE", "10")),
+    max_overflow=int(_os.getenv("DB_MAX_OVERFLOW", "20")),
+)
+
+database = _databases.Database(ASYNC_DATABASE_URL)
+
+def _is_ddl_sql(sql: str) -> bool:
+    s = (sql or "").lstrip().lower()
+    return s.startswith(("create ", "alter ", "drop ", "truncate ", "comment ", "grant ", "revoke "))
+
+_real_execute = database.execute
+
+async def _execute_guarded(query: str, values: dict | None = None):
+    if _os.getenv("ENV", "").lower().strip() == "production" and _is_ddl_sql(query):
+        raise RuntimeError("DDL blocked in production (migration discipline).")
+    return await _real_execute(query, values)
+
+database.execute = _execute_guarded  # type: ignore[assignment]
+
+try:
+    _sync_tail  = SYNC_DATABASE_URL.split("@")[-1]
+    _async_tail = ASYNC_DATABASE_URL.split("@")[-1]
+    print(f"[DB] sync={_sync_tail}  async={_async_tail}")
+except Exception:
+    pass
+# ===================== /DB INIT =====================
+
 # ---- common utils (hashing, dates, json, rounding, lot size) ----
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -8746,68 +8801,6 @@ async def set_locale_prefs(p: LocalePrefs, request: Request):
     return resp
 # -------- Global --------
 
-# --- Pricing & Indices wiring --------------------------------------
-import os, asyncio
-from datetime import datetime, timedelta
-import asyncpg
-from sqlalchemy import create_engine
-import databases  
-from indices_builder import run_indices_builder as indices_generate_snapshot
-
-BASE_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-
-# Normalize legacy scheme
-if BASE_DATABASE_URL.startswith("postgres://"):
-    BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-# --- SQLAlchemy (sync) wants a driver prefix ---
-SYNC_DATABASE_URL = BASE_DATABASE_URL
-if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL:
-    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-
-# --- asyncpg (and databases) must NOT have "+asyncpg" in scheme ---
-# asyncpg expects: postgresql://user:pass@host:port/dbname
-ASYNC_DATABASE_URL = BASE_DATABASE_URL
-# If someone set DATABASE_URL as postgresql+asyncpg://..., strip it back
-if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
-    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
-if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
-    ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
-
-# Instantiate clients
-engine = create_engine(
-    SYNC_DATABASE_URL,
-    pool_pre_ping=True,
-    future=True,
-    pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
-)
-
-database = databases.Database(ASYNC_DATABASE_URL)
-
-def _is_ddl_sql(sql: str) -> bool:
-    s = (sql or "").lstrip().lower()
-    return s.startswith(("create ", "alter ", "drop ", "truncate ", "comment ", "grant ", "revoke "))
-
-_real_execute = database.execute
-_real_execute_many = getattr(database, "execute_many", None)
-
-async def _execute_guarded(query: str, values: dict | None = None):
-    if os.getenv("ENV", "").lower().strip() == "production" and _is_ddl_sql(query):
-        raise RuntimeError("DDL blocked in production (migration discipline).")
-    return await _real_execute(query, values)
-
-database.execute = _execute_guarded  # type: ignore[assignment]
-
-# Optional one-time sanity log 
-try:
-    _sync_tail  = SYNC_DATABASE_URL.split("@")[-1]
-    _async_tail = ASYNC_DATABASE_URL.split("@")[-1]
-    print(f"[DB] sync={_sync_tail}  async={_async_tail}")
-except Exception:
-    pass
-# -------------------------------------------------------------------
-
 def _safe_env_snapshot() -> dict:
     """
     Safe env snapshot: excludes secrets by only including allowlisted keys.
@@ -15013,18 +15006,6 @@ def _slugify_member(member: str) -> str:
     m = re.sub(r"[^a-z0-9]+", "-", m)
     return m.strip("-") or m
 
-    # Admin: allow disabling only with signed override proof
-    # (reuse the same override validator)
-    try:
-        if tenant_scoped is False:
-            # require signed override header + TTL 
-            # proof that caller is doing an intentional admin override.
-            if not _verify_admin_override(request, (request.query_params.get("member") or request.session.get("member") or "admin")):
-                return True
-        return bool(tenant_scoped)
-    except Exception:
-        return True
-
 def current_member_from_request(request: Request) -> Optional[str]:
     """
     Tenant identity rules:
@@ -17937,7 +17918,6 @@ async def indices_settle_correct(
     region: str = Query("blended"),
     rule_version: str = Query("v1"),
     supersedes_id: int = Query(..., description="indices_settlements_history.id you are correcting"),
-    priority: str | None = Query(None, description="Optional override writers for the correction selection"),
 ):
     if os.getenv("ENV", "").lower() == "production":
         _require_admin(request)
@@ -17951,8 +17931,6 @@ async def indices_settle_correct(
     except Exception:
         who = "system"
 
-    writers = _parse_priority_csv(priority) if priority else None
-
     # Safety: ensure supersedes row exists
     srow = await database.fetch_one(
         "SELECT id, as_of_date, region, material, rule_version FROM public.indices_settlements_history WHERE id=:id",
@@ -17964,8 +17942,7 @@ async def indices_settle_correct(
     res = await _publish_indices_settles_from_history(
         as_of_date=d,
         region=reg,
-        rule_version=rv,
-        priority_writers=writers,          
+        rule_version=rv,         
         published_by=who,
         action="correction",
         supersedes_history_id=int(supersedes_id),
