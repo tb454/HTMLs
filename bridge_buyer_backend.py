@@ -74,7 +74,7 @@ from sqlalchemy import text as _t
 from fastapi import Body
 import boto3
 from collections import defaultdict, deque
-from datetime import date as _date, date, timedelta, datetime, timezone, _d
+from datetime import date as _date, date, timedelta, datetime, timezone
 from datetime import datetime, timedelta, timezone as _tz
 import statistics
 from pydantic import BaseModel, AnyUrl
@@ -4153,9 +4153,9 @@ async def tons_by_yard_this_month():
     Returns [{"yard_id": <seller>, "tons_month": <float>}...] for the current calendar month,
     using BOLs delivered in the window.
     """    
-    today = _d.today()
-    start = _d(today.year, today.month, 1)
-    end   = _d(today.year + (today.month // 12), (today.month % 12) + 1, 1)
+    today = date.today()
+    start = date(today.year, today.month, 1)
+    end   = date(today.year + (today.month // 12), (today.month % 12) + 1, 1)
 
     rows = await database.fetch_all("""
       SELECT seller AS yard_id,
@@ -6012,8 +6012,8 @@ async def _member_totals(member: str, start: date, end: date):
 @fees_router.get("/preview", summary="Preview monthly charges per member")
 async def billing_preview(member: str, month: str):
     y, m = map(int, month.split("-", 1))    
-    start = _d(y, m, 1)
-    end = _d(y + (m // 12), (m % 12) + 1, 1)
+    start = date(y, m, 1)
+    end = date(y + (m // 12), (m % 12) + 1, 1)
     by_ev, subtotal, mmi, trueup = await _member_totals(member, start, end)
     return {"member": member, "period_start": str(start), "period_end": str(end),
             "by_event": by_ev, "subtotal": round(subtotal,2),
@@ -6025,8 +6025,8 @@ async def billing_run(member: str, month: str, force: bool=False, request: Reque
     if os.getenv("ENV","").lower()=="production":
         _require_admin(request)
     y, m = map(int, month.split("-", 1))    
-    start = _d(y, m, 1)
-    end = _d(y + (m // 12), (m % 12) + 1, 1)
+    start = date(y, m, 1)
+    end = date(y + (m // 12), (m % 12) + 1, 1)
 
     # lock (don’t duplicate)
     exists = await database.fetch_one(
@@ -6110,12 +6110,11 @@ async def billing_member_summary(
         except Exception:
             raise HTTPException(400, "month must be YYYY-MM")
     else:
-        today = _d.today()
+        today = date.today()
         y, m = today.year, today.month
 
-    start = _d(y, m, 1)
-    end = _d(y + (m // 12), (m % 12) + 1, 1)
-
+    start = date(y, m, 1)
+    end = date(y + (m // 12), (m % 12) + 1, 1)
     # 2) Plan + limits
     plan_row = await database.fetch_one(
         """
@@ -11303,8 +11302,8 @@ async def statement_single_pdf(member: str, as_of: date, request: Request):
 async def billing_reports(member: str, month: str = Query(..., description="YYYY-MM"), fmt: Literal["pdf","csv"]="pdf"):
     # month bounds
     y, m = map(int, month.split("-", 1))    
-    start = _d(y, m, 1)
-    end   = _d(y + (m // 12), (m % 12) + 1, 1)
+    start = date(y, m, 1)
+    end   = date(y + (m // 12), (m % 12) + 1, 1)
 
     # totals by event
     rows = await database.fetch_all("""
@@ -21461,8 +21460,8 @@ def _month_bounds_slow(month: str):
     # 'YYYY-MM' -> (date_start, date_end_exclusive)
     y, m = map(int, month.split("-", 1))
     
-    start = _d(y, m, 1)
-    end   = _d(y + (m // 12), (m % 12) + 1, 1)
+    start = date(y, m, 1)
+    end   = date(y + (m // 12), (m % 12) + 1, 1)
     return start, end
 
 async def _build_member_statement_monthly(member: str, month: str) -> tuple[str, bytes]:
