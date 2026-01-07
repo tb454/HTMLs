@@ -11517,9 +11517,8 @@ async def compliance_member_set(username: str, kyc: bool=False, aml: bool=False,
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
 
 # # ======= fee schedule ========================      
-@app.get("/legal/fees", tags=["Legal"], summary="BRidge Fee Schedule")
-async def fees_doc_alias():
-    # Use the shared static-or-placeholder helper to serve the fees page
+@app.get("/legal/fees.html", tags=["Legal"], summary="BRidge Fee Schedule")
+async def fees_doc_alias():    
     return _static_or_placeholder("legal/fees.html", "BRidge Fee Schedule")
 # ======= fee schedule ========================
 
@@ -13844,28 +13843,50 @@ async def enqueue_dossier_event(
     event_type: str,
     payload: Optional[Dict[str, Any]] = None,
     source_system: str = "bridge",
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
 ) -> None:
-    """
-    Best-effort: stage an event into the Dossier ingest queue.
-    This must never fail hot-path requests; callers should generally
-    wrap it in a try/except and ignore errors.
-    """
+    p = json.dumps(payload or {}, default=str)
     try:
-        await database.execute("""
-          INSERT INTO dossier_ingest_queue(
-            source_system, source_table, source_id, event_type, payload, tenant_id
-          )
-          VALUES (:sys, :tbl, :sid, :evt, :payload::jsonb, :tenant)
-        """, {
-            "sys": source_system,
-            "tbl": source_table,
-            "sid": str(source_id),
-            "evt": event_type,
-            "payload": json.dumps(payload or {}, default=str),
-            "tenant": tenant_id
-        })
+        await database.execute(
+            """
+            INSERT INTO public.dossier_ingest_queue(
+              source_system, source_table, source_id, event_type, payload, tenant_id
+            )
+            VALUES (:source_system, :source_table, :source_id, :event_type, CAST(:payload AS jsonb), :tenant_id)
+            """,
+            {
+                "source_system": source_system,
+                "source_table": str(source_table),
+                "source_id": str(source_id),
+                "event_type": str(event_type),
+                "payload": p,
+                "tenant_id": tenant_id,
+            },
+        )
     except Exception as e:
+        msg = str(e).lower()
+        # If prod schema is missing tenant_id, retry without it
+        if "tenant_id" in msg and "does not exist" in msg:
+            try:
+                await database.execute(
+                    """
+                    INSERT INTO public.dossier_ingest_queue(
+                      source_system, source_table, source_id, event_type, payload
+                    )
+                    VALUES (:source_system, :source_table, :source_id, :event_type, CAST(:payload AS jsonb))
+                    """,
+                    {
+                        "source_system": source_system,
+                        "source_table": str(source_table),
+                        "source_id": str(source_id),
+                        "event_type": str(event_type),
+                        "payload": p,
+                    },
+                )
+                return
+            except Exception as e2:
+                e = e2
+
         try:
             logger.warn("dossier_enqueue_failed", table=source_table, id=str(source_id), err=str(e))
         except Exception:
