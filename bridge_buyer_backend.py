@@ -317,6 +317,46 @@ def _rget(row, key, default=None):
             return dict(row).get(key, default)
         except Exception:
             return default
+
+# Indices audit helper        
+async def _log_indices_run(
+    *,
+    run_id: str,
+    as_of_date: date,
+    region: str,
+    writer: str,
+    rows_written: int,
+    inputs: dict,
+    ok: bool = True,
+    error: str | None = None,
+) -> None:
+    """
+    Best-effort audit: never breaks the snapshot endpoint.
+    Writes a row to public.indices_runs.
+    """
+    try:
+        await database.execute(
+            """
+            INSERT INTO public.indices_runs(run_id, as_of_date, region, writer, rows_written, inputs, ok, error)
+            VALUES (:run_id, :as_of_date, :region, :writer, :rows_written, :inputs::jsonb, :ok, :error)
+            """,
+            {
+                "run_id": run_id,
+                "as_of_date": as_of_date,
+                "region": region,
+                "writer": writer,
+                "rows_written": int(rows_written or 0),
+                "inputs": json.dumps(inputs or {}, default=str),
+                "ok": bool(ok),
+                "error": error,
+            },
+        )
+    except Exception as e:
+        # never break main flow
+        try:
+            logger.warn("indices_runs_log_failed", err=str(e), writer=writer, region=region, as_of=str(as_of_date))
+        except Exception:
+            pass        
 # ---- /common utils ----
 
 if os.getenv("ENV", "").lower() != "production":
@@ -983,7 +1023,7 @@ async def admin_set_session_member(request: Request, member: str = Body(..., emb
     request.session["member"] = member
     return {"ok": True, "member": request.session.get("member")}
 
-# --- Safe latest index handler (idempotent empty state) ---
+# --- Safe latest index handler ---
 @app.get(
     "/indices/latest",
     tags=["Indices"],
@@ -995,9 +1035,8 @@ async def indices_latest(
     group: str | None = Query(None, description="List mode: ferrous|nonferrous (currently informational)"),
     limit: int = Query(200, ge=1, le=2000, description="List mode max rows"),
 ):
-    # -------------------------
+
     # LEGACY MODE (symbol=...)
-    # -------------------------
     if symbol:
         fallback = {
             "symbol": symbol,
@@ -1039,9 +1078,7 @@ async def indices_latest(
                 pass
             return fallback
 
-    # -------------------------
     # LIST MODE (region/group)
-    # -------------------------
     # Find latest index_date available in indices_daily
     drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
     if not drow or not drow["d"]:
@@ -1155,7 +1192,7 @@ async def prices_copper_last():
             "source": "cache",
         }
 
-    # 0.5) Never connect in request path (prod discipline).
+    # Never connect in request path.
     if not database.is_connected:
         last = 4.25
         _PRICE_CACHE["copper_last"] = last
@@ -1167,7 +1204,7 @@ async def prices_copper_last():
             "note": "db not connected; startup should connect",
         }
 
-    # 1) Pull latest COMEX_CU from reference_prices
+    # Pull latest COMEX_CU from reference_prices
     try:
         row = await database.fetch_one(
             """
@@ -1208,7 +1245,7 @@ async def prices_copper_last():
         except Exception:
             pass
 
-    # 2) If DB is empty or query explodes → safe static fallback, never 500
+    # If DB is empty or query explodes → safe static fallback, never 500
     last = 4.25
     _PRICE_CACHE["copper_last"] = last
     _PRICE_CACHE["ts"] = now
@@ -16969,6 +17006,55 @@ async def analytics_contracts_by_day(days: int = 30):
     """, {"days": days})
     return [{"day": str(r["day"]), "count": int(r["count"] or 0)} for r in rows]
 
+@app.get(
+    "/indices/history",
+    tags=["Indices"],
+    summary="Append-only history for indices (from indices_daily_history)",
+    status_code=200,
+)
+async def indices_history(
+    material: str = Query(...),
+    region: str = Query("blended"),
+    start: date | None = Query(None),
+    end: date | None = Query(None),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    rows = await database.fetch_all(
+        """
+        SELECT run_id::text AS run_id,
+               writer,
+               as_of_date,
+               region,
+               material,
+               COALESCE(price, avg_price) AS price_per_ton,
+               currency,
+               ts,
+               volume_tons
+        FROM public.indices_daily_history
+        WHERE material ILIKE :m
+          AND region ILIKE :r
+          AND (:start::date IS NULL OR as_of_date >= :start::date)
+          AND (:end::date   IS NULL OR as_of_date <= :end::date)
+        ORDER BY as_of_date DESC, ts DESC
+        LIMIT :lim
+        """,
+        {"m": material.strip(), "r": region.strip(), "start": start, "end": end, "lim": limit},
+    )
+    return [
+        {
+            "run_id": r["run_id"],
+            "writer": r["writer"],
+            "as_of_date": str(r["as_of_date"]),
+            "region": r["region"],
+            "material": r["material"],
+            "price_per_ton": float(r["price_per_ton"] or 0.0),
+            "currency": (r["currency"] or "USD"),
+            "ts": _to_utc_z(r["ts"]),
+            "volume_tons": (float(r["volume_tons"]) if r["volume_tons"] is not None else None),
+        }
+        for r in rows
+    ]
+
 @app.post("/indices/run", tags=["Indices"], summary="Refs + Vendor + Blended")
 async def indices_run():
     """
@@ -17224,21 +17310,12 @@ async def indices_snapshot_blended(
     w_ref: float = Query(0.70, ge=0.0, le=1.0, description="Weight on reference_prices (0..1)"),
     w_vendor: float = Query(0.30, ge=0.0, le=1.0, description="Weight on vendor blend (0..1)"),
 ):
-    """
-    Correct writer for indices_daily.
+    writer = "snapshot_blended"
+    d = as_of or utcnow().date()
+    reg = (region or "blended").strip() or "blended"
+    run_id = str(uuid.uuid4())
 
-    Inputs:
-      - v_vendor_blend_latest.material, blended_lb
-      - reference_prices.symbol, price (assumed $/lb) for the SAME canonical symbol when present
-
-    Output (per material):
-      blended_ton = (w_ref * bench_lb + w_vendor * vendor_lb) * 2000
-
-    Writes:
-      indices_daily(as_of_date, region, material, avg_price, volume_tons, currency, ts, price, symbol)
-    """
-
-    # ---- normalize weights safely (never divide by zero) ----
+    # normalize weights
     try:
         wf = float(w_ref)
         wv = float(w_vendor)
@@ -17251,85 +17328,162 @@ async def indices_snapshot_blended(
     except Exception:
         wf, wv = 0.70, 0.30
 
-    d = as_of or utcnow().date()
-    reg = (region or "blended").strip() or "blended"
-
-    # ---- canonical: vendor blend universe ----
-    # bench = latest reference_prices row per symbol (for symbols that exist)
-    # vendor = v_vendor_blend_latest (latest day blend)
-    #
-    # NOTE: reference_prices.price is assumed to be $/lb for canonical material symbols.
-    # If bench is missing for a material, we fall back to vendor price only.
-    await database.execute(
-        """
-        WITH vendor AS (
-          SELECT material, blended_lb
-          FROM public.v_vendor_blend_latest
-          WHERE material IS NOT NULL AND material <> ''
-        ),
-        bench AS (
-          SELECT DISTINCT ON (rp.symbol)
-                 rp.symbol,
-                 rp.price,
-                 rp.ts_market,
-                 rp.ts_server,
-                 rp.source
-          FROM public.reference_prices rp
-          JOIN vendor v ON v.material = rp.symbol
-          WHERE rp.price IS NOT NULL
-          ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
-        ),
-        calc AS (
-          SELECT
-            :as_of::date AS as_of_date,
-            :region      AS region,
-            v.material   AS material,
-            -- bench_lb is reference_prices.price when present, otherwise vendor blended_lb
-            (COALESCE(b.price, v.blended_lb))::numeric AS bench_lb,
-            (v.blended_lb)::numeric                   AS vendor_lb
-          FROM vendor v
-          LEFT JOIN bench b ON b.symbol = v.material
-        )
-        INSERT INTO public.indices_daily(
-          as_of_date, region, material,
-          avg_price, volume_tons,
-          currency, ts, price, symbol
-        )
-        SELECT
-          c.as_of_date,
-          c.region,
-          c.material,
-          -- store blended $/ton in BOTH avg_price and price so all your readers work
-          ((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0 AS avg_price,
-          0::numeric AS volume_tons,
-          'USD'::text AS currency,
-          NOW() AS ts,
-          ((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0 AS price,
-          c.material AS symbol
-        FROM calc c
-        ON CONFLICT (as_of_date, region, material) DO UPDATE
-          SET avg_price   = EXCLUDED.avg_price,
-              price       = EXCLUDED.price,
-              ts          = EXCLUDED.ts,
-              currency    = EXCLUDED.currency,
-              volume_tons = EXCLUDED.volume_tons,
-              symbol      = EXCLUDED.symbol
-        """,
-        {"as_of": d, "region": reg, "wf": wf, "wv": wv},
-    )
-
-    # ---- report rows written for this date/region ----
-    row = await database.fetch_one(
-        "SELECT COUNT(*) AS c FROM public.indices_daily WHERE as_of_date = :d AND region = :r",
-        {"d": d, "r": reg},
-    )
-    return {
-        "ok": True,
+    # ---- input stats (for audit) ----
+    stats = {
         "as_of_date": str(d),
         "region": reg,
-        "weights": {"reference": round(wf, 4), "vendor": round(wv, 4)},
-        "rows_written": int(row["c"] or 0) if row else 0,
+        "weights": {"reference": round(wf, 6), "vendor": round(wv, 6)},
+        "vendor_source": "v_vendor_blend_latest (USD/lb)",
+        "reference_source": "reference_prices (USD/lb, symbol == vendor.material)",
     }
+
+    try:
+        v = await database.fetch_one("SELECT COUNT(*)::int AS n FROM public.v_vendor_blend_latest")
+        stats["vendor_materials"] = int(v["n"] or 0) if v else 0
+    except Exception:
+        pass
+
+    try:
+        r = await database.fetch_one(
+            """
+            SELECT MAX(COALESCE(ts_market, ts_server)) AS ts
+            FROM public.reference_prices
+            """
+        )
+        stats["reference_latest_ts"] = _to_utc_z(r["ts"]) if r and r["ts"] else None
+    except Exception:
+        pass
+
+    # ---- main write (count via SELECT) ----
+    try:
+        row = await database.fetch_one(
+            """
+            WITH vendor AS (
+              SELECT material, blended_lb
+              FROM public.v_vendor_blend_latest
+              WHERE material IS NOT NULL AND material <> ''
+            ),
+            bench AS (
+              SELECT DISTINCT ON (rp.symbol)
+                     rp.symbol,
+                     rp.price,
+                     rp.ts_market,
+                     rp.ts_server,
+                     rp.source
+              FROM public.reference_prices rp
+              JOIN vendor v ON v.material = rp.symbol
+              WHERE rp.price IS NOT NULL
+              ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
+            ),
+            calc AS (
+              SELECT
+                :as_of::date AS as_of_date,
+                :region      AS region,
+                v.material   AS material,
+                (COALESCE(b.price, v.blended_lb))::numeric AS bench_lb,
+                (v.blended_lb)::numeric                   AS vendor_lb
+              FROM vendor v
+              LEFT JOIN bench b ON b.symbol = v.material
+            ),
+            priced AS (
+              SELECT
+                c.as_of_date,
+                c.region,
+                c.material,
+                (((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0)::numeric AS px_ton
+              FROM calc c
+            ),
+            upsert_live AS (
+              INSERT INTO public.indices_daily(
+                as_of_date, region, material,
+                avg_price, volume_tons,
+                currency, ts, price, symbol
+              )
+              SELECT
+                p.as_of_date,
+                p.region,
+                p.material,
+                p.px_ton AS avg_price,
+                0::numeric AS volume_tons,
+                'USD'::text AS currency,
+                NOW() AS ts,
+                p.px_ton AS price,
+                p.material AS symbol
+              FROM priced p
+              ON CONFLICT (as_of_date, region, material) DO UPDATE
+                SET avg_price   = EXCLUDED.avg_price,
+                    price       = EXCLUDED.price,
+                    ts          = EXCLUDED.ts,
+                    currency    = EXCLUDED.currency,
+                    volume_tons = EXCLUDED.volume_tons,
+                    symbol      = EXCLUDED.symbol
+              RETURNING material
+            ),
+            ins_hist AS (
+              INSERT INTO public.indices_daily_history(
+                run_id, writer,
+                as_of_date, region, material,
+                avg_price, volume_tons, currency, ts, price, symbol
+              )
+              SELECT
+                :run_id::uuid, :writer::text,
+                p.as_of_date, p.region, p.material,
+                p.px_ton, 0::numeric, 'USD'::text, NOW(), p.px_ton, p.material
+              FROM priced p
+              ON CONFLICT (run_id, as_of_date, region, material) DO NOTHING
+              RETURNING material
+            )
+            SELECT
+              (SELECT COUNT(*)::int FROM upsert_live) AS rows_written,
+              (SELECT COUNT(*)::int FROM ins_hist)    AS history_rows_written
+            """,
+            {
+                "as_of": d,
+                "region": reg,
+                "wf": wf,
+                "wv": wv,
+                "run_id": run_id,
+                "writer": writer,
+            },
+        )
+
+        # ALSO update Python extraction + return (same as traded)
+        rows_written = int(row["rows_written"] or 0) if row else 0
+        history_rows_written = int(row["history_rows_written"] or 0) if row else 0
+
+        await _log_indices_run(
+            run_id=run_id,
+            as_of_date=d,
+            region=reg,
+            writer=writer,
+            rows_written=rows_written,
+            inputs=stats,
+            ok=True,
+        )
+
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "as_of_date": str(d),
+            "region": reg,
+            "weights": {"reference": round(wf, 4), "vendor": round(wv, 4)},
+            "rows_written": rows_written,
+            "history_rows_written": history_rows_written,
+        }
+
+    except Exception as e:
+        await _log_indices_run(
+            run_id=run_id,
+            as_of_date=d,
+            region=reg,
+            writer=writer,
+            rows_written=0,
+            inputs=stats,
+            ok=False,
+            error=f"{type(e).__name__}: {e}",
+        )
+        raise
+
 @app.post(
     "/indices/snapshot_traded",
     tags=["Indices"],
@@ -17339,74 +17493,536 @@ async def indices_snapshot_blended(
 async def indices_snapshot_traded(
     as_of: date | None = Query(None, description="As-of date (UTC). Default=today."),
 ):
-    """
-    Traded Close = executed-contract settlement-like curve (daily VWAP).
-
-    Writes indices_daily rows:
-      region='traded'
-      material = canonical symbol (material_index_map.symbol when available)
-      avg_price/price = VWAP $/ton from executed contracts
-      volume_tons = sum(weight_tons)
-      currency='USD'
-      ts=NOW()
-      symbol = same as material
-    """
+    writer = "snapshot_traded"
     d = as_of or utcnow().date()
+    run_id = str(uuid.uuid4())
+    region = "traded"
 
-    await database.execute(
-        """
-        WITH base AS (
-          SELECT
-            COALESCE(mim.symbol, c.material) AS sym,
-            c.price_per_ton,
-            c.weight_tons
-          FROM contracts c
-          LEFT JOIN material_index_map mim
-            ON mim.material = c.material
-          WHERE c.status IN ('Signed','Dispatched','Fulfilled')
-            AND c.created_at::date = :d::date
-            AND c.price_per_ton IS NOT NULL
-            AND c.weight_tons IS NOT NULL
-            AND c.weight_tons > 0
-        ),
-        agg AS (
-          SELECT
-            :d::date AS as_of_date,
-            'traded'::text AS region,
-            sym AS material,
-            (SUM(price_per_ton * weight_tons) / NULLIF(SUM(weight_tons),0))::numeric AS vwap_price,
-            SUM(weight_tons)::numeric AS volume_tons
-          FROM base
-          GROUP BY sym
+    # ---- input stats (for audit) ----
+    stats = {
+        "as_of_date": str(d),
+        "status_included": ["Signed", "Dispatched", "Fulfilled"],
+        "material_mapping": "material_index_map.symbol (fallback=contracts.material)",
+    }
+
+    try:
+        srow = await database.fetch_one(
+            """
+            SELECT
+              COUNT(*)::int AS n_contract_rows,
+              COUNT(DISTINCT COALESCE(mim.symbol, c.material))::int AS n_symbols,
+              COALESCE(SUM(c.weight_tons),0)::numeric AS sum_tons,
+              MIN(c.created_at) AS min_created_at,
+              MAX(c.created_at) AS max_created_at
+            FROM contracts c
+            LEFT JOIN material_index_map mim
+              ON mim.material = c.material
+            WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+              AND c.created_at::date = :d::date
+              AND c.price_per_ton IS NOT NULL
+              AND c.weight_tons IS NOT NULL
+              AND c.weight_tons > 0
+            """,
+            {"d": d},
         )
-        INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency, ts, price, symbol)
-        SELECT
-          as_of_date,
-          region,
-          material,
-          vwap_price,
-          volume_tons,
-          'USD'::text,
-          NOW(),
-          vwap_price,
-          material
-        FROM agg
-        ON CONFLICT (as_of_date, region, material) DO UPDATE
-          SET avg_price   = EXCLUDED.avg_price,
-              price       = EXCLUDED.price,
-              volume_tons = EXCLUDED.volume_tons,
-              currency    = EXCLUDED.currency,
-              ts          = EXCLUDED.ts,
-              symbol      = EXCLUDED.symbol
+        if srow:
+            stats.update(
+                {
+                    "n_contract_rows": int(srow["n_contract_rows"] or 0),
+                    "n_symbols": int(srow["n_symbols"] or 0),
+                    "sum_tons": float(srow["sum_tons"] or 0.0),
+                    "min_created_at": _to_utc_z(srow["min_created_at"]),
+                    "max_created_at": _to_utc_z(srow["max_created_at"]),
+                }
+            )
+    except Exception:
+        pass
+
+    # ---- main write (count via RETURNING) ----
+    try:
+        row = await database.fetch_one(
+            """
+            WITH base AS (
+                SELECT
+                    COALESCE(mim.symbol, c.material) AS sym,
+                    c.price_per_ton,
+                    c.weight_tons
+                FROM contracts c
+                LEFT JOIN material_index_map mim
+                    ON mim.material = c.material
+                WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+                  AND c.created_at::date = :d::date
+                  AND c.price_per_ton IS NOT NULL
+                  AND c.weight_tons IS NOT NULL
+                  AND c.weight_tons > 0
+            ),
+            agg AS (
+                SELECT
+                    :d::date AS as_of_date,
+                    'traded'::text AS region,
+                    sym AS material,
+                    (SUM(price_per_ton * weight_tons) / NULLIF(SUM(weight_tons),0))::numeric AS vwap_price,
+                    SUM(weight_tons)::numeric AS volume_tons
+                FROM base
+                GROUP BY sym
+            ),
+            upsert_live AS (
+                INSERT INTO indices_daily (
+                    as_of_date,
+                    region,
+                    material,
+                    avg_price,
+                    volume_tons,
+                    currency,
+                    ts,
+                    price,
+                    symbol
+                )
+                SELECT
+                    as_of_date,
+                    region,
+                    material,
+                    vwap_price,
+                    volume_tons,
+                    'USD'::text,
+                    NOW(),
+                    vwap_price,
+                    material
+                FROM agg
+                ON CONFLICT (as_of_date, region, material) DO UPDATE
+                    SET avg_price   = EXCLUDED.avg_price,
+                        price       = EXCLUDED.price,
+                        volume_tons = EXCLUDED.volume_tons,
+                        currency    = EXCLUDED.currency,
+                        ts          = EXCLUDED.ts,
+                        symbol      = EXCLUDED.symbol
+                RETURNING material
+            ),
+            ins_hist AS (
+                INSERT INTO public.indices_daily_history (
+                    run_id,
+                    writer,
+                    as_of_date,
+                    region,
+                    material,
+                    avg_price,
+                    volume_tons,
+                    currency,
+                    ts,
+                    price,
+                    symbol
+                )
+                SELECT
+                    :run_id::uuid,
+                    :writer::text,
+                    a.as_of_date,
+                    a.region,
+                    a.material,
+                    a.vwap_price,
+                    a.volume_tons,
+                    'USD'::text,
+                    NOW(),
+                    a.vwap_price,
+                    a.material
+                FROM agg a
+                ON CONFLICT (run_id, as_of_date, region, material) DO NOTHING
+                RETURNING material
+            )
+            SELECT
+                (SELECT COUNT(*)::int FROM upsert_live) AS rows_written,
+                (SELECT COUNT(*)::int FROM ins_hist)    AS history_rows_written
+            """,
+            {"d": d, "run_id": run_id, "writer": writer},
+        )
+
+        rows_written = int(row["rows_written"] or 0) if row else 0
+        history_rows_written = int(row["history_rows_written"] or 0) if row else 0
+
+        await _log_indices_run(
+            run_id=run_id,
+            as_of_date=d,
+            region=region,
+            writer=writer,
+            rows_written=rows_written,
+            inputs=stats,
+            ok=True,
+        )
+
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "as_of_date": str(d),
+            "region": region,
+            "rows_written": rows_written,
+            "history_rows_written": history_rows_written,
+        }
+
+    except Exception as e:
+        await _log_indices_run(
+            run_id=run_id,
+            as_of_date=d,
+            region=region,
+            writer=writer,
+            rows_written=0,
+            inputs=stats,
+            ok=False,
+            error=f"{type(e).__name__}: {e}",
+        )
+        raise
+
+def _parse_priority_csv(s: str) -> list[str]:
+    out = []
+    for x in (s or "").split(","):
+        t = x.strip()
+        if t:
+            out.append(t)
+    return out
+
+
+async def _resolve_settle_priority_writers(
+    *,
+    rule_version: str,
+    region: str,
+) -> list[str]:
+    """
+    Governed rulebook lookup:
+      1) (rule_version, region, '*') fallback
+    """
+    rv = (rule_version or "v1").strip() or "v1"
+    reg = (region or "").strip() or "blended"
+
+    row = await database.fetch_one(
+        """
+        SELECT priority_writers
+        FROM public.indices_settlement_rules
+        WHERE rule_version = :v
+          AND region ILIKE :r
+          AND material = '*'
+          AND enabled = TRUE
+        LIMIT 1
         """,
-        {"d": d},
+        {"v": rv, "r": reg},
+    )
+    if row and row["priority_writers"]:
+        # databases returns list already for text[]
+        return list(row["priority_writers"])
+
+    # hard fallback
+    return ["snapshot_traded", "snapshot_blended"] if reg.lower() == "blended" else ["snapshot_traded"]
+
+
+async def _publish_indices_settles_from_history(
+    *,
+    as_of_date: date,
+    region: str,
+    rule_version: str = "v1",
+    published_by: str | None = None,
+    action: str = "official",          # official|correction
+    supersedes_history_id: int | None = None,
+) -> dict:
+    """
+    Exchange-grade settle publisher:
+
+    - SOURCE: indices_daily_history (append-only)
+    - RULEBOOK: indices_settlement_rules (exact material rules override wildcard)
+    - LEDGER: indices_settlements_history (append-only, immutable)
+    - CURRENT: indices_settlements (fast UI surface) + pointer to ledger row
+
+    IMPORTANT behavior:
+    - Official publish is re-runnable (idempotent) without breaking "only one official per key".
+    - A correction publish can be run multiple times and will supersede prior history rows.
+    """
+    pub_run_id = str(uuid.uuid4())
+    d = as_of_date
+    reg = (region or "").strip() or "blended"
+    rv = (rule_version or "v1").strip() or "v1"
+    who = (published_by or "system").strip() or "system"
+
+    policy = {
+        "action": action,
+        "rule_version": rv,
+        "as_of_date": str(d),
+        "region": reg,
+        "selection_rule": "per-material priority_writers (exact overrides wildcard), then ts desc",
+        "source_table": "indices_daily_history",
+        "rule_table": "indices_settlement_rules",
+        "target_tables": ["indices_settlements", "indices_settlements_history"],
+        # You can optionally add more here later, but keep policy lightweight.
+    }
+
+    row = await database.fetch_one(
+        """
+        WITH rules_exact AS (
+          SELECT material, priority_writers
+          FROM public.indices_settlement_rules
+          WHERE rule_version = :rule_version::text
+            AND region ILIKE :r
+            AND enabled = TRUE
+            AND material <> '*'
+        ),
+        rules_wild AS (
+          SELECT priority_writers
+          FROM public.indices_settlement_rules
+          WHERE rule_version = :rule_version::text
+            AND region ILIKE :r
+            AND enabled = TRUE
+            AND material = '*'
+          LIMIT 1
+        ),
+        picked AS (
+          SELECT DISTINCT ON (h.material)
+            h.material,
+            COALESCE(h.price, h.avg_price) AS settle_price,
+            COALESCE(h.currency, 'USD')    AS currency,
+            h.ts                            AS source_ts,
+            h.run_id                        AS source_run_id,
+            h.writer                        AS source_writer,
+            COALESCE(rx.priority_writers, rw.priority_writers) AS writers_used
+          FROM public.indices_daily_history h
+          LEFT JOIN rules_exact rx ON rx.material = h.material
+          CROSS JOIN rules_wild rw
+          WHERE h.as_of_date = :d::date
+            AND h.region ILIKE :r
+            AND COALESCE(h.price, h.avg_price) IS NOT NULL
+            AND COALESCE(rx.priority_writers, rw.priority_writers) IS NOT NULL
+            AND h.writer = ANY(COALESCE(rx.priority_writers, rw.priority_writers))
+          ORDER BY
+            h.material,
+            array_position(COALESCE(rx.priority_writers, rw.priority_writers), h.writer) ASC,
+            h.ts DESC
+        ),
+        ins_hist AS (
+          INSERT INTO public.indices_settlements_history(
+            publish_run_id,
+            action,
+            rule_version,
+            as_of_date, region, material,
+            settle_price, currency,
+            method, source_run_id, source_writer, source_ts,
+            published_at, published_by,
+            supersedes_id,
+            policy
+          )
+          SELECT
+            :pub_run_id::uuid,
+            :action::text,
+            :rule_version::text,
+            :d::date, :r::text, p.material,
+            p.settle_price, p.currency,
+            CASE WHEN :action::text = 'correction' THEN 'manual_correction' ELSE 'priority' END,
+            p.source_run_id, p.source_writer, p.source_ts,
+            NOW(), :published_by,
+            :supersedes_id,
+            :policy::jsonb
+          FROM picked p
+          WHERE
+            (:action::text <> 'official')
+            OR NOT EXISTS (
+              SELECT 1
+              FROM public.indices_settlements_history x
+              WHERE x.action = 'official'
+                AND x.rule_version = :rule_version::text
+                AND x.as_of_date = :d::date
+                AND x.region ILIKE :r
+                AND x.material = p.material
+            )
+          ON CONFLICT (publish_run_id, as_of_date, region, material) DO NOTHING
+          RETURNING id, material, settle_price, currency, source_run_id, source_writer, source_ts, published_at, published_by, rule_version, method
+        ),
+        upsert_live AS (
+          INSERT INTO public.indices_settlements(
+            as_of_date, region, material,
+            settle_price, currency,
+            method, rule_version,
+            source_run_id, source_writer, source_ts,
+            published_at, published_by,
+            history_id
+          )
+          SELECT
+            :d::date, :r::text, h.material,
+            h.settle_price, h.currency,
+            h.method, h.rule_version,
+            h.source_run_id, h.source_writer, h.source_ts,
+            h.published_at, h.published_by,
+            h.id
+          FROM ins_hist h
+          ON CONFLICT (as_of_date, region, material) DO UPDATE
+            SET settle_price  = EXCLUDED.settle_price,
+                currency      = EXCLUDED.currency,
+                method        = EXCLUDED.method,
+                rule_version  = EXCLUDED.rule_version,
+                source_run_id = EXCLUDED.source_run_id,
+                source_writer = EXCLUDED.source_writer,
+                source_ts     = EXCLUDED.source_ts,
+                published_at  = EXCLUDED.published_at,
+                published_by  = EXCLUDED.published_by,
+                history_id    = EXCLUDED.history_id
+          RETURNING material
+        )
+        SELECT
+          (SELECT COUNT(*)::int FROM picked)      AS candidates,
+          (SELECT COUNT(*)::int FROM ins_hist)    AS history_rows_written,
+          (SELECT COUNT(*)::int FROM upsert_live) AS rows_written
+        """,
+        {
+            "d": d,
+            "r": reg,
+            "rule_version": rv,
+            "pub_run_id": pub_run_id,
+            "action": action,
+            "published_by": who,
+            "supersedes_id": supersedes_history_id,
+            "policy": json.dumps(policy, default=str),
+        },
     )
 
-    r = await database.fetch_one(
-        "SELECT COUNT(*) AS c FROM indices_daily WHERE as_of_date=:d AND region='traded'",
-        {"d": d},
+    return {
+        "ok": True,
+        "publish_run_id": pub_run_id,
+        "action": action,
+        "rule_version": rv,
+        "as_of_date": str(d),
+        "region": reg,
+        "candidates": int(row["candidates"] or 0) if row else 0,
+        "rows_written": int(row["rows_written"] or 0) if row else 0,
+        "history_rows_written": int(row["history_rows_written"] or 0) if row else 0,
+        "note": (
+            "If candidates=0, ensure indices_daily_history has rows for that date/region "
+            "and indices_settlement_rules has a wildcard ('*') row for that region/rule_version."
+        ),
+    }
+
+@app.post(
+    "/indices/settle/publish",
+    tags=["Indices"],
+    summary="Publish OFFICIAL settles (governed) from indices_daily_history",
+    status_code=200,
+)
+async def indices_settle_publish(
+    request: Request,
+    as_of: date | None = Query(None, description="Settle date (UTC). Default=today."),
+    region: str = Query("blended", description="Region to settle (e.g. blended, traded, IN, etc.)"),
+    rule_version: str = Query("v1", description="Rulebook version to apply"),
+):
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
+
+    d = as_of or utcnow().date()
+    reg = (region or "").strip() or "blended"
+    rv = (rule_version or "v1").strip() or "v1"
+
+    try:
+        who = (request.session.get("username") or request.session.get("email") or "admin")
+    except Exception:
+        who = "system"
+
+    return await _publish_indices_settles_from_history(
+        as_of_date=d,
+        region=reg,
+        rule_version=rv,
+        published_by=who,
+        action="official",
+        supersedes_history_id=None,
     )
-    return {"ok": True, "as_of_date": str(d), "region": "traded", "rows_written": int(r["c"] or 0)}
+
+@app.post(
+    "/indices/settle/correct",
+    tags=["Indices"],
+    summary="Publish CORRECTION settles (explicit) and supersede a prior history row",
+    status_code=200,
+)
+async def indices_settle_correct(
+    request: Request,
+    as_of: date | None = Query(None),
+    region: str = Query("blended"),
+    rule_version: str = Query("v1"),
+    supersedes_id: int = Query(..., description="indices_settlements_history.id you are correcting"),
+    priority: str | None = Query(None, description="Optional override writers for the correction selection"),
+):
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
+
+    d = as_of or utcnow().date()
+    reg = (region or "").strip() or "blended"
+    rv = (rule_version or "v1").strip() or "v1"
+
+    try:
+        who = (request.session.get("username") or request.session.get("email") or "admin")
+    except Exception:
+        who = "system"
+
+    writers = _parse_priority_csv(priority) if priority else None
+
+    # Safety: ensure supersedes row exists
+    srow = await database.fetch_one(
+        "SELECT id, as_of_date, region, material, rule_version FROM public.indices_settlements_history WHERE id=:id",
+        {"id": supersedes_id},
+    )
+    if not srow:
+        raise HTTPException(404, "supersedes_id not found")
+
+    res = await _publish_indices_settles_from_history(
+        as_of_date=d,
+        region=reg,
+        rule_version=rv,
+        priority_writers=writers,          
+        published_by=who,
+        action="correction",
+        supersedes_history_id=int(supersedes_id),
+    )
+    return res
+
+@app.get(
+    "/indices/settle/current",
+    tags=["Indices"],
+    summary="Read CURRENT official settles (indices_settlements)",
+    status_code=200,
+)
+async def indices_settle_current(
+    as_of: date | None = Query(None),
+    region: str = Query("blended"),
+    limit: int = Query(2000, ge=1, le=20000),
+):
+    d = as_of or utcnow().date()
+    reg = (region or "").strip() or "blended"
+
+    rows = await database.fetch_all(
+        """
+        SELECT as_of_date, region, material,
+               settle_price, currency,
+               method, rule_version,
+               source_run_id::text AS source_run_id,
+               source_writer, source_ts,
+               published_at, published_by,
+               history_id
+        FROM public.indices_settlements
+        WHERE as_of_date = :d::date
+          AND region ILIKE :r
+        ORDER BY material
+        LIMIT :lim
+        """,
+        {"d": d, "r": reg, "lim": limit},
+    )
+
+    return [
+        {
+            "as_of_date": str(r["as_of_date"]),
+            "region": r["region"],
+            "material": r["material"],
+            "settle_price": float(r["settle_price"]),
+            "currency": (r["currency"] or "USD"),
+            "method": r["method"],
+            "rule_version": r["rule_version"],
+            "source_run_id": r["source_run_id"],
+            "source_writer": r["source_writer"],
+            "source_ts": _to_utc_z(r["source_ts"]),
+            "published_at": _to_utc_z(r["published_at"]),
+            "published_by": r["published_by"],
+            "history_id": r["history_id"],
+        }
+        for r in rows
+    ]
+
 # --------- Daily index snapshot ---------
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
