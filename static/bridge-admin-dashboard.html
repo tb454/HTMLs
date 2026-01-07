@@ -251,7 +251,7 @@
         document.getElementById('btnBuildIndices').onclick = function(){
           const el = document.getElementById('idxCtlMsg'); el.textContent='Building indices...';
           guard(this, async ()=>{
-            const j = await postJSON('/indices/run');
+            const j = await postJSON('/admin/indices/build_today');
             el.textContent = '✓ Indices built.';
             if (j && j.ok === false) toast(JSON.stringify(j));
           }).catch(e=> el.textContent = '✗ Failed: ' + (e?.message || 'error'));
