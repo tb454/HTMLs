@@ -13894,8 +13894,7 @@ async def enqueue_dossier_event(
 
 @app.post("/admin/dossier/sync_once", tags=["Admin"])
 async def dossier_sync_once(request: Request):
-    _require_admin(request)
-    # reuse the selects inside _nightly_dossier_sync and call the internal _post_json once
+    _require_admin(request)    
     return {"ok": True}
 
 admin_dossier_router = APIRouter(prefix="/admin/dossier", tags=["Dossier"])
