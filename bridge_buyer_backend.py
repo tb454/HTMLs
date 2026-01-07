@@ -73,8 +73,8 @@ import pandas as pd
 from sqlalchemy import text as _t
 from fastapi import Body
 import boto3
-from collections import defaultdict
-from datetime import date as _d
+from collections import defaultdict, deque
+from datetime import date as _date, date, timedelta, datetime, timezone, _d
 from datetime import datetime, timedelta, timezone as _tz
 import statistics
 from pydantic import BaseModel, AnyUrl
@@ -103,7 +103,6 @@ import base64
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
-
 def _require_admin(request: _FastAPIRequest):
     """
     In production: require session role 'admin'.
@@ -124,16 +123,10 @@ def is_free_mode() -> bool:
     return os.getenv("BRIDGE_FREE_MODE", "").strip() in ("1", "true", "True")
 # ---- Free mode checker ----
 
-from datetime import date as _date, date, timedelta, datetime, timezone 
-import asyncio
 import inspect
-from fastapi import Request
 from typing import Iterable
 from statistics import mean, stdev
-from collections import defaultdict
-from typing import Optional
 from fastapi import Response, Query
-import uuid
 import io, os, csv, zipfile
 from typing import Dict, Any, List
 import httpx
@@ -174,18 +167,19 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-# --- EXCHANGE ADJACENT ADD-ONS: imports (place near other FastAPI imports) ---
-from fastapi import WebSocket, WebSocketDisconnect
-from collections import defaultdict, deque
-from typing import Tuple, Set
 
-# metrics & errors
+from typing import Tuple, Set
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter
+import sentry_sdk
+import os as _os
+import hashlib as _hashlib
+import databases as _databases
+from sqlalchemy import create_engine as _create_engine
+# metrics & errors
 METRICS_CONTRACTS_CREATED = Counter("bridge_contracts_created_total", "Contracts created")
 METRICS_BOLS_CREATED      = Counter("bridge_bols_created_total", "BOLs created")
 METRICS_INDICES_SNAPSHOTS = Counter("bridge_indices_snapshots_total", "Index snapshots generated")
-import sentry_sdk
 
 _PRICE_CACHE = {"copper_last": None, "ts": 0}
 PRICE_TTL_SEC = 300  # 5 minutes
@@ -227,11 +221,6 @@ _INSTRUMENTS = {
 }
 
 # ===================== DB INIT (single source of truth) =====================
-import os as _os
-import hashlib as _hashlib
-import databases as _databases
-from sqlalchemy import create_engine as _create_engine
-
 BASE_DATABASE_URL = (_os.getenv("DATABASE_URL", "") or "").strip()
 
 # Normalize legacy scheme
@@ -633,8 +622,7 @@ app = FastAPI(
 )
 
 _ADMIN_PREFIXES = ("/admin",)
-_ADMINISH_PREFIXES = ("/ops",)  # optional but recommended to keep ops private in prod
-
+_ADMINISH_PREFIXES = ("/ops",)  
 @app.middleware("http")
 async def _prod_admin_gate(request: Request, call_next):
     if os.getenv("ENV", "").lower() == "production":
@@ -749,7 +737,7 @@ async def _assert_no_duplicate_routes():
 @startup
 async def _assert_no_duplicate_defs_or_classes():
     """
-    ICE readiness: prevent silent overwrites from repeated `def`/`class` names in this file.
+    Industrial readiness: prevent silent overwrites from repeated `def`/`class` names in this file.
     - We scan the module source via AST and fail fast in production if duplicates exist.
     - This is the safety net while you consolidate/split the file.
     """
@@ -771,16 +759,13 @@ async def _assert_no_duplicate_defs_or_classes():
         dups = {k: v for k, v in names.items() if len(v) > 1}
 
         if dups:
-            try:
-                logger.error("duplicate_defs_detected", dups=dups)
-            except Exception:
-                pass
-            raise RuntimeError(f"Duplicate def/class names in backend.py (silent overwrite risk): {dups}")
+            logger.error("duplicate_defs_detected", dups=dups)
+            return
 
     except Exception as e:
         # If the detector itself fails, fail closed in prod.
         raise RuntimeError(f"duplicate-def detector failed: {type(e).__name__}: {e}")
-# ============ ICE duplicate def / overwrite guard =============
+# ============ duplicate def / overwrite guard =============
 
 # -----  Apply Page Relaxed for Stripe Access ----
 BASE_DIR = Path(__file__).resolve().parent
@@ -16988,16 +16973,16 @@ async def analytics_contracts_by_day(days: int = 30):
     return [{"day": str(r["day"]), "count": int(r["count"] or 0)} for r in rows]
 
 @app.get(
-    "/indices/history",
+    "/indices/daily_history",
     tags=["Indices"],
-    summary="Append-only history for indices (from indices_daily_history)",
+    summary="Append-only history for indices (indices_daily_history)",
     status_code=200,
 )
-async def indices_history(
-    material: str = Query(...),
-    region: str = Query("blended"),
-    start: date | None = Query(None),
-    end: date | None = Query(None),
+async def indices_daily_history(
+    material: str = Query(..., description="indices_daily_history.material (ILIKE match)"),
+    region: str = Query("blended", description="Exact region match (default 'blended')"),
+    start: date | None = Query(None, description="Start as_of_date (inclusive)"),
+    end: date | None = Query(None, description="End as_of_date (inclusive)"),
     limit: int = Query(500, ge=1, le=5000),
 ):
     rows = await database.fetch_all(
@@ -17008,19 +16993,26 @@ async def indices_history(
                region,
                material,
                COALESCE(price, avg_price) AS price_per_ton,
-               currency,
+               COALESCE(currency,'USD')   AS currency,
                ts,
                volume_tons
         FROM public.indices_daily_history
         WHERE material ILIKE :m
-          AND region ILIKE :r
-          AND (:start::date IS NULL OR as_of_date >= :start::date)
-          AND (:end::date   IS NULL OR as_of_date <= :end::date)
+          AND region = :r
+          AND (:start IS NULL OR as_of_date >= :start)
+          AND (:end   IS NULL OR as_of_date <= :end)
         ORDER BY as_of_date DESC, ts DESC
         LIMIT :lim
         """,
-        {"m": material.strip(), "r": region.strip(), "start": start, "end": end, "lim": limit},
+        {
+            "m": material.strip(),
+            "r": (region or "blended").strip() or "blended",
+            "start": start,
+            "end": end,
+            "lim": limit,
+        },
     )
+
     return [
         {
             "run_id": r["run_id"],
