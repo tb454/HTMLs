@@ -9226,6 +9226,172 @@ router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
 router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
 router_idx = APIRouter(prefix="/indices", tags=["Indices"])
 
+# ----------------- Index Registry (canonical identity map) -----------------
+class IndexRegistryRow(BaseModel):
+    symbol: str
+    display_name: Optional[str] = None
+    unit: Optional[str] = None
+    family: Literal["vendor_live", "reference_close", "traded_close"]
+    source_table: str
+    last_updated: Optional[str] = None  # ISO UTC Z
+
+@router_idx.get(
+    "/registry",
+    summary="Registry of BR-Index families (vendor_live / reference_close / traded_close)",
+    response_model=List[IndexRegistryRow],
+)
+async def indices_registry(
+    region: str | None = Query("blended", description="For traded_close, which indices_daily.region to sample (default 'blended')"),
+    include_vendor: bool = True,
+    include_reference: bool = True,
+    include_traded: bool = True,
+):
+    out: List[IndexRegistryRow] = []
+
+    # ---- 1) Vendor Live ----
+    if include_vendor:
+        # Primary path: uses BR-Index join (vendor_quotes + vendor_material_map + scrap_instrument)
+        try:
+            rows = await database.fetch_all(
+                """
+                WITH latest_vendor_instr AS (
+                    SELECT
+                        vq.vendor,
+                        vq.price_per_lb,
+                        vq.inserted_at,
+                        vmm.instrument_code,
+                        si.material_canonical,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY vq.vendor, vmm.instrument_code
+                            ORDER BY vq.inserted_at DESC
+                        ) AS rn
+                    FROM vendor_quotes vq
+                    JOIN vendor_material_map vmm
+                      ON vq.vendor = vmm.vendor
+                     AND vq.material = vmm.material_vendor
+                    JOIN scrap_instrument si
+                      ON vmm.instrument_code = si.instrument_code
+                    WHERE vq.price_per_lb IS NOT NULL
+                      AND (vq.unit_raw IS NULL OR UPPER(vq.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+                ),
+                dedup AS (
+                    SELECT * FROM latest_vendor_instr WHERE rn = 1
+                )
+                SELECT
+                    instrument_code AS symbol,
+                    MAX(material_canonical) AS display_name,
+                    MAX(inserted_at) AS last_ts
+                FROM dedup
+                GROUP BY instrument_code
+                ORDER BY instrument_code
+                """
+            )
+            for r in rows:
+                out.append(
+                    IndexRegistryRow(
+                        symbol=str(r["symbol"]),
+                        display_name=(r.get("display_name") if hasattr(r, "get") else dict(r).get("display_name")),
+                        unit="USD/lb",
+                        family="vendor_live",
+                        source_table="vendor_quotes + vendor_material_map + scrap_instrument",
+                        last_updated=_to_utc_z((r.get("last_ts") if hasattr(r, "get") else dict(r).get("last_ts"))),
+                    )
+                )
+        except Exception:
+            # Fallback path: minimal vendor blend view if scrap_instrument join isn't available
+            try:
+                rows = await database.fetch_all(
+                    """
+                    SELECT material AS symbol,
+                           material AS display_name,
+                           NOW() AS last_ts
+                    FROM v_vendor_blend_latest
+                    ORDER BY material
+                    """
+                )
+                for r in rows:
+                    out.append(
+                        IndexRegistryRow(
+                            symbol=str(r["symbol"]),
+                            display_name=str(r["display_name"]),
+                            unit="USD/lb",
+                            family="vendor_live",
+                            source_table="v_vendor_blend_latest",
+                            last_updated=_to_utc_z(r["last_ts"]),
+                        )
+                    )
+            except Exception:
+                pass
+
+    # ---- 2) Reference Close ----
+    if include_reference:
+        try:
+            rows = await database.fetch_all(
+                """
+                SELECT
+                  d.symbol,
+                  COALESCE(d.notes, d.symbol) AS display_name,
+                  MAX(h.dt) AS last_dt
+                FROM bridge_index_definitions d
+                LEFT JOIN bridge_index_history h
+                  ON h.symbol = d.symbol
+                WHERE (d.enabled IS NULL OR d.enabled = TRUE)
+                GROUP BY d.symbol, COALESCE(d.notes, d.symbol)
+                ORDER BY d.symbol
+                """
+            )
+            for r in rows:
+                last_dt = (r.get("last_dt") if hasattr(r, "get") else dict(r).get("last_dt"))
+                out.append(
+                    IndexRegistryRow(
+                        symbol=str(r["symbol"]),
+                        display_name=(r.get("display_name") if hasattr(r, "get") else dict(r).get("display_name")),
+                        unit="USD/lb",
+                        family="reference_close",
+                        source_table="bridge_index_definitions + bridge_index_history",
+                        last_updated=(f"{last_dt}T00:00:00Z" if last_dt else None),
+                    )
+                )
+        except Exception:
+            pass
+
+    # ---- 3) Traded Close ----
+    if include_traded:
+        reg = (region or "blended").strip() or "blended"
+        try:
+            # Prefer timestamp; fallback to as_of_date.
+            rows = await database.fetch_all(
+                """
+                SELECT
+                  material AS symbol,
+                  MAX(COALESCE(ts, (as_of_date::timestamp))) AS last_ts
+                FROM indices_daily
+                WHERE region ILIKE :r
+                GROUP BY material
+                ORDER BY material
+                """,
+                {"r": reg},
+            )
+            for r in rows:
+                out.append(
+                    IndexRegistryRow(
+                        symbol=str(r["symbol"]),
+                        display_name=str(r["symbol"]),
+                        unit="USD/ton",
+                        family="traded_close",
+                        source_table=f"indices_daily (region={reg})",
+                        last_updated=_to_utc_z(r["last_ts"]),
+                    )
+                )
+        except Exception:
+            pass
+
+    # stable ordering: family then symbol
+    fam_rank = {"vendor_live": 0, "reference_close": 1, "traded_close": 2}
+    out.sort(key=lambda x: (fam_rank.get(x.family, 9), x.symbol))
+    return out
+# ----------------- /Index Registry -----------------
+
 @router_prices.post("/pull_now_all", summary="Pull COMEX & LME reference prices (best-effort)")
 async def pull_now_all():
     await pull_comex_home_once(app.state.db_pool)
@@ -16889,14 +17055,14 @@ async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
         asof = (snapshot_date or date.today()).isoformat()
         q = """
         INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
-        SELECT :asof::date AS as_of_date,
+        SELECT CAST(:asof AS DATE) AS as_of_date,
                LOWER(seller)       AS region,
                material,
                AVG(price_per_ton)  AS avg_price,
                SUM(weight_tons)    AS volume_tons
           FROM contracts
-         WHERE created_at::date = :asof::date
-         GROUP BY region, material
+         WHERE created_at::date = CAST(:asof AS DATE)
+         GROUP BY LOWER(seller), material
         ON CONFLICT (as_of_date, region, material) DO UPDATE
           SET avg_price   = EXCLUDED.avg_price,
               volume_tons = EXCLUDED.volume_tons
@@ -17164,6 +17330,83 @@ async def indices_snapshot_blended(
         "weights": {"reference": round(wf, 4), "vendor": round(wv, 4)},
         "rows_written": int(row["c"] or 0) if row else 0,
     }
+@app.post(
+    "/indices/snapshot_traded",
+    tags=["Indices"],
+    summary="Snapshot executed contracts into indices_daily (region='traded')",
+    status_code=200,
+)
+async def indices_snapshot_traded(
+    as_of: date | None = Query(None, description="As-of date (UTC). Default=today."),
+):
+    """
+    Traded Close = executed-contract settlement-like curve (daily VWAP).
+
+    Writes indices_daily rows:
+      region='traded'
+      material = canonical symbol (material_index_map.symbol when available)
+      avg_price/price = VWAP $/ton from executed contracts
+      volume_tons = sum(weight_tons)
+      currency='USD'
+      ts=NOW()
+      symbol = same as material
+    """
+    d = as_of or utcnow().date()
+
+    await database.execute(
+        """
+        WITH base AS (
+          SELECT
+            COALESCE(mim.symbol, c.material) AS sym,
+            c.price_per_ton,
+            c.weight_tons
+          FROM contracts c
+          LEFT JOIN material_index_map mim
+            ON mim.material = c.material
+          WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+            AND c.created_at::date = :d::date
+            AND c.price_per_ton IS NOT NULL
+            AND c.weight_tons IS NOT NULL
+            AND c.weight_tons > 0
+        ),
+        agg AS (
+          SELECT
+            :d::date AS as_of_date,
+            'traded'::text AS region,
+            sym AS material,
+            (SUM(price_per_ton * weight_tons) / NULLIF(SUM(weight_tons),0))::numeric AS vwap_price,
+            SUM(weight_tons)::numeric AS volume_tons
+          FROM base
+          GROUP BY sym
+        )
+        INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency, ts, price, symbol)
+        SELECT
+          as_of_date,
+          region,
+          material,
+          vwap_price,
+          volume_tons,
+          'USD'::text,
+          NOW(),
+          vwap_price,
+          material
+        FROM agg
+        ON CONFLICT (as_of_date, region, material) DO UPDATE
+          SET avg_price   = EXCLUDED.avg_price,
+              price       = EXCLUDED.price,
+              volume_tons = EXCLUDED.volume_tons,
+              currency    = EXCLUDED.currency,
+              ts          = EXCLUDED.ts,
+              symbol      = EXCLUDED.symbol
+        """,
+        {"d": d},
+    )
+
+    r = await database.fetch_one(
+        "SELECT COUNT(*) AS c FROM indices_daily WHERE as_of_date=:d AND region='traded'",
+        {"d": d},
+    )
+    return {"ok": True, "as_of_date": str(d), "region": "traded", "rows_written": int(r["c"] or 0)}
 # --------- Daily index snapshot ---------
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
