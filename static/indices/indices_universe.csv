@@ -1,0 +1,11 @@
+symbol,title,region,material,currency,frequency,first_date,last_date
+BRIX_SHRED_US_MW,BR-Index Shred Steel — US Midwest,blended,Shred Steel,USD,daily,2026-01-02,
+BRIX_HMS_US_MW,BR-Index HMS — US Midwest,blended,HMS,USD,daily,2026-01-02,
+BRIX_OCU_US_MW,BR-Index No.1 Copper — US Midwest,blended,No.1 Copper,USD,daily,2026-01-02,
+BRIX_ALSHEET_US_MW,BR-Index Old Sheet Aluminum — US Midwest,blended,Old Sheet Aluminum,USD,daily,2026-01-02,
+BRIX_STAINLESS304_US_MW,BR-Index 304 Stainless — US Midwest,blended,Stainless 304,USD,daily,2026-01-02,
+BRIX_WIRE_US_MW,BR-Index Insulated Copper Wire — US Midwest,blended,ICW (mixed),USD,daily,2026-01-02,
+BRIX_BRASSYEL_US_MW,BR-Index Yellow Brass — US Midwest,blended,Yellow Brass,USD,daily,2026-01-02,
+BRIX_ALCANS_US_MW,BR-Index UBC (Aluminum Cans) — US Midwest,blended,Aluminum Cans (UBC),USD,daily,2026-01-02,
+BRIX_CATALYST_US_MW,BR-Index Auto Cat (avg, est.) — US Midwest,blended,Auto Catalyst (avg basket),USD,daily,2026-01-02,
+BRIX_MIXEDMETAL_US_MW,BR-Index Mixed Metals — US Midwest,blended,Mixed Metals,USD,daily,2026-01-02,

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BR-Index Admin — Complaints & Incidents</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;max-width:1200px;margin:32px auto;padding:0 16px}
+    h1{margin-bottom:8px}
+    .muted{color:#666}
+    .controls{display:flex;gap:12px;align-items:center;margin:12px 0 20px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top}
+    th{background:#fafbfc;text-align:left;font-weight:600}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #e5e7eb;font-size:12px}
+    .pill.low{background:#f6ffed;border-color:#b7eb8f}
+    .pill.medium{background:#fff7e6;border-color:#ffd591}
+    .pill.high{background:#fff1f0;border-color:#ffa39e}
+    .row{display:flex;gap:24px;flex-wrap:wrap}
+    .card{flex:1 1 520px;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+    textarea,input,select,button{font:inherit}
+    textarea{width:100%;min-height:60px}
+    button{padding:6px 10px;border:1px solid #d0d7de;border-radius:8px;background:#fff;cursor:pointer}
+    button:hover{background:#f6f8fa}
+    .right{float:right}
+    .nowrap{white-space:nowrap}
+  </style>
+</head>
+<body>
+  <h1>BR-Index Admin</h1>
+  <div class="muted">Complaints & Incidents</div>
+
+  <div class="row">
+    <!-- Complaints -->
+    <div class="card">
+      <h2 style="margin-top:0">Complaints</h2>
+      <div class="controls">
+        <label>Status:
+          <select id="complaintsStatus">
+            <option value="">(all)</option>
+            <option>received</option>
+            <option>under_review</option>
+            <option>responded</option>
+            <option>closed</option>
+          </select>
+        </label>
+        <button onclick="loadComplaints()">Reload</button>
+      </div>
+      <table id="complaintsTable">
+        <thead>
+          <tr>
+            <th class="nowrap">ID</th>
+            <th>When</th>
+            <th>From</th>
+            <th>Subject</th>
+            <th>Body</th>
+            <th>Status</th>
+            <th>Notes / Update</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Incidents -->
+    <div class="card">
+      <h2 style="margin-top:0">Incidents</h2>
+      <div class="controls">
+        <button onclick="loadIncidents()">Reload</button>
+        <a class="right" href="/indices/incidents" target="_blank">JSON →</a>
+      </div>
+      <table id="incidentsTable">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Severity</th>
+            <th>Description</th>
+            <th>Correction</th>
+            <th>Run</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+async function loadComplaints(){
+  const s = document.getElementById('complaintsStatus').value;
+  const url = s ? `/indices/complaints?status=${encodeURIComponent(s)}&limit=500` : `/indices/complaints?limit=500`;
+  const res = await fetch(url, {credentials:'include'});
+  const data = await res.json();
+  const tbody = document.querySelector('#complaintsTable tbody');
+  tbody.innerHTML = '';
+  data.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="nowrap">${row.id}</td>
+      <td class="nowrap">${row.submitted_at?.replace('T',' ').replace('Z','') ?? ''}</td>
+      <td>${(row.organization||'')}${row.email ? `<div class="muted">${row.email}</div>` : ''}</td>
+      <td>${escapeHtml(row.subject||'')}</td>
+      <td>${escapeHtml((row.body||'').slice(0,400))}${(row.body||'').length>400?'…':''}</td>
+      <td><span class="pill">${row.status}</span><div class="muted">${row.sla_due_at?('SLA: '+row.sla_due_at.replace('T',' ').replace('Z','')):''}</div></td>
+      <td>
+        <textarea id="notes-${row.id}" placeholder="Notes…">${row.notes||''}</textarea>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <select id="status-${row.id}">
+            <option value="">(keep)</option>
+            <option value="received">received</option>
+            <option value="under_review">under_review</option>
+            <option value="responded">responded</option>
+            <option value="closed">closed</option>
+          </select>
+          <button onclick="updateComplaint(${row.id})">Save</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function updateComplaint(id){
+  const status = document.getElementById(`status-${id}`).value || null;
+  const notes  = document.getElementById(`notes-${id}`).value;
+  const body = {};
+  if (status) body.status = status;
+  if (notes !== undefined) body.notes = notes;
+  const res = await fetch(`/indices/complaints/${id}`, {
+    method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    credentials:'include',
+    body: JSON.stringify(body)
+  });
+  if (!res.ok){ alert('Update failed'); return; }
+  await loadComplaints();
+}
+
+async function loadIncidents(){
+  const res = await fetch('/indices/incidents', {credentials:'include'});
+  const data = await res.json();
+  const tbody = document.querySelector('#incidentsTable tbody');
+  tbody.innerHTML = '';
+  data.forEach(row => {
+    const sev = (row.severity||'').toLowerCase();
+    const pillClass = sev==='high'?'high':(sev==='medium'?'medium':'low');
+    const runLink = row.related_run_id ? `<a href="/indices/runs/${row.related_run_id}" target="_blank">${row.related_run_id.slice(0,8)}…</a>` : '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="nowrap">${row.started_at?.replace('T',' ').replace('Z','') ?? ''}${row.resolved_at?`<div class="muted">→ ${row.resolved_at.replace('T',' ').replace('Z','')}</div>`:''}</td>
+      <td><span class="pill ${pillClass}">${row.severity||''}</span></td>
+      <td>${escapeHtml(row.description||'')}</td>
+      <td>${escapeHtml(row.correction||'')}</td>
+      <td>${runLink}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+loadComplaints();
+loadIncidents();
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "admin": "Atlas IP Holdings LLC",
+  "family": "BR-Index",
+  "last_updated_utc": "2026-01-09T00:00:00Z",
+  "policy_url": "/methodology",
+  "items": [
+    {
+      "method_rev": "1.0.0",
+      "title": "Initial public methodology",
+      "effective_date": "2026-01-15",
+      "is_active": true,
+      "classification": "material",
+      "summary": "Public launch of BR-Index with blended formula (w_ref=0.70, w_vendor=0.30), vendor eligibility rules, outlier handling, and fallback policy.",
+      "impact_note": "New index family; no back-series change.",
+      "links": {
+        "methodology_pdf": "/docs/br-index-methodology.pdf",
+        "governance": "/governance"
+      }
+    },
+    {
+      "method_rev": "1.0.1",
+      "title": "Documentation clarification",
+      "effective_date": "2026-02-01",
+      "is_active": false,
+      "classification": "minor",
+      "summary": "Clarified rounding policy and UTC cutoffs; no formula change.",
+      "impact_note": "Expected price impact < 0.05% over 12 months.",
+      "links": {
+        "diff": "/docs/changes/1.0.1-notes.html"
+      }
+    }
+  ]
+}

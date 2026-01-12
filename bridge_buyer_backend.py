@@ -103,6 +103,8 @@ import base64
 
 from routers import carriers as carriers_router
 from routers import dat_mock_admin as dat_mock_admin_router
+from routers import carriers_li_admin as carriers_li_admin_router
+
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
 def _require_admin(request: _FastAPIRequest):
@@ -3068,6 +3070,7 @@ async def _vendor_blended_lb(material: str) -> float | None:
 
 app.include_router(vendor_router)
 app.include_router(carriers_router.router)
+app.include_router(carriers_li_admin_router.router)
 app.include_router(dat_mock_admin_router.router)
 # ========= Vendor Quotes: Folder Watcher ==========
 
@@ -9244,6 +9247,69 @@ async def ingest_copper_csv(request: Request, path: str = "/mnt/data/Copper Futu
 router_pricing = APIRouter(prefix="/pricing", tags=["Pricing"])
 router_fc = APIRouter(prefix="/forecasts", tags=["Forecasts"])
 router_idx = APIRouter(prefix="/indices", tags=["Indices"])
+
+# --- Admin/Public: incidents list ---
+@router_idx.get("/incidents")
+async def indices_incidents(limit: int = 200):
+    q = """
+      select id, started_at, resolved_at, severity, description, correction, related_run_id
+      from public.indices_incidents
+      order by started_at desc
+      limit :limit
+    """
+    return await database.fetch_all(q, {"limit": max(1, min(limit, 1000))})
+
+# --- Admin: complaints list (filterable) ---
+from typing import Optional, Literal  # (safe if already imported; Python ignores duplicates)
+
+@router_idx.get("/complaints")
+async def complaints_list(
+    status: Optional[Literal["received","under_review","responded","closed"]] = None,
+    limit: int = 200
+):
+    base = """
+      select id, submitted_at, email, organization, subject, body, status, sla_due_at, notes
+      from public.indices_complaints
+    """
+    if status:
+        base += " where status = :status"
+    base += " order by submitted_at desc limit :limit"
+    return await database.fetch_all(base, {"status": status, "limit": max(1, min(limit, 1000))})
+
+# --- Admin: update complaint status/notes (uses RETURNING to assert update happened) ---
+from pydantic import BaseModel
+
+class ComplaintUpdate(BaseModel):
+    status: Optional[Literal["received","under_review","responded","closed"]] = None
+    notes: Optional[str] = None
+
+@router_idx.patch("/complaints/{cid}")
+async def complaints_update(cid: int, payload: ComplaintUpdate):
+    if payload.status is None and payload.notes is None:
+        raise HTTPException(400, "Nothing to update.")
+    sets, params = [], {"id": cid}
+    if payload.status is not None:
+        sets.append("status = :status"); params["status"] = payload.status
+    if payload.notes is not None:
+        sets.append("notes = :notes"); params["notes"] = payload.notes
+    q = f"update public.indices_complaints set {', '.join(sets)} where id = :id returning id"
+    rec = await database.fetch_one(q, params)
+    if not rec:
+        raise HTTPException(404, "Complaint not found")
+    return {"id": rec["id"], "updated": True}
+
+# --- Public/Admin: run manifest detail ---
+@router_idx.get("/runs/{run_id}")
+async def indices_run_detail(run_id: str):
+    q = """
+      select run_id, writer, method_rev, params, inputs, started_at, finished_at
+      from public.indices_run_manifest
+      where run_id = :r
+    """
+    rec = await database.fetch_one(q, {"r": run_id})
+    if not rec:
+        raise HTTPException(404, "run_id not found")
+    return rec
 
 # ----------------- Index Registry (canonical identity map) -----------------
 class IndexRegistryRow(BaseModel):
