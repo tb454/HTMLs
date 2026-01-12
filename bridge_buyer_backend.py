@@ -101,6 +101,8 @@ import pytz
 import secrets
 import base64
 
+from routers import carriers as carriers_router
+from routers import dat_mock_admin as dat_mock_admin_router
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
 def _require_admin(request: _FastAPIRequest):
@@ -620,6 +622,8 @@ app = FastAPI(
         "url": "https://scrapfutures.com/legal",
     },
 )
+
+app.state.database = database
 
 _ADMIN_PREFIXES = ("/admin",)
 _ADMINISH_PREFIXES = ("/ops",)  
@@ -3063,7 +3067,8 @@ async def _vendor_blended_lb(material: str) -> float | None:
     return float(row["p"]) if row and row["p"] is not None else None
 
 app.include_router(vendor_router)
-
+app.include_router(carriers_router.router)
+app.include_router(dat_mock_admin_router.router)
 # ========= Vendor Quotes: Folder Watcher ==========
 
 # Env toggles (OFF by default)
