@@ -2,8 +2,8 @@
 import csv, io, json, httpx, asyncio, re
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Query, Request
-from app_db import database
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Query, Request, Depends
+
 
 router = APIRouter(prefix="/admin/carriers", tags=["Admin/Carriers"])
 
@@ -37,7 +37,7 @@ def _to_date(s: Any) -> Optional[str]:
             pass
     return None
 
-async def _upsert_batch(ref_rows: list[Dict[str, Any]]) -> dict:
+async def _upsert_batch(ref_rows: list[Dict[str, Any]], database) -> dict:
     """Upserts into carriers_ref, mirrors into dat_mock_carriers, logs changes for monitor."""
     if not ref_rows:
         return {"inserted": 0, "updated": 0, "changes": 0}
@@ -139,16 +139,16 @@ def _read_csv_text(text: str) -> list[Dict[str, Any]]:
     return out
 
 @router.post("/li_import", summary="Upload FMCSA Licensing & Insurance CSV (free dataset)")
-async def li_import(file: UploadFile = File(...)):
+async def li_import(file: UploadFile = File(...), database = Depends(lambda: None)):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Upload a .csv")
     text = (await file.read()).decode("utf-8-sig", errors="replace")
     rows = _read_csv_text(text)
-    res = await _upsert_batch(rows)
+    res = await _upsert_batch(rows, database)
     return {"ok": True, "rows_in": len(rows), **res}
 
 @router.post("/li_sync_url", summary="Fetch L&I CSV from URL and ingest")
-async def li_sync_url(url: str = Body(..., embed=True)):
+async def li_sync_url(url: str = Body(..., embed=True), database = Depends(lambda: None)):
     try:
         async with httpx.AsyncClient(timeout=60) as c:
             r = await c.get(url)
@@ -158,5 +158,5 @@ async def li_sync_url(url: str = Body(..., embed=True)):
         raise HTTPException(400, f"download failed: {e}")
     text = r.text
     rows = _read_csv_text(text)
-    res = await _upsert_batch(rows)
+    res = await _upsert_batch(rows, database)
     return {"ok": True, "url": url, "rows_in": len(rows), **res}

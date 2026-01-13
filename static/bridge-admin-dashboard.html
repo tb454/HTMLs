@@ -1830,6 +1830,37 @@ Object.assign(window, {
   // wireModal('anotherModalId'); // add more if needed
 })();
 </script>
+<!-- FMCSA L&I Sync -->
+<div style="margin-top:1rem;padding:8px;border:1px solid #ddd;border-radius:8px">
+  <h3 style="margin:0 0 .5rem 0">Carrier Registry (Free Mode)</h3>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="liUrl" placeholder="L&I CSV URL (e.g. your data.gov/S3 link)" style="min-width:420px;padding:8px">
+    <button id="btnLiSync">Sync L&I from URL</button>
+    <button id="btnRunMonitor">Run Carrier Monitor Now</button>
+  </div>
+  <small>Accepts the public FMCSA “Licensing & Insurance” CSV export.</small>
+</div>
+
+<script nonce="{{NONCE}}">
+document.getElementById('btnLiSync').onclick = async ()=>{
+  const url = document.getElementById('liUrl').value.trim();
+  if(!url) return alert('Paste a CSV URL first');
+  const r = await fetch('/admin/carriers/li_sync_url', {
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    credentials:'include',
+    body: JSON.stringify({ url })
+  });
+  const j = await r.json();
+  alert(`L&I synced: in=${j.rows_in}  inserted=${j.inserted}  updated=${j.updated}  changes=${j.changes}`);
+};
+
+document.getElementById('btnRunMonitor').onclick = async ()=>{
+  const r = await fetch('/tasks/carrier_monitor', { method:'POST', credentials:'include' });
+  const j = await r.json();
+  alert(`Carrier monitor: checked=${j.checked}  alerts=${j.alerts}`);
+};
+</script>
 
 </body>
 </html>

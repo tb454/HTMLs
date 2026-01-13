@@ -104,6 +104,8 @@ import base64
 from routers import carriers as carriers_router
 from routers import dat_mock_admin as dat_mock_admin_router
 from routers import carriers_li_admin as carriers_li_admin_router
+from routers.carriers_li_admin import li_sync_url
+from jobs.carrier_monitor import carrier_monitor_run
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
@@ -3072,6 +3074,16 @@ app.include_router(vendor_router)
 app.include_router(carriers_router.router)
 app.include_router(carriers_li_admin_router.router)
 app.include_router(dat_mock_admin_router.router)
+# ---- Tasks (manual triggers) ----
+tasks_router = APIRouter(prefix="/tasks", tags=["Tasks"])
+
+@tasks_router.post("/carrier_monitor", summary="Run carrier monitor now")
+async def run_carrier_monitor_now():
+    return await carrier_monitor_run()
+
+app.include_router(tasks_router)
+# ---- Tasks ----
+
 # ========= Vendor Quotes: Folder Watcher ==========
 
 # Env toggles (OFF by default)
@@ -22624,6 +22636,7 @@ async def _nightly_snapshot_cron():
     - Runs only when ENV=production
     - Uses run_daily_snapshot() with storage backend from env
     - Logs success/failure, never crashes the worker
+    - ALSO (optional): pulls FMCSA L&I CSV if FMCSA_LI_URL is set, then runs carrier monitor/alerts
     """
     env = os.getenv("ENV", "").lower()
     if env != "production":
@@ -22671,6 +22684,26 @@ async def _nightly_snapshot_cron():
                         logger.info("snapshot_nightly", backend=backend, **res)
                     except Exception:
                         pass
+
+                    # --- FMCSA L&I sync (if FMCSA_LI_URL is set) + carrier alerts ---
+                    try:
+                        _li_url = (os.getenv("FMCSA_LI_URL") or "").strip()
+                        if _li_url:
+                            try:
+                                # Pull CSV → upsert carriers_ref → mirror deltas
+                                await li_sync_url(url=_li_url)
+                            except Exception:
+                                # Never block nightly on L&I hiccups
+                                pass
+                        # Always run monitor (uses whatever data is present)
+                        try:
+                            await carrier_monitor_run()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    # --- /FMCSA L&I sync ---
+
                 except Exception as e:
                     try:
                         logger.warn("snapshot_nightly_failed", backend=backend, err=str(e))
