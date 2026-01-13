@@ -16554,6 +16554,13 @@ async def purchase_contract(
 
             status = (row["status"] or "").strip()
 
+            try:
+                me = (request.session.get("member") or request.session.get("org") or request.session.get("username") or "").strip()
+            except Exception:
+                me = ""
+            role = (request.session.get("role") or "").lower()
+            buyer_row = (row["buyer"] or "").strip()
+
             # If already purchased-ish → idempotent success
             if status in ("Signed", "Dispatched", "Fulfilled"):
                 bol_row = await database.fetch_one(
@@ -16582,18 +16589,27 @@ async def purchase_contract(
                     status_code=409,
                     detail=f"Contract not purchasable from status '{status}' (need 'Open').",
                 )
-
+            # Authorization: if directed, only the intended buyer may purchase
+            if role != "admin":
+                if buyer_row.lower() not in ("open", me.lower()):
+                    raise HTTPException(403, "not authorized to purchase this contract")
             # Flip to Signed (NO inventory touches)
             updated = await database.fetch_one(
                 """
                 UPDATE contracts
-                   SET status   = 'Signed',
-                       signed_at = COALESCE(signed_at, NOW())
-                 WHERE id = :id
-                 RETURNING id, buyer, seller, material, weight_tons,
-                           price_per_ton, currency, tenant_id, status, created_at
+                    SET buyer    = CASE WHEN LOWER(buyer) = 'open' THEN :me ELSE buyer END,
+                    status   = 'Signed',
+                    signed_at = COALESCE(signed_at, NOW())
+                WHERE id = :id
+                AND status = 'Open'
+                AND (
+                        LOWER(buyer) = 'open'
+                    OR LOWER(buyer) = LOWER(:me)
+                )
+                RETURNING id, buyer, seller, material, weight_tons,
+                        price_per_ton, currency, tenant_id, status, created_at
                 """,
-                {"id": contract_id},
+                {"id": contract_id, "me": me},
             )
             if not updated:
                 raise HTTPException(status_code=409, detail="Contract state changed; retry.")
@@ -18450,6 +18466,17 @@ async def list_contracts_admin(
         where = ["1=1"]
         params: dict[str, object] = {"limit": limit, "offset": offset}
 
+        try:
+            role = (request.session.get("role") or "").lower()
+        except Exception:
+            role = ""
+        try:
+            viewer = current_member_from_request(request) or (request.session.get("member") or request.session.get("org") or "").strip()
+        except Exception:
+            viewer = ""
+        if role == "buyer" and viewer:
+            where.append("(LOWER(buyer) = 'open' OR LOWER(buyer) = LOWER(:viewer_buyer))")
+            params["viewer_buyer"] = viewer            
         if tenant_id:
             where.append("tenant_id = :tenant_id")
             params["tenant_id"] = tenant_id
