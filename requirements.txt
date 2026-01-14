@@ -42,6 +42,7 @@ jinja2==3.1.4
 # Auth / crypto
 passlib[bcrypt]==1.7.4
 PyJWT==2.10.1
+pyotp==2.9.0
 
 # HTTP / I/O
 httpx==0.28.1

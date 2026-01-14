@@ -73,7 +73,6 @@ import pandas as pd
 from sqlalchemy import text as _t
 from fastapi import Body
 import boto3
-from collections import defaultdict, deque
 from datetime import date as _date, date, timedelta, datetime, timezone
 from datetime import datetime, timedelta, timezone as _tz
 import statistics
@@ -100,12 +99,24 @@ from math import ceil
 import pytz
 import secrets
 import base64
+import pyotp
 
 from routers import carriers as carriers_router
 from routers import dat_mock_admin as dat_mock_admin_router
 from routers import carriers_li_admin as carriers_li_admin_router
 from routers.carriers_li_admin import li_sync_url
 from jobs.carrier_monitor import carrier_monitor_run
+
+from collections import defaultdict, deque
+
+# --- login brute-force guard ---
+import time as _login_time
+_login_failures = defaultdict(list)   # key -> [timestamps]
+_user_locked_until = {}               # key -> locked_until_epoch
+LOCK_WINDOW_SEC = 15 * 60
+LOCK_THRESHOLD  = 8
+LOCKOUT_SEC     = 15 * 60
+# --- login brute-force guard ---
 
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
@@ -648,10 +659,13 @@ async def _prod_admin_gate(request: Request, call_next):
             except Exception:
                 role = ""
             if role != "admin":
-                # 401 if no session/role, 403 if logged but not admin
                 code = 401 if not role else 403
+                try:
+                    logger.warning("permission_denied", path=p, role=role or "-", code=code)
+                except Exception:
+                    pass
                 return JSONResponse(status_code=code, content={"detail": "admin only"})
-    return await call_next(request)
+            return await call_next(request)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -4276,7 +4290,9 @@ async def admin_vendor_pricing_latest(limit: int = Query(500, ge=1, le=5000)):
     }
 
 @app.post("/admin/vendor/import", tags=["Admin"], summary="Admin: import vendor pricing file (csv/xlsx)", status_code=200)
-async def admin_vendor_import(file: UploadFile = File(...)):
+async def admin_vendor_import(request: Request, file: UploadFile = File(...)):
+    if os.getenv("ENV", "").lower() == "production":
+        _require_admin(request)
     fname = (file.filename or "").lower()
 
     # Use the SAME ingestion logic as the standard endpoints, so behavior is identical
@@ -4294,7 +4310,7 @@ async def admin_vendor_import(file: UploadFile = File(...)):
     except Exception:
         pass
 
-        # ---- publish vendor blend as source-of-truth (best-effort) ----
+    # ---- publish vendor blend as source-of-truth (best-effort) ----
     try:
         await upsert_vendor_to_reference()
     except Exception:
@@ -9133,6 +9149,25 @@ async def store_perf_floor(body: dict, request: Request):
     """, {"v": json.dumps(body)})
     return {"ok": True}
 
+@app.post("/admin/mfa/setup", tags=["Auth"], summary="Issue TOTP secret for admin")
+async def admin_mfa_setup(request: Request):
+    _require_admin(request)
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    if not ident: raise HTTPException(401, "login required")
+    row = await database.fetch_one("""
+      SELECT totp_secret, email FROM public.users
+      WHERE lower(coalesce(email,''))=:i OR lower(coalesce(username,''))=:i LIMIT 1
+    """, {"i": ident})
+    if not row: raise HTTPException(404, "user not found")
+    secret = row["totp_secret"] or pyotp.random_base32()
+    if not row["totp_secret"]:
+        await database.execute("""
+          UPDATE public.users SET totp_secret=:s
+          WHERE lower(coalesce(email,''))=:i OR lower(coalesce(username,''))=:i
+        """, {"s": secret, "i": ident})
+    uri = pyotp.TOTP(secret).provisioning_uri(name=(row["email"] or ident), issuer_name="BRidge")
+    return {"otpauth_uri": uri}
+
 @app.post("/admin/demo/reset", tags=["Admin"], summary="Reset demo data (NON-PROD only)", include_in_schema=(not IS_PROD))
 async def admin_demo_reset(request: Request):
     _dev_only("demo reset")
@@ -10441,10 +10476,41 @@ async def _daily_indices_job():
         await asyncio.sleep((next_run - now).total_seconds())
 # -----------------------------------------------------------------------
 
+def verify_sig_docsign(raw: bytes, sig: str) -> bool:
+    """
+    Verify DocuSign webhook signature.
+    DocuSign sends X-DocuSign-Signature-1 header with HMAC-SHA256 of the request body.
+    """
+    secret = os.getenv("DOCUSIGN_WEBHOOK_SECRET", "").strip()
+    if not secret or not sig:
+        return False
+    
+    computed = base64.b64encode(
+        hmac.new(secret.encode(), raw, hashlib.sha256).digest()
+    ).decode()
+    return hmac.compare_digest(computed, sig)
+
 # ---------- docsign webhook endpoint ----------
+
 @app.post("/docsign", tags=["Integrations"])
-async def docsign_webhook(request: Request):
-    payload = await request.json()
+async def docsign_webhook(
+    request: Request,
+    x_signature: str = Header(default="", alias="X-Signature"),
+    x_docusign_sig: str = Header(default="", alias="X-DocuSign-Signature-1"),
+):
+    raw = await request.body()
+    sig = x_signature or x_docusign_sig
+
+    if not verify_sig_docsign(raw, sig):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # DocuSign may send XML; keep stub flexible
+    payload: dict = {}
+    try:
+        payload = json.loads(raw.decode("utf-8", errors="ignore"))
+    except Exception:
+        payload = {}
+
     envelope_id = payload.get("envelopeId") or payload.get("envelope_id")
     status      = (payload.get("status") or "").lower()
 
@@ -11478,9 +11544,19 @@ async def login(request: Request):
         data = {"username": (form.get("username") or ""), "password": (form.get("password") or "")}
 
     body = LoginIn(**data)
+    mfa_code = request.headers.get("X-MFA") or (data.get("totp") if isinstance(data, dict) else None)
     ident = (body.username or "").strip().lower()
     pwd   = body.password or ""
 
+    ip  = (request.client.host if request.client else "-")
+    key = f"{ident}|{ip}"
+
+    _now = _login_time.time()
+
+    # lockout check (DoS-aware: ident+ip)
+    if key in _user_locked_until and _now < _user_locked_until[key]:
+        raise HTTPException(status_code=429, detail="account temporarily locked")
+    
     # --- TEST/CI bypass: accept test/test in non-production so rate-limit test can hammer 10x and still get 200s ---
     _env = os.getenv("ENV", "").lower()
     # Allow test bypass in non-prod OR when running under pytest (even if ENV=production).
@@ -11507,6 +11583,22 @@ async def login(request: Request):
     )
 
     if not row:
+        try:
+            logger.info("auth_fail", user=ident, ip=ip)
+        except Exception:
+            pass
+
+        arr = _login_failures[key]
+        arr.append(_now)
+        _login_failures[key] = [t for t in arr if _now - t < LOCK_WINDOW_SEC]
+
+        if len(_login_failures[key]) >= LOCK_THRESHOLD:
+            _user_locked_until[key] = _now + LOCKOUT_SEC
+            try:
+                logger.warning("auth_lockout", user=ident, ip=ip)
+            except Exception:
+                pass
+
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # In production, require verified email before allowing login
@@ -11519,6 +11611,10 @@ async def login(request: Request):
     request.session.clear()
     request.session["username"] = (row["username"] or row["email"])
     request.session["role"] = role
+
+    # reset brute-force counters on success
+    _login_failures.pop(key, None)
+    _user_locked_until.pop(key, None)
 
     # Set a default member/org in the session if none present (first membership wins)
     try:
