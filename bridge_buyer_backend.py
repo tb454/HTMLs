@@ -675,6 +675,7 @@ async def _prod_admin_gate(request: Request, call_next):
                     pass
                 return JSONResponse(status_code=code, content={"detail": "admin only"})
             return await call_next(request)
+    return await call_next(request)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -1010,17 +1011,10 @@ def _rate_limit_key(request: Request) -> str:
 
     return "testserver"
 
-
-# Force rate limit storage to memory during pytest so CI doesn't depend on external backends
-_rl_storage = (os.getenv("RATELIMIT_STORAGE_URL") or "").strip()
-if IS_PYTEST:
-    _rl_storage = "memory://"
-
 limiter = Limiter(
     key_func=_rate_limit_key,
     headers_enabled=False,
-    enabled=ENFORCE_RL,
-    # IMPORTANT: never pass None — slowapi can choke on it
+    enabled=ENFORCE_RL,    
     storage_uri=(_rl_storage or "memory://"),
 )
 
