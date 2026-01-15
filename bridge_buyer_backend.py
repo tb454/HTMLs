@@ -256,13 +256,22 @@ if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
 if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
 
-engine = _create_engine(
-    SYNC_DATABASE_URL,
-    pool_pre_ping=True,
-    future=True,
-    pool_size=int(_os.getenv("DB_POOL_SIZE", "10")),
-    max_overflow=int(_os.getenv("DB_MAX_OVERFLOW", "20")),
-)
+if not SYNC_DATABASE_URL:
+    class _DummyEngine:
+        def begin(self):
+            from contextlib import nullcontext
+            return nullcontext()
+        def execute(self, *a, **k):
+            raise RuntimeError("DATABASE_URL missing; engine unavailable")
+    engine = _DummyEngine()
+else:
+    engine = _create_engine(
+        SYNC_DATABASE_URL,
+        pool_pre_ping=True,
+        future=True,
+        pool_size=int(_os.getenv("DB_POOL_SIZE", "10")),
+        max_overflow=int(_os.getenv("DB_MAX_OVERFLOW", "20")),
+    )
 
 database = _databases.Database(ASYNC_DATABASE_URL)
 
