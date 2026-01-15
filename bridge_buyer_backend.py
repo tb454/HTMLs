@@ -988,11 +988,40 @@ _rl_storage = (os.getenv("RATELIMIT_STORAGE_URL") or "").strip()
 if IS_PYTEST:
     _rl_storage = "memory://"
 
+def _rate_limit_key(request: Request) -> str:
+    """
+    Safe key function so CI/tests never die if slowapi util import changes
+    or get_remote_address ends up None.
+    """
+    try:
+        if callable(get_remote_address):
+            return get_remote_address(request)
+    except Exception:
+        pass
+
+    # fallback (works in TestClient too)
+    try:
+        client = getattr(request, "client", None)
+        host = getattr(client, "host", None)
+        if host:
+            return host
+    except Exception:
+        pass
+
+    return "testserver"
+
+
+# Force rate limit storage to memory during pytest so CI doesn't depend on external backends
+_rl_storage = (os.getenv("RATELIMIT_STORAGE_URL") or "").strip()
+if IS_PYTEST:
+    _rl_storage = "memory://"
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_rate_limit_key,
     headers_enabled=False,
     enabled=ENFORCE_RL,
-    storage_uri=(_rl_storage or None),
+    # IMPORTANT: never pass None — slowapi can choke on it
+    storage_uri=(_rl_storage or "memory://"),
 )
 
 app.state.limiter = limiter
