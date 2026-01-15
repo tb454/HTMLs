@@ -998,6 +998,16 @@ limiter = Limiter(
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
+def _noop_limit(*_args, **_kwargs):
+    def _deco(fn):
+        return fn
+    return _deco
+
+try:
+    _limit = limiter.limit if callable(getattr(limiter, "limit", None)) else _noop_limit
+except Exception:
+    _limit = _noop_limit
+    
 @startup
 async def _assert_prod_safety_flags():
     """
@@ -11543,7 +11553,7 @@ class LoginOut(BaseModel):
     redirect: str | None = None
 
 @app.post("/login", tags=["Auth"], response_model=LoginOut, summary="Login with email or username")
-@limiter.limit("10/minute")
+@_limit("10/minute")
 async def login(request: Request):
     # Accept JSON or classic HTML form
     try:
@@ -11795,7 +11805,7 @@ class SignupOut(BaseModel):
     summary="Create an account (public: buyers; sellers optional via env)",
     response_model=SignupOut,
 )
-@limiter.limit("10/minute")
+@_limit("10/minute")
 async def public_signup(payload: SignupIn, request: Request):
     email = payload.email.strip().lower()
     pwd   = payload.password.strip()
@@ -13443,7 +13453,7 @@ async def _ensure_audit_seal_schema():
     description="Partners push absolute qty_on_hand per (seller, sku). Uses HMAC in PROD; writes movements and ingest log.",
     status_code=200
 )
-@limiter.limit("60/minute")
+@_limit("60/minute")
 async def inventory_bulk_upsert(body: dict, request: Request):
     _harvester_guard()
     key = _idem_key(request)
@@ -13551,7 +13561,7 @@ async def idem_put(key: str, resp: dict):
     response_model=dict,
     status_code=200
 )
-@limiter.limit("60/minute")
+@_limit("60/minute")
 async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_protect)):
     # permission gate
     await require_perm(request, "inventory.write")
@@ -13624,7 +13634,7 @@ async def inventory_template_csv():
 
 # -------- Inventory: Import CSV (gated + unit-aware) --------
 @app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)", response_model=None)
-@limiter.limit("30/minute")
+@_limit("30/minute")
 async def inventory_import_csv(
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
@@ -13671,7 +13681,7 @@ async def inventory_import_csv(
 
 # -------- Inventory: Import Excel (gated + unit-aware) --------
 @app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)", response_model=None)
-@limiter.limit("15/minute")
+@_limit("15/minute")
 async def inventory_import_excel(
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
@@ -13812,7 +13822,7 @@ async def _ensure_dead_letters():
 #-------- Dead Letter Startup --------
 
 # ------- Webhook DLQ replayer -------
-@limiter.limit("30/minute")
+@_limit("30/minute")
 @app.post("/admin/webhooks/replay", tags=["Admin"])
 async def webhook_replay(request: Request, limit: int = 100):
     _require_admin(request)
@@ -21407,7 +21417,7 @@ async def _rfq_symbol(rfq_id: str) -> str:
         raise HTTPException(404, "RFQ not found")
     return _canon_symbol(row["symbol"])
 
-@limiter.limit("30/minute")
+@_limit("30/minute")
 @app.post("/rfq", tags=["RFQ"], summary="Create RFQ")
 async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
@@ -21444,7 +21454,7 @@ async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
     resp = {"rfq_id": rfq_id, "status": "open"}
     return await _idem_guard(request, key, resp)
 
-@limiter.limit("60/minute")
+@_limit("60/minute")
 @app.post("/rfq/{rfq_id}/quote", tags=["RFQ"], summary="Respond to RFQ")
 async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request, _=Depends(csrf_protect)):
     key = _idem_key(request)
@@ -21472,7 +21482,7 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request, _=Depends(csrf
     resp = {"quote_id": quote_id}
     return await _idem_guard(request, key, resp)
 
-@limiter.limit("30/minute")
+@_limit("30/minute")
 @app.post("/rfq/{rfq_id}/award", tags=["RFQ"], summary="Award RFQ to a quote → records deal & broadcasts")
 async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     key = _idem_key(request)
@@ -22100,7 +22110,7 @@ async def _fut_cancel(order_id: str, user: str | None = None):
 
 # ===== /Futures matching handlers =====
 
-@limiter.limit("120/minute")
+@_limit("120/minute")
 @clob_router.post("/orders", summary="Place order")
 async def clob_place_order(o: CLOBOrderIn, request: Request):
     key = _idem_key(request)
@@ -22451,7 +22461,7 @@ async def _clob_match(order_id: str) -> float:
         pass
     return filled_total
 
-@limiter.limit("180/minute")
+@_limit("180/minute")
 @trade_router.post("/orders", summary="Place order (limit or market) and match")
 async def place_order(ord_in: OrderIn, request: Request):    
     key = _idem_key(request)
