@@ -6710,6 +6710,14 @@ def _price_id_for_lookup(lookup_key: str) -> str:
     # If we got here, the lookup_key isn't present in Stripe dashboard
     raise RuntimeError(f"Stripe price lookup_key not found: {lookup_key}")
 
+class PmSetupIn(BaseModel):
+    member: str
+    email: EmailStr
+
+class SubscriptionCheckoutIn(BaseModel):
+    member: str
+    plan: str
+    email: Optional[EmailStr] = None
 
 @app.post("/billing/subscribe/checkout", tags=["Billing"], summary="Start subscription Checkout for plan")
 async def start_subscription_checkout(body: SubscriptionCheckoutIn, _=Depends(csrf_protect)):
@@ -6899,15 +6907,6 @@ def emit_ws_usage(member: str, raw_count: int) -> None:
     except Exception:
         pass
 # === Stripe Meter Events: WS messages ===
-
-class PmSetupIn(BaseModel):
-    member: str
-    email: EmailStr
-
-class SubscriptionCheckoutIn(BaseModel):
-    member: str
-    plan: str
-    email: Optional[EmailStr] = None
 
 @app.post("/billing/pm/setup_session", tags=["Billing"], summary="Create setup-mode Checkout Session (ACH+Card)")
 async def pm_setup_session(body: PmSetupIn, _=Depends(csrf_protect)):
