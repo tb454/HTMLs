@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS vendor_quotes(
   inserted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_vq_mat_time ON vendor_quotes(material, inserted_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_quotes_vendor_material_sheetdate
+  ON vendor_quotes(vendor, material, sheet_date);
 """
 
 async def _ensure_schema(db: Database):    
@@ -94,6 +96,13 @@ async def _insert_rows_batch(db: Database, rows: List[Dict], vendor: str, sheet_
     q = """
     INSERT INTO vendor_quotes(vendor, category, material, price_per_lb, unit_raw, sheet_date, source_file)
     VALUES(:v, :c, :m, :p, :u, :d, :s)
+    ON CONFLICT (vendor, material, sheet_date)
+    DO UPDATE SET
+      category     = EXCLUDED.category,
+      price_per_lb = EXCLUDED.price_per_lb,
+      unit_raw     = EXCLUDED.unit_raw,
+      source_file  = EXCLUDED.source_file,
+      inserted_at  = NOW()
     """
     vals = [
         {"v": vendor, "c": r["category"], "m": r["material"], "p": r["price_per_lb"],
@@ -255,23 +264,7 @@ async def ingest_one_file(db: Database, path: str, vendor: str, since: Optional[
         print(f"NO ROWS parsed: {fname}")
         return 0
 
-    # Secondary dedupe per row (vendor+material+sheet_date+source+unit)
-    keep: List[Dict] = []
-    for r in rows:
-        hit = await db.fetch_one("""
-            SELECT 1 FROM vendor_quotes
-            WHERE vendor=:v AND material=:m AND sheet_date IS NOT DISTINCT FROM :d
-              AND source_file=:s AND unit_raw=:u
-            LIMIT 1
-        """, {"v": vendor, "m": r["material"], "d": sheet_date, "s": fname, "u": r["unit_raw"]})
-        if not hit:
-            keep.append(r)
-
-    if not keep:
-        print(f"OK {fname}: inserted 0 (duplicates)")
-        return 0
-
-    n = await _insert_rows_batch(db, keep, vendor, sheet_date, fname)
+    n = await _insert_rows_batch(db, rows, vendor, sheet_date, fname)
     print(f"OK {fname}: inserted {n}")
     return n
 
