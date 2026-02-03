@@ -44,10 +44,8 @@ from fastapi import UploadFile, File, Form
 from fastapi import APIRouter, HTTPException
 from urllib.parse import quote
 import html as _html
-from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas as _pdf
 from fastapi import UploadFile, File
-from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, UploadFile, File
 from sqlalchemy import Table, Column, String, DateTime, Integer, Text, Boolean
 from datetime import datetime, date
@@ -68,7 +66,6 @@ from urllib.parse import quote
 import io, csv as _csv
 from contextlib import suppress
 import asyncio
-from decimal import Decimal, ROUND_HALF_UP
 import pandas as pd
 from sqlalchemy import text as _t
 from fastapi import Body
@@ -18362,7 +18359,7 @@ async def public_indices_csv(
 @app.post(
     "/indices/snapshot_blended",
     tags=["Indices"],
-    summary="Snapshot blended benchmark+vendor into indices_daily (correct writer)",
+    summary="Snapshot blended benchmark+vendor into indices_daily",
     status_code=200,
 )
 async def indices_snapshot_blended(
