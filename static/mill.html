@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BRidge — Mill</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<div class="max-w-5xl mx-auto p-6">
+  <h1 class="text-2xl font-bold">Mill Dashboard</h1>
+  <p class="text-sm text-zinc-500">Set material requirements, manage approved sources, upload lab results.</p>
+
+  <div class="mt-6 grid grid-cols-1 gap-6">
+    <section class="bg-white rounded-2xl shadow p-4">
+      <h2 class="font-semibold">My Requirements</h2>
+      <form id="reqForm" class="flex gap-2 mt-2">
+        <input class="border px-2 py-1 rounded" placeholder="Material e.g. BR-CU-#1" name="material"/>
+        <input class="border px-2 py-1 rounded" placeholder="Min %" name="min_pct" type="number" step="0.01"/>
+        <input class="border px-2 py-1 rounded" placeholder="Max contam. %" name="max_contaminant" type="number" step="0.01"/>
+        <button class="px-3 py-1 rounded bg-zinc-900 text-white">Save</button>
+      </form>
+      <table id="reqs" class="w-full text-sm mt-3"></table>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-4">
+      <h2 class="font-semibold">Approved Sources</h2>
+      <form id="srcForm" class="flex gap-2 mt-2">
+        <select class="border px-2 py-1 rounded" name="source_kind">
+          <option>yard</option><option>broker</option><option>processor</option>
+        </select>
+        <input class="border px-2 py-1 rounded" placeholder="Source name" name="source_name"/>
+        <button class="px-3 py-1 rounded bg-zinc-900 text-white">Approve</button>
+      </form>
+      <table id="sources" class="w-full text-sm mt-3"></table>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-4">
+      <h2 class="font-semibold">Upload Lab Result</h2>
+      <form id="labForm" class="flex gap-2 mt-2">
+        <input class="border px-2 py-1 rounded grow" placeholder="BOL ID" name="bol_id"/>
+        <input type="file" name="file"/>
+        <button class="px-3 py-1 rounded bg-zinc-900 text-white">Upload</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+async function json(u,opt){const r=await fetch(u,opt);return r.json();}
+const reqs = document.getElementById('reqs');
+const sources = document.getElementById('sources');
+
+async function load(){
+  const r = await json('/mills/requirements');
+  reqs.innerHTML = !r.length ? '<tr><td class="py-2 text-zinc-500">No requirements.</td></tr>' :
+   '<thead><tr class="text-left text-zinc-500"><th class="py-2">Material</th><th>Min%</th><th>Max contam%</th></tr></thead>'+
+   r.map(x=>`<tr class="border-t"><td class="py-2">${x.material}</td><td>${x.min_pct??''}</td><td>${x.max_contaminant??''}</td></tr>`).join('');
+  const s = await json('/mills/approved_sources');
+  sources.innerHTML = !s.length ? '<tr><td class="py-2 text-zinc-500">No sources.</td></tr>' :
+   '<thead><tr class="text-left text-zinc-500"><th class="py-2">Kind</th><th>Name</th><th>Approved</th></tr></thead>'+
+   s.map(x=>`<tr class="border-t"><td class="py-2">${x.source_kind}</td><td>${x.source_name}</td><td>${x.approved?'Yes':'No'}</td></tr>`).join('');
+}
+document.getElementById('reqForm').onsubmit = async (e)=>{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = Object.fromEntries(f.entries());
+  if (body.min_pct) body.min_pct = Number(body.min_pct);
+  if (body.max_contaminant) body.max_contaminant = Number(body.max_contaminant);
+  await json('/mills/requirements',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  e.target.reset(); load();
+};
+document.getElementById('srcForm').onsubmit = async (e)=>{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = Object.fromEntries(f.entries());
+  await json('/mills/approved_sources',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  e.target.reset(); load();
+};
+document.getElementById('labForm').onsubmit = async (e)=>{
+  e.preventDefault();
+  const f = new FormData(e.target);
+  await fetch('/mills/lab_results/upload?bol_id='+encodeURIComponent(f.get('bol_id')), {method:'POST', body:f});
+  e.target.reset();
+};
+load();
+</script>

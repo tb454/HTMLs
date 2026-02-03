@@ -115,7 +115,7 @@
 
       <hr style="margin:12px 0; border:0; border-top:1px solid #eee;"/>
 
-      <h3 style="margin:0 0 6px 0; font-size:14px;">New Order (CLOB)</h3>
+      <h3 style="margin:0 0 6px 0; font-size:14px;">New Order (Futures)</h3>
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
         <div style="flex:1 1 120px;">
           <label style="font-size:12px; display:block; margin-bottom:2px;">Symbol</label>
@@ -136,9 +136,14 @@
             <option value="ioc">IOC</option>
             <option value="fok">FOK</option>
           </select>
-        </div>
+        </div>      
+      <div style="flex:1 1 220px;">
+        <label style="font-size:12px; display:block; margin-bottom:2px;">Account ID</label>
+        <input id="ordAccount" type="text" placeholder="UUID of your margin account"
+               style="width:100%; padding:6px; border:1px solid #ccc; border-radius:8px;"/>
+        <div style="font-size:11px; opacity:.7;">Use /clearing/deposit to fund it</div>
       </div>
-
+      </div>
       <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-bottom:6px;">
         <div style="flex:0 0 110px;">
           <label for="ordPrice" style="font-size:12px; display:block; margin-bottom:2px;">Price</label>

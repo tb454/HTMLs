@@ -158,6 +158,27 @@ async def require_buyer_seller_or_admin(request: Request):
     return {"role": role}
 # ---- /Buyer auth helpers ----
 
+# ---- Broker & Mill auth helpers ----
+def _free_mode() -> bool:
+    return (os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1","true","yes"))
+
+def require_broker_or_admin(request: Request):
+    if _free_mode():
+        return {"role": "free"}
+    role = (request.session.get("role") or "").lower()
+    if role not in ("broker","admin"):
+        raise HTTPException(status_code=403, detail="broker/admin only")
+    return {"role": role}
+
+def require_mill_or_admin(request: Request):
+    if _free_mode():
+        return {"role": "free"}
+    role = (request.session.get("role") or "").lower()
+    if role not in ("mill","admin"):
+        raise HTTPException(status_code=403, detail="mill/admin only")
+    return {"role": role}
+# ---- /Broker & Mill auth helpers ----
+
 # ---- Free mode checker ----
 import os
 def is_free_mode() -> bool:
@@ -9840,6 +9861,184 @@ async def admin_demo_reset(request: Request):
     await database.execute("DELETE FROM tenants WHERE id=:t", {"t": tid})
     return {"ok": True}
 
+# ---------------- Brokers and Mills ----------------
+brokers_router = APIRouter(prefix="/brokers", tags=["Brokers"])
+
+class AssignBrokerIn(BaseModel):
+    broker_id: str
+
+@app.post("/admin/contracts/{id}/assign_broker", tags=["Admin"], summary="Assign broker to a contract")
+async def assign_broker_admin(id: str, body: AssignBrokerIn, request: Request):
+    _require_admin(request)
+    row = await database.fetch_one(
+        "UPDATE contracts SET broker_id=:b WHERE id=:id RETURNING id, broker_id",
+        {"id": id, "b": body.broker_id}
+    )
+    if not row:
+        raise HTTPException(404, "contract not found")
+    return {"ok": True, "contract_id": id, "broker_id": body.broker_id}
+
+@brokers_router.get("/me/contracts", summary="Broker’s matched contracts")
+async def broker_my_contracts(request: Request, _=Depends(require_broker_or_admin),
+                              status: str|None=None, limit:int=100, offset:int=0):
+    # resolve broker identity by session -> users.id
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    u = await database.fetch_one("""
+        SELECT id FROM public.users
+        WHERE lower(coalesce(email,''))=:i OR lower(coalesce(username,''))=:i
+        LIMIT 1
+    """, {"i": ident})
+    if not u: return {"contracts":[]}
+    where = ["broker_id = :bid"]
+    vals = {"bid": u["id"], "limit":limit, "offset":offset}
+    if status:
+        where.append("status ILIKE :st"); vals["st"]=status
+    q = f"SELECT * FROM contracts WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    rows = await database.fetch_all(q, vals)
+    return {"contracts":[dict(r) for r in rows]}
+
+class BrokerStartContractIn(BaseModel):
+    buyer: str
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_ton: float
+    currency: str = "USD"
+    notes: str | None = None
+    markup_usd: float | None = None
+    commission_usd: float | None = None
+    mill_bound: bool = False
+
+@brokers_router.post("/contracts/initiate", summary="Broker-initiated contract (on behalf)")
+async def broker_initiate_contract(body: BrokerStartContractIn,
+                                   request: Request, _=Depends(require_broker_or_admin)):
+    # who is the broker
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    u = await database.fetch_one("""
+        SELECT id FROM public.users
+        WHERE lower(coalesce(email,''))=:i OR lower(coalesce(username,''))=:i
+        LIMIT 1
+    """, {"i": ident})
+    if not u: raise HTTPException(401, "whoami missing")
+
+    cid = str(uuid.uuid4())
+    await _ensure_org_exists(body.buyer)
+    await _ensure_org_exists(body.seller)
+
+    row = await database.fetch_one("""
+      INSERT INTO contracts(
+        id,buyer,seller,material,weight_tons,price_per_ton,status,currency,
+        broker_id,markup_usd,commission_usd,mill_bound
+      )
+      VALUES(
+        :id,:buyer,:seller,:mat,:wt,:ppt,'Open',:ccy,
+        :broker,:markup,:comm,:mill
+      )
+      RETURNING *
+    """, {
+        "id": cid, "buyer": body.buyer, "seller": body.seller, "mat": body.material,
+        "wt": float(body.weight_tons), "ppt": float(body.price_per_ton),
+        "ccy": body.currency, "broker": u["id"],
+        "markup": body.markup_usd, "comm": body.commission_usd, "mill": body.mill_bound
+    })
+
+    # Optional: pre-accrue a commission record for tracking
+    if body.commission_usd and float(body.commission_usd) > 0:
+        await database.execute("""
+          INSERT INTO broker_commissions(contract_id, broker_id, basis, rate, computed_usd, status, notes)
+          VALUES (:cid,:bid,'per_contract',:rate,:rate,'accrued',:n)
+        """, {"cid": cid, "bid": u["id"], "rate": float(body.commission_usd or 0), "n": body.notes or ""})
+
+    return dict(row)
+
+@brokers_router.get("/commissions", summary="Broker commissions (ledger)")
+async def broker_commissions(request: Request, _=Depends(require_broker_or_admin),
+                             status:str|None=None, limit:int=100, offset:int=0):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    u = await database.fetch_one("""
+        SELECT id FROM public.users
+        WHERE lower(coalesce(email,''))=:i OR lower(coalesce(username,''))=:i
+        LIMIT 1
+    """, {"i": ident})
+    if not u: return {"rows":[]}
+    where = ["broker_id=:b"]; vals={"b":u["id"], "limit":limit, "offset":offset}
+    if status: where.append("status=:st"); vals["st"]=status
+    q = f"SELECT * FROM broker_commissions WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    rows = await database.fetch_all(q, vals)
+    return {"rows":[dict(r) for r in rows]}
+
+app.include_router(brokers_router)
+
+mills_router = APIRouter(prefix="/mills", tags=["Mills"])
+
+class MillReqIn(BaseModel):
+    material: str
+    min_pct: float | None = None
+    max_contaminant: float | None = None
+    spec_json: dict | None = None
+
+@mills_router.get("/requirements", summary="Get my requirements")
+async def mill_get_reqs(request: Request, _=Depends(require_mill_or_admin)):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    rows = await database.fetch_all(
+        "SELECT * FROM mill_requirements WHERE mill_username=:u ORDER BY material",
+        {"u": ident}
+    )
+    return [dict(r) for r in rows]
+
+@mills_router.post("/requirements", summary="Upsert requirement")
+async def mill_set_req(body: MillReqIn, request: Request, _=Depends(require_mill_or_admin)):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    row = await database.fetch_one("""
+      INSERT INTO mill_requirements(mill_username,material,min_pct,max_contaminant,spec_json,updated_at)
+      VALUES (:u,:m,:a,:b,:j,NOW())
+      ON CONFLICT (mill_username,material) DO UPDATE SET
+        min_pct=EXCLUDED.min_pct, max_contaminant=EXCLUDED.max_contaminant,
+        spec_json=EXCLUDED.spec_json, updated_at=NOW()
+      RETURNING *
+    """, {"u": ident, "m": body.material, "a": body.min_pct, "b": body.max_contaminant, "j": json.dumps(body.spec_json or {})})
+    return dict(row)
+
+class ApproveIn(BaseModel):
+    source_kind: Literal["yard","broker","processor"]
+    source_name: str
+    approved: bool = True
+    notes: str | None = None
+
+@mills_router.get("/approved_sources", summary="List approved sources")
+async def mill_sources(request: Request, _=Depends(require_mill_or_admin)):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    rows = await database.fetch_all(
+        "SELECT * FROM mill_approved_sources WHERE mill_username=:u ORDER BY source_kind, source_name",
+        {"u": ident}
+    )
+    return [dict(r) for r in rows]
+
+@mills_router.post("/approved_sources", summary="Upsert approved source")
+async def mill_sources_upsert(body: ApproveIn, request: Request, _=Depends(require_mill_or_admin)):
+    ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    row = await database.fetch_one("""
+      INSERT INTO mill_approved_sources(mill_username,source_kind,source_name,approved,notes,updated_at)
+      VALUES (:u,:k,:n,:a,:t,NOW())
+      ON CONFLICT (mill_username,source_kind,source_name) DO UPDATE
+         SET approved=EXCLUDED.approved, notes=EXCLUDED.notes, updated_at=NOW()
+      RETURNING *
+    """, {"u": ident, "k": body.source_kind, "n": body.source_name, "a": body.approved, "t": body.notes})
+    return dict(row)
+
+@mills_router.post("/lab_results/upload", summary="Upload lab result and link to BOL")
+async def mill_lab_upload(bol_id: str, file: UploadFile = File(...), request: Request=None, _=Depends(require_mill_or_admin)):
+    data = await file.read()
+    url = await _upload_attachment_bytes(file.filename, data)  # reuses your helper
+    row = await database.fetch_one("""
+      INSERT INTO bol_attachments(bol_id, kind, url, uploaded_by)
+      VALUES (:b,'lab_result',:u,:by) RETURNING *
+    """, {"b": bol_id, "u": url, "by": (request.session.get("username") if hasattr(request,"session") else None)})
+    return dict(row)
+
+app.include_router(mills_router)
+# ------------- Brokers and mills -----------
+
 # -------- Pricing & Indices Routers -------------------------
 async def _fetch_base(symbol: str):
     """
@@ -13833,6 +14032,26 @@ async def buyer_positions(buyer: str, status: Optional[str] = Query(None, descri
     rows = await database.fetch_all(q, vals)
     return [BuyerPositionRow(**dict(r)) for r in rows]
 # -------- Buyer Positions: list by buyer/status ----
+
+# -------- Broker and Mills routes --------
+@app.get("/broker", include_in_schema=False)
+async def broker_page(request: Request):
+    await require_broker_or_admin(request)     # gate
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower()=="production"
+    resp = FileResponse("static/broker.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
+
+@app.get("/mill", include_in_schema=False)
+async def mill_page(request: Request):
+    await require_mill_or_admin(request)       # gate
+    token = _csrf_get_or_create(request)
+    prod = os.getenv("ENV","").lower()=="production"
+    resp = FileResponse("static/mill.html")
+    resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
+    return resp
+# -------- Broker and Mills routes --------
 
 # -------- Inventory: Finished Goods snapshot (for seller.html) --------
 class FinishedRow(BaseModel):

@@ -71,6 +71,7 @@
   const ordQty = document.getElementById('ordQty');
   const ordMsg = document.getElementById('ordMsg');
   const ordSubmitBtn = document.getElementById('ordSubmitBtn');
+  const ordAccount = document.getElementById('ordAccount');
 
   function setOrdMsg(msg, ok) {
     if (!ordMsg) return;
@@ -100,12 +101,10 @@
   async function loadUniverse() {
     if (!symbolSel) return;
     try {
-      const syms = await api('/indices/universe');
-      symbolSel.innerHTML = (syms || [])
-        .map((row) => {
-          const sym = typeof row === 'string' ? row : row.symbol;
-          return `<option value="${sym}">${sym}</option>`;
-        })
+      const uni = await api('/public/indices/universe?region=blended&limit=5000');
+      const list = (uni && uni.tickers) ? uni.tickers : (uni || []);
+      symbolSel.innerHTML = list
+        .map((t) => `<option value="${t}">${t}</option>`)
         .join('');
     } catch (e) {
       console.error(e);
@@ -115,20 +114,31 @@
 
   async function loadHistory() {
     if (!symbolSel || !limitSel || !idxMeta) return;
-    const symbol = symbolSel.value;
+    const ticker = symbolSel.value;
     const limit = +limitSel.value || 500;
     idxMeta.textContent = '';
     try {
-      const rows = await api(
-        `/indices/history?symbol=${encodeURIComponent(symbol)}&limit=${limit}`
-      );
-      const data = (rows || []).slice().reverse(); // ascending for chart aesthetics
-      drawChart(data);
-      if (rows && rows.length) {
-        const last = rows[0];
-        const px = last.close_price ?? last.price;
-        const ts = last.dt ?? last.date ?? last.ts ?? '';
-        idxMeta.textContent = `Latest: ${px} @ ${ts}`;
+      const out = await api(`/public/indices/history?ticker=${encodeURIComponent(ticker)}&region=blended`);
+      const rows = (out.rows || out || []);
+      const use = rows.slice(-limit);
+      // adapt to drawChart’s expected fields
+      const pts = use.map(r => ({ date: r.as_of_date, price: r.index_price_per_ton ?? r.price_per_ton ?? r.avg_price }));
+      // draw
+      if (typeof Chart !== 'undefined') {
+        const labels = pts.map(p => p.date);
+        const data = pts.map(p => +p.price);
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+          type: 'line',
+          data: { labels, datasets: [{ label: `${ticker} (USD/ton)`, data }] },
+          options: { responsive: true, animation: false, scales: { y: { beginAtZero: false } } }
+        });
+      } else {
+        drawChart(pts);
+      }
+      if (pts.length) {
+        const last = pts[pts.length - 1];
+        idxMeta.textContent = `Latest: $${(+last.price).toFixed(2)} @ ${last.date}`;
       } else {
         idxMeta.textContent = 'No data for this symbol yet.';
       }
@@ -148,48 +158,64 @@
       return;
     }
     try {
-      const q = await api(
-        `/pricing/quote?category=${encodeURIComponent('Misc Product')}` +
-          `&material=${encodeURIComponent(material)}`
-      );
-      const px = Number(q.price_per_lb);
-      quoteOut.textContent = `${q.material}: $${px.toFixed(4)} per lb (source: ${q.source})`;
+      const q = await api(`/pricing/quote?material=${encodeURIComponent(material)}`);
+      const perLb = q.price_per_lb ?? q.price ?? null;
+      if (perLb != null) {
+        const perTon = (+perLb * 2000).toFixed(2);
+        quoteOut.textContent = `${q.material || material}: ~$${perTon}/ton`;
+      } else if (q.price_per_ton != null) {
+        quoteOut.textContent = `${q.material || material}: $${(+q.price_per_ton).toFixed(2)}/ton`;
+      } else {
+        quoteOut.textContent = 'No quote available yet.';
+      }
     } catch (e) {
-      quoteErr.textContent =
-        'No quote found (try a different material or ensure reference/vendor data is loaded).';
+      quoteErr.textContent = 'No quote found (try another name or load vendor/index data).';
     }
   }
 
+    async function resolveListingId(symbolRoot) {
+    const products = await api('/admin/futures/products');
+    const prod = (products || []).find(p => (p.symbol_root || '').toUpperCase() === symbolRoot.toUpperCase());
+    if (!prod) throw new Error('Unknown product');
+    const series = await api(`/admin/futures/series?product_id=${encodeURIComponent(prod.id)}&status=Listed`);
+    if (!series.length) throw new Error('No Listed series');
+    series.sort((a,b) => new Date(a.expiry_date) - new Date(b.expiry_date));
+    return series[0].id;
+  }
+  
   async function loadBook() {
     const symbolRootInput = document.getElementById('bookSymbolRoot');
-    const symRoot = (symbolRootInput && symbolRootInput.value || '').trim();
-    const fallback = (symbolSel && symbolSel.value || '').trim();
-    const sym = symRoot || fallback;
-    if (!sym) return;
+    const root = ((symbolRootInput && symbolRootInput.value) || '').trim()
+      || ((symbolSel && symbolSel.value) || '').trim();
+    if (!root) return;
     try {
-      const book = await api(`/trader/book?symbol=${encodeURIComponent(sym)}`);
+      const listingId = await resolveListingId(root);
+      const book = await api(`/trade/book?listing_id=${encodeURIComponent(listingId)}&depth=10`);
       const bidsBody = document.querySelector('#bookBids tbody');
       const asksBody = document.querySelector('#bookAsks tbody');
+
       function renderSide(rows, body) {
         if (!body) return;
         if (!rows || !rows.length) {
           body.innerHTML = `<tr><td colspan="2" style="opacity:.6; padding:4px;">No depth</td></tr>`;
           return;
         }
-        body.innerHTML = rows
-          .map(
-            (r) => `
-            <tr>
-              <td>${r.price}</td>
-              <td style="text-align:right;">${r.qty_lots}</td>
-            </tr>
-          `
-          )
-          .join('');
+        body.innerHTML = rows.map(r =>
+          `<tr><td>$${(+r.price).toFixed(2)}</td><td style="text-align:right;">${(+r.qty).toFixed(2)}</td></tr>`
+        ).join('');
       }
+
       renderSide(book.bids || [], bidsBody);
       renderSide(book.asks || [], asksBody);
+
+      // remember active listing/root if you add WS later
+      loadBook._activeListing = listingId;
+      loadBook._activeRoot = root.toUpperCase();
     } catch (e) {
+      const bidsBody = document.querySelector('#bookBids tbody');
+      const asksBody = document.querySelector('#bookAsks tbody');
+      if (bidsBody) bidsBody.innerHTML = `<tr><td colspan="2" style="opacity:.6; padding:4px;">No book</td></tr>`;
+      if (asksBody) asksBody.innerHTML = `<tr><td colspan="2" style="opacity:.6; padding:4px;">No book</td></tr>`;
       console.error(e);
     }
   }
@@ -199,54 +225,50 @@
 
     const symFromTicket = (ordSymbol && ordSymbol.value || '').trim();
     const symFromBook = (document.getElementById('bookSymbolRoot')?.value || '').trim();
-    const sym = symFromTicket || symFromBook || (symbolSel && symbolSel.value || '').trim();
+    const root = symFromTicket || symFromBook || (symbolSel && symbolSel.value || '').trim();
 
-    const side = (ordSide && ordSide.value) || 'buy';
-    const tif = (ordTif && ordTif.value) || 'day';
-    const qty = parseFloat(ordQty.value || '0');
+    const side = ((ordSide && ordSide.value) || 'buy').toUpperCase();
+    const tif  = ((ordTif && ordTif.value) || 'day').toUpperCase();
+    const qty  = parseFloat(ordQty.value || '0');
+    const account_id = (ordAccount && ordAccount.value || '').trim();
 
-    if (!sym) {
-      setOrdMsg('Enter a symbol (e.g., CU-SHRED-1M).', false);
-      return;
-    }
-    if (!qty || qty <= 0) {
-      setOrdMsg('Qty must be > 0.', false);
-      return;
-    }
-
-    const priceRaw = ordPrice && ordPrice.value;
-    const body = {
-      symbol: sym,
-      side: side,
-      qty_lots: qty,
-      tif: tif
-    };
-    if (priceRaw !== '' && priceRaw != null) {
-      body.price = Number(priceRaw);
-    }
+    if (!root) { setOrdMsg('Enter a symbol root (e.g., CU-SHRED-1M).', false); return; }
+    if (!(qty > 0)) { setOrdMsg('Qty must be > 0.', false); return; }
+    if (!account_id) { setOrdMsg('Account ID required.', false); return; }
 
     try {
       setOrdMsg('Submitting…', true);
 
-      const j = await api('/clob/orders', {
+      const listing_id = await resolveListingId(root);
+      const priceStr = (ordPrice && ordPrice.value || '').trim();
+      const body = {
+        account_id,
+        listing_id,
+        side,
+        qty,
+        order_type: priceStr ? 'LIMIT' : 'MARKET',
+        tif
+      };
+      if (priceStr) body.price = parseFloat(priceStr);
+
+      const j = await api('/trade/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key':
-            (crypto.randomUUID && crypto.randomUUID()) || String(Date.now())
+          'Idempotency-Key': (crypto.randomUUID && crypto.randomUUID()) || String(Date.now())
         },
         body: JSON.stringify(body)
       });
 
-      const oid = j.order_id || j.id || 'ok';
+      const oid = j.id || j.order_id || 'ok';
       setOrdMsg(`Order accepted (ID: ${oid})`, true);
 
-      // Keep symbol fields in sync
-      if (!symFromTicket && ordSymbol) ordSymbol.value = sym;
+      // keep fields in sync
+      if (!symFromTicket && ordSymbol) ordSymbol.value = root;
       const bookSymInput = document.getElementById('bookSymbolRoot');
-      if (bookSymInput && !bookSymInput.value) bookSymInput.value = sym;
+      if (bookSymInput && !bookSymInput.value) bookSymInput.value = root;
 
-      // Refresh panes
+      // refresh panes
       loadBook().catch(() => {});
       loadOrders().catch(() => {});
       loadPositions().catch(() => {});

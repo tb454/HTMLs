@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BRidge — Broker</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script src="https://cdn.tailwindcss.com"></script>
+<div class="max-w-5xl mx-auto p-6">
+  <h1 class="text-2xl font-bold">Broker Dashboard</h1>
+  <p class="text-sm text-zinc-500">Assigned contracts, commissions, and tools.</p>
+
+  <div class="mt-6 grid grid-cols-1 gap-6">
+    <section class="bg-white rounded-2xl shadow p-4">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold">My Contracts</h2>
+        <button id="refreshBtn" class="px-3 py-1 rounded bg-zinc-900 text-white">Refresh</button>
+      </div>
+      <table id="contracts" class="w-full text-sm mt-3"></table>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-4">
+      <h2 class="font-semibold">Commissions</h2>
+      <table id="comms" class="w-full text-sm mt-3"></table>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+async function json(url){ const r=await fetch(url); return r.json(); }
+async function load(){
+  const c = await json('/brokers/me/contracts?limit=50');
+  const t = document.getElementById('contracts');
+  if(!c.contracts?.length){ t.innerHTML = '<tr><td class="py-2 text-zinc-500">No contracts.</td></tr>'; }
+  else {
+    t.innerHTML = `<thead><tr class="text-left text-zinc-500">
+      <th class="py-2">Created</th><th>Buyer</th><th>Seller</th><th>Material</th><th>Wt</th><th>$ /ton</th><th>Status</th></tr></thead>` +
+      c.contracts.map(r=>`<tr class="border-t">
+        <td class="py-2">${(r.created_at||'').slice(0,19).replace('T',' ')}</td>
+        <td>${r.buyer||''}</td><td>${r.seller||''}</td>
+        <td>${r.material||''}</td>
+        <td>${Number(r.weight_tons||0).toFixed(2)}</td>
+        <td>${Number(r.price_per_ton||0).toFixed(2)}</td>
+        <td>${r.status||''}</td>
+      </tr>`).join('');
+  }
+  const cm = await json('/brokers/commissions?limit=50');
+  const u = document.getElementById('comms');
+  if(!cm.rows?.length){ u.innerHTML = '<tr><td class="py-2 text-zinc-500">No commissions.</td></tr>'; }
+  else {
+    u.innerHTML = `<thead><tr class="text-left text-zinc-500">
+      <th class="py-2">When</th><th>Contract</th><th>Basis</th><th>Rate</th><th>Computed $</th><th>Status</th></tr></thead>` +
+      cm.rows.map(r=>`<tr class="border-t">
+        <td class="py-2">${(r.created_at||'').slice(0,19).replace('T',' ')}</td>
+        <td>${r.contract_id}</td><td>${r.basis}</td>
+        <td>${Number(r.rate||0)}</td><td>${Number(r.computed_usd||0).toFixed(2)}</td><td>${r.status}</td>
+      </tr>`).join('');
+  }
+}
+document.getElementById('refreshBtn').onclick = load;
+load();
+</script>
