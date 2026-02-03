@@ -3,64 +3,78 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>BRidge Buyer </title>
+  <title>BRidge Buyer</title>
   <meta name="description" content="Purchase open BRidge contracts, post RFQs, and monitor live inventory and BOLs." />
- 
+  <meta name="color-scheme" content="light dark" />
+
   <script nonce="{{NONCE}}">
-    function onReady(fn){
+    function onReady(fn) {
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', fn);
       } else {
-        try { fn(); } catch(e){ console.error(e); }
+        try { fn(); } catch (e) { console.error(e); }
       }
     }
     // Mint XSRF cookie immediately so unsafe methods can echo it
-    onReady(async () => { try { await fetch('/health', { credentials:'include' }); } catch {} });
+    onReady(async () => { try { await fetch('/health', { credentials: 'include' }); } catch {} });
   </script>
 
   <!-- Performance & Integrity -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
     rel="stylesheet"
     integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
     crossorigin="anonymous"
   />
-  <link rel="stylesheet" href="/static/app.css">
-
-  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="/static/app.css" />
 
   <script id="boot" nonce="{{NONCE}}">
     window.endpoint = window.endpoint || (location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin);
   </script>
   <script src="/static/js/locale.js" defer nonce="{{NONCE}}"></script>
   <script src="/static/js/i18n.js" defer nonce="{{NONCE}}"></script>
-  
 </head>
 <body>
   <!-- Locale strip -->
   <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
-  <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
-  <select id="lang-select" class="form-select form-select-sm w-auto">
-    <option value="en">English</option><option value="es">Español</option><option value="zh">中文</option>
-  </select>
-  <label class="form-label m-0 ms-2" for="tz-select" data-i18n="timezone">Timezone</label>
-  <input id="tz-select" class="form-control form-control-sm w-220" list="tz-list" placeholder="America/Phoenix" data-i18n-ph="timezone"/>
-  <datalist id="tz-list">
-    <option value="America/Phoenix"></option><option value="America/New_York"></option>
-    <option value="America/Chicago"></option><option value="America/Los_Angeles"></option>
-    <option value="UTC"></option><option value="Europe/London"></option><option value="Asia/Shanghai"></option>
-  </datalist>
-  <button id="save-locale" class="btn btn-outline-secondary btn-sm ms-1"><span data-i18n="save">Save</span></button>
-  <small class="text-muted ms-auto" id="local-time"></small>
-</div>
- 
+    <label class="form-label m-0" for="lang-select" data-i18n="language">Language</label>
+    <select id="lang-select" class="form-select form-select-sm w-auto">
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="zh">中文</option>
+    </select>
+
+    <label class="form-label m-0 ms-2" for="tz-select" data-i18n="timezone">Timezone</label>
+    <input
+      id="tz-select"
+      class="form-control form-control-sm w-220"
+      list="tz-list"
+      placeholder="America/Phoenix"
+      data-i18n-ph="timezone"
+    />
+    <datalist id="tz-list">
+      <option value="America/Phoenix"></option>
+      <option value="America/New_York"></option>
+      <option value="America/Chicago"></option>
+      <option value="America/Los_Angeles"></option>
+      <option value="UTC"></option>
+      <option value="Europe/London"></option>
+      <option value="Asia/Shanghai"></option>
+    </datalist>
+
+    <button id="save-locale" class="btn btn-outline-secondary btn-sm ms-1">
+      <span data-i18n="save">Save</span>
+    </button>
+
+    <small class="text-muted ms-auto" id="local-time"></small>
+  </div>
+
   <a href="#list" class="visually-hidden visually-hidden-focusable">Skip to content</a>
 
   <!-- Toast (live region) -->
   <div id="toast" class="toast-bridge" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
     <button type="button" class="toast-close" aria-label="Close notification">&times;</button>
-
     <span id="toastMsg"></span>
   </div>
 
@@ -78,8 +92,7 @@
 
     <!-- Compliance cues -->
     <div class="small text-muted mb-2">
-      KYC/AML verified • Data retention 7y
-      — <a href="/legal/security">Security</a> • <a href="/legal/terms">Terms</a>
+      KYC/AML verified • Data retention 7y — <a href="/legal/security">Security</a> • <a href="/legal/terms">Terms</a>
     </div>
 
     <!-- Timezone hint -->
@@ -90,24 +103,16 @@
       <div class="col-lg-6 mb-3">
         <div class="cardy h-100">
           <h5 class="mb-2">My Positions</h5>
-          <div class="small text-muted mb-2">
-            Contracts you have purchased and still hold.
-          </div>
-          <div id="buyerPositionsBody" class="small">
-            Loading positions…
-          </div>
+          <div class="small text-muted mb-2">Contracts you have purchased and still hold.</div>
+          <div id="buyerPositionsBody" class="small">Loading positions…</div>
         </div>
       </div>
 
       <div class="col-lg-6 mb-3">
         <div class="cardy h-100">
           <h5 class="mb-2">My BOLs</h5>
-          <div class="small text-muted mb-2">
-            Recent Bills of Lading where you are the buyer.
-          </div>
-          <div id="buyerBolsBody" class="small">
-            Loading BOLs…
-          </div>
+          <div class="small text-muted mb-2">Recent Bills of Lading where you are the buyer.</div>
+          <div id="buyerBolsBody" class="small">Loading BOLs…</div>
         </div>
       </div>
     </div>
@@ -116,37 +121,178 @@
       <div class="col-lg-6 mb-3">
         <div class="cardy h-100">
           <h5 class="mb-2">Plan &amp; Billing</h5>
-          <div id="buyerBillingBody" class="small">
-            Loading billing summary…
-          </div>
+          <div id="buyerBillingBody" class="small">Loading billing summary…</div>
         </div>
       </div>
 
       <div class="col-lg-6 mb-3">
         <div class="cardy h-100">
           <h5 class="mb-2">Market Snapshot</h5>
-          <div id="buyerMarketBody" class="small">
-            Loading market snapshot…
-          </div>
+          <div id="buyerMarketBody" class="small">Loading market snapshot…</div>
         </div>
       </div>
     </div>
     <!-- /Buyer overview -->
 
+    <!-- Buyer extras -->
+    <div class="row mb-3" id="buyerExtrasRow">
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">My RFQs</h5>
+          <div class="small text-muted mb-2">RFQs you’ve posted (latest first).</div>
+          <div id="buyerRfqsBody" class="small">Loading RFQs…</div>
+        </div>
+      </div>
+
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-2 mb-0">Contract History</h5>
+            <button id="dlContractsCsv" class="btn btn-outline-secondary btn-sm" type="button">CSV</button>
+          </div>
+          <div class="small text-muted mb-2">Signed/fulfilled purchases you’ve made.</div>
+          <div id="buyerHistoryBody" class="small">Loading contracts…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="buyerPlanRow">
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">Delivery Calendar</h5>
+          <div class="small text-muted mb-2">Upcoming &amp; recent BOLs.</div>
+          <div id="buyerCalendarBody" class="small">Loading schedule…</div>
+        </div>
+      </div>
+
+      <div class="col-lg-6 mb-3">
+        <div class="cardy h-100">
+          <div class="d-flex align-items-end gap-2">
+            <div class="flex-grow-1">
+              <label class="form-label mb-1" for="qMaterial">Quick Price — Material</label>
+              <input id="qMaterial" class="form-control" placeholder="#1 Copper, Shred Steel, 6061…" />
+            </div>
+            <div class="maxw-140">
+              <label class="form-label mb-1" for="qTons">Tons</label>
+              <input id="qTons" class="form-control" type="number" min="1" step="0.5" />
+            </div>
+            <div>
+              <span class="form-label mb-1 vis-hidden-label">&nbsp;</span>
+              <button id="qGo" class="btn btn-primary" type="button">Quote</button>
+            </div>
+          </div>
+          <div id="qOut" class="small mt-2 text-muted">Enter a material + tons and click Quote.</div>
+        </div>
+      </div>
+    </div>
+    <!-- /Buyer extras -->
+
+    <!-- BOL Manager -->
+    <div class="row mb-3" id="buyerBolManagerRow">
+      <div class="col-lg-12 mb-3">
+        <div class="cardy h-100">
+          <h5 class="mb-2">BOL Manager</h5>
+          <div class="small text-muted mb-2">Quick actions on a single BOL and (optionally) its Contract.</div>
+
+          <div class="row g-2 align-items-end">
+            <div class="col-sm-3">
+              <label class="form-label mb-1" for="bmBolId">BOL ID</label>
+              <input id="bmBolId" class="form-control" placeholder="9fd8-...-e57" />
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label mb-1" for="bmContractId">Contract ID (optional)</label>
+              <input id="bmContractId" class="form-control" placeholder="b1c8-...-e9" />
+            </div>
+
+            <div class="col-sm-6 text-sm-end">
+              <button id="bmRefresh" class="btn btn-outline-secondary btn-sm">Refresh</button>
+              <button id="bmReceive" class="btn btn-primary btn-sm">Mark Delivered (Receive)</button>
+            </div>
+          </div>
+
+          <hr/>
+
+          <div class="row g-3">
+            <!-- Attachments -->
+            <div class="col-md-6">
+              <h6 class="mb-2">Attachments</h6>
+              <div class="d-flex gap-2 align-items-end mb-2">
+                <div class="flex-grow-1">
+                  <label class="form-label mb-1" for="bmFile">Upload (photo / scale ticket)</label>
+                  <input id="bmFile" type="file" class="form-control" />
+                </div>
+                <div class="maxw-180">
+                  <label class="form-label mb-1" for="bmFileKind">Kind</label>
+                  <select id="bmFileKind" class="form-select">
+                    <option value="photo">photo</option>
+                    <option value="scale_ticket">scale_ticket</option>
+                    <option value="other">other</option>
+                  </select>
+                </div>
+                <div>
+                  <span class="form-label mb-1 vis-hidden-label">&nbsp;</span>
+                  <button id="bmUpload" class="btn btn-secondary">Upload</button>
+                </div>
+              </div>
+              <div id="bmAttachList" class="small text-muted">No attachments yet.</div>
+            </div>
+
+            <!-- Disputes -->
+            <div class="col-md-6">
+              <h6 class="mb-2">Disputes</h6>
+              <div class="d-flex gap-2 mb-2">
+                <input id="bmDisputeReason" class="form-control" placeholder="Reason (short)" />
+                <input id="bmDisputeNotes" class="form-control" placeholder="Notes (optional)" />
+                <button id="bmOpenDispute" class="btn btn-warning">Open</button>
+              </div>
+              <div id="bmDisputeList" class="small text-muted">No disputes yet.</div>
+            </div>
+
+            <!-- Payouts -->
+            <div class="col-md-6">
+              <h6 class="mb-2 mt-2">Payout</h6>
+              <div class="d-flex gap-2 mb-2">
+                <input id="bmPayee" class="form-control" placeholder="Payee (seller/broker)" />
+                <input id="bmPayoutAmt" type="number" min="0" step="0.01" class="form-control" placeholder="Amount USD" />
+                <button id="bmCreatePayout" class="btn btn-success">Create</button>
+              </div>
+              <div id="bmPayoutList" class="small text-muted">No payouts found.</div>
+            </div>
+
+            <!-- Tags -->
+            <div class="col-md-6">
+              <h6 class="mb-2 mt-2">Tags</h6>
+              <div class="d-flex gap-2 mb-2">
+                <input id="bmTag" class="form-control" placeholder="e.g., urgent, qc-hold" />
+                <button id="bmAddTag" class="btn btn-outline-primary">Add</button>
+                <button id="bmDelTag" class="btn btn-outline-danger">Remove</button>
+              </div>
+              <div id="bmTagList" class="small text-muted">No tags yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /BOL Manager -->
+
     <!-- Controls -->
     <div class="d-flex gap-2 mb-3 align-items-end">
       <div class="flex-grow-1">
         <label class="visually-hidden" for="buyerFilter">Filter buyer</label>
-        <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)" autocomplete="off">
+        <input id="buyerFilter" class="form-control form-control-sm" placeholder="Filter buyer (optional)" autocomplete="off" />
       </div>
       <div class="flex-grow-1">
         <label class="visually-hidden" for="materialFilter">Filter material/SKU</label>
-        <input id="materialFilter" class="form-control form-control-sm" placeholder="Material/SKU (e.g., SHRED, Barley, #1)" autocomplete="off">
+        <input
+          id="materialFilter"
+          class="form-control form-control-sm"
+          placeholder="Material/SKU (e.g., SHRED, Barley, #1)"
+          autocomplete="off"
+        />
       </div>
 
       <button class="btn btn-secondary btn-sm" id="refreshBtn" type="button">Refresh</button>
 
-      <!-- added accessible label + aria-label for sortBy -->
       <label class="visually-hidden" for="sortBy">Sort contracts by</label>
       <select
         id="sortBy"
@@ -160,9 +306,7 @@
         <option value="weight_tons_desc">Tons ↓</option>
       </select>
 
-      <div class="small text-muted ms-auto" id="unitBadge">
-        Units: US short tons • Currency: USD
-      </div>
+      <div class="small text-muted ms-auto" id="unitBadge">Units: US short tons • Currency: USD</div>
     </div>
 
     <!-- RFQ (two-click) -->
@@ -184,7 +328,7 @@
         </div>
         <div class="maxw-160">
           <label class="form-label mb-1" for="rfqQty">Qty (lots)</label>
-          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="0.01" step="0.01">
+          <input id="rfqQty" class="form-control" type="number" placeholder="e.g. 5" min="0.01" step="0.01" />
         </div>
         <div>
           <span class="form-label mb-1 vis-hidden-label" aria-hidden="true">&nbsp;</span>
@@ -193,7 +337,7 @@
       </div>
     </div>
 
-    <!-- live region for loading text (a11y) -->
+    <!-- Live region for loading text (a11y) -->
     <div id="loadingStatus" class="visually-hidden" role="status" aria-live="polite"></div>
 
     <div id="list" aria-busy="false"></div>
@@ -203,7 +347,9 @@
       <button class="btn btn-secondary btn-sm" id="nextBtn" type="button" aria-label="Next page">Next ▶</button>
       <label class="small text-muted mb-0" for="pageSize">Rows:</label>
       <select id="pageSize" class="form-select form-select-sm w-auto">
-        <option>25</option><option selected>100</option><option>200</option>
+        <option>25</option>
+        <option selected>100</option>
+        <option>200</option>
       </select>
       <span class="small text-muted" id="pageInfo" aria-live="polite"></span>
     </div>
@@ -211,55 +357,58 @@
 
   <script nonce="{{NONCE}}">
     // Cookie reader for CSRF etc.
-    function _cookie(name){
-      const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')+'=([^;]*)'));
+    function _cookie(name) {
+      const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1') + '=([^;]*)'));
       return m ? decodeURIComponent(m[1]) : '';
     }
-    // Unified endpoint (already set in boot) and helpers
-    function toast(msg, ms=2800){
+
+    // Toast helper
+    function toast(msg, ms = 2800) {
       const wrap = document.getElementById('toast');
       const msgEl = document.getElementById('toastMsg');
       const text = typeof msg === 'string' ? msg : (msg?.message || 'Error');
-      if (!wrap || !msgEl){ alert(text); return; }
+      if (!wrap || !msgEl) { alert(text); return; }
       msgEl.textContent = text; // safe text only
       wrap.classList.add('show');
-      try{ wrap.focus(); }catch{}
-      setTimeout(()=>{ wrap.classList.remove('show'); }, ms);
+      try { wrap.focus(); } catch {}
+      setTimeout(() => { wrap.classList.remove('show'); }, ms);
     }
 
     // Close toast via delegated click (no inline handlers)
-    document.addEventListener('click', (e)=>{
+    document.addEventListener('click', (e) => {
       if (e.target && e.target.classList.contains('toast-close')) {
         const t = e.target.closest('.toast-bridge');
         if (t) t.classList.remove('show');
       }
     });
 
+    // Unified endpoint + fetch wrapper with CSRF + 401 redirect
     let __inflight = new Map();
-    async function api(path, opts={}){
+    async function api(path, opts = {}) {
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
 
       // abort same-URL inflight to avoid piling up when user types filters
-      if (__inflight.has(url)) { try { __inflight.get(url).abort(); } catch{} }
+      if (__inflight.has(url)) { try { __inflight.get(url).abort(); } catch {} }
       const ctl = new AbortController(); __inflight.set(url, ctl);
-      const to = setTimeout(()=>ctl.abort(), 9000);
+      const to = setTimeout(() => ctl.abort(), 9000);
 
       const method = (opts.method || 'GET').toUpperCase();
-      const headers = { Accept:'application/json', ...(opts.headers||{}) };
+      const headers = { Accept: 'application/json', ...(opts.headers || {}) };
       if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
         headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
       }
 
-      try{
-        const res = await fetch(url, { credentials:'include', ...opts, signal: ctl.signal, headers });
+      try {
+        const res = await fetch(url, { credentials: 'include', ...opts, signal: ctl.signal, headers });
         if (res.status === 401) {
           const next = encodeURIComponent(location.pathname + location.search);
           location.href = `/static/bridge-login.html?next=${next}`;
           throw new Error('Unauthorized');
         }
         if (!res.ok) {
-          let m='Request failed';
-          try { m=(await res.clone().json()).detail||m; } catch { try { m=await res.clone().text()||m; } catch{} }
+          let m = 'Request failed';
+          try { m = (await res.clone().json()).detail || m; }
+          catch { try { m = await res.clone().text() || m; } catch {} }
           toast(m);
           throw new Error(m);
         }
@@ -270,42 +419,42 @@
       }
     }
 
-    // Health badge
-    onReady(async ()=>{
+    // Health badge + auth banner
+    onReady(async () => {
       const hb = document.querySelector('[data-health-badge]');
       const banner = document.getElementById('authBanner');
       const msg = document.getElementById('authMsg');
 
-      try{
-        let ok=false;
+      try {
+        let ok = false;
         try { ok = (await api('/health')).ok; } catch {}
         if (!ok) { try { ok = (await api('/healthz')).ok; } catch {} }
-        if (ok){ hb?.setAttribute('data-ok','1'); if(hb) hb.textContent='● Live'; }
+        if (ok) { hb?.setAttribute('data-ok', '1'); if (hb) hb.textContent = '● Live'; }
         else {
-          hb?.removeAttribute('data-ok'); if(hb) hb.textContent='● Degraded';
-          if (banner && msg){ banner.style.display='block'; msg.textContent = 'Service degraded'; }
+          hb?.removeAttribute('data-ok'); if (hb) hb.textContent = '● Degraded';
+          if (banner && msg) { banner.style.display = 'block'; msg.textContent = 'Service degraded'; }
         }
-      }catch{
-        hb?.removeAttribute('data-ok'); if(hb) hb.textContent='● Degraded';
-        if (banner && msg){ banner.style.display='block'; msg.textContent = 'Service degraded'; }
+      } catch {
+        hb?.removeAttribute('data-ok'); if (hb) hb.textContent = '● Degraded';
+        if (banner && msg) { banner.style.display = 'block'; msg.textContent = 'Service degraded'; }
       }
 
-      try{
+      try {
         const r = await api('/me'); const j = await r.json();
-        if (!j?.username){
-          if (banner && msg){ banner.style.display='block'; msg.textContent = 'Not logged in'; }
+        if (!j?.username) {
+          if (banner && msg) { banner.style.display = 'block'; msg.textContent = 'Not logged in'; }
         }
-      }catch{
-        if (banner && msg){ banner.style.display='block'; msg.textContent = 'Auth unknown'; }
+      } catch {
+        if (banner && msg) { banner.style.display = 'block'; msg.textContent = 'Auth unknown'; }
       }
     });
   </script>
 
   <script nonce="{{NONCE}}">
     const endpoint = window.endpoint;
-    let offset = 0, limit = 100; // pagination
+    let offset = 0, limit = 100;        // pagination
     let sortBy = 'created_at_desc';
-    let loadCtl = null;          // AbortController for overlapping loads    
+    let loadCtl = null;                 // AbortController for overlapping loads
     let paused = false;
 
     // ---- Timezone toggle (UTC vs local) ----
@@ -321,11 +470,11 @@
     let buyerKey  = storedUser.buyer  || storedUser.member || storedUser.org || storedUser.company || storedUser.username || '';
     let memberKey = storedUser.member || storedUser.org    || storedUser.company || buyerKey || '';
 
-    // --- Make sure we actually have buyer/member context, even if bridgeUser is empty ---
-    async function ensureBuyerContext() {      
+    // Ensure buyer context, even if bridgeUser is empty
+    async function ensureBuyerContext() {
       if (buyerKey && memberKey) return true;
 
-      try {        
+      try {
         const r = await api('/me');
         const j = await r.json();
         const u = (j.username || '').toLowerCase();
@@ -338,10 +487,7 @@
         } else if (u) {
           // Generic fallback: turn "anthony.priority" into "Anthony Priority"
           const base = u.split('@')[0].replace(/[._-]+/g, ' ').trim();
-          const orgGuess = base
-            ? base.replace(/\b\w/g, c => c.toUpperCase())
-            : j.username;
-
+          const orgGuess = base ? base.replace(/\b\w/g, c => c.toUpperCase()) : j.username;
           buyerKey = buyerKey || orgGuess || j.username || '';
           memberKey = memberKey || orgGuess || j.username || '';
         }
@@ -356,53 +502,53 @@
           org: memberKey
         };
         try { localStorage.setItem('bridgeUser', JSON.stringify(merged)); } catch {}
-
-      } catch (e) {
-        // If /me blows up, fall through and report "no context"
+      } catch {
+        // If /me fails, fall through and report "no context"
       }
 
       return !!buyerKey;
     }
 
-    function _formatTons(v){
+    function _formatTons(v) {
       const n = Number(v || 0);
       if (!isFinite(n) || !n) return '—';
       return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
     }
 
-    function _fmtDate(d){
+    function _fmtDate(d) {
       const dt = new Date(d);
       return useUTC
-        ? dt.toLocaleString('en-US', { timeZone:'UTC', timeZoneName:'short' })
+        ? dt.toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
         : dt.toLocaleString();
     }
 
-    function _renderTZHint(){
+    function _renderTZHint() {
       const el = document.getElementById('tzHint');
       if (!el) return;
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
       el.innerHTML = `Times shown in <b>${useUTC ? 'UTC' : tz}</b> • <a href="#" id="toggleTZ">${useUTC ? 'Use local' : 'Use UTC'}</a>`;
-      document.getElementById('toggleTZ')?.addEventListener('click', (e)=>{
+      document.getElementById('toggleTZ')?.addEventListener('click', (e) => {
         e.preventDefault();
         useUTC = !useUTC;
-        localStorage.setItem('buyer.useUTC', useUTC ? '1':'0');
+        localStorage.setItem('buyer.useUTC', useUTC ? '1' : '0');
         _renderTZHint();
         loadOpenContracts();
       });
     }
     onReady(_renderTZHint);
-   // ---- /Timezone toggle ----
+    // ---- /Timezone toggle ----
 
-    function currentRole(){
-      try{ return (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase(); }
-      catch{ return ''; }
+    function currentRole() {
+      try { return (JSON.parse(localStorage.getItem('bridgeUser') || '{}').role || '').toLowerCase(); }
+      catch { return ''; }
     }
 
-    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+    function debounce(fn, ms = 250) {
+      let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+    }
 
-        // ---- Buyer-side widgets: positions, BOLs, billing, market ----
-
-    async function loadBuyerPositions(){
+    // ---- Buyer-side widgets: positions, BOLs, billing, market ----
+    async function loadBuyerPositions() {
       const body = document.getElementById('buyerPositionsBody');
       if (!body) return;
 
@@ -412,22 +558,23 @@
       }
 
       body.textContent = 'Loading positions…';
-      try{
+      try {
         const res = await api(`/buyer_positions?buyer=${encodeURIComponent(buyerKey)}`);
         const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0){
+        if (!Array.isArray(rows) || rows.length === 0) {
           body.textContent = 'No open positions yet.';
           return;
         }
+
         const ul = document.createElement('ul');
         ul.className = 'list-unstyled mb-0';
 
         rows.slice(0, 10).forEach(p => {
           const li = document.createElement('li');
           li.className = 'small mb-1';
-          const sym  = p.symbol || p.material || p.sku || 'Position';
+          const sym = p.symbol || p.material || p.sku || 'Position';
           const tons = _formatTons(p.net_tons ?? p.quantity_tons ?? p.weight_tons);
-          const avg  = Number(p.avg_price_per_ton ?? p.price_per_ton ?? p.last_price_per_ton ?? 0);
+          const avg = Number(p.avg_price_per_ton ?? p.price_per_ton ?? p.last_price_per_ton ?? 0);
           const avgStr = avg
             ? `$${avg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/ton`
             : '—';
@@ -439,18 +586,18 @@
         body.innerHTML = '';
         body.appendChild(ul);
 
-        if (rows.length > 10){
+        if (rows.length > 10) {
           const more = document.createElement('div');
           more.className = 'small text-muted mt-1';
           more.textContent = `Showing first 10 of ${rows.length} positions.`;
           body.appendChild(more);
         }
-      }catch(e){
+      } catch {
         body.textContent = 'Could not load positions.';
       }
     }
 
-    async function loadBuyerBols(){
+    async function loadBuyerBols() {
       const body = document.getElementById('buyerBolsBody');
       if (!body) return;
 
@@ -460,17 +607,17 @@
       }
 
       body.textContent = 'Loading BOLs…';
-      try{
+      try {
         const res = await api(`/bols?buyer=${encodeURIComponent(buyerKey)}`);
-
         const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0){
+        if (!Array.isArray(rows) || rows.length === 0) {
           body.textContent = 'No BOLs found for this buyer.';
           return;
         }
 
         const table = document.createElement('table');
         table.className = 'table table-sm mb-0 align-middle';
+
         const thead = document.createElement('thead');
         thead.innerHTML = '<tr><th>BOL</th><th>Status</th><th>Weight (t)</th><th>Updated</th><th>PDF</th></tr>';
         table.appendChild(thead);
@@ -482,6 +629,16 @@
           const idCell = document.createElement('td');
           const bolId = b.bol_id ?? b.id ?? '—';
           idCell.textContent = bolId;
+
+          const statusCell = document.createElement('td');
+          statusCell.textContent = b.status || '—';
+
+          const wtCell = document.createElement('td');
+          wtCell.textContent = _formatTons(b.weight_tons ?? b.gross_tons ?? b.net_tons);
+
+          const ts = b.updated_at || b.delivered_at || b.created_at;
+          const tsCell = document.createElement('td');
+          tsCell.textContent = ts ? _fmtDate(ts) : '—';
 
           const pdfCell = document.createElement('td');
           if (bolId && bolId !== '—') {
@@ -496,16 +653,6 @@
             pdfCell.textContent = '—';
           }
 
-          const statusCell = document.createElement('td');
-          statusCell.textContent = b.status || '—';
-
-          const wtCell = document.createElement('td');
-          wtCell.textContent = _formatTons(b.weight_tons ?? b.gross_tons ?? b.net_tons);
-
-          const ts = b.updated_at || b.delivered_at || b.created_at;
-          const tsCell = document.createElement('td');
-          tsCell.textContent = ts ? _fmtDate(ts) : '—';
-
           tr.append(idCell, statusCell, wtCell, tsCell, pdfCell);
           tbody.appendChild(tr);
         });
@@ -514,18 +661,18 @@
         body.innerHTML = '';
         body.appendChild(table);
 
-        if (rows.length > 10){
+        if (rows.length > 10) {
           const more = document.createElement('div');
           more.className = 'small text-muted mt-1';
           more.textContent = `Showing first 10 of ${rows.length} BOLs.`;
           body.appendChild(more);
         }
-      }catch(e){
+      } catch {
         body.textContent = 'Could not load BOLs.';
       }
     }
 
-    async function loadBuyerBilling(){
+    async function loadBuyerBilling() {
       const body = document.getElementById('buyerBillingBody');
       if (!body) return;
 
@@ -535,7 +682,7 @@
       }
 
       body.textContent = 'Loading billing summary…';
-      try{
+      try {
         const res = await api(`/billing/member_summary?member=${encodeURIComponent(memberKey)}`);
         const j = await res.json();
 
@@ -558,35 +705,27 @@
 
         mkLine('Plan', plan);
         mkLine('Status', status);
-        if (limitTons != null){
-          mkLine('Tons/month included', _formatTons(limitTons));
-        }
-        if (usedTons != null){
-          mkLine('Tons used this month', _formatTons(usedTons));
-        }
-        if (nextInvoice){
-          mkLine('Next invoice', nextInvoice);
-        }
-        if (lastAmt != null){
+        if (limitTons != null) mkLine('Tons/month included', _formatTons(limitTons));
+        if (usedTons != null) mkLine('Tons used this month', _formatTons(usedTons));
+        if (nextInvoice) mkLine('Next invoice', nextInvoice);
+        if (lastAmt != null) {
           mkLine('Last invoice amount', `${cur} ${Number(lastAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
         }
 
-        if (!frag.childNodes.length){
-          mkLine('Billing', 'No billing summary available.');
-        }
+        if (!frag.childNodes.length) mkLine('Billing', 'No billing summary available.');
 
         body.innerHTML = '';
         body.appendChild(frag);
-      }catch(e){
+      } catch {
         body.textContent = 'Could not load billing summary.';
       }
     }
 
-    async function loadMarketSnapshot(){
+    async function loadMarketSnapshot() {
       const body = document.getElementById('buyerMarketBody');
       if (!body) return;
       body.textContent = 'Loading market snapshot…';
-      try{
+      try {
         const [idxRes, cuRes] = await Promise.allSettled([
           api('/indices/latest?symbol=' + encodeURIComponent('BR-CU-#1')),
           api('/prices/copper_last')
@@ -594,25 +733,21 @@
 
         const lines = [];
 
-        if (idxRes.status === 'fulfilled'){
+        if (idxRes.status === 'fulfilled') {
           const j = await idxRes.value.json();
           const primary = Array.isArray(j) ? j[0] : j;
-          if (primary){
+          if (primary) {
             const name = primary.name || primary.index || 'Scrap Index';
             const val  = primary.value ?? primary.level ?? null;
-            if (val != null){
-              lines.push(`${name}: ${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-            }
+            if (val != null) lines.push(`${name}: ${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
           }
         }
 
-        if (cuRes.status === 'fulfilled'){
+        if (cuRes.status === 'fulfilled') {
           const j = await cuRes.value.json();
           const last = Number(j.last ?? j.price ?? j.value ?? 0);
           const chg  = Number(j.change ?? j.change_abs ?? 0);
-          if (!Number.isFinite(last) || !last) {
-            // nothing usable
-          } else {
+          if (Number.isFinite(last) && last) {
             let s = `BR-CU (Copper) $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb`;
             if (Number.isFinite(chg) && chg !== 0) {
               const sign = chg > 0 ? '+' : '';
@@ -622,7 +757,7 @@
           }
         }
 
-        if (!lines.length){
+        if (!lines.length) {
           body.textContent = 'No market data available.';
           return;
         }
@@ -630,74 +765,248 @@
         body.innerHTML = '';
         const ul = document.createElement('ul');
         ul.className = 'list-unstyled mb-0';
-        for (const l of lines){
+        for (const l of lines) {
           const li = document.createElement('li');
           li.className = 'small mb-1';
           li.textContent = l;
           ul.appendChild(li);
         }
         body.appendChild(ul);
-      }catch(e){
+      } catch {
         body.textContent = 'Could not load market data.';
       }
     }
     // ---- /Buyer-side widgets ----
 
-    function _syncQuery(params){
+    // ---- Buyer BOL Manager (attachments, disputes, payouts, tags, receive) ----
+    function _bmVals() {
+      const bol = (document.getElementById('bmBolId')?.value || '').trim();
+      const cid = (document.getElementById('bmContractId')?.value || '').trim();
+      return { bol, cid };
+    }
+
+    async function bmRefresh() {
+      const { bol, cid } = _bmVals();
+      if (!bol) { toast('Enter BOL ID'); return; }
+
+      // attachments
+      try {
+        const r = await api(`/attachments/bols/${encodeURIComponent(bol)}`);
+        const rows = await r.json();
+        const el = document.getElementById('bmAttachList');
+        if (!rows?.length) { el.textContent = 'No attachments yet.'; }
+        else {
+          const ul = document.createElement('ul'); ul.className = 'list-unstyled mb-0';
+          rows.forEach(a => {
+            const li = document.createElement('li');
+            const when = a.created_at ? _fmtDate(a.created_at) : '';
+            li.innerHTML = `${a.kind || 'file'} – <a href="${a.url}" target="_blank" rel="noopener">${a.url}</a> ${when ? ' · ' + when : ''}`;
+            ul.appendChild(li);
+          });
+          el.innerHTML = ''; el.appendChild(ul);
+        }
+      } catch { document.getElementById('bmAttachList').textContent = 'Failed to load attachments.'; }
+
+      // disputes (entity: bol)
+      try {
+        const r = await api(`/disputes?entity_type=bol&entity_id=${encodeURIComponent(bol)}&limit=50`);
+        const rows = await r.json();
+        const el = document.getElementById('bmDisputeList');
+        if (!rows?.length) el.textContent = 'No disputes yet.';
+        else {
+          const ul = document.createElement('ul'); ul.className = 'list-unstyled mb-0';
+          rows.forEach(d => {
+            const when = d.created_at ? _fmtDate(d.created_at) : '';
+            ul.innerHTML += `<li>${d.status || 'open'} — ${d.reason || ''} ${when ? ' · ' + when : ''}</li>`;
+          });
+          el.innerHTML = ''; el.appendChild(ul);
+        }
+      } catch { document.getElementById('bmDisputeList').textContent = 'Failed to load disputes.'; }
+
+      // tags (entity: bol)
+      try {
+        const r = await api(`/tags?entity_type=bol&entity_id=${encodeURIComponent(bol)}`);
+        const rows = await r.json();
+        const el = document.getElementById('bmTagList');
+        if (!rows?.length) el.textContent = 'No tags yet.';
+        else {
+          el.textContent = rows.map(t => t.tag).join(', ');
+        }
+      } catch { document.getElementById('bmTagList').textContent = 'Failed to load tags.'; }
+
+      // payouts (needs contract id)
+      try {
+        const el = document.getElementById('bmPayoutList');
+        if (!cid) { el.textContent = 'Enter Contract ID to view payouts.'; }
+        else {
+          const r = await api(`/payouts?contract_id=${encodeURIComponent(cid)}&limit=50`);
+          const rows = await r.json();
+          if (!rows?.length) el.textContent = 'No payouts found.';
+          else {
+            const ul = document.createElement('ul'); ul.className = 'list-unstyled mb-0';
+            rows.forEach(p => {
+              const when = p.created_at ? _fmtDate(p.created_at) : '';
+              ul.innerHTML += `<li>${p.status || 'pending'} — $${Number(p.amount_usd || 0).toFixed(2)} → ${p.payee || ''}${when ? ' · ' + when : ''}</li>`;
+            });
+            el.innerHTML = ''; el.appendChild(ul);
+          }
+        }
+      } catch { document.getElementById('bmPayoutList').textContent = 'Failed to load payouts.'; }
+    }
+
+    async function bmUpload() {
+      const { bol } = _bmVals();
+      const file = document.getElementById('bmFile')?.files?.[0];
+      const kind = document.getElementById('bmFileKind')?.value || 'photo';
+      if (!bol || !file) { toast('BOL + file required'); return; }
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('kind', kind);
+      await api(`/attachments/bols/${encodeURIComponent(bol)}`, { method: 'POST', body: fd });
+      toast('Attachment uploaded');
+      bmRefresh();
+      try { document.getElementById('bmFile').value = ''; } catch {}
+    }
+
+    async function bmOpenDispute() {
+      const { bol } = _bmVals();
+      const reason = (document.getElementById('bmDisputeReason')?.value || '').trim();
+      const notes  = (document.getElementById('bmDisputeNotes')?.value || '').trim();
+      if (!bol || !reason) { toast('BOL + reason required'); return; }
+      await api('/disputes', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ entity_type: 'bol', entity_id: bol, reason, notes })
+      });
+      toast('Dispute opened');
+      bmRefresh();
+    }
+
+    async function bmReceive() {
+      const { bol } = _bmVals();
+      if (!bol) { toast('Enter BOL ID'); return; }
+      if (!confirm('Mark this BOL Delivered and post a receipt?')) return;
+      await api('/buyer/inventory/receive', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ bol_id: bol, notes: 'buyer receive via UI' })
+      });
+      toast('BOL marked Delivered');
+      bmRefresh();
+      // keep widgets in sync
+      loadBuyerBols();
+      loadBuyerPositions();
+    }
+
+    async function bmCreatePayout() {
+      const { cid } = _bmVals();
+      const payee = (document.getElementById('bmPayee')?.value || '').trim();
+      const amt   = Number(document.getElementById('bmPayoutAmt')?.value || 0);
+      if (!cid || !payee || !(amt > 0)) { toast('Contract ID, payee, and amount are required'); return; }
+      await api('/payouts', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ contract_id: cid, payee, amount_usd: amt })
+      });
+      toast('Payout created');
+      bmRefresh();
+    }
+
+    async function bmAddTag() {
+      const { bol } = _bmVals();
+      const tag = (document.getElementById('bmTag')?.value || '').trim();
+      if (!bol || !tag) { toast('BOL + tag required'); return; }
+      await api('/tags', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ entity_type:'bol', entity_id: bol, tag })
+      });
+      toast('Tag added'); bmRefresh();
+    }
+
+    async function bmDelTag() {
+      const { bol } = _bmVals();
+      const tag = (document.getElementById('bmTag')?.value || '').trim();
+      if (!bol || !tag) { toast('BOL + tag required'); return; }
+      await api(`/tags?entity_type=bol&entity_id=${encodeURIComponent(bol)}&tag=${encodeURIComponent(tag)}`, { method:'DELETE' });
+      toast('Tag removed'); bmRefresh();
+    }
+
+    // Wire BOL manager buttons
+    onReady(() => {
+      document.getElementById('bmRefresh')?.addEventListener('click', bmRefresh);
+      document.getElementById('bmUpload')?.addEventListener('click', bmUpload);
+      document.getElementById('bmOpenDispute')?.addEventListener('click', bmOpenDispute);
+      document.getElementById('bmReceive')?.addEventListener('click', bmReceive);
+      document.getElementById('bmCreatePayout')?.addEventListener('click', bmCreatePayout);
+      document.getElementById('bmAddTag')?.addEventListener('click', bmAddTag);
+      document.getElementById('bmDelTag')?.addEventListener('click', bmDelTag);
+    });
+    // ---- /Buyer BOL Manager ----
+
+    function _syncQuery(params) {
       const u = new URL(location.href);
-      for (const [k,v] of Object.entries(params)){
+      for (const [k, v] of Object.entries(params)) {
         if (v === '' || v == null) u.searchParams.delete(k);
         else u.searchParams.set(k, v);
       }
       history.replaceState({}, '', u);
     }
 
-    function setLoadingUI(isLoading){
-      const ids = ['prevBtn','nextBtn','refreshBtn'];
-      ids.forEach(id=>{
+    function setLoadingUI(isLoading) {
+      const ids = ['prevBtn', 'nextBtn', 'refreshBtn'];
+      ids.forEach(id => {
         const el = document.getElementById(id);
-        if (el){ el.disabled = isLoading; el.setAttribute('aria-disabled', String(isLoading)); }
+        if (el) { el.disabled = isLoading; el.setAttribute('aria-disabled', String(isLoading)); }
       });
     }
 
-    function rowCard(r){
+    function rowCard(r) {
       const div = document.createElement('div');
       div.className = 'cardy';
 
       const left = document.createElement('div');
-      const title = document.createElement('h5'); title.className='mb-1'; title.textContent = r?.material ?? '';
-      const seller = document.createElement('div'); seller.className='text-muted small'; seller.textContent = `Seller: ${r?.seller ?? ''}`;
-      const buyer  = document.createElement('div'); buyer .className='text-muted small'; buyer .textContent = `Buyer: ${r?.buyer ?? ''}`;
+      const title = document.createElement('h5');
+      title.className = 'mb-1';
+      title.textContent = r?.material ?? '';
+      const seller = document.createElement('div');
+      seller.className = 'text-muted small';
+      seller.textContent = `Seller: ${r?.seller ?? ''}`;
+      const buyer  = document.createElement('div');
+      buyer.className = 'text-muted small';
+      buyer.textContent = `Buyer: ${r?.buyer ?? ''}`;
 
-        const wt = Number(r?.weight_tons ?? 0);
-        const pt = Number(r?.price_per_ton ?? 0);
-        const total = wt * pt;
+      const wt = Number(r?.weight_tons ?? 0);
+      const pt = Number(r?.price_per_ton ?? 0);
+      const total = wt * pt;
 
-        const cur = (r?.currency || 'USD').toString().toUpperCase();
-        const tax = (r?.tax_percent ?? r?.tax_pct);
-        const taxStr = (tax !== null && tax !== undefined && !Number.isNaN(Number(tax)))
-          ? ` · Tax ${Number(tax).toFixed(2)}%`
-          : '';
+      const cur = (r?.currency || 'USD').toString().toUpperCase();
+      const tax = (r?.tax_percent ?? r?.tax_pct);
+      const taxStr = (tax !== null && tax !== undefined && !Number.isNaN(Number(tax)))
+        ? ` · Tax ${Number(tax).toFixed(2)}%`
+        : '';
 
-        const line = document.createElement('div');
-        line.className='small';
-        line.textContent =
-          `Tons: ${wt} @ ${cur} $${pt}/ton · Total ${cur} $${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}${taxStr}`;
+      const line = document.createElement('div');
+      line.className = 'small';
+      line.textContent =
+        `Tons: ${wt} @ ${cur} $${pt}/ton · Total ${cur} $${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${taxStr}`;
 
-      const created = document.createElement('div'); created.className='small text-muted';
+      const created = document.createElement('div');
+      created.className = 'small text-muted';
       if (r?.created_at) created.textContent = `Created: ${_fmtDate(r.created_at)}`;
 
       left.append(title, seller, buyer, line, created);
 
-      const right = document.createElement('div'); right.className='text-end';
+      const right = document.createElement('div');
+      right.className = 'text-end';
       const btn = document.createElement('button');
       btn.className = 'btn btn-primary btn-sm';
       btn.type = 'button';
       btn.textContent = 'Buy';
-      btn.setAttribute('aria-label', `Buy contract ${r?.material||''} from ${r?.seller||''}`);
+      btn.setAttribute('aria-label', `Buy contract ${r?.material || ''} from ${r?.seller || ''}`);
       const canBuy = /^(open|pending)$/i.test(r?.status || '');
       btn.disabled = !canBuy;
-      if (canBuy) btn.addEventListener('click', (ev)=> buy(ev, r.id));
+      if (canBuy) btn.addEventListener('click', (ev) => buy(ev, r.id));
       right.append(btn);
 
       const row = document.createElement('div');
@@ -708,7 +1017,7 @@
       return div;
     }
 
-    async function loadOpenContracts(){
+    async function loadOpenContracts() {
       if (loadCtl) loadCtl.abort();
       loadCtl = new AbortController();
 
@@ -716,7 +1025,7 @@
       const ls = document.getElementById('loadingStatus');
       if (ls) ls.textContent = 'Loading contracts…';
       setLoadingUI(true);
-      root.setAttribute('aria-busy','true');
+      root.setAttribute('aria-busy', 'true');
 
       const q = new URLSearchParams({ status: 'Open', limit, offset, sort: sortBy });
       const buyerEl = document.getElementById('buyerFilter');
@@ -726,13 +1035,13 @@
       if (buyerVal) q.set('buyer', buyerVal);
       if (matVal)   q.set('material', matVal);
 
-      const page = Math.floor(offset/limit)+1;
+      const page = Math.floor(offset / limit) + 1;
       _syncQuery({ buyer: buyerVal || '', material: matVal || '', page, rows: String(limit) });
 
-      try{
+      try {
         const res  = await api(`/contracts?` + q.toString(), { signal: loadCtl.signal });
         const rows = await res.json();
-        const total = +(res.headers.get('X-Total-Count')||0);
+        const total = +(res.headers.get('X-Total-Count') || 0);
 
         root.innerHTML = '';
         if (!Array.isArray(rows) || rows.length === 0) {
@@ -745,17 +1054,18 @@
               <button type="button" class="btn btn-sm btn-primary" id="reqQuoteBtn">Request Quote</button>
             </div>`;
           root.append(wrap);
-          document.getElementById('clearFiltersBtn')?.addEventListener('click', ()=>{
-            document.getElementById('buyerFilter').value='';
-            document.getElementById('materialFilter').value='';
-            offset=0; loadOpenContracts();
+          document.getElementById('clearFiltersBtn')?.addEventListener('click', () => {
+            document.getElementById('buyerFilter').value = '';
+            document.getElementById('materialFilter').value = '';
+            offset = 0; loadOpenContracts();
           });
-          document.getElementById('reqQuoteBtn')?.addEventListener('click', ()=>{
-            const q = document.getElementById('rfqQty'); if (q){ q.focus(); }
+          document.getElementById('reqQuoteBtn')?.addEventListener('click', () => {
+            const q = document.getElementById('rfqQty'); if (q) { q.focus(); }
             toast('Enter RFQ quantity and submit.');
           });
-         
-          const pi = document.getElementById('pageInfo'); if (pi) pi.textContent = `Showing 0 • offset ${offset}`;
+
+          const pi = document.getElementById('pageInfo');
+          if (pi) pi.textContent = `Showing 0 • offset ${offset}`;
           if (ls) ls.textContent = 'Loaded.';
           return;
         }
@@ -767,37 +1077,37 @@
         const pi = document.getElementById('pageInfo');
         if (pi) {
           pi.textContent = total
-            ? `Showing ${rows.length} • ${offset+1}–${offset+rows.length} of ${total}`
+            ? `Showing ${rows.length} • ${offset + 1}–${offset + rows.length} of ${total}`
             : `Showing ${rows.length} • offset ${offset}`;
         }
+
         // enable/disable paging buttons based on results/offset
         const prev = document.getElementById('prevBtn');
         const next = document.getElementById('nextBtn');
         if (prev) prev.disabled = (offset <= 0);
         if (next) next.disabled = (rows.length < limit);
-
-      } catch(e){
-        if (e.name !== 'AbortError') {/* api() already toasted */}
-      } finally{
+      } catch (e) {
+        if (e.name !== 'AbortError') { /* api() already toasted */ }
+      } finally {
         if (ls) ls.textContent = 'Loaded.';
         loadCtl = null;
         setLoadingUI(false);
-        root.setAttribute('aria-busy','false');
+        root.setAttribute('aria-busy', 'false');
       }
     }
 
-    async function buy(ev, id){
+    async function buy(ev, id) {
       const btn = ev?.currentTarget;
       if (!confirm('Confirm purchase of this contract?')) return;
-      if (btn){ btn.disabled = true; btn.textContent = 'Purchasing…'; }
-      try{
+      if (btn) { btn.disabled = true; btn.textContent = 'Purchasing…'; }
+      try {
         const res = await api(`/contracts/${id}/purchase`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now())),            
+            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))
           },
-          body: JSON.stringify({ op:'purchase' })
+          body: JSON.stringify({ op: 'purchase' })
         });
         const data = await res.json();
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
@@ -805,51 +1115,50 @@
         // keep buyer widgets in sync after purchase
         loadBuyerPositions();
         loadBuyerBols();
-      } catch(e) {
-        // api() already toasted details
+      } catch {
         toast('Purchase failed');
       } finally {
-        if (btn){ btn.disabled = false; btn.textContent = 'Buy'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Buy'; }
       }
     }
     window.buy = buy; // expose for inline
 
     // Wire UI
-    document.getElementById('refreshBtn')?.addEventListener('click', ()=>{ offset = 0; loadOpenContracts(); });
-    document.getElementById('buyerFilter')?.addEventListener('input', debounce(()=>{
+    document.getElementById('refreshBtn')?.addEventListener('click', () => { offset = 0; loadOpenContracts(); });
+    document.getElementById('buyerFilter')?.addEventListener('input', debounce(() => {
       offset = 0;
-      localStorage.setItem('buyer.filter.buyer', document.getElementById('buyerFilter').value||'');
+      localStorage.setItem('buyer.filter.buyer', document.getElementById('buyerFilter').value || '');
       loadOpenContracts();
     }, 250));
-    document.getElementById('materialFilter')?.addEventListener('input', debounce(()=>{
+    document.getElementById('materialFilter')?.addEventListener('input', debounce(() => {
       offset = 0;
-      localStorage.setItem('buyer.filter.material', document.getElementById('materialFilter').value||'');
+      localStorage.setItem('buyer.filter.material', document.getElementById('materialFilter').value || '');
       loadOpenContracts();
     }, 250));
 
-    document.getElementById('prevBtn')?.addEventListener('click', ()=>{
+    document.getElementById('prevBtn')?.addEventListener('click', () => {
       offset = Math.max(0, offset - limit);
-      const page = Math.floor(offset/limit)+1;
+      const page = Math.floor(offset / limit) + 1;
       _syncQuery({ page, rows: String(limit) });
       loadOpenContracts();
     });
-    document.getElementById('nextBtn')?.addEventListener('click', ()=>{
+    document.getElementById('nextBtn')?.addEventListener('click', () => {
       offset += limit;
-      const page = Math.floor(offset/limit)+1;
+      const page = Math.floor(offset / limit) + 1;
       _syncQuery({ page, rows: String(limit) });
       loadOpenContracts();
     });
 
-    document.getElementById('sortBy')?.addEventListener('change', e=>{
+    document.getElementById('sortBy')?.addEventListener('change', e => {
       sortBy = e.target.value; offset = 0;
       localStorage.setItem('buyer.sortBy', sortBy);
       loadOpenContracts();
     });
 
-    document.getElementById('pageSize')?.addEventListener('change', e=>{
-      const v = Math.max(1, parseInt(e.target.value||'100', 10));
-      limit = v; 
-      offset = 0; 
+    document.getElementById('pageSize')?.addEventListener('change', e => {
+      const v = Math.max(1, parseInt(e.target.value || '100', 10));
+      limit = v;
+      offset = 0;
       // keep URL in sync with page size + reset to page 1
       const u = new URL(location.href);
       u.searchParams.set('rows', String(v));
@@ -859,12 +1168,12 @@
     });
 
     // Hydrate filters/page from URL on first load
-    (function hydrateFromURL(){
+    (function hydrateFromURL() {
       const q = new URL(location.href).searchParams;
       const buyer = q.get('buyer') || localStorage.getItem('buyer.filter.buyer') || '';
       const material = q.get('material') || localStorage.getItem('buyer.filter.material') || '';
-      const page = Math.max(1, parseInt(q.get('page')||'1', 10));
-      const rows = parseInt(q.get('rows')||'', 10);
+      const page = Math.max(1, parseInt(q.get('page') || '1', 10));
+      const rows = parseInt(q.get('rows') || '', 10);
       const savedSort = localStorage.getItem('buyer.sortBy') || 'created_at_desc';
       sortBy = savedSort;
 
@@ -881,8 +1190,8 @@
       const p = localStorage.getItem('buyer.paused') === '1';
       if (p) { paused = true; const pb = document.getElementById('pauseBtn'); if (pb) pb.textContent = 'Resume'; }
     })();
-  
-    // Initial load + keep refreshing in the background 
+
+    // Initial load + keep refreshing in the background
     loadOpenContracts();
     onReady(() => {
       // Buyer-facing widgets
@@ -892,7 +1201,7 @@
       loadMarketSnapshot();
     });
 
-    // Refresh every 5 minutes, but do NOT clear the table first.
+    // Refresh every 5 minutes; do NOT clear the table first.
     setInterval(() => {
       if (!paused && !document.hidden) {
         loadOpenContracts();
@@ -902,48 +1211,171 @@
     }, 300000);
   </script>
 
-  <!-- RFQ wiring (after api() & DOM exist) + hide for non-buyers -->
   <script nonce="{{NONCE}}">
-    (function(){
-      const role = (JSON.parse(localStorage.getItem('bridgeUser')||'{}').role||'').toLowerCase();
-      const rfqCard = document.getElementById('rfqCard');
-      if (rfqCard && role !== 'buyer') rfqCard.classList.add('d-none');
+    // --- My RFQs (buyer scope) ---
+    async function loadMyRfqs() {
+      const el = document.getElementById('buyerRfqsBody');
+      if (!el) return;
+      if (!(await ensureBuyerContext())) { el.textContent = 'No buyer context.'; return; }
 
-      const btn = document.getElementById('rfqGo');
-      if(!btn) return;
+      try {
+        const r = await api('/rfqs?scope=mine');
+        const rows = await r.json();
+        if (!rows?.length) { el.textContent = 'No RFQs yet.'; return; }
 
-      if (role === 'buyer') {
-        const sideSel = document.getElementById('rfqSide');
-        if (sideSel) sideSel.value = 'buy';
+        const tbl = document.createElement('table');
+        tbl.className = 'table table-sm mb-0 align-middle';
+        tbl.innerHTML = '<thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Expires</th></tr></thead>';
+
+        const tb = document.createElement('tbody');
+        rows.slice(0, 10).forEach(x => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="text-monospace">${x.rfq_id}</td>
+            <td>${x.symbol || ''}</td>
+            <td>${x.side || ''}</td>
+            <td>${Number(x.quantity_lots || 0).toLocaleString()}</td>
+            <td>${x.expires_at ? _fmtDate(x.expires_at) : '—'}</td>`;
+          tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+
+        el.innerHTML = '';
+        el.appendChild(tbl);
+      } catch {
+        el.textContent = 'Could not load RFQs.';
       }
+    }
 
-      btn.onclick = async ()=>{
-        const s   = document.getElementById('rfqSym')?.value || '';
-        const side= document.getElementById('rfqSide')?.value || 'buy';
-        const q   = +(document.getElementById('rfqQty')?.value || 0);
-        if (!q) return toast('Enter qty');
-        const exp = new Date(Date.now() + 20*60*1000).toISOString();
-        try{
-          const r = await api('/rfq', {
-            method:'POST',
-            headers: {
-              'Content-Type':'application/json',
-              'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))           
-            },
-            body: JSON.stringify({ symbol:s, side, quantity_lots:q, expires_at:exp })
+    // --- Contract History (+ CSV button) ---
+    async function loadBuyerHistory() {
+      const el = document.getElementById('buyerHistoryBody');
+      if (!el) return;
+      if (!(await ensureBuyerContext())) { el.textContent = 'No buyer context.'; return; }
+
+      try {
+        const base = new URLSearchParams({ buyer: buyerKey, limit: '100', offset: '0', sort: 'created_at_desc' });
+        const [a, b] = await Promise.all([
+          api('/contracts?' + base + '&status=Signed'),
+          api('/contracts?' + base + '&status=Fulfilled')
+        ]);
+        const rows = [...await a.json(), ...await b.json()]
+          .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+        if (!rows.length) { el.textContent = 'No past contracts.'; return; }
+
+        const tbl = document.createElement('table');
+        tbl.className = 'table table-sm mb-0 align-middle';
+        tbl.innerHTML = '<thead><tr><th>When</th><th>Material</th><th>Tons</th><th>$ / ton</th><th>Total</th><th>Status</th></tr></thead>';
+
+        const tb = document.createElement('tbody');
+        rows.slice(0, 15).forEach(r => {
+          const wt = Number(r.weight_tons || 0), pt = Number(r.price_per_ton || 0), tot = wt * pt;
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${_fmtDate(r.created_at)}</td>
+            <td>${r.material || ''}</td>
+            <td>${_formatTons(wt)}</td>
+            <td>$${pt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td>$${tot.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td>${r.status || ''}</td>`;
+          tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+
+        el.innerHTML = '';
+        el.appendChild(tbl);
+
+        const btn = document.getElementById('dlContractsCsv');
+        if (btn && !btn._wired) {
+          btn._wired = true;
+          btn.addEventListener('click', () => {
+            const u = new URL(`${window.endpoint}/contracts/export_csv`);
+            window.open(u.toString(), '_blank', 'noopener');
           });
-          toast('RFQ posted');
-          try { console.log(await r.json()); } catch {}
-        }catch(e){ /* toast already shown */ }
+        }
+      } catch {
+        el.textContent = 'Could not load history.';
+      }
+    }
+
+    // --- Delivery Calendar (upcoming + recent) ---
+    async function loadDeliveryCalendar() {
+      const el = document.getElementById('buyerCalendarBody');
+      if (!el) return;
+      if (!(await ensureBuyerContext())) { el.textContent = 'No buyer context.'; return; }
+
+      try {
+        const [up, done] = await Promise.all([
+          api(`/bols?buyer=${encodeURIComponent(buyerKey)}&status=Scheduled&limit=50`),
+          api(`/bols?buyer=${encodeURIComponent(buyerKey)}&status=Delivered&limit=10`)
+        ]);
+        const upcoming = await up.json();
+        const delivered = await done.json();
+
+        const wrap = document.createElement('div');
+        const sec = (title, rows, tsKey) => {
+          const card = document.createElement('div');
+          const h = document.createElement('div');
+          h.className = 'fw-bold mb-1';
+          h.textContent = title;
+          card.appendChild(h);
+          if (!rows?.length) { card.appendChild(document.createTextNode('None')); return card; }
+          const ul = document.createElement('ul');
+          ul.className = 'list-unstyled mb-2';
+          rows.slice(0, 8).forEach(b => {
+            const ts = b[tsKey] || b.pickup_time || b.delivery_time;
+            const li = document.createElement('li');
+            li.textContent = `${b.material || ''} · ${_formatTons(b.weight_tons)} tons · ${_fmtDate(ts)}`;
+            ul.appendChild(li);
+          });
+          card.appendChild(ul);
+          return card;
+        };
+        wrap.appendChild(sec('Upcoming', upcoming, 'pickup_time'));
+        wrap.appendChild(sec('Recently Delivered', delivered, 'delivery_time'));
+
+        el.innerHTML = '';
+        el.appendChild(wrap);
+      } catch {
+        el.textContent = 'Could not load schedule.';
+      }
+    }
+      // --- RFQ creator (buyer scope) ---
+    function wireRfq() {
+      const btn = document.getElementById('rfqGo');
+      if (!btn) return;
+      btn.onclick = async () => {
+        const sym  = (document.getElementById('rfqSym')?.value || '').trim();
+        const side = (document.getElementById('rfqSide')?.value || 'buy').trim().toLowerCase();
+        const qty  = Number(document.getElementById('rfqQty')?.value || 0);
+        if (!sym || !(qty > 0)) { toast('Symbol and quantity required.'); return; }
+
+        try {
+          const res = await api('/rfqs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: sym, side, quantity_lots: qty })
+          });
+          const j = await res.json();
+          toast(`RFQ posted (${j.rfq_id || 'ok'}).`);
+          // Refresh "My RFQs" card
+          loadMyRfqs();
+        } catch (e) {
+          toast(e?.message || 'RFQ failed');
+        }
       };
-      document.getElementById('rfqQty')?.addEventListener('keydown', (e)=>{
-        if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
-      });
-    })();
-  </script>
+    }
+  </script>  
 
   <!-- Policy Acceptance Modal -->
-    <div class="modal fade" id="policyModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="policyModalTitle">
+  <div
+    class="modal fade"
+    id="policyModal"
+    tabindex="-1"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="policyModalTitle"
+  >
     <div class="modal-dialog modal-lg modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
@@ -951,7 +1383,9 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" disabled></button>
         </div>
         <div class="modal-body">
-          <p class="small text-muted mb-2" id="policySummary">You must accept the current Terms / Rulebook to continue trading.</p>
+          <p class="small text-muted mb-2" id="policySummary">
+            You must accept the current Terms / Rulebook to continue trading.
+          </p>
           <p class="small">
             View full documents:
             <a href="/legal/terms.html" target="_blank" rel="noopener noreferrer">Terms</a> ·
@@ -960,14 +1394,14 @@
             <a href="/legal/rulebook.html" target="_blank" rel="noopener noreferrer">Rulebook</a>
           </p>
           <div class="form-check mt-3">
-            <input class="form-check-input" type="checkbox" id="policyAgreeChk">
+            <input class="form-check-input" type="checkbox" id="policyAgreeChk" />
             <label class="form-check-label small" for="policyAgreeChk">
               I have read and agree to the current Terms, Rulebook, Fee Schedule, and Policies.
             </label>
           </div>
         </div>
         <div class="modal-footer">
-          <button id="policyAcceptBtn" type="button" class="btn btn-primary" disabled>Accept & Continue</button>
+          <button id="policyAcceptBtn" type="button" class="btn btn-primary" disabled>Accept &amp; Continue</button>
         </div>
       </div>
     </div>
@@ -981,60 +1415,65 @@
   ></script>
 
   <script nonce="{{NONCE}}">
-  // Buyer: policy acceptance gating
-  (function(){
-    async function checkPolicies(){
-      try{
-        const res = await api('/policies/status');
-        const j = await res.json();
-        if (j.accepted) return; // nothing to do
+    // Buyer: policy acceptance gating
+    (function () {
+      async function checkPolicies() {
+        try {
+          const res = await api('/policies/status');
+          const j = await res.json();
+          if (j.accepted) return; // nothing to do
 
-        // fetch current policy metadata (optional)
-        let summary = 'You must accept the current Terms / Rulebook to continue trading.';
-        try{
-          const r2 = await api('/policies/current');
-          const p = await r2.json();
-          if (p && p.version){
-            summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to continue trading.`;
-          }
-        }catch{}
-        const sEl = document.getElementById('policySummary'); if (sEl) sEl.textContent = summary;
+          // fetch current policy metadata (optional)
+          let summary = 'You must accept the current Terms / Rulebook to continue trading.';
+          try {
+            const r2 = await api('/policies/current');
+            const p = await r2.json();
+            if (p && p.version) {
+              summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to continue trading.`;
+            }
+          } catch {}
+          const sEl = document.getElementById('policySummary'); if (sEl) sEl.textContent = summary;
 
-        // show blocking modal
-        const modalEl = document.getElementById('policyModal');
-        if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
-        const modal = new bootstrap.Modal(modalEl, { backdrop:'static', keyboard:false });
-        modal.show();
+          // show blocking modal
+          const modalEl = document.getElementById('policyModal');
+          if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
+          const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+          modal.show();
 
-        const chk = document.getElementById('policyAgreeChk');
-        const btn = document.getElementById('policyAcceptBtn');
-        chk?.addEventListener('change', ()=>{ btn.disabled = !chk.checked; });
-        btn?.addEventListener('click', async ()=>{
-          btn.disabled = true;
-          try{
-            await api('/policies/accept', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ key:'rulebook', version: null })
-            });
-            modal.hide();
-            toast('Policy accepted.');
-          }catch(e){
-            toast(e.message || 'Could not record acceptance');
-            btn.disabled = false;
-          }
-        });
-      }catch{
-        // if policy endpoint fails, do nothing; backend will enforce if critical
+          const chk = document.getElementById('policyAgreeChk');
+          const btn = document.getElementById('policyAcceptBtn');
+          chk?.addEventListener('change', () => { btn.disabled = !chk.checked; });
+          btn?.addEventListener('click', async () => {
+            btn.disabled = true;
+            try {
+              await api('/policies/accept', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'rulebook', version: null })
+              });
+              modal.hide();
+              toast('Policy accepted.');
+            } catch (e) {
+              toast(e.message || 'Could not record acceptance');
+              btn.disabled = false;
+            }
+          });
+        } catch {
+          // if policy endpoint fails, do nothing; backend will enforce if critical
+        }
       }
-    }
 
-    onReady(checkPolicies);
-  })();
+      onReady(checkPolicies);
+      onReady(loadMyRfqs);
+      onReady(loadBuyerHistory);
+      onReady(loadDeliveryCalendar);
+      onReady(wireQuickQuote);
+      onReady(wireRfq);
+    })();
   </script>
-  
+
   <footer class="legal-footer">
-    <hr class="mb-3">
+    <hr class="mb-3" />
     <nav class="small d-flex flex-wrap gap-2 justify-content-center" aria-label="Legal navigation">
       <a href="/legal/terms.html" class="link-secondary" rel="noopener noreferrer">Terms</a><span>·</span>
       <a href="/legal/privacy.html" class="link-secondary" rel="noopener noreferrer">Privacy</a><span>·</span>

@@ -100,7 +100,7 @@ import pytz
 import secrets
 import base64
 import pyotp
-
+from fastapi import Form
 from routers import carriers as carriers_router
 from routers import dat_mock_admin as dat_mock_admin_router
 from routers import carriers_li_admin as carriers_li_admin_router
@@ -133,6 +133,30 @@ def _require_admin(request: _FastAPIRequest):
 def _admin_dep(request: _FastAPIRequest):
     _require_admin(request)
 # ---- /Admin dependency helper ----
+
+# ---- Buyer auth helpers (role-quickcheck) ----
+async def require_buyer_or_admin(request: Request):
+    """
+    Minimal gate for new buyer routes:
+    - FREE mode: allow
+    - Otherwise: session role must be 'buyer' or 'admin'
+    """
+    if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1", "true", "yes"):
+        return {"role": "free"}
+    role = (request.session.get("role") or "").lower()
+    if role not in ("buyer", "admin"):
+        raise HTTPException(status_code=403, detail="buyer/admin only")
+    return {"role": role}
+
+# Optional combo (if you later want to relax BOL creation to buyers too)
+async def require_buyer_seller_or_admin(request: Request):
+    if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() in ("1", "true", "yes"):
+        return {"role": "free"}
+    role = (request.session.get("role") or "").lower()
+    if role not in ("buyer", "seller", "admin"):
+        raise HTTPException(status_code=403, detail="buyer/seller/admin only")
+    return {"role": role}
+# ---- /Buyer auth helpers ----
 
 # ---- Free mode checker ----
 import os
@@ -738,7 +762,7 @@ async def _prod_idempotency_enforcer(request: Request, call_next):
 @startup
 async def _assert_no_duplicate_routes():
     """
-    ICE readiness: fail fast if we accidentally register two handlers for the same (method,path).
+    readiness: fail fast if we accidentally register two handlers for the same (method,path).
     """
     prod = os.getenv("ENV", "").lower() == "production"
     seen = {}
@@ -764,8 +788,329 @@ async def _assert_no_duplicate_routes():
             pass
         if prod:
             raise RuntimeError(msg)
+# ---- Cache + UTF-8 middleware ----
 
-# =========  duplicate def / overwrite guard  ==========
+# -------- Buyer-facing models & routes --------
+def _current_member_name(request: Request) -> str:
+    try:
+        # session → helper fallback
+        m = current_member_from_request(request)
+        if m:
+            return m
+        return (request.session.get("member")
+                or request.session.get("org")
+                or request.session.get("username")
+                or request.session.get("email")
+                or "").strip()
+    except Exception:
+        return ""
+
+class BuyerIssueContractIn(BaseModel):
+    seller: str
+    material: str
+    weight_tons: float
+    price_per_ton: float
+    currency: str = "USD"
+    notes: str | None = None
+
+class BuyerIssueBOLIn(BaseModel):
+    contract_id: str
+    carrier_name: str = "TBD"
+    carrier_driver: str = "TBD"
+    carrier_truck_vin: str = "TBD"
+    material: str
+    weight_tons: float
+    price_per_unit: float
+    total_value: float
+    pickup_time: datetime | None = None
+    origin_country: str | None = None
+    destination_country: str | None = None
+    port_code: str | None = None
+    hs_code: str | None = None
+    duty_usd: float | None = None
+    tax_pct: float | None = None
+
+class BuyerReceiveIn(BaseModel):
+    bol_id: str
+    # notes for audit trail
+    notes: str | None = None
+
+class BuyerResellIn(BaseModel):
+    counterparty_buyer: str
+    material: str
+    weight_tons: float
+    price_per_ton: float
+    currency: str = "USD"
+    notes: str | None = None
+
+@app.post("/buyer/contracts/issue", tags=["Buyer"], summary="Buyer issues a BUY contract")
+async def buyer_issue_contract(payload: BuyerIssueContractIn, request: Request, _=Depends(require_buyer_or_admin)):
+    """
+    Writes into your existing contracts table:
+      id, buyer (current member), seller, material, weight_tons, price_per_ton, status='Open'
+    """
+    cid = str(uuid.uuid4())
+    buyer_member = _current_member_name(request) or "OPEN"
+    await _ensure_org_exists(buyer_member)
+    await _ensure_org_exists(payload.seller)
+    row = await database.fetch_one("""
+        INSERT INTO contracts (
+            id, buyer, seller, material, weight_tons, price_per_ton,
+            status, currency, pricing_formula, reference_symbol, reference_price,
+            reference_source, reference_timestamp
+        )
+        VALUES (
+            :id, :buyer, :seller, :mat, :wt, :ppt,
+            'Open', :ccy, NULL, NULL, NULL, NULL, NULL
+        )
+        RETURNING id
+    """, {
+        "id": cid, "buyer": buyer_member, "seller": payload.seller,
+        "mat": payload.material, "wt": float(payload.weight_tons),
+        "ppt": float(payload.price_per_ton), "ccy": payload.currency,
+    })
+    if not row:
+        raise HTTPException(500, "contract insert failed")
+    return {"ok": True, "contract_id": str(row["id"])}
+
+@app.post("/buyer/bols/issue", tags=["Buyer"], summary="Buyer issues a BOL linked to a contract")
+async def buyer_issue_bol(payload: BuyerIssueBOLIn, request: Request, _=Depends(require_buyer_or_admin)):
+    bol_id = str(uuid.uuid4())
+    pickup_time = payload.pickup_time or utcnow()
+    # default tenant id
+    tenant_id = await current_tenant_id(request)
+    row = await database.fetch_one("""
+        INSERT INTO bols (
+            bol_id, contract_id, buyer, seller, material, weight_tons,
+            price_per_unit, total_value,
+            carrier_name, carrier_driver, carrier_truck_vin,
+            pickup_signature_base64, pickup_signature_time, pickup_time, status,
+            origin_country, destination_country, port_code, hs_code, duty_usd, tax_pct,
+            tenant_id
+        )
+        SELECT
+            :bol_id, :cid, c.buyer, c.seller, :mat, :wt,
+            :ppu, :tv,
+            :cname, :cdriver, :cvin,
+            NULL, NULL, :pt, 'Scheduled',
+            :orig, :dest, :port, :hs, :duty, :tax,
+            :tid
+        FROM contracts c
+        WHERE c.id = :cid
+        RETURNING bol_id
+    """, {
+        "bol_id": bol_id,
+        "cid": payload.contract_id,
+        "mat": payload.material,
+        "wt": float(payload.weight_tons),
+        "ppu": float(payload.price_per_unit),
+        "tv": float(payload.total_value),
+        "cname": payload.carrier_name,
+        "cdriver": payload.carrier_driver,
+        "cvin": payload.carrier_truck_vin,
+        "pt": pickup_time,
+        "orig": payload.origin_country,
+        "dest": payload.destination_country,
+        "port": payload.port_code,
+        "hs": payload.hs_code,
+        "duty": payload.duty_usd,
+        "tax": payload.tax_pct,
+        "tid": tenant_id
+    })
+    if not row:
+        raise HTTPException(404, "contract not found")
+    try:
+        METRICS_BOLS_CREATED.inc()
+    except Exception:
+        pass
+    return {"ok": True, "bol_id": str(row["bol_id"])}
+
+@app.post("/buyer/inventory/receive", tags=["Buyer"], summary="Mark BOL delivered and post inventory receipt")
+async def buyer_receive_inventory(payload: BuyerReceiveIn, request: Request, _=Depends(require_buyer_or_admin)):
+    """
+    Minimal receive flow compatible with your schema:
+      1) bols.status → 'Delivered', delivery_time=NOW()
+      2) Add a receipts row (optional) or an inventory_movements row for the BUYER as seller==member
+    """
+    buyer_member = _current_member_name(request) or "UNKNOWN"
+    # 1) mark delivered
+    bol = await database.fetch_one("""
+        UPDATE bols
+           SET status='Delivered',
+               delivery_time = COALESCE(delivery_time, NOW())
+         WHERE bol_id = :b
+         RETURNING bol_id, material, weight_tons, tenant_id
+    """, {"b": payload.bol_id})
+    if not bol:
+        raise HTTPException(404, "BOL not found")
+
+    # 2) record an inventory movement under the buyer's name (as 'seller' field in schema)
+    try:
+        await database.execute("""
+            INSERT INTO inventory_movements (
+              seller, sku, movement_type, qty, uom, ref_contract,
+              contract_id_uuid, bol_id_uuid, meta, tenant_id, created_at
+            )
+            VALUES (
+              :seller, :sku, 'receive', :qty, 'ton', NULL,
+              NULL, :bid, CAST(:meta AS jsonb), :tid, NOW()
+            )
+        """, {
+            "seller": buyer_member,
+            "sku": bol["material"],
+            "qty": float(bol["weight_tons"] or 0.0),
+            "bid": payload.bol_id,
+            "meta": json.dumps({"notes": payload.notes or "", "source": "buyer_receive_inventory"}),
+            "tid": bol.get("tenant_id")
+        })
+    except Exception:
+        # best effort; do not block
+        pass
+
+    # Optional: enqueue dossier event
+    try:
+        await enqueue_dossier_event(
+            source_table="bols",
+            source_id=str(bol["bol_id"]),
+            event_type="BOL_RECEIVED",
+            payload={"bol_id": str(bol["bol_id"]), "material": bol["material"], "qty_tons": float(bol["weight_tons"] or 0.0)},
+            tenant_id=str(bol.get("tenant_id")) if bol.get("tenant_id") else None,
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "bol_id": payload.bol_id, "status": "Delivered"}
+
+@app.post("/buyer/contracts/resell", tags=["Buyer"], summary="Create SELL contract from on-hand inventory")
+async def buyer_resell_from_inventory(payload: BuyerResellIn, request: Request, _=Depends(require_buyer_or_admin)):
+    """
+    Creates a SELL contract for the buyer (buyer becomes seller on the resell),
+    and reserves the quantity in inventory_items (if present).
+    """
+    seller_member = _current_member_name(request) or "OPEN"
+    await _ensure_org_exists(seller_member)
+    await _ensure_org_exists(payload.counterparty_buyer)
+
+    # quick available check (if view exists)
+    available = None
+    try:
+        r = await database.fetch_one("""
+          SELECT qty_available FROM inventory_available
+          WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:sku)
+        """, {"s": seller_member, "sku": payload.material})
+        if r: available = float(r["qty_available"])
+    except Exception:
+        available = None
+
+    if available is not None and payload.weight_tons > available + 1e-9:
+        raise HTTPException(400, detail=f"insufficient inventory: {available} ton available")
+
+    cid = str(uuid.uuid4())
+    row = await database.fetch_one("""
+        INSERT INTO contracts (
+            id, buyer, seller, material, weight_tons, price_per_ton, status, currency
+        )
+        VALUES (
+            :id, :buyer, :seller, :mat, :wt, :ppt, 'Open', :ccy
+        )
+        RETURNING id
+    """, {
+        "id": cid, "buyer": payload.counterparty_buyer, "seller": seller_member,
+        "mat": payload.material, "wt": float(payload.weight_tons),
+        "ppt": float(payload.price_per_ton), "ccy": payload.currency
+    })
+    if not row:
+        raise HTTPException(500, "resell insert failed")
+
+    # best-effort reserve movement
+    try:
+        await database.execute("""
+            INSERT INTO inventory_movements (
+              seller, sku, movement_type, qty, uom, ref_contract,
+              contract_id_uuid, bol_id_uuid, meta, tenant_id, created_at
+            )
+            VALUES (
+              :seller, :sku, 'reserve', :qty, 'ton', :ref,
+              :cid, NULL, CAST(:meta AS jsonb), NULL, NOW()
+            )
+        """, {
+            "seller": seller_member,
+            "sku": payload.material,
+            "qty": float(payload.weight_tons),
+            "ref": cid,
+            "cid": cid,
+            "meta": json.dumps({"reason": "buyer_resell"}, default=str),
+        })
+    except Exception:
+        pass
+
+    return {"ok": True, "contract_id": str(cid)}
+
+@app.get("/buyer/inventory", tags=["Buyer"], summary="Buyer inventory balances")
+async def buyer_inventory(request: Request, _=Depends(require_buyer_or_admin)):
+    """
+    Returns available inventory for the current member.
+    Prefers view inventory_available; falls back to inventory_items if view missing.
+    """
+    member = _current_member_name(request)
+    try:
+        rows = await database.fetch_all("""
+            SELECT sku AS material, qty_available AS qty
+            FROM inventory_available
+            WHERE LOWER(seller) = LOWER(:s)
+            ORDER BY sku
+        """, {"s": member})
+        return {"inventory": [{"material": r["material"], "qty": float(r["qty"])} for r in rows]}
+    except Exception:
+        rows = await database.fetch_all("""
+            SELECT sku, GREATEST(COALESCE(qty_on_hand,0)-COALESCE(qty_reserved,0)-COALESCE(qty_committed,0),0) AS qty
+            FROM inventory_items
+            WHERE LOWER(seller)=LOWER(:s)
+            ORDER BY sku
+        """, {"s": member})
+        return {"inventory": [{"material": r["sku"], "qty": float(r["qty"])} for r in rows]}
+
+@app.get("/buyer/contracts", tags=["Buyer"], summary="Buyer contracts (incoming and resell)")
+async def buyer_contracts(
+    request: Request,
+    _=Depends(require_buyer_or_admin),
+    role: str | None = Query(None, description="filter as 'buyer' or 'seller' (relative to current member)"),
+    status: str | None = Query(None),
+    limit: int = 50, offset: int = 0,
+):
+    member = _current_member_name(request)
+    base = "SELECT id, buyer, seller, material, weight_tons, price_per_ton, currency, status, created_at FROM contracts WHERE 1=1"
+    params: dict[str, object] = {"limit": limit, "offset": offset}
+
+    if role == "buyer":
+        base += " AND buyer ILIKE :me"; params["me"] = member
+    elif role == "seller":
+        base += " AND seller ILIKE :me"; params["me"] = member
+    else:
+        base += " AND (buyer ILIKE :me OR seller ILIKE :me)"; params["me"] = member
+
+    if status:
+        base += " AND status ILIKE :st"; params["st"] = status
+
+    base += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    rows = await database.fetch_all(base, params)
+    out = []
+    for r in rows:
+        out.append({
+            "id": str(r["id"]),
+            "buyer": r["buyer"],
+            "seller": r["seller"],
+            "material": r["material"],
+            "weight_tons": float(r["weight_tons"] or 0.0),
+            "price_per_ton": float(r["price_per_ton"] or 0.0),
+            "currency": r["currency"] or "USD",
+            "status": r["status"],
+            "created_at": (r["created_at"].isoformat() if r["created_at"] else None),
+        })
+    return {"contracts": out}
+# ---------- Buyer-facing models & routes ----------
+
+# ---------- duplicate def / overwrite guard  ---------
 @startup
 async def _assert_no_duplicate_defs_or_classes():
     """
@@ -4370,6 +4715,212 @@ async def admin_vendor_import(request: Request, file: UploadFile = File(...)):
     }
 app.include_router(analytics_router)
 
+# ============ Disputes / Attachments / Payouts / Tags Routers ============
+disputes_router   = APIRouter(prefix="/disputes", tags=["Disputes"])
+attachments_router= APIRouter(prefix="/attachments", tags=["Attachments"])
+payouts_router    = APIRouter(prefix="/payouts", tags=["Payouts"])
+tags_router       = APIRouter(prefix="/tags", tags=["Tags"])
+
+class DisputeIn(BaseModel):
+    entity_type: Literal["contract","bol"]
+    entity_id: str
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+    evidence_urls: Optional[List[str]] = None
+    audit_json: Optional[dict] = None
+
+class DisputeUpdate(BaseModel):
+    status: Optional[Literal["open","in_review","resolved","rejected"]] = None
+    notes: Optional[str] = None
+    evidence_urls: Optional[List[str]] = None
+    audit_json: Optional[dict] = None
+
+@disputes_router.post("", summary="Open a dispute")
+async def disputes_open(p: DisputeIn, request: Request):
+    tid = await current_tenant_id(request)
+    who = (request.session.get("username") if hasattr(request,"session") else None)
+    row = await database.fetch_one("""
+      INSERT INTO disputes(entity_type,entity_id,opened_by,status,reason,notes,evidence_urls,audit_json,tenant_id)
+      VALUES (:t,:id,:by,'open',:r,:n,:urls::text[],:aud::jsonb,:tid)
+      RETURNING *
+    """, {"t": p.entity_type, "id": p.entity_id, "by": who, "r": p.reason, "n": p.notes,
+          "urls": p.evidence_urls or [], "aud": json.dumps(p.audit_json or {}), "tid": tid})
+    return dict(row)
+
+@disputes_router.get("", summary="List disputes")
+async def disputes_list(entity_type: Optional[str]=None, entity_id: Optional[str]=None,
+                        status: Optional[str]=None, limit:int=100, offset:int=0,
+                        tenant_scoped: bool=True, request: Request=None):
+    tid = await current_tenant_id(request) if request else None
+    cond, vals = [], {"limit":limit, "offset":offset}
+    if tenant_scoped and tid:
+        cond.append("tenant_id = :tid"); vals["tid"]=tid
+    if entity_type:
+        cond.append("entity_type = :et"); vals["et"]=entity_type
+    if entity_id:
+        cond.append("entity_id = :eid"); vals["eid"]=entity_id
+    if status:
+        cond.append("status = :st"); vals["st"]=status
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    rows = await database.fetch_all(f"SELECT * FROM disputes{where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset", vals)
+    return [dict(r) for r in rows]
+
+@disputes_router.get("/{id}", summary="Get one dispute")
+async def disputes_get(id: str):
+    row = await database.fetch_one("SELECT * FROM disputes WHERE id=:i", {"i": id})
+    if not row: raise HTTPException(404, "not found")
+    return dict(row)
+
+@disputes_router.patch("/{id}", summary="Update dispute status/notes/evidence")
+async def disputes_update(id: str, p: DisputeUpdate):
+    sets, vals = [], {"i": id}
+    if p.status is not None: sets.append("status=:st"); vals["st"]=p.status
+    if p.notes is not None: sets.append("notes=:n"); vals["n"]=p.notes
+    if p.evidence_urls is not None: sets.append("evidence_urls=:u"); vals["u"]=p.evidence_urls
+    if p.audit_json is not None: sets.append("audit_json=:a"); vals["a"]=json.dumps(p.audit_json)
+    if not sets: return {"ok": True, "updated": 0}
+    sets.append("updated_at=NOW()")
+    row = await database.fetch_one(f"UPDATE disputes SET {', '.join(sets)} WHERE id=:i RETURNING *", vals)
+    if not row: raise HTTPException(404, "not found")
+    return dict(row)
+
+async def _upload_attachment_bytes(name: str, data: bytes) -> str:
+    supa_url = os.getenv("SUPABASE_URL", "").strip()
+    supa_key = os.getenv("SUPABASE_SERVICE_ROLE", "").strip()
+    bucket = os.getenv("ATTACH_BUCKET", "attachments")
+    if supa_url and supa_key:
+        # Supabase Storage upload
+        api = f"{supa_url}/storage/v1/object/{bucket}/{name}"
+        headers = {"Authorization": f"Bearer {supa_key}", "Content-Type": "application/octet-stream", "x-upsert":"true"}
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(api, headers=headers, content=data)
+                r.raise_for_status()
+            # public URL (assumes bucket public or handled via signed URLs elsewhere)
+            return f"{supa_url}/storage/v1/object/public/{bucket}/{name}"
+        except Exception:
+            pass
+    # local fallback
+    base = Path("/mnt/data/attachments")
+    base.mkdir(parents=True, exist_ok=True)
+    p = base / name
+    p.write_bytes(data)
+    return f"file://{p}"
+
+@attachments_router.post("/bols/{bol_id}", summary="Upload attachment to a BOL")
+async def bol_attachment_upload(bol_id: str,
+                                kind: Optional[str] = Form("photo"),
+                                file: UploadFile = File(...),
+                                request: Request = None):
+    data = await file.read()
+    fname = f"{uuid.uuid4().hex}_{file.filename}"
+    url = await _upload_attachment_bytes(fname, data)
+    tid = await current_tenant_id(request)
+    who = (request.session.get("username") if hasattr(request,"session") else None)
+    row = await database.fetch_one("""
+      INSERT INTO bol_attachments(bol_id,kind,url,uploaded_by,tenant_id)
+      VALUES (:bid,:k,:u,:by,:tid) RETURNING *
+    """, {"bid": bol_id, "k": kind, "u": url, "by": who, "tid": tid})
+    return dict(row)
+
+@attachments_router.get("/bols/{bol_id}", summary="List BOL attachments")
+async def bol_attachment_list(bol_id: str):
+    rows = await database.fetch_all("SELECT * FROM bol_attachments WHERE bol_id=:b ORDER BY created_at DESC", {"b": bol_id})
+    return [dict(r) for r in rows]
+
+@attachments_router.delete("/{attachment_id}", summary="Delete attachment (metadata only)")
+async def bol_attachment_delete(attachment_id: str):    
+    row = await database.fetch_one("DELETE FROM bol_attachments WHERE id=:i RETURNING id", {"i": attachment_id})
+    if not row: raise HTTPException(404, "not found")
+    return {"ok": True, "deleted": attachment_id}
+
+class PayoutIn(BaseModel):
+    contract_id: str
+    payee: str
+    amount_usd: float
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+
+class PayoutUpdate(BaseModel):
+    status: Optional[Literal["pending","processing","paid","failed","cancelled"]] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    paid_at: Optional[datetime] = None
+
+@payouts_router.post("", summary="Create payout")
+async def payout_create(p: PayoutIn, request: Request):
+    tid = await current_tenant_id(request)
+    row = await database.fetch_one("""
+      INSERT INTO payouts(contract_id,payee,amount_usd,status,reference,notes,tenant_id)
+      VALUES (:c,:pay,:amt,'pending',:ref,:n,:tid) RETURNING *
+    """, {"c": p.contract_id, "pay": p.payee, "amt": float(p.amount_usd),
+          "ref": p.reference, "n": p.notes, "tid": tid})
+    return dict(row)
+
+@payouts_router.get("", summary="List payouts")
+async def payout_list(contract_id: Optional[str]=None, status: Optional[str]=None,
+                      payee: Optional[str]=None, limit:int=100, offset:int=0,
+                      tenant_scoped: bool=True, request: Request=None):
+    tid = await current_tenant_id(request) if request else None
+    cond, vals = [], {"limit":limit, "offset":offset}
+    if tenant_scoped and tid: cond.append("tenant_id = :tid"); vals["tid"]=tid
+    if contract_id: cond.append("contract_id = :cid"); vals["cid"]=contract_id
+    if status: cond.append("status = :st"); vals["st"]=status
+    if payee: cond.append("payee ILIKE :py"); vals["py"]=f"%{payee}%"
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    rows = await database.fetch_all(f"SELECT * FROM payouts{where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset", vals)
+    return [dict(r) for r in rows]
+
+@payouts_router.patch("/{id}", summary="Update payout")
+async def payout_update(id: str, p: PayoutUpdate):
+    sets, vals = [], {"i": id}
+    if p.status is not None: sets.append("status=:st"); vals["st"]=p.status
+    if p.reference is not None: sets.append("reference=:r"); vals["r"]=p.reference
+    if p.notes is not None: sets.append("notes=:n"); vals["n"]=p.notes
+    if p.paid_at is not None: sets.append("paid_at=:pa"); vals["pa"]=p.paid_at
+    if not sets: return {"ok": True, "updated": 0}
+    sets.append("updated_at=NOW()")
+    row = await database.fetch_one(f"UPDATE payouts SET {', '.join(sets)} WHERE id=:i RETURNING *", vals)
+    if not row: raise HTTPException(404, "not found")
+    return dict(row)
+
+class TagIn(BaseModel):
+    entity_type: str
+    entity_id: str
+    tag: str
+
+@tags_router.post("", summary="Add a tag")
+async def tag_add(p: TagIn, request: Request):
+    who = (request.session.get("username") if hasattr(request,"session") else None)
+    await database.execute("""
+      INSERT INTO entity_tags(entity_type,entity_id,tag,tagged_by)
+      VALUES (:t,:id,:g,:by) ON CONFLICT DO NOTHING
+    """, {"t": p.entity_type, "id": p.entity_id, "g": p.tag, "by": who})
+    return {"ok": True}
+
+@tags_router.delete("", summary="Remove a tag")
+async def tag_remove(entity_type: str, entity_id: str, tag: str):
+    await database.execute("""
+      DELETE FROM entity_tags WHERE entity_type=:t AND entity_id=:id AND tag=:g
+    """, {"t": entity_type, "id": entity_id, "g": tag})
+    return {"ok": True}
+
+@tags_router.get("", summary="List tags on an entity")
+async def tag_list(entity_type: str, entity_id: str):
+    rows = await database.fetch_all("""
+      SELECT tag, tagged_by, created_at
+      FROM entity_tags
+      WHERE entity_type=:t AND entity_id=:id
+      ORDER BY tag
+    """, {"t": entity_type, "id": entity_id})
+    return [dict(r) for r in rows]
+
+app.include_router(disputes_router)
+app.include_router(attachments_router)
+app.include_router(payouts_router)
+app.include_router(tags_router)
+# --------- Disputes / Attachments / Payouts / Tags ----------
+
 # ---- BR Indices ----
 class BRIndexRow(BaseModel):
     instrument_code: str
@@ -4692,7 +5243,70 @@ async def _ensure_missing_schema_patch():
     ALTER TABLE public.receivables
       ADD COLUMN IF NOT EXISTS tenant_id UUID;
     """)
-# ----- /Missing DDL patch -----
+# ----- Missing DDL patch -----
+
+# ----- Disputes / Attachments / Payouts / Tags (DDL) ------
+@startup
+async def _ensure_disputes_attachments_payouts_tags():
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""
+    -- Disputes: generic across contracts/BOLs; store a light audit trail JSON
+    CREATE TABLE IF NOT EXISTS disputes(
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      entity_type   TEXT NOT NULL CHECK (entity_type IN ('contract','bol')),
+      entity_id     TEXT NOT NULL,
+      opened_by     TEXT,
+      status        TEXT NOT NULL DEFAULT 'open',        -- open|in_review|resolved|rejected
+      reason        TEXT,
+      notes         TEXT,
+      evidence_urls TEXT[],                              -- optional list of links
+      audit_json    JSONB,                                -- arbitrary trail
+      tenant_id     UUID,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_disputes_entity ON disputes(entity_type, entity_id, status);
+
+    -- BOL attachments: photos, scale tickets, etc.
+    CREATE TABLE IF NOT EXISTS bol_attachments(
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      bol_id       UUID NOT NULL,
+      kind         TEXT,                  -- photo|scale_ticket|other
+      url          TEXT NOT NULL,         -- where the asset lives
+      uploaded_by  TEXT,
+      tenant_id    UUID,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_bol_attachments ON bol_attachments(bol_id, kind);
+
+    -- Payouts: track settlement of money to the seller (or counterparty)
+    CREATE TABLE IF NOT EXISTS payouts(
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      contract_id  UUID NOT NULL,
+      payee        TEXT NOT NULL,      -- who gets paid (seller or broker etc.)
+      amount_usd   NUMERIC NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',  -- pending|processing|paid|failed|cancelled
+      paid_at      TIMESTAMPTZ,
+      reference    TEXT,               -- check/ACH/ref #
+      notes        TEXT,
+      tenant_id    UUID,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_payouts_contract ON payouts(contract_id, status);
+
+    -- Entity tags: generic tagging for UX filters
+    CREATE TABLE IF NOT EXISTS entity_tags(
+      entity_type TEXT NOT NULL,
+      entity_id   TEXT NOT NULL,
+      tag         TEXT NOT NULL,
+      tagged_by   TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(entity_type, entity_id, tag)
+    );
+    """)
+# ----- Disputes / Attachments / Payouts / Tags (DDL) ------
 
 # ----- Billing core -----
 billing_router = APIRouter(prefix="/billing", tags=["Billing"])
@@ -19852,7 +20466,7 @@ async def list_bols_admin(
 
 @app.post("/bols", response_model=BOLOut, tags=["BOLs"], summary="Create BOL", status_code=201)
 async def create_bol_pg(bol: BOLIn, request: Request):
-    await require_perm(request, "bols.create")
+    await require_buyer_seller_or_admin(request)
     tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     hit = await idem_get(key) if key else None
