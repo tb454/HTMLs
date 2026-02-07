@@ -199,7 +199,7 @@ function initMaterialBenchmarksPaging() {
   }
 }
 
-// Force-refresh helper (called by seller.html)
+// Force-refresh helper
 async function refreshBRIndex(force = true) {
   try {
     await _ensureBRIndexRows(!!force);
@@ -208,4 +208,8 @@ async function refreshBRIndex(force = true) {
   try { await loadMaterialBenchmarks(materialsPage); } catch {}
 }
 
+// seller.html needs these:
+window.loadMarketSnapshot = loadMarketSnapshot;
+window.loadMaterialBenchmarks = loadMaterialBenchmarks;
+window.initMaterialBenchmarksPaging = initMaterialBenchmarksPaging;
 window.refreshBRIndex = refreshBRIndex;

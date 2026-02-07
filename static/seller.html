@@ -10,63 +10,62 @@
   <link rel="icon" href="/favicon.ico">
   <script defer nonce="{{NONCE}}" src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<script nonce="{{NONCE}}">
-  // run now if DOM is ready, else when DOMContentLoaded fires
-  function onReady(fn){
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', fn);
-    } else {
-      try { fn(); } catch(e){ console.error(e); }
-    }
-  }
-</script>
-
-<!-- Gate by role early (session-probed) -->
-<script nonce="{{NONCE}}">
-  (async () => {
-    try {
-      // optional: warm cookies
-      await fetch('/health', { credentials: 'include' });
-      const r = await fetch('/me', {
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      });
-      if (!r.ok) throw new Error('no session');
-      const me = await r.json(); // expect: { username, role }
-      window.__bridgeUser = me;
-
-      const role = (me.role || '').toLowerCase();
-      if (!role || !['seller', 'yard', 'admin', 'buyer'].includes(role)) {
-        location.href = '/static/bridge-login.html';
-        return;
+  <script nonce="{{NONCE}}">
+    // run now if DOM is ready, else when DOMContentLoaded fires
+    function onReady(fn){
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fn);
+      } else {
+        try { fn(); } catch(e){ console.error(e); }
       }
-
-      // UI role gates + propagate into seller dashboard once DOM is ready
-      onReady(() => {
-        const userEl = document.getElementById('current-user');
-        if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
-
-        document.querySelectorAll('[data-role="admin"]').forEach(el => {
-          el.hidden = (role !== 'admin');
-        });
-        document.querySelectorAll('[data-role="seller"]').forEach(el => {
-          el.hidden = !(role === 'seller' || role === 'admin' || role === 'yard');
-        });
-        document.querySelectorAll('[data-role="buyer"]').forEach(el => {
-          el.hidden = (role !== 'buyer');
-        });
-
-        // Once the seller dashboard wiring exists, kick it so the page isn't "dead"
-        if (window.wireSellerUI) {
-          try { window.wireSellerUI(); } catch (e) { console.error(e); }
-        }
-      });
-    } catch {
-      location.href = '/static/bridge-login.html';
     }
-  })();
-</script>
+  </script>
 
+  <!-- Gate by role early (session-probed) -->
+  <script nonce="{{NONCE}}">
+    (async () => {
+      try {
+        // optional: warm cookies
+        await fetch('/health', { credentials: 'include' });
+        const r = await fetch('/me', {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!r.ok) throw new Error('no session');
+        const me = await r.json(); // expect: { username, role }
+        window.__bridgeUser = me;
+
+        const role = (me.role || '').toLowerCase();
+        if (!role || !['seller', 'yard', 'admin', 'buyer'].includes(role)) {
+          location.href = '/static/bridge-login.html';
+          return;
+        }
+
+        // UI role gates + propagate into seller dashboard once DOM is ready
+        onReady(() => {
+          const userEl = document.getElementById('current-user');
+          if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
+
+          document.querySelectorAll('[data-role="admin"]').forEach(el => {
+            el.hidden = (role !== 'admin');
+          });
+          document.querySelectorAll('[data-role="seller"]').forEach(el => {
+            el.hidden = !(role === 'seller' || role === 'admin' || role === 'yard');
+          });
+          document.querySelectorAll('[data-role="buyer"]').forEach(el => {
+            el.hidden = (role !== 'buyer');
+          });
+
+          // Once the seller dashboard wiring exists, kick it so the page isn't "dead"
+          if (window.wireSellerUI) {
+            try { window.wireSellerUI(); } catch (e) { console.error(e); }
+          }
+        });
+      } catch {
+        location.href = '/static/bridge-login.html';
+      }
+    })();
+  </script>
 </head>
 <body>
   <!-- Locale strip -->
@@ -95,21 +94,21 @@
         <button type="button" class="btn btn-outline-primary btn-sm" id="btnLogin">Login</button>
         <button type="button" class="btn btn-outline-danger btn-sm" id="btnLogout">Logout</button>
 
-<script nonce="{{NONCE}}">
-(async function(){
-  async function doLogout(){
-    try { await api('/logout', { method:'POST' }); } catch {}
-    localStorage.removeItem('bridgeUser');
-    location.href='/static/bridge-login.html';
-  }
-  Object.assign(window, { doLogout });
+        <script nonce="{{NONCE}}">
+          (async function(){
+            async function doLogout(){
+              try { await api('/logout', { method:'POST' }); } catch {}
+              localStorage.removeItem('bridgeUser');
+              location.href='/static/bridge-login.html';
+            }
+            Object.assign(window, { doLogout });
 
-  onReady(() => {
-    document.getElementById('btnLogin')?.addEventListener('click', (e)=>{ e.preventDefault(); showLoginModal(); });
-    document.getElementById('btnLogout')?.addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
-  });
-})();
-</script>
+            onReady(() => {
+              document.getElementById('btnLogin')?.addEventListener('click', (e)=>{ e.preventDefault(); showLoginModal(); });
+              document.getElementById('btnLogout')?.addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
+            });
+          })();
+        </script>
         <a class="btn btn-secondary btn-sm" href="/static/spec-ferrous.html">Spec Sheet Ferrous</a>
         <a class="btn btn-secondary btn-sm" href="/static/spec-nonferrous.html">Spec Sheet Nonferrous</a>
         <a class="btn btn-secondary btn-sm" href="/static/shipping-terms.html">Shipping Terms</a>
@@ -125,12 +124,12 @@
       <div class="section-title">Overview Cards</div>
       <div class="overview-cards">
         <div id="finished-goods-card" class="card-custom">
-        <div><strong>Finished Goods</strong></div>
-        <div id="finishedGoodsInfo">Loading...</div>
-        <div class="chart-container h-220">
-          <canvas id="finishedGoodsChart"></canvas>
+          <div><strong>Finished Goods</strong></div>
+          <div id="finishedGoodsInfo">Loading...</div>
+          <div class="chart-container h-220">
+            <canvas id="finishedGoodsChart"></canvas>
+          </div>
         </div>
-      </div>
 
         <div class="card-custom">
           <div><strong>Active Contracts</strong></div>
@@ -162,138 +161,6 @@
         </div>
       </div>
     </section>
-    
-    <script nonce="{{NONCE}}">
-    // ---- Yard Pricing & Hedge Config UI ----
-    (function(){
-      const $ = (id)=>document.getElementById(id);
-
-      function yardKey(){
-        const fromField = ($('yardConfigSeller')?.value || '').trim();
-        if (fromField) return fromField;
-        const seller = ($('sellerName')?.value || '').trim();
-        if (seller) return seller;
-        return '';
-      }
-
-      function skuKey(){
-        return ($('yardConfigSku')?.value || $('material')?.value || '').trim();
-      }
-
-      function setMsg(msg){
-        const el = $('yardConfigMsg');
-        if (el) el.textContent = msg || '';
-      }
-
-      function renderRules(rows){
-        const tb = $('yardRulesTable')?.querySelector('tbody');
-        if (!tb) return;
-        if (!rows || !rows.length){
-          tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No rules yet.</td></tr>`;
-          return;
-        }
-        tb.innerHTML = rows.map(r => `
-          <tr>
-            <td>${r.material || ''}</td>
-            <td>${r.formula || ''}</td>
-            <td>${(r.loss_min_pct ?? 0)}–${(r.loss_max_pct ?? 0)}%</td>
-            <td>${r.min_margin_usd_ton ?? 0}</td>
-            <td>${(r.target_hedge_ratio ?? 0)}</td>
-          </tr>
-        `).join('');
-      }
-
-      function renderHedges(rows){
-        const tb = $('yardHedgeTable')?.querySelector('tbody');
-        if (!tb) return;
-        if (!rows || !rows.length){
-          tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No hedge recommendations.</td></tr>`;
-          return;
-        }
-        tb.innerHTML = rows.map(r => `
-          <tr>
-            <td>${r.material || ''}</td>
-            <td>${r.on_hand_tons ?? ''}</td>
-            <td>${r.hedged_tons ?? ''}</td>
-            <td>${(r.target_hedge_ratio ?? 0)}</td>
-            <td>${r.suggested_lots ?? 0}</td>
-          </tr>
-        `).join('');
-      }
-
-      async function loadRules(){
-        const yard = yardKey();
-        if (!yard){ setMsg('Set Seller or Yard key first.'); return; }
-        setMsg('Loading rules...');
-        try{
-          const res = await api(`/yard_rules?yard=${encodeURIComponent(yard)}`);
-          const rows = await res.json();
-          renderRules(rows || []);
-          setMsg(`Loaded ${rows.length || 0} rule(s) for ${yard}.`);
-        }catch(e){
-          setMsg(e.message || 'Failed to load rules');
-        }
-      }
-
-      async function saveRule(){
-        const yard = yardKey();
-        const sku  = skuKey();
-        if (!yard || !sku){ toast('Seller/Yard and SKU are required.'); return; }
-        const body = {
-          yard,
-          material: sku,
-          formula: ($('yardConfigFormula')?.value || '').trim() || null,
-          loss_min_pct: $('yardLossMin')?.value ? parseFloat($('yardLossMin').value) : null,
-          loss_max_pct: $('yardLossMax')?.value ? parseFloat($('yardLossMax').value) : null,
-          min_margin_usd_ton: $('yardMinMargin')?.value ? parseFloat($('yardMinMargin').value) : null,
-          target_hedge_ratio: $('yardHedgeRatio')?.value ? parseFloat($('yardHedgeRatio').value) : null,
-          min_tons: $('yardMinTons')?.value ? parseFloat($('yardMinTons').value) : null,
-          futures_symbol_root: ($('yardSymbolRoot')?.value || '').trim() || null,
-          auto_hedge: ($('yardAutoHedge')?.value === 'true')
-        };
-        setMsg('Saving rule...');
-        try{
-          await api('/yard_rules', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(body)
-          });
-          toast('Yard rule saved.');
-          await loadRules();
-          setMsg('Saved.');
-        }catch(e){
-          setMsg(e.message || 'Failed to save rule');
-        }
-      }
-
-      async function loadHedgeRecs(){
-        const yard = yardKey();
-        if (!yard){ toast('Set Seller/Yard first.'); return; }
-        setMsg('Loading hedge recommendations...');
-        try{
-          const res = await api(`/hedge/recommendations?yard=${encodeURIComponent(yard)}`);
-          const rows = await res.json();
-          renderHedges(rows || []);
-          setMsg(`Got ${rows.length || 0} hedge recommendation(s).`);
-        }catch(e){
-          setMsg(e.message || 'Failed to load hedge recommendations');
-        }
-      }
-
-      onReady(() => {
-        $('yardRuleLoad')?.addEventListener('click', loadRules);
-        $('yardRuleSave')?.addEventListener('click', saveRule);
-        $('yardHedgeRecs')?.addEventListener('click', loadHedgeRecs);
-
-        // If seller is already set, auto-populate yardConfigSeller & load rules on first open
-        const seller = (document.getElementById('sellerName')?.value || '').trim();
-        if (seller && $('yardConfigSeller')) {
-          $('yardConfigSeller').value = seller;
-          loadRules().catch(()=>{});
-        }
-      });
-    })();
-    </script>
 
     <!-- Price This Material -->
     <section class="section">
@@ -387,8 +254,117 @@
         </div>
       </div>
 
-
       <div id="invUploadMsg" class="small text-muted mt-2"></div>
+    </section>
+
+    <!-- Yard Pricing & Hedge Config (HTML block only) -->
+    <section class="section">
+      <div class="section-title">Yard Pricing & Hedge Config</div>
+
+      <div class="card p-3">
+        <div class="row g-2">
+          <div class="col-md-3">
+            <label class="form-label">Seller / Yard Key</label>
+            <input id="yardConfigSeller" class="form-control" placeholder="e.g., Winski Salvage">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Material / SKU</label>
+            <input id="yardConfigSku" class="form-control" list="skuList" placeholder="e.g., SHRED">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Formula</label>
+            <input id="yardConfigFormula" class="form-control" placeholder="e.g., COMEX-0.10 or BR-CU*2000 - 60">
+          </div>
+          <div class="col-md-3 d-flex align-items-end gap-2">
+            <button id="yardRuleLoad" class="btn btn-outline-secondary w-100">Load Rules</button>
+            <button id="yardRuleSave" class="btn btn-primary w-100">Save Rule</button>
+          </div>
+        </div>
+
+        <div class="row g-2 mt-2">
+          <div class="col-md-2">
+            <label class="form-label">Loss Min %</label>
+            <input id="yardLossMin" type="number" step="0.01" class="form-control" placeholder="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Loss Max %</label>
+            <input id="yardLossMax" type="number" step="0.01" class="form-control" placeholder="0">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Min Margin ($/ton)</label>
+            <input id="yardMinMargin" type="number" step="0.01" class="form-control" placeholder="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Target Hedge Ratio</label>
+            <input id="yardHedgeRatio" type="number" step="0.01" class="form-control" placeholder="0.50">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Min Tons</label>
+            <input id="yardMinTons" type="number" step="0.01" class="form-control" placeholder="0">
+          </div>
+        </div>
+
+        <div class="row g-2 mt-2">
+          <div class="col-md-3">
+            <label class="form-label">Futures Symbol Root</label>
+            <input id="yardSymbolRoot" class="form-control" placeholder="e.g., BR-CU">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Auto Hedge</label>
+            <select id="yardAutoHedge" class="form-select">
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+          <div class="col-md-3 d-flex align-items-end">
+            <button id="yardHedgeRecs" class="btn btn-outline-primary w-100">Get Hedge Recs</button>
+          </div>
+          <div class="col-md-3 d-flex align-items-end">
+            <div id="yardConfigMsg" class="small text-muted"></div>
+          </div>
+        </div>
+
+        <div class="row g-2 mt-3">
+          <div class="col-md-6">
+            <h6 class="mb-2">Saved Rules</h6>
+            <div class="table-responsive">
+              <table id="yardRulesTable" class="table table-sm table-striped">
+                <thead>
+                  <tr>
+                    <th>Material</th>
+                    <th>Formula</th>
+                    <th>Loss % (min–max)</th>
+                    <th>Min Margin $/ton</th>
+                    <th>Target Hedge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="5" class="text-muted text-center py-2">No rules yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <h6 class="mb-2">Hedge Recommendations</h6>
+            <div class="table-responsive">
+              <table id="yardHedgeTable" class="table table-sm table-striped">
+                <thead>
+                  <tr>
+                    <th>Material</th>
+                    <th>On-hand (t)</th>
+                    <th>Hedged (t)</th>
+                    <th>Target Hedge</th>
+                    <th>Suggested Lots</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="5" class="text-muted text-center py-2">No hedge recommendations.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Create Contract -->
@@ -424,7 +400,7 @@
           Create Contract
         </button>
       </div>
-      <!-- place ONE shared datalist somewhere once in the page --> 
+      <!-- place ONE shared datalist somewhere once in the page -->
       <datalist id="skuList"></datalist>
 
       <!-- RFQ (two-click) -->
@@ -467,16 +443,15 @@
           <label for="filterEnd" class="visually-hidden">Contract end date filter</label>
           <input id="filterEnd" type="date" class="form-control form-control-sm" placeholder="End (ISO)">
         </div>
-       <div class="col-md-3 d-flex gap-2">
-        <button type="button" class="btn btn-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
-        <button type="button" class="btn btn-secondary btn-sm" id="clearFiltersBtn">Clear</button>
+        <div class="col-md-3 d-flex gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" id="refreshContractsBtn">Refresh</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="clearFiltersBtn">Clear</button>
         </div>
       </div>
 
-
       <div class="table-responsive">
         <table class="table table-sm table-striped table-hover align-middle" id="sellerContractsTable">
-  <caption class="visually-hidden">Contracts list with filters and paging</caption>
+          <caption class="visually-hidden">Contracts list with filters and paging</caption>
           <thead class="sticky">
             <tr>
               <th>ID</th>
@@ -489,7 +464,7 @@
               <th>Status</th>
               <th>Created</th>
             </tr>
-          </thead>  
+          </thead>
           <tbody></tbody>
         </table>
       </div>
@@ -519,7 +494,7 @@
         <caption class="visually-hidden">BR-Index Overview</caption>
         <thead class="sticky">
           <tr>
-            <th>Symbol</th>                    
+            <th>Symbol</th>
             <th>Last</th>
             <th>Change</th>
             <th>Open</th>
@@ -545,10 +520,10 @@
     <section class="section">
       <div class="section-title">Key Performance Indicators (KPIs)</div>
       <div class="kpi-content">
-  <div class="chart-container h-220">
-    <canvas id="kpiChart"></canvas>
-  </div>
-</div>
+        <div class="chart-container h-220">
+          <canvas id="kpiChart"></canvas>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -632,63 +607,63 @@
   <script defer nonce="{{NONCE}}" src="/static/js/i18n.js?v=20251125"></script>
   <script defer nonce="{{NONCE}}" src="/static/js/seller.js?v=20251125"></script>
 
+  <!-- Big helper: endpoint + api + toast + charts + UI wiring -->
   <script nonce="{{NONCE}}">
-    // endpoint + api + toast + health
     const ORIGIN = location.origin.includes('localhost') ? 'http://localhost:8000' : location.origin;
     function _cookie(name){
       const m = document.cookie.match(new RegExp('(?:^|; )'+name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')+'=([^;]*)'));
       return m ? decodeURIComponent(m[1]) : '';
     }
 
-let __toastTimer;
-function toast(msg, ms=2800){
-  const t=document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  try { t.focus(); } catch {}
-  clearTimeout(__toastTimer);
-  __toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, ms);
-}
-
-async function api(path, opt = {}) {
-  const url = path.startsWith('http') ? path : `${ORIGIN}${path}`;
-  const method = (opt.method || 'GET').toUpperCase();
-  const headers = { 'Accept':'application/json', ...(opt.headers || {}) };
-  // add CSRF header only for unsafe methods
-  if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
-    headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
-  }
-  const res = await fetch(url, { credentials:'include', ...opt, cache: (opt.cache || 'no-store'), headers });
-  if (res.status === 401) {
-    const next = encodeURIComponent(location.pathname + location.search);
-    location.href = `/static/bridge-login.html?next=${next}`;
-    throw new Error('Unauthorized');
-  }
-  if (!res.ok) {
-    let status = res.status;
-    let bodyText = '';
-    try {
-      const j = await res.clone().json();
-      bodyText = j?.detail || JSON.stringify(j);
-    } catch {
-      try { bodyText = await res.text(); } catch { bodyText = ''; }
+    let __toastTimer;
+    function toast(msg, ms=2800){
+      const t=document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      try { t.focus(); } catch {}
+      clearTimeout(__toastTimer);
+      __toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, ms);
     }
-    const msg = bodyText ? `HTTP ${status}: ${bodyText}` : `HTTP ${status}`;
-    console.error('API error:', { url, status, bodyText });
-    toast(msg);
-    throw new Error(msg);
-  }
-  return res;
-}
 
-onReady(async () => {
-  try {
-    // sets XSRF-TOKEN cookie for the SPA
-    await fetch('/health', { credentials:'include' });
-    const b = document.querySelector('[data-health-badge]');
-    if (b) { b.textContent='● Live'; b.setAttribute('data-ok','1'); }
-  } catch {}
-});
+    async function api(path, opt = {}) {
+      const url = path.startsWith('http') ? path : `${ORIGIN}${path}`;
+      const method = (opt.method || 'GET').toUpperCase();
+      const headers = { 'Accept':'application/json', ...(opt.headers || {}) };
+      // add CSRF header only for unsafe methods
+      if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
+        headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
+      }
+      const res = await fetch(url, { credentials:'include', ...opt, cache: (opt.cache || 'no-store'), headers });
+      if (res.status === 401) {
+        const next = encodeURIComponent(location.pathname + location.search);
+        location.href = `/static/bridge-login.html?next=${next}`;
+        throw new Error('Unauthorized');
+      }
+      if (!res.ok) {
+        let status = res.status;
+        let bodyText = '';
+        try {
+          const j = await res.clone().json();
+          bodyText = j?.detail || JSON.stringify(j);
+        } catch {
+          try { bodyText = await res.text(); } catch { bodyText = ''; }
+        }
+        const msg = bodyText ? `HTTP ${status}: ${bodyText}` : `HTTP ${status}`;
+        console.error('API error:', { url, status, bodyText });
+        toast(msg);
+        throw new Error(msg);
+      }
+      return res;
+    }
+
+    onReady(async () => {
+      try {
+        // sets XSRF-TOKEN cookie for the SPA
+        await fetch('/health', { credentials:'include' });
+        const b = document.querySelector('[data-health-badge]');
+        if (b) { b.textContent='● Live'; b.setAttribute('data-ok','1'); }
+      } catch {}
+    });
 
     const accentColor = '#3498db';
     // ---- Timezone toggle (UTC vs local) ----
@@ -719,7 +694,7 @@ onReady(async () => {
       };
     }
     onReady(_renderTZHintSeller);
-// ---- /Timezone toggle ----
+    // ---- /Timezone toggle ----
 
     /* colors handled by CSS; no inline styles */
 
@@ -786,7 +761,7 @@ onReady(async () => {
           // These are defined in THIS file (always safe)
           try { loadActiveContractsSummary(); } catch {}
           try { loadSellerKPIs(); } catch {}
-          try { loadTradeLog(); } catch {}          
+          try { loadTradeLog(); } catch {}
 
           // These come from seller.js (defer) – wait then call
           if (await waitFn('loadMarketSnapshot')) { try { window.loadMarketSnapshot(); } catch {} }
@@ -798,7 +773,7 @@ onReady(async () => {
 
         } catch {}
       })();
-      
+
       // Keep overview cards alive
       setInterval(() => {
         if (document.hidden) return;
@@ -815,27 +790,26 @@ onReady(async () => {
         if (document.hidden) return;
         try { loadSellerKPIs(); } catch {}
       }, 120000);
-
     });
 
-     // Keep BR-Index alive (refresh every 30s)
-      setInterval(() => {
-        if (document.hidden) return;
-        try {
-          if (window.refreshBRIndex) window.refreshBRIndex(true);
-        } catch {}
-      }, 30000);
+    // Keep BR-Index alive (refresh every 30s)
+    setInterval(() => {
+      if (document.hidden) return;
+      try {
+        if (window.refreshBRIndex) window.refreshBRIndex(true);
+      } catch {}
+    }, 30000);
 
     // Keep Recent Inventory Movements alive (every 15s)
-      setInterval(() => {
-        if (document.hidden) return;
-        try {
-          const seller = (document.getElementById("sellerName")?.value || '').trim();
-          const mat    = (document.getElementById("material")?.value || '').trim()
-                      || (document.getElementById("invSku")?.value || '').trim();
-          if (seller && mat) renderRecentMovements(seller, mat);
-        } catch {}
-      }, 15000);
+    setInterval(() => {
+      if (document.hidden) return;
+      try {
+        const seller = (document.getElementById("sellerName")?.value || '').trim();
+        const mat    = (document.getElementById("material")?.value || '').trim()
+                    || (document.getElementById("invSku")?.value || '').trim();
+        if (seller && mat) renderRecentMovements(seller, mat);
+      } catch {}
+    }, 15000);
 
     // Pricing widget
     onReady(() => {
@@ -1086,7 +1060,7 @@ onReady(async () => {
       }
     }
 
-    // ========= BR-Index overview  =========
+    // ========= BR-Index overview helpers =========
     async function loadMetalsOverview() {
       const table = document.getElementById('metals-market-table');
       if (!table) return;
@@ -1176,7 +1150,7 @@ onReady(async () => {
         tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Enter seller to load finished goods.</td></tr>`;
         return;
       }
-      
+
       try {
         const r = await api(`/inventory/finished_goods?seller=${encodeURIComponent(seller)}`);
         const rows = await r.json();
@@ -1328,7 +1302,8 @@ onReady(async () => {
       try { await listContracts(); } catch {}
       try { renderRecentMovements(seller, material); } catch {}
       setTimeout(() => { try { refreshFinishedFromInputs(); } catch {} }, 150);
-    }       
+    }
+
     function toISOStringDateStart(v){
       if (!v) return "";
       const d = new Date(v);
@@ -1355,7 +1330,7 @@ onReady(async () => {
       if (start)  qs.set("start", toISOStringDateStart(start));  // ISO UTC start-of-day
       if (end)    qs.set("end",   toISOStringDateEnd(end));      // ISO UTC (exclusive) end
 
-      const tbody = document.querySelector("#sellerContractsTable tbody");      
+      const tbody = document.querySelector("#sellerContractsTable tbody");
       const res = await api(`/contracts/search?${qs.toString()}`);
       const totalCount = +(res.headers.get('X-Total-Count') || 0);
       const rows = await res.json();
@@ -1606,7 +1581,7 @@ onReady(async () => {
         const data = await resp.json();
         document.getElementById("current-user").innerText = `User: ${username}`;
         const sellerEl = document.getElementById("sellerName");
-        if (sellerEl) sellerEl.value = username;      
+        if (sellerEl) sellerEl.value = username;
         refreshFinishedFromInputs();
         try { if (document.getElementById('sellerName')?.value.trim()) { await listContracts(); } } catch {}
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
@@ -1615,8 +1590,141 @@ onReady(async () => {
         document.getElementById("login-error").innerText = (err?.message || "Login failed");
       }
     });
-
   </script>
+
+  <!-- Yard Pricing & Hedge Config UI script: placed AFTER api() helper -->
+  <script nonce="{{NONCE}}">
+    // ---- Yard Pricing & Hedge Config UI ----
+    (function(){
+      const $ = (id)=>document.getElementById(id);
+
+      function yardKey(){
+        const fromField = ($('yardConfigSeller')?.value || '').trim();
+        if (fromField) return fromField;
+        const seller = ($('sellerName')?.value || '').trim();
+        if (seller) return seller;
+        return '';
+      }
+
+      function skuKey(){
+        return ($('yardConfigSku')?.value || $('material')?.value || '').trim();
+      }
+
+      function setMsg(msg){
+        const el = $('yardConfigMsg');
+        if (el) el.textContent = msg || '';
+      }
+
+      function renderRules(rows){
+        const tb = $('yardRulesTable')?.querySelector('tbody');
+        if (!tb) return;
+        if (!rows || !rows.length){
+          tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No rules yet.</td></tr>`;
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.material || ''}</td>
+            <td>${r.formula || ''}</td>
+            <td>${(r.loss_min_pct ?? 0)}–${(r.loss_max_pct ?? 0)}%</td>
+            <td>${r.min_margin_usd_ton ?? 0}</td>
+            <td>${(r.target_hedge_ratio ?? 0)}</td>
+          </tr>
+        `).join('');
+      }
+
+      function renderHedges(rows){
+        const tb = $('yardHedgeTable')?.querySelector('tbody');
+        if (!tb) return;
+        if (!rows || !rows.length){
+          tb.innerHTML = `<tr><td colspan="5" class="text-muted text-center py-2">No hedge recommendations.</td></tr>`;
+          return;
+        }
+        tb.innerHTML = rows.map(r => `
+          <tr>
+            <td>${r.material || ''}</td>
+            <td>${r.on_hand_tons ?? ''}</td>
+            <td>${r.hedged_tons ?? ''}</td>
+            <td>${(r.target_hedge_ratio ?? 0)}</td>
+            <td>${r.suggested_lots ?? 0}</td>
+          </tr>
+        `).join('');
+      }
+
+      async function loadRules(){
+        const yard = yardKey();
+        if (!yard){ setMsg('Set Seller or Yard key first.'); return; }
+        setMsg('Loading rules...');
+        try{
+          const res = await api(`/yard_rules?yard=${encodeURIComponent(yard)}`);
+          const rows = await res.json();
+          renderRules(rows || []);
+          setMsg(`Loaded ${rows.length || 0} rule(s) for ${yard}.`);
+        }catch(e){
+          setMsg(e.message || 'Failed to load rules');
+        }
+      }
+
+      async function saveRule(){
+        const yard = yardKey();
+        const sku  = skuKey();
+        if (!yard || !sku){ toast('Seller/Yard and SKU are required.'); return; }
+        const body = {
+          yard,
+          material: sku,
+          formula: ($('yardConfigFormula')?.value || '').trim() || null,
+          loss_min_pct: $('yardLossMin')?.value ? parseFloat($('yardLossMin').value) : null,
+          loss_max_pct: $('yardLossMax')?.value ? parseFloat($('yardLossMax').value) : null,
+          min_margin_usd_ton: $('yardMinMargin')?.value ? parseFloat($('yardMinMargin').value) : null,
+          target_hedge_ratio: $('yardHedgeRatio')?.value ? parseFloat($('yardHedgeRatio').value) : null,
+          min_tons: $('yardMinTons')?.value ? parseFloat($('yardMinTons').value) : null,
+          futures_symbol_root: ($('yardSymbolRoot')?.value || '').trim() || null,
+          auto_hedge: ($('yardAutoHedge')?.value === 'true')
+        };
+        setMsg('Saving rule...');
+        try{
+          await api('/yard_rules', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+          });
+          toast('Yard rule saved.');
+          await loadRules();
+          setMsg('Saved.');
+        }catch(e){
+          setMsg(e.message || 'Failed to save rule');
+        }
+      }
+
+      async function loadHedgeRecs(){
+        const yard = yardKey();
+        if (!yard){ toast('Set Seller/Yard first.'); return; }
+        setMsg('Loading hedge recommendations...');
+        try{
+          const res = await api(`/hedge/recommendations?yard=${encodeURIComponent(yard)}`);
+          const rows = await res.json();
+          renderHedges(rows || []);
+          setMsg(`Got ${rows.length || 0} hedge recommendation(s).`);
+        }catch(e){
+          setMsg(e.message || 'Failed to load hedge recommendations');
+        }
+      }
+
+      onReady(() => {
+        $('yardRuleLoad')?.addEventListener('click', loadRules);
+        $('yardRuleSave')?.addEventListener('click', saveRule);
+        $('yardHedgeRecs')?.addEventListener('click', loadHedgeRecs);
+
+        // If seller is already set, auto-populate yardConfigSeller & load rules on first open
+        const seller = (document.getElementById('sellerName')?.value || '').trim();
+        if (seller && $('yardConfigSeller')) {
+          $('yardConfigSeller').value = seller;
+          loadRules().catch(()=>{});
+        }
+      });
+    })();
+  </script>
+
   <script nonce="{{NONCE}}">
     onReady(() => {
       const btn = document.getElementById('rfqGo');
@@ -1677,61 +1785,61 @@ onReady(async () => {
   </div>
 
   <script nonce="{{NONCE}}">
-  // Seller/Yard: policy gating
-  (function(){
-    async function checkPolicies(){
-      try{
-        const res = await api('/policies/status');
-        const j = await res.json();
-        if (j.accepted) return;
-
-        let summary = 'You must accept the current Terms / Rulebook to create contracts and BOLs.';
+    // Seller/Yard: policy gating
+    (function(){
+      async function checkPolicies(){
         try{
-          const r2 = await api('/policies/current');
-          const p = await r2.json();
-          if (p && p.version){
-            summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to create contracts and BOLs.`;
-          }
-        }catch{}
+          const res = await api('/policies/status');
+          const j = await res.json();
+          if (j.accepted) return;
 
-        const sEl = document.getElementById('policySummary');
-        if (sEl) sEl.textContent = summary;
-
-        const modalEl = document.getElementById('policyModal');
-        if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
-
-        const modal = new bootstrap.Modal(modalEl, { backdrop:'static', keyboard:false });
-        modal.show();
-
-        const chk = document.getElementById('policyAgreeChkSeller');
-        const btn = document.getElementById('policyAcceptBtnSeller');
-
-        chk?.addEventListener('change', () => {
-          btn.disabled = !chk.checked;
-        });
-
-        btn?.addEventListener('click', async () => {
-          btn.disabled = true;
+          let summary = 'You must accept the current Terms / Rulebook to create contracts and BOLs.';
           try{
-            await api('/policies/accept', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ key:'rulebook', version: null })
-            });
-            modal.hide();
-            toast('Policy accepted.');
-          }catch(e){
-            toast(e.message || 'Could not record acceptance');
-            btn.disabled = false;
-          }
-        });
-      }catch{
-        // If policies endpoints fail, backend still enforces on write; do nothing here.
-      }
-    }
+            const r2 = await api('/policies/current');
+            const p = await r2.json();
+            if (p && p.version){
+              summary = `You must accept ${p.key || 'the Rulebook'} v${p.version} to create contracts and BOLs.`;
+            }
+          }catch{}
 
-    onReady(checkPolicies);
-  })();
+          const sEl = document.getElementById('policySummary');
+          if (sEl) sEl.textContent = summary;
+
+          const modalEl = document.getElementById('policyModal');
+          if (!modalEl || !(window.bootstrap && bootstrap.Modal)) return;
+
+          const modal = new bootstrap.Modal(modalEl, { backdrop:'static', keyboard:false });
+          modal.show();
+
+          const chk = document.getElementById('policyAgreeChkSeller');
+          const btn = document.getElementById('policyAcceptBtnSeller');
+
+          chk?.addEventListener('change', () => {
+            btn.disabled = !chk.checked;
+          });
+
+          btn?.addEventListener('click', async () => {
+            btn.disabled = true;
+            try{
+              await api('/policies/accept', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ key:'rulebook', version: null })
+              });
+              modal.hide();
+              toast('Policy accepted.');
+            }catch(e){
+              toast(e.message || 'Could not record acceptance');
+              btn.disabled = false;
+            }
+          });
+        }catch{
+          // If policies endpoints fail, backend still enforces on write; do nothing here.
+        }
+      }
+
+      onReady(checkPolicies);
+    })();
   </script>
 
   <footer class="legal-footer">
@@ -1755,7 +1863,5 @@ onReady(async () => {
     <div><a href="mailto:info@atlasipholdingsllc.com">info@atlasipholdingsllc.com</a></div>
     <div class="mt-2">&copy; 2025 BRidge Technologies. All rights reserved.</div>
   </footer>
-
 </body>
 </html>
-

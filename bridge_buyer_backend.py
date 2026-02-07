@@ -4795,7 +4795,9 @@ async def disputes_update(id: str, p: DisputeUpdate):
     if p.status is not None: sets.append("status=:st"); vals["st"]=p.status
     if p.notes is not None: sets.append("notes=:n"); vals["n"]=p.notes
     if p.evidence_urls is not None: sets.append("evidence_urls=:u"); vals["u"]=p.evidence_urls
-    if p.audit_json is not None: sets.append("audit_json=:a"); vals["a"]=json.dumps(p.audit_json)
+    if p.audit_json is not None:
+        sets.append("audit_json=:a::jsonb")
+        vals["a"] = json.dumps(p.audit_json, default=str)
     if not sets: return {"ok": True, "updated": 0}
     sets.append("updated_at=NOW()")
     row = await database.fetch_one(f"UPDATE disputes SET {', '.join(sets)} WHERE id=:i RETURNING *", vals)
@@ -16389,13 +16391,13 @@ async def log_action(actor: str, action: str, entity_id: str, details: dict):
     await database.execute(
         """
         INSERT INTO audit_log (actor, action, entity_id, details)
-        VALUES (:actor, :action, :entity_id, :details)
+        VALUES (:actor, :action, :entity_id, :details::jsonb)
         """,
         {
             "actor": actor,
             "action": action,
             "entity_id": entity_id,
-            "details": json.dumps(details),
+            "details": json.dumps(details, default=str),
         },
     )
 # ------------------ Hash-chained audit events (per-day chain) ---------
