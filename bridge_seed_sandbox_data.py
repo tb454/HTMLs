@@ -156,44 +156,55 @@ async def seed_vendor_quotes_and_indices():
     Writes to:
       vendor_quotes(vendor, category, material, price_per_lb, unit_raw, sheet_date, source_file, inserted_at)
       indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
-    Then you can call:
-      POST /reference_prices/upsert_from_vendor
-      POST /indices/snapshot_blended
     """
     print("Seeding vendor quotes + indices snapshots …")
     nowd = _now_utc().date()
 
-    # Vendor quotes (light sampling)
+    # Vendor quotes (light sampling) — idempotent via ON CONFLICT UPSERT
     vrows = []
-    vendors = ["C&Y Global, Inc. / Pro Metal Recycling", "Lewis Salvage", "Metro Scrap", "Atlas Vendor A", "Atlas Vendor B"]
+    vendors = [
+        "C&Y Global, Inc. / Pro Metal Recycling",
+        "Lewis Salvage",
+        "Metro Scrap",
+        "Atlas Vendor A",
+        "Atlas Vendor B",
+    ]
     for mat in MATERIALS:
         if random.random() > PCT_VENDOR_QUOTES:
             continue
         for v in vendors:
-            # Convert ton price → lb for vendor feed
-            ton = _rand_price_ton(mat)
-            per_lb = round(ton / 2000.0, 4)
+            ton = _rand_price_ton(mat)            # $/ton
+            per_lb = round(ton / 2000.0, 4)       # $/lb for sheets
             vrows.append({
                 "vendor": v,
-                "category": "Auto" if "Steel" in mat or "HMS" in mat or "P&S" in mat else "Nonferrous",
+                "category": "Auto" if any(k in mat for k in ("Steel","HMS","P&S")) else "Nonferrous",
                 "material": mat,
                 "price_per_lb": per_lb,
                 "unit_raw": "LB",
                 "sheet_date": nowd,
                 "source_file": "seed",
-                "inserted_at": _now_utc()
+                "inserted_at": _now_utc(),
             })
+
     if vrows:
+        # Upsert so re-running the seeder doesn't explode on the unique constraint
         await database.execute_many("""
             INSERT INTO vendor_quotes
               (vendor,category,material,price_per_lb,unit_raw,sheet_date,source_file,inserted_at)
             VALUES
               (:vendor,:category,:material,:price_per_lb,:unit_raw,:sheet_date,:source_file,:inserted_at)
+            ON CONFLICT (vendor, material, sheet_date) DO UPDATE
+              SET category    = EXCLUDED.category,
+                  price_per_lb= EXCLUDED.price_per_lb,
+                  unit_raw    = EXCLUDED.unit_raw,
+                  source_file = EXCLUDED.source_file,
+                  inserted_at = EXCLUDED.inserted_at
         """, vrows)
 
     if SEED_INDICES:
         # Simple daily snapshot backfill (avg_price) for a couple of materials
         id_rows = []
+        nowd = _now_utc().date()
         for d in range(DAYS_BACK):
             asof = (nowd - timedelta(days=d))
             for mat in ("Shred Steel", "Bare Bright", "#1 Copper"):
@@ -203,16 +214,17 @@ async def seed_vendor_quotes_and_indices():
                     "material": mat,
                     "avg_price": _rand_price_ton(mat),
                     "volume_tons": random.randint(0, 200),
-                    "currency": CURRENCY
+                    "currency": CURRENCY,
                 })
-        # store as $/ton (avg_price)
         await database.execute_many("""
             INSERT INTO indices_daily
               (as_of_date, region, material, avg_price, volume_tons, currency)
             VALUES
               (:as_of_date,:region,:material,:avg_price,:volume_tons,:currency)
             ON CONFLICT (as_of_date, region, material) DO UPDATE
-              SET avg_price=EXCLUDED.avg_price, volume_tons=EXCLUDED.volume_tons, currency=EXCLUDED.currency
+              SET avg_price  = EXCLUDED.avg_price,
+                  volume_tons= EXCLUDED.volume_tons,
+                  currency   = EXCLUDED.currency
         """, id_rows)
 
 async def main():
