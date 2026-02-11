@@ -13,6 +13,19 @@ function _bleach(s){
   return String(s || '').replace(/(COMEX|LME|CME)/ig, 'BR-Index');
 }
 
+const SYMBOL_LABELS = {
+  'BR-CU':'Base Copper',
+  'BR-AL':'Base Aluminum',
+  'BR-HMS':'HMS',
+  'BR-PS':'Plate & Structural',
+  'BR-SHRED':'Shred',
+  'BR-SS304':'Stainless 304',
+  'BR-SS316':'Stainless 316',
+  'BR-ZN':'Base Zinc',
+  'BR-NI':'Base Nickel',
+  'BR-PB':'Base Lead'
+};
+
 function _arr(x){
   return Array.isArray(x) ? x : (x?.items || x?.rows || x?.data || []);
 }
@@ -84,7 +97,7 @@ async function _ensureBRIndexRows(force=false){
     out.push({
       symbol: sym,
 
-      name: _bleach(d.notes || d.name || ''),
+      name: _bleach(d.notes || d.name || SYMBOL_LABELS[sym] || ''),
 
       category: '',
 
