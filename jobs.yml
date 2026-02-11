@@ -1,0 +1,101 @@
+# jobs.yaml
+jobs:
+  # ---------- ONE-TIME / ON-DEPLOY ----------
+  - name: apply_migrations
+    tag: deploy
+    cmd: python /app/apply_migrations.py
+
+  - name: seed_reference_data
+    tag: deploy
+    cmd: python /app/bridge_seed_reference_data.py
+
+  # ---------- HOURLY (fast stuff / monitoring) ----------
+  - name: indices_snapshot_builder
+    tag: hourly
+    cmd: python /app/indices_builder.py
+
+  - name: carrier_monitor
+    tag: hourly
+    cmd: python /app/jobs/carrier_monitor.py
+
+  # ---------- NIGHTLY (full battery) ----------
+  # 1) DB & reference data safety (repeat nightly in case of drift)
+  - name: nightly_apply_migrations
+    tag: nightly
+    cmd: python /app/apply_migrations.py
+
+  - name: nightly_seed_reference_data
+    tag: nightly
+    cmd: python /app/bridge_seed_reference_data.py
+
+  - name: import_vendor_material_map
+    tag: nightly
+    cmd: python /app/bridge_vendor_map_import.py
+
+  # 2) Vendor ingests (run “all”, queue, specific sheets)
+  - name: vendor_ingest_all
+    tag: nightly
+    cmd: python /app/bridge_vendor_ingest_all.py
+
+  - name: vendor_ingest_queue
+    tag: nightly
+    cmd: python /app/run_vendor_ingest_queue.py
+
+  - name: bridge_vendor_ingest
+    tag: nightly
+    cmd: python /app/bridge_vendor_ingest.py
+
+  - name: ingest_cy_quote_sheet
+    tag: nightly
+    cmd: python /app/ingest_cy_quote_sheet.py
+
+  - name: ingest_lewis_quotes
+    tag: nightly
+    cmd: python /app/ingest_lewis_quotes.py
+
+  - name: ingest_vendor_quotes_csv
+    tag: nightly
+    cmd: python /app/ingest_vendor_quotes_csv.py
+
+  # 3) Indices / forecasts
+  - name: indices_builder
+    tag: nightly
+    cmd: python /app/indices_builder.py
+
+  - name: forecast_job
+    tag: nightly
+    cmd: python /app/forecast_job.py
+
+  # 4) Your ad-hoc nightly orchestrator (if it chains more stuff)
+  - name: nightly_jobs
+    tag: nightly
+    cmd: python /app/nightly_jobs.py
+
+  # 5) Test sweep (both your custom suite and pytest)
+  - name: full_test_suite
+    tag: nightly
+    cmd: python /app/tests/full_test_suite.py
+
+  - name: pytest_tests_folder
+    tag: nightly
+    cmd: pytest -q /app/tests --maxfail=5 --disable-warnings
+
+  # If (and only if) you truly have a legacy /app/pytest dir, keep this.
+  # Otherwise, delete this block.
+  - name: pytest_legacy_folder
+    tag: nightly
+    cmd: pytest -q /app/pytest --maxfail=5 --disable-warnings
+
+  # ---------- WEEKLY (deeper/slow checks) ----------
+  - name: pytest_all
+    tag: weekly
+    cmd: pytest -q /app --maxfail=10 --disable-warnings
+
+  # Focused “prod safety” & isolation checks weekly, too
+  - name: prod_safety_tests
+    tag: weekly
+    cmd: pytest -q /app/tests/test_prod_safety.py
+
+  - name: tenant_isolation_tests
+    tag: weekly
+    cmd: pytest -q /app/tests/test_tenant_isolation.py
