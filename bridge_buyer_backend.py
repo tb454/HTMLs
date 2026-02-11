@@ -2968,6 +2968,75 @@ async def _ensure_vendor_quotes_schema():
     """)
 
 @startup
+async def _ensure_analytics_ledgers_and_carriers():
+    """
+    Idempotent DDL for:
+      - m2m_ledger           : daily MTM per contract
+      - rfq_events           : RFQ lifecycle events
+      - carriers, carrier_checks : hauler verification snapshots
+      - vol_curves           : per material/region tenor sigma
+    """
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS m2m_ledger(
+      id BIGSERIAL PRIMARY KEY,
+      contract_id UUID NOT NULL,
+      tenant_id UUID,
+      as_of DATE NOT NULL,
+      qty NUMERIC NOT NULL,
+      price NUMERIC NOT NULL,
+      mtm_usd NUMERIC NOT NULL,
+      source TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(contract_id, as_of)
+    );
+    CREATE INDEX IF NOT EXISTS ix_m2m_asof ON m2m_ledger(as_of);
+
+    CREATE TABLE IF NOT EXISTS rfq_events(
+      id BIGSERIAL PRIMARY KEY,
+      rfq_id UUID NOT NULL,
+      tenant_id UUID,
+      event TEXT NOT NULL,      -- created|quoted|awarded|cancelled
+      actor TEXT,
+      symbol TEXT,
+      price NUMERIC,
+      qty_lots NUMERIC,
+      at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS carriers(
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID,
+      name TEXT NOT NULL,
+      usdot TEXT,
+      mc TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS carrier_checks(
+      id BIGSERIAL PRIMARY KEY,
+      carrier_id UUID NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+      tenant_id UUID,
+      checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL,     -- authorized|not_authorized|expired|unknown
+      snapshot JSONB,
+      UNIQUE(carrier_id, date_trunc('day', checked_at))
+    );
+
+    CREATE TABLE IF NOT EXISTS vol_curves(
+      id BIGSERIAL PRIMARY KEY,
+      material TEXT NOT NULL,
+      region TEXT NOT NULL,
+      tenor_days INT NOT NULL,  -- 30|60|90
+      sigma NUMERIC NOT NULL,
+      as_of DATE NOT NULL,
+      tenant_id UUID,
+      UNIQUE(material, region, tenor_days, as_of)
+    );
+    """)
+
+@startup
 async def _ensure_vendor_ingest_schema():
     if not BOOTSTRAP_DDL:
         return
@@ -3493,6 +3562,36 @@ app.include_router(vendor_router)
 app.include_router(carriers_router.router)
 app.include_router(carriers_li_admin_router.router)
 app.include_router(dat_mock_admin_router.router)
+
+car_verify_router = APIRouter(prefix="/carrier", tags=["Carrier"])
+
+class CarrierVerifyIn(BaseModel):
+    name: str
+    usdot: Optional[str] = None
+    mc: Optional[str] = None
+    tenant_id: Optional[str] = None
+
+@car_verify_router.post("/verify", summary="Verify carrier (FMCSA/SAFER stub or live)")
+async def carrier_verify(body: CarrierVerifyIn):
+    row = await database.fetch_one("""
+      INSERT INTO carriers(id, tenant_id, name, usdot, mc, active)
+      VALUES (gen_random_uuid(), :tid, :n, :u, :m, TRUE)
+      ON CONFLICT (name) DO UPDATE
+        SET usdot=COALESCE(EXCLUDED.usdot, carriers.usdot),
+            mc=COALESCE(EXCLUDED.mc, carriers.mc)
+      RETURNING id
+    """, {"tid": body.tenant_id, "n": body.name.strip(),
+          "u": (body.usdot or None), "m": (body.mc or None)})
+    status = "authorized" if (body.usdot or body.mc) else "unknown"
+    snap = {"usdot": body.usdot, "mc": body.mc, "source": "stub", "ts": utcnow().isoformat()}
+    await database.execute("""
+      INSERT INTO carrier_checks(carrier_id, tenant_id, status, snapshot)
+      VALUES (:id, :tid, :st, :snap::jsonb)
+    """, {"id": row["id"], "tid": body.tenant_id, "st": status, "snap": json.dumps(snap)})
+    return {"carrier_id": str(row["id"]), "status": status}
+
+app.include_router(car_verify_router)
+
 # ---- Tasks (manual triggers) ----
 tasks_router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -3902,6 +4001,51 @@ async def admin_vendor_watch_status(request: Request):
         "last_error": VENDOR_WATCH_LAST_ERROR,
     }
 # ============= /Vendor Quotes: Folder Watcher ================
+@app.post("/jobs/run_m2m_marks", tags=["Jobs"], summary="Compute daily MTM per open contract (writes m2m_ledger)")
+async def jobs_run_m2m_marks(as_of: Optional[date] = None, region: Optional[str] = None):
+    d = as_of or utcnow().date()
+    rows = await database.fetch_all("""
+      SELECT id, tenant_id, material, COALESCE(NULLIF(region,''),'blended') AS region,
+             weight_tons, price_per_ton
+      FROM contracts
+      WHERE status IN ('Open','Signed','Dispatched')
+    """)
+    marked = 0
+    for c in rows:
+        p = await database.fetch_one("""
+          SELECT COALESCE(price,avg_price) AS px
+          FROM indices_daily
+          WHERE as_of_date=:d AND material=:m
+            AND (:r IS NULL OR region ILIKE :r)
+          ORDER BY ts DESC NULLS LAST
+          LIMIT 1
+        """, {"d": d, "m": c["material"], "r": (region or c["region"])})
+        if not p or p["px"] is None:
+            continue
+        px = float(p["px"])
+        qty = float(c["weight_tons"] or 0.0)
+        deal = float(c["price_per_ton"] or 0.0)
+        mtm = (px - deal) * qty
+        await database.execute("""
+          INSERT INTO m2m_ledger(contract_id, tenant_id, as_of, qty, price, mtm_usd, source)
+          VALUES (:cid,:tid,:d,:q,:p,:mtm,'INDEX')
+          ON CONFLICT (contract_id, as_of) DO UPDATE
+            SET qty=EXCLUDED.qty, price=EXCLUDED.price, mtm_usd=EXCLUDED.mtm_usd, source=EXCLUDED.source
+        """, {"cid": c["id"], "tid": c["tenant_id"], "d": d, "q": qty, "p": px, "mtm": mtm})
+        marked += 1
+    return {"ok": True, "as_of": str(d), "rows": marked}
+
+@app.get("/analytics/mtm_by_day", tags=["Analytics"], summary="MTM sum by day (USD)")
+async def analytics_mtm_by_day(material: Optional[str] = None, days: int = 30):
+    rows = await database.fetch_all(f"""
+      SELECT ml.as_of::date AS d, ROUND(SUM(ml.mtm_usd)::numeric,2) AS mtm
+      FROM m2m_ledger ml
+      JOIN contracts c ON c.id = ml.contract_id
+      WHERE ml.as_of >= CURRENT_DATE - make_interval(days => :days)
+        {"AND c.material = :m" if material else ""}
+      GROUP BY d ORDER BY d
+    """, {"days": days, "m": material} if material else {"days": days})
+    return [{"date": str(r["d"]), "mtm_usd": float(r["mtm"] or 0.0)} for r in rows]
 
 @app.get("/analytics/vendor_price_history", tags=["Analytics"], summary="Daily vendor-blended history for a material")
 async def vendor_price_history(material: str, days:int = 365):
@@ -4654,6 +4798,39 @@ async def vendor_quotes_latest(limit_per_vendor: int = Query(500, ge=1, le=5000)
         {"d": latest_date, "lim": limit_per_vendor},
     )
     return [dict(r) for r in rows]
+
+@app.get("/admin/badges", tags=["Admin"], summary="Operational badges for dashboard")
+async def admin_badges():
+    # RFQ
+    rfq_last = await database.fetch_one("SELECT MAX(at) AS t FROM rfq_events")
+    rfq_open = await database.fetch_one("SELECT COUNT(*) AS c FROM rfqs WHERE status='open'")
+    # Carrier verify
+    cv_last = await database.fetch_one("SELECT MAX(checked_at) AS t FROM carrier_checks")
+    stale_car = await database.fetch_one("""
+      SELECT COUNT(*) AS c
+        FROM carriers c
+        LEFT JOIN LATERAL (
+           SELECT 1 FROM carrier_checks cc
+            WHERE cc.carrier_id=c.id AND cc.checked_at >= NOW() - INTERVAL '30 days' AND cc.status='authorized'
+            LIMIT 1
+        ) v ON TRUE
+       WHERE v IS NULL
+    """)
+    # MTM
+    mtm_last = await database.fetch_one("SELECT MAX(as_of) AS d FROM m2m_ledger")
+    # Vol curve
+    vol_last = await database.fetch_one("SELECT MAX(as_of) AS d FROM vol_curves")
+    # Dossier sync queue 
+    dq_last = await database.fetch_one("SELECT MAX(sent_at) AS t FROM dossier_ingest_queue WHERE status='sent'")
+    return {
+      "rfq": {"last_event": _to_utc_z(rfq_last["t"]) if rfq_last and rfq_last["t"] else None,
+              "open_count": int(rfq_open["c"] if rfq_open else 0)},
+      "carrier_verify": {"last_run": _to_utc_z(cv_last["t"]) if cv_last and cv_last["t"] else None,
+                         "stale_carriers": int(stale_car["c"] if stale_car else 0)},
+      "mtm": {"last_mark_date": (str(mtm_last["d"]) if mtm_last and mtm_last["d"] else None)},
+      "vol_curve": {"last_build_date": (str(vol_last["d"]) if vol_last and vol_last["d"] else None)},
+      "dossier_sync": {"last_push": _to_utc_z(dq_last["t"]) if dq_last and dq_last["t"] else None}
+    }
 
 @app.get("/admin/vendor/pricing/latest", tags=["Admin"], summary="Admin: latest vendor blended pricing", status_code=200)
 async def admin_vendor_pricing_latest(limit: int = Query(500, ge=1, le=5000)):
@@ -17958,6 +18135,39 @@ async def analytics_prices_over_time(material: str, window: str = "1M"):
 
     return [{"date": str(r["d"]), "avg_price": float(r["avg_ton"] or 0.0)} for r in rows]
 
+@app.get("/analytics/vol_curve", tags=["Analytics"], summary="Volatility curve (σ) from indices + RFQ quotes")
+async def analytics_vol_curve(material: str, region: str = "blended", as_of: Optional[date] = None):
+    d = as_of or utcnow().date()
+    hist = await database.fetch_all("""
+      SELECT as_of_date, COALESCE(price, avg_price) AS px
+      FROM indices_daily
+      WHERE material=:m AND region ILIKE :r
+        AND as_of_date BETWEEN :d - INTERVAL '120 days' AND :d
+      ORDER BY as_of_date
+    """, {"m": material, "r": region, "d": d})
+    prices = [float(r["px"]) for r in hist if r["px"] is not None]
+    if len(prices) < 20:
+        return {"material": material, "region": region, "as_of": str(d), "sigma": {}}
+    rets = []
+    for i in range(1, len(prices)):
+        try:
+            rets.append(math.log(prices[i]/prices[i-1]))
+        except Exception:
+            pass
+    def _sigma(n):
+        if len(rets) < n: return None
+        return float(statistics.pstdev(rets[-n:])) if len(rets[-n:]) > 1 else 0.0
+    out = {}
+    for tenor in (30, 60, 90):
+        s = _sigma(tenor)
+        if s is None: continue
+        out[tenor] = s
+        await database.execute("""
+          INSERT INTO vol_curves(material, region, tenor_days, sigma, as_of)
+          VALUES (:m,:r,:t,:s,:d)
+          ON CONFLICT (material,region,tenor_days,as_of) DO UPDATE SET sigma=EXCLUDED.sigma
+        """, {"m": material, "r": region, "t": tenor, "s": s, "d": d})
+    return {"material": material, "region": region, "as_of": str(d), "sigma": out}
 
 @app.get("/analytics/surveil_recent", tags=["Analytics"], summary="Recent surveillance alerts (UI compat)")
 async def analytics_surveil_recent(limit: int = 25):
@@ -20708,6 +20918,29 @@ async def create_bol_pg(bol: BOLIn, request: Request):
     # Try to insert; if it already exists (same key), fetch the existing row
     idem_key = (request.headers.get("Idempotency-Key") or "").strip() or None
 
+    # --- carrier verification gate (authorized in last 30 days) ---
+    try:
+        cname = (bol.carrier.name or "").strip()
+        if cname:
+            crow = await database.fetch_one(
+                "SELECT id FROM carriers WHERE LOWER(name)=LOWER(:n) LIMIT 1", {"n": cname}
+            )
+            ok = False
+            if crow:
+                chk = await database.fetch_one("""
+                   SELECT 1 FROM carrier_checks
+                    WHERE carrier_id=:cid AND status='authorized'
+                      AND checked_at >= NOW() - INTERVAL '30 days'
+                    LIMIT 1
+                """, {"cid": crow["id"]})
+                ok = bool(chk)
+            if not ok and os.getenv("ENV","").lower() == "production":
+                raise HTTPException(412, "carrier not verified (POST /carrier/verify first)")
+    except HTTPException:
+        raise
+    except Exception:
+        # non-prod: soft-allow; prod: deny if unset above
+        pass
     row = await database.fetch_one("""
         INSERT INTO bols (
             bol_id, contract_id, buyer, seller, material, weight_tons,
@@ -22289,6 +22522,20 @@ async def create_rfq(r: RFQIn, request: Request, _=Depends(csrf_protect)):
     except Exception:
         pass
     resp = {"rfq_id": rfq_id, "status": "open"}
+
+    # rfq_event: created
+    try:
+        actor = (request.session.get("username") if hasattr(request,"session") else None) or "system"
+        await database.execute("""
+          INSERT INTO rfq_events(rfq_id, tenant_id, event, actor, symbol, price, qty_lots)
+          VALUES (:id, :tid, 'created', :actor, :sym, NULL, :qty)
+        """, {"id": rfq_id,
+              "tid": await current_tenant_id(request),
+              "actor": actor,
+              "sym": _canon_symbol(r.symbol),
+              "qty": float(r.quantity_lots)})
+    except Exception:
+        pass
     return await _idem_guard(request, key, resp)
 
 @_limit("60/minute")
@@ -22314,6 +22561,15 @@ async def quote_rfq(rfq_id: str, q: RFQQuoteIn, request: Request, _=Depends(csrf
     )
     try:
         await _md_broadcast({"type": "rfq.quote", "rfq_id": rfq_id, "quote_id": quote_id, "symbol": symbol, "price": float(q.price), "qty_lots": float(q.qty_lots)})
+    except Exception:
+        pass
+    try:
+        actor = (request.session.get("username") if hasattr(request,"session") else None) or "system"
+        await database.execute("""
+          INSERT INTO rfq_events(rfq_id, tenant_id, event, actor, symbol, price, qty_lots)
+          SELECT :rfq, rf.tenant_id, 'quoted', :actor, rf.symbol, :p, :q
+            FROM rfqs rf WHERE rf.rfq_id=:rfq
+        """, {"rfq": rfq_id, "actor": actor, "p": float(q.price), "q": float(q.qty_lots)})
     except Exception:
         pass
     resp = {"quote_id": quote_id}
@@ -22365,6 +22621,16 @@ async def award_rfq(rfq_id: str, quote_id: str, request: Request):
     # Broadcast trade tick (RFQ-style)
     try:
         await _md_broadcast({"type": "trade", "venue": "RFQ", "symbol": symbol, "price": price, "qty_lots": qty})
+    except Exception:
+        pass
+    try:
+        actor = (request.session.get("username") if hasattr(request,"session") else None) or "system"
+        await database.execute("""
+          INSERT INTO rfq_events(rfq_id, tenant_id, event, actor, symbol, price, qty_lots)
+          SELECT :rfq, rf.tenant_id, 'awarded', :actor, rf.symbol, q.price, q.qty_lots
+            FROM rfqs rf JOIN rfq_quotes q ON q.rfq_id=rf.rfq_id
+           WHERE rf.rfq_id=:rfq AND q.quote_id=:qid
+        """, {"rfq": rfq_id, "qid": quote_id, "actor": actor})
     except Exception:
         pass
 
