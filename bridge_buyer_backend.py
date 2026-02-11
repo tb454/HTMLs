@@ -8710,44 +8710,29 @@ async def public_index_detail_data(
     }
 
 # ---- Public mirror APIs (delayed for public, real-time for subscriber) ----
-@app.get("/public/indices/universe", tags=["Public"], summary="Public index universe (delayed)")
+@app.get("/public/indices/universe", tags=["Public"], summary="Public index universe (array of {symbol})")
 async def public_indices_universe(
     request: Request,
-    region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
+    region: str | None = Query(None),
     limit: int = Query(2000, ge=1, le=20000),
 ):
     target = await _public_target_index_date(request)
     if not target:
-        return {
-            "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "subscriber": _public_is_subscriber(request),
-            "delay_days": _public_delay_days(request),
-            "index_date": None,
-            "region": region,
-            "tickers": [],
-        }
+        return []  
 
     reg = (region or "blended").strip() or "blended"
     rows = await database.fetch_all(
         """
         SELECT DISTINCT material
         FROM public.indices_daily
-        WHERE as_of_date = :d
-          AND region ILIKE :r
+        WHERE as_of_date = :d AND region ILIKE :r
         ORDER BY material
         LIMIT :lim
         """,
         {"d": target, "r": reg, "lim": limit},
     )
 
-    return {
-        "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "subscriber": _public_is_subscriber(request),
-        "delay_days": _public_delay_days(request),
-        "index_date": str(target),
-        "region": reg,
-        "tickers": [str(r["material"]) for r in rows if r and r["material"]],
-    }
+    return [{"symbol": str(r["material"])} for r in rows if r and r["material"]]
 
 @app.get("/public/indices/latest", tags=["Public"], summary="Public latest indices snapshot (delayed)")
 async def public_indices_latest(
