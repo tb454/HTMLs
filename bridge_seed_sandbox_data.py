@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 # Import your already-deployed app pieces
-from bridge_buyer_backend import database, utcnow, _ensure_org_exists
 from bridge_buyer_backend import app, lifespan, database, _ensure_org_exists
 
 # Hard stop if someone points at prod
