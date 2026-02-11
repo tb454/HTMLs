@@ -1,62 +1,139 @@
-// public-indices.js (public mirror)
-(function () {
-  // deterrents (not real protection, but fine for casuals)
-  document.addEventListener("contextmenu", (e) => e.preventDefault());
-  document.addEventListener("selectstart", (e) => e.preventDefault());
-  document.addEventListener("copy", (e) => {
-    e.preventDefault();
-    e.clipboardData.setData("text/plain", "BRidge Indices — https://bridge.scrapfutures.com/indices");
+// public-indices.js — BRidge public list
+
+// ---- tiny helpers
+const $  = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const fmt = (n, dp = 4) =>
+  (n == null || Number.isNaN(+n))
+    ? "-"
+    : Number(n).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+async function jget(path) {
+  const r = await fetch(path, {
+    headers: { "Accept": "application/json" },
+    credentials: "omit",
+    cache: "no-store"
   });
+  if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+  return r.json();
+}
 
-  const fmt = (n) => (n === null || n === undefined) ? "-" : (typeof n === "number" ? n.toFixed(4) : String(n));
-  const tbody = document.getElementById("tbody");
-  const filterInput = document.getElementById("filterInput");
-  const lastUpdated = document.getElementById("lastUpdated");
-  const modePill = document.getElementById("modePill");
+// ---- polite copy deterrents (public only; cosmetic)
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+document.addEventListener("selectstart", (e) => e.preventDefault());
+document.addEventListener("copy", (e) => {
+  e.preventDefault();
+  e.clipboardData.setData("text/plain", "BRidge Indices — https://scrapfutures.com/indices");
+});
 
-  let rows = [];
+// ---- skeleton helper (no external CSS; still CSP-safe because it’s not inline <script>)
+function showSkeleton(tbody, cols) {
+  tbody.innerHTML = "";
+  for (let i = 0; i < 6; i++) {
+    const tr = document.createElement("tr");
+    for (let c = 0; c < cols; c++) {
+      const td = document.createElement("td");
+      td.innerHTML = '<span class="s" style="display:inline-block;width:100%;height:1em;background:linear-gradient(90deg,#152036,#0e1524,#152036);background-size:200% 100%;animation:sh 1.1s linear infinite;border-radius:4px"></span>';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+(function injectKeyframes(){
+  const css = "@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}";
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
+})();
 
-  function render() {
-    const q = (filterInput.value || "").trim().toUpperCase();
-    const filtered = !q ? rows : rows.filter(r => (r.ticker || "").toUpperCase().includes(q));
+// ---- main loader
+async function loadPublicIndices() {
+  const tbody     = $("#tbody");
+  const updatedEl = $("#lastUpdated");
+  const modeEl    = $("#modePill");
+  const statusEl  = $("#statusText");
 
-    if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
-      return;
+  showSkeleton(tbody, 5);
+
+  try {
+    // 1) universe
+    const defs = await jget("/public/indices/universe");   // [{symbol,...}]
+    const symbols = (Array.isArray(defs) ? defs : [])
+      .map(d => String(d.symbol || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    // 2) seed rows
+    tbody.innerHTML = symbols.map(sym => `
+      <tr data-sym="${sym}">
+        <td class="mono" style="font-weight:800;">${sym}</td>
+        <td class="last muted">…</td>
+        <td class="delta muted">…</td>
+        <td class="updated muted">…</td>
+        <td class="right"><a class="btn" href="/index/${encodeURIComponent(sym)}">View</a></td>
+      </tr>
+    `).join("");
+
+    // 3) fill Last / Δ / Updated (sequential = friendly to backend)
+    for (const sym of symbols) {
+      try {
+        // limit=2 is enough for last & previous
+        const hist = await jget(`/public/indices/history?symbol=${encodeURIComponent(sym)}&limit=2`);
+        const series = (Array.isArray(hist) ? hist : [])
+          .filter(x => x && x.as_of_date && (x.close_price != null))
+          .sort((a, b) => new Date(a.as_of_date) - new Date(b.as_of_date));
+
+        const n     = series.length;
+        const last  = n ? +series[n - 1].close_price : null;
+        const prev  = n > 1 ? +series[n - 2].close_price : null;
+        const delta = (last != null && prev != null) ? (last - prev) : null;
+        const when  = n ? series[n - 1].as_of_date : null;
+
+        const row = tbody.querySelector(`tr[data-sym="${CSS.escape(sym)}"]`);
+        if (!row) continue;
+
+        // last
+        const lastEl = row.querySelector(".last");
+        lastEl.textContent = fmt(last);
+
+        // delta
+        const dEl = row.querySelector(".delta");
+        if (delta == null) {
+          dEl.textContent = "-";
+          dEl.className = "delta muted";
+        } else {
+          dEl.textContent = (delta >= 0 ? "+" : "") + fmt(delta);
+          dEl.className = "delta " + (delta >= 0 ? "pos" : "neg");
+        }
+
+        // updated
+        row.querySelector(".updated").textContent = when || "—";
+      } catch {
+        // keep skeleton for that row if it fails
+      }
     }
 
-    tbody.innerHTML = filtered.map(r => {
-      const d = (typeof r.delta === "number") ? r.delta : null;
-      const deltaCls = (d === null) ? "muted" : (d >= 0 ? "delta pos" : "delta neg");
-      const deltaText = (d === null) ? "-" : (d >= 0 ? "+" + d.toFixed(4) : d.toFixed(4));
-
-      return `
-        <tr>
-          <td style="font-weight:800;">${r.ticker || "-"}</td>
-          <td>${fmt(r.last)}</td>
-          <td><span class="${deltaCls}">${deltaText}</span></td>
-          <td class="muted">${r.updated || "-"}</td>
-          <td class="right"><a class="btn" href="/index/${encodeURIComponent(r.ticker)}">View</a></td>
-        </tr>
-      `;
-    }).join("");
-  }
-
-  async function load() {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
-    const res = await fetch("/api/public/indices", { headers: { "Accept": "application/json" } });
-    const data = await res.json();
-    rows = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
-    lastUpdated.textContent = "Updated: " + (data?.server_time || "—");
-    modePill.textContent = "Mode: " + (data?.mode || "Public");
-    render();
-  }
-
-  document.getElementById("refreshBtn").addEventListener("click", load);
-  filterInput.addEventListener("input", render);
-
-  load().catch(err => {
+    // header/status
+    const nowUtc = new Date().toISOString().replace("T", " ").slice(0, 16);
+    if (updatedEl) updatedEl.textContent = "Updated: " + nowUtc + " (UTC)";
+    if (modeEl)    modeEl.textContent    = "Mode: Public";
+    if (statusEl)  statusEl.textContent  = "Live";
+  } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" class="muted">Error loading indices.</td></tr>`;
-    console.error(err);
+    if (statusEl) statusEl.textContent = "Degraded";
+  }
+}
+
+// ---- filter (client-side)
+function filterRows() {
+  const q = ($("#filterInput").value || "").trim().toUpperCase();
+  $("#tbody").querySelectorAll("tr").forEach(tr => {
+    const sym = (tr.getAttribute("data-sym") || "").toUpperCase();
+    tr.style.display = (!q || sym.includes(q)) ? "" : "none";
   });
-})();
+}
+
+// ---- wire & init
+document.getElementById("refreshBtn")?.addEventListener("click", loadPublicIndices);
+document.getElementById("filterInput")?.addEventListener("input", filterRows);
+window.addEventListener("DOMContentLoaded", loadPublicIndices);

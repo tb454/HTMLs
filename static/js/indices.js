@@ -1,10 +1,8 @@
 // indices.js — BR-Index mode (bridge_index_definitions + bridge_index_history)
-// Expects endpoints:
-//   GET  /indices/universe                  -> [{symbol, enabled, method, factor, base_symbol, ...}]
-//   GET  /indices/history?symbol=BR-AL...   -> [{dt, close_price, ...}, ...]
-// Optional (if you have it): /forecasts/latest?symbol=...&horizon_days=90
 
 // ---------- tiny helpers ----------
+const $ = (sel) => document.querySelector(sel);
+
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 
 function csvDownload(filename, rows){

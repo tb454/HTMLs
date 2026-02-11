@@ -451,6 +451,31 @@
   </script>
 
   <script nonce="{{NONCE}}">
+  function wireQuickQuote(){
+    const btn  = document.getElementById('qGo');
+    const mat  = document.getElementById('qMaterial');
+    const tons = document.getElementById('qTons');
+    const out  = document.getElementById('qOut');
+    if(!btn || !mat || !tons || !out) return;
+
+    btn.onclick = async () => {
+      const m = (mat.value||'').trim();
+      const t = Number(tons.value||0);
+      if(!m || !(t>0)){ out.textContent = 'Enter a material and tons.'; return; }
+      out.textContent = 'Quoting…';
+      try{
+        const r = await api(`/pricing/quote?material=${encodeURIComponent(m)}&tons=${encodeURIComponent(t)}`);
+        const j = await r.json();
+        const perTon = (j.price_per_ton ?? (j.price_per_lb && j.price_per_lb*2000)) || null;
+        out.textContent = perTon ? `${j.material||m}: $${perTon.toFixed(2)}/ton` : 'No quote available.';
+      }catch{
+        out.textContent = 'Quote failed.';
+      }
+    };
+  }
+  </script>
+
+  <script nonce="{{NONCE}}">
     const endpoint = window.endpoint;
     let offset = 0, limit = 100;        // pagination
     let sortBy = 'created_at_desc';

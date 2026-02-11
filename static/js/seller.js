@@ -1,6 +1,5 @@
-// ========================================
 // BR-INDEX SNAPSHOT + MATERIALS TABLE
-// ========================================
+
 
 // Constants and state
 const MATERIALS_PAGE_SIZE = 50;

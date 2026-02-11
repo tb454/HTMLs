@@ -101,7 +101,7 @@
   async function loadUniverse() {
     if (!symbolSel) return;
     try {
-      const uni = await api('/public/indices/universe?region=blended&limit=5000');
+      const uni = await api('/public/indices/universe');
       const list = (uni && uni.tickers) ? uni.tickers : (uni || []);
       symbolSel.innerHTML = list
         .map((t) => `<option value="${t}">${t}</option>`)
@@ -118,7 +118,7 @@
     const limit = +limitSel.value || 500;
     idxMeta.textContent = '';
     try {
-      const out = await api(`/public/indices/history?ticker=${encodeURIComponent(ticker)}&region=blended`);
+      const out = await api(`/indices/history?symbol=${encodeURIComponent(ticker)}`);
       const rows = (out.rows || out || []);
       const use = rows.slice(-limit);
       // adapt to drawChart’s expected fields

@@ -8711,6 +8711,7 @@ async def public_index_detail_data(
 
 # ---- Public mirror APIs (delayed for public, real-time for subscriber) ----
 @app.get("/public/indices/universe", tags=["Public"], summary="Public index universe (delayed)")
+@limiter(limit=100, time_window=60)  # very light rate limit since this is a public endpoint
 async def public_indices_universe(
     request: Request,
     region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
@@ -8728,7 +8729,6 @@ async def public_indices_universe(
         }
 
     reg = (region or "blended").strip() or "blended"
-
     rows = await database.fetch_all(
         """
         SELECT DISTINCT material
@@ -8751,6 +8751,7 @@ async def public_indices_universe(
     }
 
 @app.get("/public/indices/latest", tags=["Public"], summary="Public latest indices snapshot (delayed)")
+@limiter(limit=100, time_window=60)  # very light rate limit since this is a public endpoint
 async def public_indices_latest(
     request: Request,
     region: str | None = Query(None, description="indices_daily.region (default 'blended')"),
@@ -8803,6 +8804,7 @@ async def public_indices_latest(
     }
 
 @app.get("/public/indices/history", tags=["Public"], summary="Public index history for a ticker (delayed)")
+@limiter(limit=100, time_window=60)  # very light rate limit since this is a public endpoint
 async def public_indices_history(
     request: Request,
     ticker: str = Query(..., description="material key used in indices_daily.material"),
@@ -18194,7 +18196,7 @@ async def rolling_bands(material: str, days: int = 365):
     rows = await database.fetch_all(q, {"m": material, "days": days})
     return [dict(r) for r in rows]
 
-# --- DAILY INDEX SNAPSHOTS ---
+# --- DAILY INDEX SNAPSHOT ---
 @app.post("/indices/generate_snapshot", tags=["Analytics"], summary="Generate daily index snapshot for a date (default today)")
 async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
     try:
@@ -19078,7 +19080,6 @@ async def indices_settle_current(
         }
         for r in rows
     ]
-
 # --------- Daily index snapshot ---------
 
 # --- PRICE BAND ESTIMATES (min/max/avg/stddev) ---
