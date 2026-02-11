@@ -286,17 +286,51 @@ BASE_DATABASE_URL = (_os.getenv("DATABASE_URL", "") or "").strip()
 if BASE_DATABASE_URL.startswith("postgres://"):
     BASE_DATABASE_URL = BASE_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# SQLAlchemy (sync) wants a driver prefix
+# SQLAlchemy 
 SYNC_DATABASE_URL = BASE_DATABASE_URL
 if SYNC_DATABASE_URL.startswith("postgresql://") and "+psycopg" not in SYNC_DATABASE_URL:
     SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-# databases/asyncpg must NOT have "+driver" in the scheme
+# databases/asyncpg 
 ASYNC_DATABASE_URL = BASE_DATABASE_URL
 if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
 if ASYNC_DATABASE_URL.startswith("postgresql+psycopg://"):
     ASYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+
+# --- Force IPv4 for DB URLs when requested (sandbox safety) ---
+if _os.getenv("FORCE_IPV4", "").strip().lower() in ("1","true","yes"):
+    import socket
+    from urllib.parse import urlparse, urlunparse
+
+    def _force_ipv4_in_url(url: str) -> str:
+        try:
+            u = urlparse(url)
+            host = u.hostname
+            if not host:
+                return url
+            # Resolve only IPv4 (AF_INET)
+            infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
+            ipv4 = infos[0][4][0] if infos else None
+            if not ipv4:
+                return url
+            # Rebuild netloc with original user/pass/port but IPv4 literal host
+            auth = ""
+            if u.username:
+                auth = u.username
+                if u.password:
+                    auth += f":{u.password}"
+                auth += "@"
+            port = f":{u.port}" if u.port else ""
+            netloc = f"{auth}{ipv4}{port}"
+            return urlunparse((u.scheme, netloc, u.path or "", u.params or "", u.query or "", u.fragment or ""))
+        except Exception:
+            return url
+
+    # Apply to both async + sync DSNs
+    ASYNC_DATABASE_URL = _force_ipv4_in_url(ASYNC_DATABASE_URL)
+    SYNC_DATABASE_URL  = _force_ipv4_in_url(SYNC_DATABASE_URL)
+# --- /Force IPv4 ---
 
 if not SYNC_DATABASE_URL:
     class _DummyEngine:
