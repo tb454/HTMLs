@@ -7,15 +7,11 @@ from uuid import uuid4
 
 # Import your already-deployed app pieces
 from bridge_buyer_backend import database, utcnow, _ensure_org_exists
+from bridge_buyer_backend import app, lifespan, database, _ensure_org_exists
 
-# ensure DB connected + schema exists before seeding
-import asyncio
-from bridge_buyer_backend import apply_migrations, seed_reference_data, database
-
-apply_migrations()      # safe no-op if already applied
-seed_reference_data()   # safe to re-run
-
-asyncio.get_event_loop().run_until_complete(database.connect())
+# Hard stop if someone points at prod
+if os.getenv("ENV", "").lower() == "production":
+    raise SystemExit("Refusing to seed: ENV=production")
 
 # ----------------- CONFIG -----------------
 DAYS_BACK           = int(os.getenv("SBX_DAYS_BACK", "120"))   # how many days of history
@@ -43,6 +39,9 @@ MATERIALS = [
     "Shred Steel", "HMS #1", "P&S 5ft", "Al 6061", "Al 6063",
     "Bare Bright", "#1 Copper", "#2 Copper", "Insulated Wire", "SS 304"
 ]
+
+def _now_utc(): return datetime.now(timezone.utc)
+def _choice(seq): return seq[random.randint(0, len(seq)-1)]
 
 def _rand_price_ton(material: str) -> float:
     # crude material bases (USD/ton)
@@ -219,6 +218,11 @@ async def seed_vendor_quotes_and_indices():
 
 async def main():
     print("== BRidge Sandbox Seeder ==")
+
+    # Run app startup hooks once (connect DB, bootstrap schema, views, indexes, etc.)
+    async with lifespan(app):
+        pass
+
     if not database.is_connected:
         await database.connect()
 
