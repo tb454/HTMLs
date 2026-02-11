@@ -8,6 +8,15 @@ from uuid import uuid4
 # Import your already-deployed app pieces
 from bridge_buyer_backend import database, utcnow, _ensure_org_exists
 
+# ensure DB connected + schema exists before seeding
+import asyncio
+from bridge_buyer_backend import apply_migrations, seed_reference_data, database
+
+apply_migrations()      # safe no-op if already applied
+seed_reference_data()   # safe to re-run
+
+asyncio.get_event_loop().run_until_complete(database.connect())
+
 # ----------------- CONFIG -----------------
 DAYS_BACK           = int(os.getenv("SBX_DAYS_BACK", "120"))   # how many days of history
 CONTRACTS_PER_DAY   = int(os.getenv("SBX_CONTRACTS_PER_DAY", "25"))
