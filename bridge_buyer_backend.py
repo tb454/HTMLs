@@ -4,7 +4,7 @@ from wsgiref import headers
 import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.responses import JSONResponse
-
+import socket, logging
 class JSONResponseUTF8(JSONResponse):
     media_type = "application/json; charset=utf-8"
 from fastapi.middleware.cors import CORSMiddleware
@@ -331,6 +331,26 @@ if _os.getenv("FORCE_IPV4", "").strip().lower() in ("1","true","yes"):
     ASYNC_DATABASE_URL = _force_ipv4_in_url(ASYNC_DATABASE_URL)
     SYNC_DATABASE_URL  = _force_ipv4_in_url(SYNC_DATABASE_URL)
 # --- /Force IPv4 ---
+
+def _log_db_dns_once():
+    dsn = (ASYNC_DATABASE_URL or "").strip()
+    try:
+      host = dsn.split("@",1)[-1].split("/",1)[0].rsplit(":",1)[0]
+    except Exception:
+      host = None
+    log = logging.getLogger("uvicorn.error")
+    if not host:
+        log.info("[DB] async url tail: %s", dsn.split("@")[-1] if "@" in dsn else "(n/a)")
+        return
+    try:
+        infos = socket.getaddrinfo(host, 5432, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        addrs = []
+        for fam,_,_,_,sa in infos:
+            fams = {socket.AF_INET:"ipv4", socket.AF_INET6:"ipv6"}.get(fam, str(fam))
+            addrs.append(f"{sa[0]}({fams})")
+        log.info("[DB] resolve %s -> %s", host, ", ".join(addrs) or "(none)")
+    except Exception as e:
+        log.warning("[DB] DNS resolution failed for %s: %s", host, e)
 
 if not SYNC_DATABASE_URL:
     class _DummyEngine:
@@ -22187,6 +22207,14 @@ async def ml_anomaly(a: AnomIn):
 @startup
 async def _flywheel_anomaly_cron():
     if _is_pytest():
+        return
+    
+    # 🔒 sandbox/ops toggle
+    if os.getenv("FLYWHEEL_DISABLE", "").lower() in ("1","true","yes"):
+        try:
+            logger.info("flywheel disabled in this environment")
+        except Exception:
+            pass
         return
     """
     Nightly flywheel job (vendor-aware):
