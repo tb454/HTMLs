@@ -4269,7 +4269,6 @@ async def _connect_db_first():
     if not database.is_connected:
         await database.connect()
 
-
     async def _do_connect():
         if not database.is_connected:
             await database.connect()

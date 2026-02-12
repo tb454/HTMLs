@@ -1523,13 +1523,15 @@
 
       if (!seller || !sku || !Number.isFinite(qty)) { toast('Seller, SKU, and Qty are required.'); return; }
 
+      const idem = (crypto.randomUUID?.() || String(Date.now()));
       const resp = await api(`/inventory/manual_add`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (crypto.randomUUID?.() || String(Date.now())) },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idem },
         body: JSON.stringify({
           seller, sku, qty_on_hand: qty, uom: 'ton',
           location: location || undefined, description: description || undefined,
-          source: 'manual'
+          source: 'manual',
+          idem_key: idem
         })
       });
       toast('Inventory updated.');

@@ -495,43 +495,80 @@
     let buyerKey  = storedUser.buyer  || storedUser.member || storedUser.org || storedUser.company || storedUser.username || '';
     let memberKey = storedUser.member || storedUser.org    || storedUser.company || buyerKey || '';
 
-    // Ensure buyer context, even if bridgeUser is empty
+    // Ensure buyer context, even if bridgeUser is empty.    
     async function ensureBuyerContext() {
+      // read a fresh snapshot; don't reassign outer const
+      let su;
+      try { su = JSON.parse(localStorage.getItem('bridgeUser') || '{}'); } catch { su = {}; }
+
+      buyerKey  = (typeof buyerKey  === 'string' && buyerKey.trim())  ? buyerKey.trim()  : (su?.buyer  || '').trim();
+      memberKey = (typeof memberKey === 'string' && memberKey.trim()) ? memberKey.trim() : (su?.member || su?.org || '').trim();
+
       if (buyerKey && memberKey) return true;
 
+      let j = null;
       try {
-        const r = await api('/me');
-        const j = await r.json();
-        const u = (j.username || '').toLowerCase();
-
-        // Hard mappings for your real accounts
-        if (u === 'anthony.priority' || u === 'anthony@priorityrecycling.com') {
-          buyerKey = memberKey = 'Priority Recycling';
-        } else if (u === 'alex.farnsworth' || u === 'alex@farnsworthmetals.com') {
-          buyerKey = memberKey = 'Farnsworth Metals';
-        } else if (u) {
-          // Generic fallback: turn "anthony.priority" into "Anthony Priority"
-          const base = u.split('@')[0].replace(/[._-]+/g, ' ').trim();
-          const orgGuess = base ? base.replace(/\b\w/g, c => c.toUpperCase()) : j.username;
-          buyerKey = buyerKey || orgGuess || j.username || '';
-          memberKey = memberKey || orgGuess || j.username || '';
-        }
-
-        // Persist back into bridgeUser so next page load is instant
-        const merged = {
-          ...(storedUser || {}),
-          username: j.username || storedUser.username || '',
-          role: j.role || storedUser.role || '',
-          buyer: buyerKey,
-          member: memberKey,
-          org: memberKey
-        };
-        try { localStorage.setItem('bridgeUser', JSON.stringify(merged)); } catch {}
-      } catch {
-        // If /me fails, fall through and report "no context"
+        const r = await api('/me');      // must return JSON: { username, role, member, resolved_member, ... }
+        j = await r.json();
+      } catch (_) {
+        j = null; // tolerate offline/first-load
       }
 
-      return !!buyerKey;
+      const candidates = [];
+
+      // 1) Backend single-value hints (prefer resolved_member)
+      if (j) {
+        [
+          j.resolved_member, j.member, j.org, j.organization, j.company,
+          j.default_org, j.default_buyer, j.org_name, j.account_name, j.buyer
+        ].forEach(v => {
+          if (typeof v === 'string' && v.trim()) candidates.push(v.trim());
+        });
+      }
+
+      // 2) Backend array hints (orgs / organizations / memberships)
+      const orgArrays = [
+        ...(Array.isArray(j?.orgs) ? j.orgs : []),
+        ...(Array.isArray(j?.organizations) ? j.organizations : []),
+        ...(Array.isArray(j?.memberships) ? j.memberships : [])
+      ];
+
+      for (const o of orgArrays) {
+        const name = String(o?.name || o?.org || o?.organization || '').trim();
+        const role = String(o?.role || o?.roles || '').toLowerCase();
+        const primary = Boolean(o?.primary || o?.is_primary || o?.default);
+        if (!name) continue;
+        if (primary || role.includes('buyer')) candidates.unshift(name); // higher priority
+        else candidates.push(name);
+      }
+
+      // 3) Last-resort: derive from username
+      const uname = String(j?.username || storedUser?.username || '').trim();
+      if (!candidates.length && uname) {
+        const base = uname.split('@')[0].replace(/[._-]+/g, ' ').trim();
+        const guess = base ? base.replace(/\b\w/g, c => c.toUpperCase()) : uname;
+        candidates.push(guess);
+      }
+
+      const chosen = (candidates.find(Boolean) || '').trim();
+
+      if (chosen) {
+        buyerKey  = buyerKey  || chosen;
+        memberKey = memberKey || chosen;
+      }
+
+      // Persist a clean, minimal bridgeUser snapshot for next load
+      const merged = {
+        username: (j?.username || su?.username || '').trim(),
+        role: (j?.role || su?.role || '').trim(),
+        buyer: buyerKey || '',
+        member: memberKey || '',
+        org: memberKey || ''
+      };
+
+      try { localStorage.setItem('bridgeUser', JSON.stringify(merged)); } catch {}
+
+      return Boolean(buyerKey);
     }
 
     function _formatTons(v) {
@@ -1125,23 +1162,48 @@
       const btn = ev?.currentTarget;
       if (!confirm('Confirm purchase of this contract?')) return;
       if (btn) { btn.disabled = true; btn.textContent = 'Purchasing…'; }
+
+      const idem = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()));
+
       try {
-        const res = await api(`/contracts/${id}/purchase`, {
-          method: 'PATCH',
+        // ensure buyerKey is populated (maps Oscar Winski via ensureBuyerContext)
+        if (!(await ensureBuyerContext())) throw new Error('No buyer context available.');
+
+        // Prefer POST /buy (simple method, CSRF header auto via api(), fewer CORS edge cases)
+        let res = await api(`/contracts/${encodeURIComponent(id)}/buy`, {
+          method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()))
+            'Idempotency-Key': idem
           },
-          body: JSON.stringify({ op: 'purchase' })
+          body: JSON.stringify({ buyer: buyerKey })
         });
-        const data = await res.json();
+        let data = await res.json();
+
         toast(`Purchased. BOL ${data?.bol_id ?? '—'} created.`);
         loadOpenContracts();
-        // keep buyer widgets in sync after purchase
         loadBuyerPositions();
         loadBuyerBols();
-      } catch {
-        toast('Purchase failed');
+      } catch (e1) {
+        // Fallback to your previous PATCH route if POST /buy isn’t available
+        try {
+          let res2 = await api(`/contracts/${encodeURIComponent(id)}/purchase`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': idem
+            },
+            body: JSON.stringify({ op: 'purchase', buyer: buyerKey })
+          });
+          let data2 = await res2.json();
+
+          toast(`Purchased. BOL ${data2?.bol_id ?? '—'} created.`);
+          loadOpenContracts();
+          loadBuyerPositions();
+          loadBuyerBols();
+        } catch (e2) {
+          toast(e2?.message || 'Purchase failed');
+        }
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Buy'; }
       }
