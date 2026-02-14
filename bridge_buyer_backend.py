@@ -9188,9 +9188,38 @@ async def seller_page(request: Request):
 
 @app.get("/indices-dashboard", include_in_schema=False)
 async def indices_page(request: Request):
+    """
+    Dynamic Indices page:
+    - Injects CSP nonce into {{NONCE}} so scripts/styles pass CSP
+    - Mints XSRF-TOKEN cookie (same pattern as /buyer, /seller, /admin)
+    """
+    nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
+
+    # read + inject nonce
+    try:
+        html = Path("static/indices.html").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="static/indices.html not found")
+
+    html = html.replace("{{NONCE}}", nonce)
+
     token = _csrf_get_or_create(request)
-    prod = os.getenv("ENV","").lower() == "production"
-    resp = FileResponse("static/indices.html")
+    prod = os.getenv("ENV", "").lower() == "production"
+
+    # Match your other pages’ CSP profile (allows Chart.js CDN + your static js)
+    csp = (
+        "default-src 'self'; "
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        f"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'unsafe-inline' 'nonce-{nonce}'; "
+        "style-src-attr 'self' 'unsafe-inline'; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net; "
+        "form-action 'self'"
+    )
+
+    resp = HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
     resp.set_cookie("XSRF-TOKEN", token, httponly=False, samesite="lax", secure=prod, path="/")
     return resp
 

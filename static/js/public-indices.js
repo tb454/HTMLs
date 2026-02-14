@@ -75,6 +75,7 @@ async function loadPublicIndices() {
     `).join("");
 
     // 3) fill Last / Δ / Updated (sequential = friendly to backend)
+    let metaSet = false
     for (const sym of symbols) {
       try {
         // limit=2 is enough for last & previous
