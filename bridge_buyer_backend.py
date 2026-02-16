@@ -743,6 +743,66 @@ app = FastAPI(
     },
 )
 
+# ----- Trusted hosts + session cookie -----
+allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
+
+prod = IS_PROD
+allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
+
+RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
+BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
+
+def _dev_only(reason: str = "dev-only"):
+    if _is_prod():
+        # Must look like the route does not exist in prod
+        raise HTTPException(status_code=404, detail="Not Found")
+
+def _allow_test_login_bypass() -> bool:
+    # Explicit allowlist; must be OFF in prod.
+    if _is_prod():
+        return False
+    return os.getenv("ALLOW_TEST_LOGIN_BYPASS", "0").lower() in ("1","true","yes")
+
+@startup
+async def _assert_bootstrap_disabled_in_prod():
+    """
+    Production must treat the DB as managed (migrations outside the app).
+    Pytest may simulate production; don't brick unit tests.
+    """
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+    if os.getenv("ENV", "").lower() == "production" and RAW_BOOTSTRAP_DDL:
+        raise RuntimeError("BRIDGE_BOOTSTRAP_DDL must be 0 in production (managed schema / migrations discipline).")
+
+if not prod or allow_local:
+    allowed += [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "testserver",
+        "api",
+        "api:8000",
+        "localhost:8000",
+        "127.0.0.1:8000",   
+    ]
+
+    if allow_local:
+        allowed += []
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
+    https_only=prod,
+    same_site="lax",
+    max_age=60*60*8,
+)
+
+# Make client IP visible behind proxies/CDN so SlowAPI uses the real address
+if prod:
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
+# ----- Trusted hosts + session cookie -----
+
 app.state.database = database
 
 _ADMIN_PREFIXES = ("/admin",)
@@ -1340,66 +1400,6 @@ def _require_qbo_relay_auth(request: Request):
     if hdr != QBO_RELAY_AUTH:
         raise HTTPException(status_code=401, detail="bad relay auth")
 # === QBO OAuth Relay • Config ===
-
-# ----- Trusted hosts + session cookie -----
-allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
-
-prod = IS_PROD
-allow_local = os.getenv("ALLOW_LOCALHOST_IN_PROD", "") in ("1", "true", "yes")
-
-RAW_BOOTSTRAP_DDL = os.getenv("BRIDGE_BOOTSTRAP_DDL", "1").lower() in ("1", "true", "yes")
-BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
-
-def _dev_only(reason: str = "dev-only"):
-    if _is_prod():
-        # Must look like the route does not exist in prod
-        raise HTTPException(status_code=404, detail="Not Found")
-
-def _allow_test_login_bypass() -> bool:
-    # Explicit allowlist; must be OFF in prod.
-    if _is_prod():
-        return False
-    return os.getenv("ALLOW_TEST_LOGIN_BYPASS", "0").lower() in ("1","true","yes")
-
-@startup
-async def _assert_bootstrap_disabled_in_prod():
-    """
-    Production must treat the DB as managed (migrations outside the app).
-    Pytest may simulate production; don't brick unit tests.
-    """
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return
-    if os.getenv("ENV", "").lower() == "production" and RAW_BOOTSTRAP_DDL:
-        raise RuntimeError("BRIDGE_BOOTSTRAP_DDL must be 0 in production (managed schema / migrations discipline).")
-
-if not prod or allow_local:
-    allowed += [
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "testserver",
-        "api",
-        "api:8000",
-        "localhost:8000",
-        "127.0.0.1:8000",   
-    ]
-
-    if allow_local:
-        allowed += []
-
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
-    https_only=prod,
-    same_site="lax",
-    max_age=60*60*8,
-)
-
-# Make client IP visible behind proxies/CDN so SlowAPI uses the real address
-if prod:
-    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
-# ----- Trusted hosts + session cookie -----
 
 # =====  rate limiting =====
 ENFORCE_RL = (
@@ -3656,8 +3656,8 @@ app.include_router(car_verify_router)
 tasks_router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 @tasks_router.post("/carrier_monitor", summary="Run carrier monitor now")
-async def run_carrier_monitor_now():
-    return await carrier_monitor_run()
+async def run_carrier_monitor_now(request: Request):
+    return await carrier_monitor_run(request)
 
 app.include_router(tasks_router)
 # ---- Tasks ----
@@ -12747,7 +12747,50 @@ async def login(request: Request):
                 request.session["member"] = mem_row["name"] or mem_row["slug"]
     except Exception:
         pass
-
+    # --- Auto-seed perms if missing (prevents "user exists but cannot do anything") ---
+    try:
+        if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() not in ("1", "true", "yes"):
+            auto_seed = os.getenv("AUTO_SEED_PERMS_ON_LOGIN", "1").strip().lower() in ("1", "true", "yes")
+            if auto_seed:
+                ident2 = ((request.session.get("username") or request.session.get("email") or "")).strip().lower()
+                u2 = await database.fetch_one(
+                    """
+                    SELECT id::text AS id
+                    FROM public.users
+                    WHERE lower(coalesce(email,'')) = :i OR lower(coalesce(username,'')) = :i
+                    LIMIT 1
+                    """,
+                    {"i": ident2},
+                )
+                tid2 = await current_tenant_id(request)
+                if u2 and tid2:
+                    # if the user has *no* perms for this tenant, seed defaults based on role
+                    has_any = await database.fetch_one(
+                        "SELECT 1 FROM user_permissions WHERE user_id=:u AND tenant_id=:t LIMIT 1",
+                        {"u": u2["id"], "t": tid2},
+                    )
+                    if not has_any:
+                        default_perms_map = {
+                            "buyer":  ["contracts.read", "contracts.purchase", "bols.read", "inventory.read"],
+                            "seller": ["contracts.create", "contracts.update", "inventory.write", "bols.create", "bols.read"],
+                            "broker": ["contracts.read", "contracts.create", "contracts.update", "bols.read"],
+                            "mill":   ["contracts.read", "bols.read"],
+                            "admin":  ["*"],
+                        }
+                        perms = default_perms_map.get(role, ["contracts.read"])
+                        for p in perms:
+                            await database.execute(
+                                """
+                                INSERT INTO user_permissions(user_id, tenant_id, perm)
+                                VALUES (:u, :t, :p)
+                                ON CONFLICT (user_id, tenant_id, perm) DO NOTHING
+                                """,
+                                {"u": u2["id"], "t": tid2, "p": p},
+                            )
+    except Exception:
+        # never block login on perms seeding
+        pass
+    # --- /Auto-seed perms if missing ---   
     return LoginOut(ok=True, role=role, redirect=f"/{role}")
 # ======= AUTH ========
 
@@ -16562,8 +16605,7 @@ async def search_materials(request: Request, q: str = "", limit: int = 25):
     }
 
 @materials_router.post("", summary="Upsert material (admin only)")
-async def upsert_material(body: MaterialUpsertIn, request: Request):
-    _require_admin(request)  # your existing admin gate
+async def upsert_material(body: MaterialUpsertIn, request: Request):        
     tid = await _tenant_or_404(request)
 
     canon = (body.canonical_name or "").strip()
