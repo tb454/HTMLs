@@ -78,17 +78,37 @@ async function loadPublicIndices() {
     let metaSet = false
     for (const sym of symbols) {
       try {
-        // limit=2 is enough for last & previous
-        const hist = await jget(`/public/indices/history?symbol=${encodeURIComponent(sym)}&limit=2`);
-        const series = (Array.isArray(hist) ? hist : [])
-          .filter(x => x && x.as_of_date && (x.close_price != null))
-          .sort((a, b) => new Date(a.as_of_date) - new Date(b.as_of_date));
+        // Public mirror detail endpoint (indices_daily) — returns {latest, history, subscriber, delay_days, index_date}
+        const data = await jget(`/public/index/${encodeURIComponent(sym)}/data?region=blended`);
 
-        const n     = series.length;
-        const last  = n ? +series[n - 1].close_price : null;
-        const prev  = n > 1 ? +series[n - 2].close_price : null;
-        const delta = (last != null && prev != null) ? (last - prev) : null;
-        const when  = n ? series[n - 1].as_of_date : null;
+        // Set global page labels once, from any successful response
+        if (!metaSet && data) {
+          const isSub = !!data.subscriber;
+          const delay = (data.delay_days ?? null);
+          const idxDate = (data.index_date ?? null);
+
+          // mode pill
+          modePill.textContent = isSub ? "Mode: Subscriber" : `Mode: Public${delay != null ? ` (T-${delay})` : ""}`;
+
+          // last updated pill shows the effective index date
+          if (idxDate) lastUpdated.textContent = `Index Date: ${idxDate}`;
+          metaSet = true;
+        }
+
+        // Normalize series from the response
+        const seriesRaw = (data && Array.isArray(data.history)) ? data.history
+                        : (data && Array.isArray(data.rows)) ? data.rows
+                        : [];
+
+        // Ensure asc by date
+        const series = seriesRaw
+          .filter(x => x && x.as_of_date && x.index_price_per_ton != null)
+          .sort((a,b) => new Date(a.as_of_date) - new Date(b.as_of_date));
+
+        const n = series.length;
+        const last = n ? +series[n-1].index_price_per_ton : null;
+        const prev = n > 1 ? +series[n-2].index_price_per_ton : null;
+        const when = n ? (series[n-1].as_of_date || null) : null;
 
         const row = tbody.querySelector(`tr[data-sym="${CSS.escape(sym)}"]`);
         if (!row) continue;
@@ -99,6 +119,7 @@ async function loadPublicIndices() {
 
         // delta
         const dEl = row.querySelector(".delta");
+        const delta = (last != null && prev != null) ? last - prev : null;
         if (delta == null) {
           dEl.textContent = "-";
           dEl.className = "delta muted";

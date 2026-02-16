@@ -99,18 +99,15 @@
   }
 
   async function loadUniverse() {
-    if (!symbolSel) return;
-    try {
-      const uni = await api('/public/indices/universe');
-      const list = (uni && uni.tickers) ? uni.tickers : (uni || []);
-      symbolSel.innerHTML = list
-        .map((t) => `<option value="${t}">${t}</option>`)
-        .join('');
-    } catch (e) {
-      console.error(e);
-      symbolSel.innerHTML = `<option disabled>Failed to load</option>`;
-    }
-  }
+    // Trader should trade off listed instruments/products (settlement-driven)
+    const prod = await api("/products").catch(() => []);
+    const symbols = Array.isArray(prod) ? prod.map(x => x.symbol).filter(Boolean) : [];
+    symbols.sort();
+
+    const sel = $("symbolSelect");
+    sel.innerHTML = symbols.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+    if (!sel.value && symbols.length) sel.value = symbols[0];
+  } 
 
   async function loadHistory() {
     if (!symbolSel || !limitSel || !idxMeta) return;

@@ -923,6 +923,8 @@ async def buyer_issue_contract(payload: BuyerIssueContractIn, request: Request, 
     """
     cid = str(uuid.uuid4())
     buyer_member = _current_member_name(request) or "OPEN"
+    mat = (payload.material or "").strip()
+    await require_material_exists(request, mat)
     await _ensure_org_exists(buyer_member)
     await _ensure_org_exists(payload.seller)
     row = await database.fetch_one("""
@@ -14672,6 +14674,7 @@ async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_p
 
     seller = (payload.get("seller") or "").strip()
     sku    = (payload.get("sku") or "").strip().upper()
+    await require_material_exists(request, sku)
     if not (seller and sku):
         raise HTTPException(400, "seller and sku are required")
 
@@ -16409,6 +16412,180 @@ async def require_perm(request: Request, perm: str):
     if not await _has_perm(uid, tid, perm):
         raise HTTPException(403, f"missing permission: {perm}")
 # -------- Permission helpers --------
+
+# ---------- MATERIALS ----------
+materials_router = APIRouter(prefix="/materials", tags=["Materials"])
+
+class MaterialRow(BaseModel):
+    canonical_name: str
+    display_name: Optional[str] = None
+    enabled: bool = True
+    sort_order: Optional[int] = None
+
+class MaterialsOut(BaseModel):
+    tenant_id: str
+    materials: List[MaterialRow]
+
+class MaterialUpsertIn(BaseModel):
+    canonical_name: str
+    display_name: Optional[str] = None
+    enabled: bool = True
+    sort_order: Optional[int] = None
+
+async def _tenant_or_404(request: Request) -> str:
+    # primary: session member -> tenants.slug -> tenants.id
+    tid = await current_tenant_id(request)
+    if tid:
+        return tid
+
+    try:
+        candidate = (
+            (request.query_params.get("seller") or "").strip()
+            or (request.query_params.get("member") or "").strip()
+            or (request.session.get("member") or "").strip()
+            or (request.session.get("org") or "").strip()
+        )
+    except Exception:
+        candidate = ""
+
+    if candidate:
+        slug = _slugify_member(candidate)
+        try:
+            row = await database.fetch_one("SELECT id FROM tenants WHERE slug=:s", {"s": slug})
+            if row and row["id"]:
+                return str(row["id"])
+        except Exception:
+            pass
+
+    raise HTTPException(401, "tenant not resolved (missing session member/org)")
+
+@materials_router.get("", summary="List active materials for current tenant")
+async def list_materials(request: Request, limit: int = 2000):
+    tid = await _tenant_or_404(request)
+    rows = await database.fetch_all(
+        """
+        SELECT canonical_name, display_name, enabled, sort_order
+        FROM public.materials
+        WHERE tenant_id = :tid AND enabled = TRUE
+        ORDER BY COALESCE(sort_order, 999999), canonical_name
+        LIMIT :lim
+        """,
+        {"tid": tid, "lim": max(1, min(limit, 20000))}
+    )
+    return {
+        "tenant_id": tid,
+        "materials": [
+            {
+                "canonical_name": r["canonical_name"],
+                "display_name": r["display_name"],
+                "enabled": bool(r["enabled"]),
+                "sort_order": r["sort_order"],
+            }
+            for r in rows
+        ],
+    }
+
+@materials_router.get("/search", summary="Prefix search for autocomplete")
+async def search_materials(request: Request, q: str = "", limit: int = 25):
+    tid = await _tenant_or_404(request)
+    qn = (q or "").strip()
+    if not qn:
+        # return top N
+        rows = await database.fetch_all(
+            """
+            SELECT canonical_name, display_name
+            FROM public.materials
+            WHERE tenant_id = :tid AND enabled = TRUE
+            ORDER BY COALESCE(sort_order, 999999), canonical_name
+            LIMIT :lim
+            """,
+            {"tid": tid, "lim": max(1, min(limit, 200))}
+        )
+    else:
+        rows = await database.fetch_all(
+            """
+            SELECT canonical_name, display_name
+            FROM public.materials
+            WHERE tenant_id = :tid
+              AND enabled = TRUE
+              AND (
+                canonical_name ILIKE :pfx
+                OR COALESCE(display_name,'') ILIKE :pfx
+                OR canonical_name ILIKE :like
+                OR COALESCE(display_name,'') ILIKE :like
+              )
+            ORDER BY canonical_name
+            LIMIT :lim
+            """,
+            {"tid": tid, "pfx": f"{qn}%", "like": f"%{qn}%", "lim": max(1, min(limit, 200))}
+        )
+    return {
+        "tenant_id": tid,
+        "materials": [{"name": (r["display_name"] or r["canonical_name"]), "canonical_name": r["canonical_name"]} for r in rows]
+    }
+
+@materials_router.post("", summary="Upsert material (admin only)")
+async def upsert_material(body: MaterialUpsertIn, request: Request):
+    _require_admin(request)  # your existing admin gate
+    tid = await _tenant_or_404(request)
+
+    canon = (body.canonical_name or "").strip()
+    if not canon:
+        raise HTTPException(422, "canonical_name required")
+
+    await database.execute(
+        """
+        INSERT INTO public.materials(tenant_id, canonical_name, display_name, enabled, sort_order, updated_at)
+        VALUES (:tid, :c, :d, :e, :s, NOW())
+        ON CONFLICT (tenant_id, canonical_name) DO UPDATE
+          SET display_name = EXCLUDED.display_name,
+              enabled      = EXCLUDED.enabled,
+              sort_order   = EXCLUDED.sort_order,
+              updated_at   = NOW()
+        """,
+        {"tid": tid, "c": canon, "d": body.display_name, "e": bool(body.enabled), "s": body.sort_order}
+    )
+    return {"ok": True, "tenant_id": tid, "canonical_name": canon}
+
+async def require_material_exists(request: Request, material: str) -> str:
+    """
+    Recommended: validate canonical materials on writes.
+    If you want “learn as you go”, set MATERIALS_AUTO_LEARN=1
+    """
+    tid = await _tenant_or_404(request)
+    m = (material or "").strip()
+    if not m:
+        raise HTTPException(422, "material required")
+
+    row = await database.fetch_one(
+        """
+        SELECT canonical_name, enabled
+        FROM public.materials
+        WHERE tenant_id = :tid AND canonical_name = :m
+        LIMIT 1
+        """,
+        {"tid": tid, "m": m}
+    )
+    if row and bool(row["enabled"]):
+        return m
+
+    # Optional learn-as-you-go
+    if os.getenv("MATERIALS_AUTO_LEARN", "").lower() in ("1", "true", "yes"):
+        await database.execute(
+            """
+            INSERT INTO public.materials(tenant_id, canonical_name, enabled, updated_at)
+            VALUES (:tid, :m, TRUE, NOW())
+            ON CONFLICT (tenant_id, canonical_name) DO UPDATE
+              SET enabled = TRUE, updated_at = NOW()
+            """,
+            {"tid": tid, "m": m}
+        )
+        return m
+
+    raise HTTPException(422, f"Unknown material for tenant: {m}")
+
+app.include_router(materials_router)
+# ---------- MATERIALS ----------
 
 #-------- Billing / Pricing API --------
 async def _org_plan(org: Optional[str]) -> str:
@@ -19825,6 +20002,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     await _ensure_org_exists(contract.seller)
     price_val = float(quantize_money(price_dec))
     sku    = (contract.material or "").strip()
+    await require_material_exists(request, sku)
 
     # resolve tenant from request/session first; if missing, derive from seller name
     tenant_id = await current_tenant_id(request)
