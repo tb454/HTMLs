@@ -6444,7 +6444,7 @@ async def admin_provision_user(p: dict, request: Request, _=Depends(csrf_protect
         user = await database.fetch_one("""
             INSERT INTO public.users (id,email,username,password_hash,role,is_active,email_verified,created_at)
             VALUES (gen_random_uuid(), :email, :uname, crypt('TempBridge123!', gen_salt('bf')), :role, TRUE, TRUE, NOW())
-            ON CONFLICT ((lower(email))) DO UPDATE
+            ON CONFLICT (email) DO UPDATE
               SET username=EXCLUDED.username, role=EXCLUDED.role, is_active=TRUE
             RETURNING id
         """, {"email": email, "uname": uname, "role": role})
@@ -16628,7 +16628,7 @@ async def _ensure_materials_schema():
       unique (tenant_id, canonical_name)
     );
     """)
-    
+
 app.include_router(materials_router)
 # ---------- MATERIALS ----------
 
