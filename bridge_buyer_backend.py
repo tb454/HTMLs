@@ -6440,14 +6440,24 @@ async def admin_provision_user(p: dict, request: Request, _=Depends(csrf_protect
     default_perms = default_perms_map[role]
 
     async with database.transaction():
-        # 1) user (idempotent on email)
+        # 1) user (idempotent on email) — NO ON CONFLICT (CI schema may not have uniques)
         user = await database.fetch_one("""
-            INSERT INTO public.users (id,email,username,password_hash,role,is_active,email_verified,created_at)
-            VALUES (gen_random_uuid(), :email, :uname, crypt('TempBridge123!', gen_salt('bf')), :role, TRUE, TRUE, NOW())
-            ON CONFLICT (email) DO UPDATE
-              SET username=EXCLUDED.username, role=EXCLUDED.role, is_active=TRUE
+            UPDATE public.users
+            SET username       = :uname,
+                role           = :role,
+                is_active      = TRUE,
+                email_verified = COALESCE(email_verified, TRUE)
+            WHERE LOWER(COALESCE(email,'')) = :email
             RETURNING id
         """, {"email": email, "uname": uname, "role": role})
+
+        if not user:
+            user = await database.fetch_one("""
+                INSERT INTO public.users (id,email,username,password_hash,role,is_active,email_verified,created_at)
+                VALUES (gen_random_uuid(), :email, :uname, crypt('TempBridge123!', gen_salt('bf')), :role, TRUE, TRUE, NOW())
+                RETURNING id
+            """, {"email": email, "uname": uname, "role": role})
+
         user_id = user["id"]
 
         # 2) tenant (idempotent on slug)
