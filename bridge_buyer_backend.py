@@ -940,7 +940,7 @@ async def buyer_issue_contract(payload: BuyerIssueContractIn, request: Request, 
         RETURNING id
     """, {
         "id": cid, "buyer": buyer_member, "seller": payload.seller,
-        "mat": payload.material, "wt": float(payload.weight_tons),
+        "mat": mat, "wt": float(payload.weight_tons),
         "ppt": float(payload.price_per_ton), "ccy": payload.currency,
     })
     if not row:
@@ -951,6 +951,8 @@ async def buyer_issue_contract(payload: BuyerIssueContractIn, request: Request, 
 async def buyer_issue_bol(payload: BuyerIssueBOLIn, request: Request, _=Depends(require_buyer_or_admin)):
     bol_id = str(uuid.uuid4())
     pickup_time = payload.pickup_time or utcnow()
+    mat = (payload.material or "").strip()
+    await require_material_exists(request, mat)
     # default tenant id
     tenant_id = await current_tenant_id(request)
     row = await database.fetch_one("""
@@ -975,7 +977,7 @@ async def buyer_issue_bol(payload: BuyerIssueBOLIn, request: Request, _=Depends(
     """, {
         "bol_id": bol_id,
         "cid": payload.contract_id,
-        "mat": payload.material,
+        "mat": mat,
         "wt": float(payload.weight_tons),
         "ppu": float(payload.price_per_unit),
         "tv": float(payload.total_value),
@@ -1064,6 +1066,8 @@ async def buyer_resell_from_inventory(payload: BuyerResellIn, request: Request, 
     seller_member = _current_member_name(request) or "OPEN"
     await _ensure_org_exists(seller_member)
     await _ensure_org_exists(payload.counterparty_buyer)
+    mat = (payload.material or "").strip()
+    await require_material_exists(request, mat)
 
     # quick available check (if view exists)
     available = None
@@ -1071,7 +1075,7 @@ async def buyer_resell_from_inventory(payload: BuyerResellIn, request: Request, 
         r = await database.fetch_one("""
           SELECT qty_available FROM inventory_available
           WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:sku)
-        """, {"s": seller_member, "sku": payload.material})
+        """, {"s": seller_member, "sku": mat})
         if r: available = float(r["qty_available"])
     except Exception:
         available = None
@@ -1090,7 +1094,7 @@ async def buyer_resell_from_inventory(payload: BuyerResellIn, request: Request, 
         RETURNING id
     """, {
         "id": cid, "buyer": payload.counterparty_buyer, "seller": seller_member,
-        "mat": payload.material, "wt": float(payload.weight_tons),
+        "mat": mat, "wt": float(payload.weight_tons),
         "ppt": float(payload.price_per_ton), "ccy": payload.currency
     })
     if not row:
@@ -1109,7 +1113,7 @@ async def buyer_resell_from_inventory(payload: BuyerResellIn, request: Request, 
             )
         """, {
             "seller": seller_member,
-            "sku": payload.material,
+            "sku": mat,
             "qty": float(payload.weight_tons),
             "ref": cid,
             "cid": cid,
@@ -10233,6 +10237,8 @@ async def mill_get_reqs(request: Request, _=Depends(require_mill_or_admin)):
 @mills_router.post("/requirements", summary="Upsert requirement")
 async def mill_set_req(body: MillReqIn, request: Request, _=Depends(require_mill_or_admin)):
     ident = (request.session.get("username") or request.session.get("email") or "").strip()
+    mat = (body.material or "").strip()
+    await require_material_exists(request, mat)    
     row = await database.fetch_one("""
       INSERT INTO mill_requirements(mill_username,material,min_pct,max_contaminant,spec_json,updated_at)
       VALUES (:u,:m,:a,:b,:j,NOW())
@@ -10240,7 +10246,7 @@ async def mill_set_req(body: MillReqIn, request: Request, _=Depends(require_mill
         min_pct=EXCLUDED.min_pct, max_contaminant=EXCLUDED.max_contaminant,
         spec_json=EXCLUDED.spec_json, updated_at=NOW()
       RETURNING *
-    """, {"u": ident, "m": body.material, "a": body.min_pct, "b": body.max_contaminant, "j": json.dumps(body.spec_json or {})})
+    """, {"u": ident, "m": mat, "a": body.min_pct, "b": body.max_contaminant, "j": json.dumps(body.spec_json or {})})
     return dict(row)
 
 class ApproveIn(BaseModel):
@@ -14755,6 +14761,7 @@ async def inventory_import_csv(
             try:
                 s = (seller or row.get("seller") or "").strip()
                 k = (row.get("sku") or "").strip()
+                await require_material_exists(request, k.upper())
                 if not (s and k):
                     raise ValueError("missing seller or sku")
 
