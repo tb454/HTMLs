@@ -10,7 +10,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pg_dump -Fc "$DATABASE_URL" > backup_$(date +%F).dump
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:Vh9jGqvfnjHtNZlr@db.naoaitepvzrwlaqihzvc.supabase.co:5432/postgres
       - uses: actions/upload-artifact@v4
         with:
           name: db-backup

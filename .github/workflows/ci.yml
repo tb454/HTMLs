@@ -20,6 +20,9 @@ jobs:
     env:
       ENV: ci
       HARVESTER_DISABLED: 1
+      BRIDGE_FREE_MODE: "1"
+      MATERIALS_AUTO_LEARN: "1"
+      TEST_TENANT_ID: "00000000-0000-0000-0000-000000000001"
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bridge
       SESSION_SECRET: test-secret
       JWT_SECRET: test-jwt

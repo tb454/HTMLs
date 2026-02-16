@@ -16371,8 +16371,20 @@ def current_member_from_request(request: Request) -> Optional[str]:
 
 async def current_tenant_id(request: Request) -> Optional[str]:
     """
-    Resolve tenant_id via the inferred member key (slug match).
+    Resolve tenant_id via:
+      - NON-PROD: X-Tenant-Id header (fast test/dev override)
+      - else: inferred member key (slug match)
     """
+    # --- NON-PROD header override (CI/dev convenience) ---
+    if os.getenv("ENV", "").lower().strip() != "production":
+        hdr = (request.headers.get("X-Tenant-Id") or request.headers.get("X-Tenant") or "").strip()
+        if hdr:
+            try:
+                return str(uuid.UUID(hdr))
+            except Exception:
+                raise HTTPException(status_code=400, detail="invalid X-Tenant-Id")
+    # --- NON-PROD header override (CI/dev convenience) ---
+
     member = current_member_from_request(request)
     if not member:
         return None
@@ -16444,7 +16456,15 @@ async def _tenant_or_404(request: Request) -> str:
     tid = await current_tenant_id(request)
     if tid:
         return tid
-
+    
+    # NON-PROD header override (CI/dev convenience)
+    if os.getenv("ENV", "").lower().strip() != "production":
+        hdr = (request.headers.get("X-Tenant-Id") or request.headers.get("X-Tenant") or "").strip()
+        if hdr:
+            try:
+                return str(uuid.UUID(hdr))
+            except Exception:
+                raise HTTPException(status_code=400, detail="invalid X-Tenant-Id")
     try:
         candidate = (
             (request.query_params.get("seller") or "").strip()
@@ -16591,6 +16611,24 @@ async def require_material_exists(request: Request, material: str) -> str:
 
     raise HTTPException(422, f"Unknown material for tenant: {m}")
 
+@startup
+async def _ensure_materials_schema():
+    if not BOOTSTRAP_DDL:
+        return
+    await run_ddl_multi("""
+    CREATE TABLE IF NOT EXISTS public.materials (
+      id uuid primary key default gen_random_uuid(),
+      tenant_id uuid not null,
+      canonical_name text not null,
+      display_name text,
+      enabled boolean not null default true,
+      sort_order int,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (tenant_id, canonical_name)
+    );
+    """)
+    
 app.include_router(materials_router)
 # ---------- MATERIALS ----------
 
