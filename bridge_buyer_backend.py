@@ -14778,7 +14778,7 @@ async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_p
         "delta": delta,
         "uom": "ton",
     }
-    return await _idem_guard(request, key, resp)           # manual_add
+    return await _idem_guard(request, key, resp)          
 
 # -------- Inventory: CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
@@ -14954,9 +14954,6 @@ async def _ensure_inventory_constraints():
 # -------- Contract enums and FKs --------
 @startup
 async def _ensure_contract_enums_and_fks():
-    # HARD STOP: Supabase schema is the boss in production.
-    # This block previously converted contracts.status to an enum, which breaks ILIKE
-    # filters and causes "cannot alter type of a column used by a view" failures.
     return
 # -------- Contract enums and FKs --------
 
