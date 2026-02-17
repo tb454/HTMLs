@@ -2455,10 +2455,7 @@ def _is_same_site_browser(request: Request) -> bool:
         return False
 # ---  Smart CSRF toggles ---
 
-async def csrf_protect(
-    request: Request,
-    x_csrf: str | None = Header(default=None, alias="X-CSRF")
-):
+async def csrf_protect(request: Request):
     """
     Enforce CSRF only in production, only for unsafe methods,
     only for same-site browser requests that carry a session cookie,
@@ -2486,6 +2483,11 @@ async def csrf_protect(
         # Issue one so the client can retry
         _csrf_issue_token(request)
         raise HTTPException(status_code=401, detail="bad csrf")
+
+    x_csrf = (
+        (request.headers.get("X-CSRF") or "").strip()
+        or (request.headers.get("X-CSRF-Token") or "").strip()
+    )
 
     if x_csrf != sess_token:
         raise HTTPException(status_code=401, detail="bad csrf")
