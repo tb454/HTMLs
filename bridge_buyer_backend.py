@@ -9258,10 +9258,9 @@ async def indices_legacy(request: Request):
 async def indices_alias(request: Request):
     # Serve the same static indices page the admin links to.
     return await indices_page(request)
-
 # -------- Static HTML --------
 
-# alias: support any old links that hit /yard
+# --------- alias help ----------
 @app.get("/yard", include_in_schema=False)
 async def yard_alias():
     return RedirectResponse("/seller", status_code=307)
@@ -9276,6 +9275,24 @@ async def favicon():
     if p.exists():
         return FileResponse(str(p))
     return Response(status_code=204)
+
+@app.get("/seller.html", include_in_schema=False)
+async def seller_page_html_alias():
+    return RedirectResponse("/seller", status_code=307)
+
+@app.get("/buyer.html", include_in_schema=False)
+async def buyer_page_html_alias():
+    return RedirectResponse("/buyer", status_code=307)
+
+@app.get("/admin.html", include_in_schema=False)
+async def admin_page_html_alias():
+    return RedirectResponse("/admin", status_code=307)
+
+@app.get("/trader.html", include_in_schema=False)
+async def trader_page_html_alias():
+    return RedirectResponse("/trader", status_code=307)
+
+# --------- alias help ----------
 
 # -------- Risk controls (kill switch, price bands, entitlements) --------
 @startup

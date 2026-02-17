@@ -46,18 +46,56 @@ async function api(path, opts = {}) {
   return res;
 }
 
-// Role → homepage map (use the actual .html files)
+// Role → homepage map 
 const ROLE_HOME = {
-  admin:  "/admin.html",
-  seller: "/seller.html",
-  buyer:  "/buyer.html",
+  admin:  "/admin",
+  seller: "/seller",
+  buyer:  "/buyer",
 };
 
-function safeInternalNext(nxt) {
-  // honor ?next= only for same-origin internal paths
+function _roleAllowsNext(role, path) {
+  const p = String(path || "");
+  // hard deny anything weird
+  if (!p.startsWith("/") || p.startsWith("//")) return false;
+
+  // admin can go anywhere in-app
+  if (role === "admin") return true;
+
+  // sellers: allow seller + shared pages
+  if (role === "seller") {
+    return (
+      p === "/seller" || p.startsWith("/seller/") ||
+      p === "/trader" || p.startsWith("/trader/") ||
+      p === "/broker" || p.startsWith("/broker/") ||
+      p === "/mill"   || p.startsWith("/mill/") ||
+      p === "/indices-dashboard" || p.startsWith("/indices") ||
+      p.startsWith("/public") ||
+      p.startsWith("/legal") ||
+      p === "/pricing" || p.startsWith("/pricing")
+    );
+  }
+
+  // buyers: allow buyer + shared pages
+  if (role === "buyer") {
+    return (
+      p === "/buyer"  || p.startsWith("/buyer/") ||
+      p === "/trader" || p.startsWith("/trader/") ||
+      p === "/broker" || p.startsWith("/broker/") ||
+      p === "/mill"   || p.startsWith("/mill/") ||
+      p === "/indices-dashboard" || p.startsWith("/indices") ||
+      p.startsWith("/public") ||
+      p.startsWith("/legal") ||
+      p === "/pricing" || p.startsWith("/pricing")
+    );
+  }
+
+  return false;
+}
+
+function safeInternalNext(role, nxt) {
   if (!nxt) return null;
   if (!nxt.startsWith("/") || nxt.startsWith("//")) return null;
-  return nxt;
+  return _roleAllowsNext(role, nxt) ? nxt : null;
 }
 
 // ?next= handling + loading state + show/hide password
@@ -153,11 +191,11 @@ document.getElementById("loginForm").addEventListener("submit", async function (
 
     // Target resolution order:
     // 1) ?next= (internal only)
-    let target = safeInternalNext(next);
+    let target = safeInternalNext(role, next);
 
     // 2) server-provided redirect (internal only)
     if (!target && typeof data.redirect === "string") {
-      const safe = safeInternalNext(data.redirect);
+      const safe = safeInternalNext(role, data.redirect);
       if (safe) target = safe;
     }
 
