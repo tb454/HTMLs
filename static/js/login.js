@@ -156,7 +156,7 @@ document.getElementById("loginForm").addEventListener("submit", async function (
     if (!ROLE_HOME[role]) role = "buyer"; // hard fallback
 
     // --- derive org/buyer key from login identifier ---
-    const rawUser = username; // what they typed into the login box
+    const rawUser = username; 
 
     const orgGuess = (function (u) {
       if (!u) return "";
