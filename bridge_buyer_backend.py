@@ -18310,7 +18310,6 @@ async def confirm_delivery(
     contract_id: str,
     payload: DeliveryConfirmIn = Body(default=DeliveryConfirmIn()),
     request: Request = None,
-    _=Depends(csrf_protect),
 ):
     if not request:
         raise HTTPException(401, "Unauthorized")
