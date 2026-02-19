@@ -14743,8 +14743,8 @@ async def inventory_manual_add(payload: dict, request: Request):
     if key and key in _idem_cache:
         return _idem_cache[key]
 
-    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
-        pass
+    #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        #pass
 
     seller = (payload.get("seller") or "").strip()
     sku    = (payload.get("sku") or "").strip().upper()
@@ -14814,8 +14814,8 @@ async def inventory_import_csv(
     seller: Optional[str] = Form(None),
     request: Request = None,
 ):
-    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
-        pass
+    #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        #pass
 
     tenant_id = await current_tenant_id(request) if request is not None else None
 
@@ -14861,8 +14861,8 @@ async def inventory_import_excel(
     seller: Optional[str] = Form(None),
     request: Request = None,
 ):
-    if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
-        pass
+    #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+        #pass
 
     tenant_id = await current_tenant_id(request) if request is not None else None
 
