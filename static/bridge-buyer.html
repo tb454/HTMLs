@@ -362,6 +362,10 @@
       return m ? decodeURIComponent(m[1]) : '';
     }
 
+    // Ensure XSRF cookie exists before any unsafe request (prevents race-click 401 "bad csrf")
+    const __csrfMint = (async () => {
+      try { await fetch('/health', { credentials: 'include' }); } catch {}
+    })();
     // Toast helper
     function toast(msg, ms = 2800) {
       const wrap = document.getElementById('toast');
@@ -395,6 +399,7 @@
       const method = (opts.method || 'GET').toUpperCase();
       const headers = { Accept: 'application/json', ...(opts.headers || {}) };
       if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
+        try { await __csrfMint; } catch {}
         headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
       }
 
