@@ -14748,9 +14748,10 @@ async def inventory_manual_add(payload: dict, request: Request):
 
     seller = (payload.get("seller") or "").strip()
     sku    = (payload.get("sku") or "").strip().upper()
-    await require_material_exists(request, sku)
     if not (seller and sku):
         raise HTTPException(400, "seller and sku are required")
+
+    await require_material_exists_for_seller(request, sku, seller)
 
     uom     = (payload.get("uom") or "ton")
     loc     = payload.get("location")
@@ -14828,10 +14829,11 @@ async def inventory_import_csv(
             try:
                 s = (seller or row.get("seller") or "").strip()
                 k = (row.get("sku") or "").strip()
-                await require_material_exists(request, k.upper())
+
                 if not (s and k):
                     raise ValueError("missing seller or sku")
-
+                await require_material_exists_for_seller(request, k.upper(), s)
+                
                 uom = row.get("uom") or "ton"
                 qty_raw = float(row.get("qty_on_hand") or 0.0)
                 qty_tons = _to_tons(qty_raw, uom)
@@ -14890,6 +14892,8 @@ async def inventory_import_excel(
                 k = (rec.get("sku") or rec.get("SKU") or "").strip()
                 if not (s and k):
                     raise ValueError("missing seller or sku")
+
+                await require_material_exists_for_seller(request, k.upper(), s)
 
                 uom = rec.get("uom") or rec.get("UOM") or "ton"
                 qty_raw = rec.get("qty_on_hand") or rec.get("Qty_On_Hand") or 0.0
@@ -16636,6 +16640,64 @@ async def upsert_material(body: MaterialUpsertIn, request: Request):
         {"tid": tid, "c": canon, "d": body.display_name, "e": bool(body.enabled), "s": body.sort_order}
     )
     return {"ok": True, "tenant_id": tid, "canonical_name": canon}
+
+async def require_material_exists_for_seller(request: Request, material: str, seller: str) -> str:
+    """
+    Inventory endpoints often receive seller in JSON body (not query params),
+    so tenant can't be resolved by _tenant_or_404(). This helper:
+      1) tries normal require_material_exists()
+      2) if that fails with 401 (tenant not resolved), resolves tenant via tenants.slug from seller
+      3) validates material against public.materials for that tenant (or auto-learns if enabled)
+    """
+    m = (material or "").strip()
+    s = (seller or "").strip()
+    if not m:
+        raise HTTPException(422, "material required")
+
+    # First try the canonical path (session/query-based tenant resolution)
+    try:
+        return await require_material_exists(request, m)
+    except HTTPException as e:
+        if e.status_code != 401:
+            raise  # not a tenant-resolution problem
+
+    # Fallback: derive tenant from seller (body field), not query params
+    if not s:
+        raise HTTPException(401, "tenant not resolved (missing seller in payload)")
+
+    slug = _slugify_member(s)
+    trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
+    if not trow or not trow["id"]:
+        raise HTTPException(401, "tenant not resolved (seller has no tenant)")
+
+    tid = str(trow["id"])
+
+    row = await database.fetch_one(
+        """
+        SELECT canonical_name, enabled
+        FROM public.materials
+        WHERE tenant_id = :tid AND canonical_name = :m
+        LIMIT 1
+        """,
+        {"tid": tid, "m": m}
+    )
+    if row and bool(row["enabled"]):
+        return m
+
+    # Optional learn-as-you-go
+    if os.getenv("MATERIALS_AUTO_LEARN", "").lower() in ("1", "true", "yes"):
+        await database.execute(
+            """
+            INSERT INTO public.materials(tenant_id, canonical_name, enabled, updated_at)
+            VALUES (:tid, :m, TRUE, NOW())
+            ON CONFLICT (tenant_id, canonical_name) DO UPDATE
+              SET enabled = TRUE, updated_at = NOW()
+            """,
+            {"tid": tid, "m": m}
+        )
+        return m
+
+    raise HTTPException(422, f"Unknown material for tenant: {m}")
 
 async def require_material_exists(request: Request, material: str) -> str:
     """

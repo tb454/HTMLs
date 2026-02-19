@@ -659,7 +659,7 @@
         headers
       });
 
-      // One retry for unsafe methods if we got a 401 and CSRF token was missing/late
+      // One retry for unsafe methods
       if (!isSafe && res.status === 401) {
         try { await fetch('/health', { credentials:'include' }); } catch {}
         const xsrf2 = _cookie('XSRF-TOKEN');
