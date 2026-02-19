@@ -16559,6 +16559,19 @@ async def _tenant_or_404(request: Request) -> str:
                         candidate = s
         except Exception:
             pass
+
+    # FORM fallback (inventory/import/csv + inventory/import/excel are multipart/form-data)
+    if not candidate and (request.method or "").upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        try:
+            ctype = (request.headers.get("content-type") or "").lower()
+            if ("multipart/form-data" in ctype) or ("application/x-www-form-urlencoded" in ctype):
+                form = await request.form()
+                s = (form.get("seller") or form.get("member") or form.get("org") or "").strip()
+                if s:
+                    candidate = s
+        except Exception:
+            pass
+        
     if candidate:
         slug = _slugify_member(candidate)
         try:
