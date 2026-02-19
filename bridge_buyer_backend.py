@@ -9126,9 +9126,6 @@ with open("static/trader.html", "r", encoding="utf-8") as f:
 
 @app.get("/buyer", include_in_schema=False)
 async def buyer_page_dynamic(request: Request):
-    # permission gates
-    await require_perm(request, "contracts.read")
-    await require_perm(request, "contracts.purchase")
 
     nonce = getattr(request.state, "csp_nonce", secrets.token_urlsafe(16))
     html = _BUYER_HTML_TEMPLATE.replace("{{NONCE}}", nonce)
@@ -14740,8 +14737,6 @@ async def idem_put(key: str, resp: dict):
 )
 @_limit("60/minute")
 async def inventory_manual_add(payload: dict, request: Request, _=Depends(csrf_protect)):
-    # permission gate
-    await require_perm(request, "inventory.write")
 
     key = _idem_key(request)
     if key and key in _idem_cache:
@@ -18027,7 +18022,6 @@ async def purchase_contract(
     request: Request,
     _=Depends(csrf_protect),
 ):
-    await require_perm(request, "contracts.purchase")
     try:
         # ---- idempotency ----
         key = _idem_key(request) or getattr(body, "idempotency_key", None)
@@ -20092,7 +20086,6 @@ async def list_contracts_admin(
 
 @app.post("/contracts", response_model=ContractOut, tags=["Contracts"], summary="Create Contract", status_code=201)
 async def create_contract(contract: ContractInExtended, request: Request, _=Depends(csrf_protect)):
-    await require_perm(request, "contracts.create")
     tenant_id = await current_tenant_id(request)
     key = _idem_key(request)
     if key:
