@@ -740,7 +740,7 @@
     onReady(_renderTZHintSeller);
     // ---- /Timezone toggle ----
 
-    /* colors handled by CSS; no inline styles */
+    /* colors handled by CSS; no inline styles. */
 
     let activeContractsChart, finishedGoodsChart, kpiChart;
     const activeContractsChangeHistory = [], activeContractsChartLabels = [];
@@ -751,7 +751,7 @@
       const hd = document.getElementById('header-date');
       if (hd) hd.textContent = _fmtDate(new Date());
       try { wireSellerUI(); } catch (e) { console.warn(e); }
-      
+
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
