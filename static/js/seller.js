@@ -8,36 +8,6 @@ let BRINDEX_ROWS = [];
 let BRINDEX_LAST_FETCH_MS = 0;
 const BRINDEX_TTL_MS = 25000; // refetch if older than 25s
 
-// ---------------- CSRF (prod) helper ----------------
-// Backend requires:
-// XSRF-TOKEN cookie
-function _cookie(name){
-  const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1') + '=([^;]*)'));
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
-// mint XSRF cookie once (best-effort)
-let _csrfReady = (async () => {
-  try { await fetch('/health', { credentials: 'include' }); } catch {}
-})();
-
-// wrapper: always include cookies; add X-CSRF for unsafe methods
-async function _fetch(url, opts = {}) {
-  const method = String(opts.method || 'GET').toUpperCase();
-
-  if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
-    try { await _csrfReady; } catch {}
-    const token = _cookie('XSRF-TOKEN');
-    opts.headers = opts.headers || {};
-    if (!opts.headers['X-CSRF'] && !opts.headers['X-CSRF-Token']) {
-      opts.headers['X-CSRF'] = token;
-    }
-  }
-
-  return fetch(url, { credentials: 'include', ...opts });
-}
-// ---------------- CSRF helper ----------------
-
 function _bleach(s){  
   return String(s || '').replace(/(COMEX|LME|CME)/ig, 'BR-Index');
 }
@@ -60,12 +30,15 @@ function _arr(x){
 }
 
 async function _getJSON(url){
-  const r = await _fetch(url, {
+  // Use the unified request wrapper from seller.html so auth/401/CSRF behavior is consistent
+  if (typeof window.api !== 'function') {
+    throw new Error('api() not loaded yet');
+  }
+  const r = await window.api(url, {
     method: 'GET',
     cache: 'no-store',
     headers: { 'Accept': 'application/json' }
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
   return await r.json();
 }
 

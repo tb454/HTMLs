@@ -750,7 +750,8 @@
     onReady(() => {
       const hd = document.getElementById('header-date');
       if (hd) hd.textContent = _fmtDate(new Date());
-
+      try { wireSellerUI(); } catch (e) { console.warn(e); }
+      
       const activeCanvas = document.getElementById('activeContractsChart');
       if (activeCanvas) {
         activeContractsChart = new Chart(activeCanvas.getContext('2d'), {
