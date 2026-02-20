@@ -984,7 +984,6 @@ async def buyer_issue_contract(payload: BuyerIssueContractIn, request: Request, 
     cid = str(uuid.uuid4())
     buyer_member = _current_member_name(request) or "OPEN"
     mat = (payload.material or "").strip()
-    await require_material_exists(request, mat)
     await _ensure_org_exists(buyer_member)
     await _ensure_org_exists(payload.seller)
     row = await database.fetch_one("""
@@ -1012,8 +1011,7 @@ async def buyer_issue_bol(payload: BuyerIssueBOLIn, request: Request, _=Depends(
     bol_id = str(uuid.uuid4())
     pickup_time = payload.pickup_time or utcnow()
     mat = (payload.material or "").strip()
-    await require_material_exists(request, mat)
-    # default tenant id
+
     tenant_id = await current_tenant_id(request)
     row = await database.fetch_one("""
         INSERT INTO bols (
@@ -10263,8 +10261,7 @@ async def mill_get_reqs(request: Request, _=Depends(require_mill_or_admin)):
 @mills_router.post("/requirements", summary="Upsert requirement")
 async def mill_set_req(body: MillReqIn, request: Request, _=Depends(require_mill_or_admin)):
     ident = (request.session.get("username") or request.session.get("email") or "").strip()
-    mat = (body.material or "").strip()
-    await require_material_exists(request, mat)    
+    mat = (body.material or "").strip() 
     row = await database.fetch_one("""
       INSERT INTO mill_requirements(mill_username,material,min_pct,max_contaminant,spec_json,updated_at)
       VALUES (:u,:m,:a,:b,:j,NOW())
@@ -14751,8 +14748,6 @@ async def inventory_manual_add(payload: dict, request: Request):
     if not (seller and sku):
         raise HTTPException(400, "seller and sku are required")
 
-    await require_material_exists(request, sku)
-
     uom     = (payload.get("uom") or "ton")
     loc     = payload.get("location")
     desc    = payload.get("description")
@@ -14832,7 +14827,6 @@ async def inventory_import_csv(
 
                 if not (s and k):
                     raise ValueError("missing seller or sku")
-                await require_material_exists(request, k.upper())
                 
                 uom = row.get("uom") or "ton"
                 qty_raw = float(row.get("qty_on_hand") or 0.0)
@@ -14892,8 +14886,6 @@ async def inventory_import_excel(
                 k = (rec.get("sku") or rec.get("SKU") or "").strip()
                 if not (s and k):
                     raise ValueError("missing seller or sku")
-
-                await require_material_exists(request, k.upper())
 
                 uom = rec.get("uom") or rec.get("UOM") or "ton"
                 qty_raw = rec.get("qty_on_hand") or rec.get("Qty_On_Hand") or 0.0
@@ -20140,7 +20132,6 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     await _ensure_org_exists(contract.seller)
     price_val = float(quantize_money(price_dec))
     sku    = (contract.material or "").strip()
-    await require_material_exists(request, sku)
 
     # resolve tenant from request/session first; if missing, derive from seller name
     tenant_id = await current_tenant_id(request)
