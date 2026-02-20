@@ -14814,62 +14814,84 @@ async def idem_put(key: str, resp: dict):
 
 @_limit("60/minute")
 async def inventory_manual_add(payload: dict, request: Request):
+    rid = (request.headers.get("X-Request-ID") or getattr(getattr(request, "state", None), "request_id", None) or "")
 
-    key = _idem_key(request)
-    hit = await idem_get(key) if key else None
-    if hit:
-        return hit
+    try:
+        key = _idem_key(request)
+        hit = await idem_get(key) if key else None
+        if hit:
+            return hit
 
-    #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
-        #pass
+        #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
+            #pass
 
-    seller = (payload.get("seller") or "").strip()
-    sku    = (payload.get("sku") or "").strip().upper()
-    if not (seller and sku):
-        raise HTTPException(400, "seller and sku are required")
+        seller = (payload.get("seller") or "").strip()
+        sku    = (payload.get("sku") or "").strip().upper()
+        if not (seller and sku):
+            raise HTTPException(400, "seller and sku are required")
 
-    uom     = (payload.get("uom") or "ton")
-    loc     = payload.get("location")
-    desc    = payload.get("description")
-    source  = payload.get("source") or "manual"
-    idem    = payload.get("idem_key")
-    qty_raw = float(payload.get("qty_on_hand") or 0.0)
-    qty_tons = _to_tons(qty_raw, uom)
+        uom     = (payload.get("uom") or "ton")
+        loc     = payload.get("location")
+        desc    = payload.get("description")
+        source  = payload.get("source") or "manual"
+        idem    = payload.get("idem_key")
+        qty_raw = float(payload.get("qty_on_hand") or 0.0)
+        qty_tons = _to_tons(qty_raw, uom)
 
-    tenant_id = await current_tenant_id(request)
-    if not tenant_id and seller:
+        tenant_id = await current_tenant_id(request)
+        if not tenant_id and seller:
+            try:
+                slug = _slugify_member(seller)
+                trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
+                if trow and trow.get("id"):
+                    tenant_id = str(trow["id"])
+            except Exception:
+                tenant_id = None
+
+        async with database.transaction():
+            old, new_qty, delta = await _manual_upsert_absolute_tx(
+                seller=seller,
+                sku=sku,
+                qty_on_hand_tons=qty_tons,
+                uom=uom,
+                location=loc,
+                description=desc,
+                source=source,
+                movement_reason="manual_add",
+                idem_key=idem,
+                tenant_id=tenant_id,
+            )
+
+        resp = {
+            "ok": True,
+            "seller": seller,
+            "sku": sku,
+            "from": old,
+            "to": new_qty,
+            "delta": delta,
+            "uom": "ton",
+        }
+        return await _idem_guard(request, key, resp)
+
+    except HTTPException:
+        raise
+    except Exception as e:
         try:
-            slug = _slugify_member(seller)
-            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
-            if trow and trow.get("id"):
-                tenant_id = str(trow["id"])
+            logger.exception(
+                "inventory_manual_add_failed",
+                request_id=rid,
+                seller=(payload.get("seller") if isinstance(payload, dict) else None),
+                sku=(payload.get("sku") if isinstance(payload, dict) else None),
+                err=str(e),
+                err_type=type(e).__name__,
+            )
         except Exception:
-            tenant_id = None
-
-    async with database.transaction():
-        old, new_qty, delta = await _manual_upsert_absolute_tx(
-            seller=seller,
-            sku=sku,
-            qty_on_hand_tons=qty_tons,
-            uom=uom,
-            location=loc,
-            description=desc,
-            source=source,
-            movement_reason="manual_add",
-            idem_key=idem,
-            tenant_id=tenant_id,
-        )
-
-    resp = {
-        "ok": True,
-        "seller": seller,
-        "sku": sku,
-        "from": old,
-        "to": new_qty,
-        "delta": delta,
-        "uom": "ton",
-    }
-    return await _idem_guard(request, key, resp)          
+            pass
+        # don’t leak DB internals to users in production
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "inventory/manual_add failed", "request_id": rid},
+        )   
 
 # -------- CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
