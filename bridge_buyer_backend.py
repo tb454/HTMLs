@@ -14570,7 +14570,7 @@ async def _ensure_audit_log_schema():
         logger.warn("audit_log_bootstrap_failed", err=str(e))
 # ----------- /schema bootstrap -----------
 
-# ===== AUDIT CHAIN schema bootstrap (idempotent) =====
+# -------------- AUDIT CHAIN schema bootstrap (idempotent) ---------
 @startup
 async def _ensure_audit_chain_schema():
     if not BOOTSTRAP_DDL:
