@@ -14089,7 +14089,7 @@ async def _manual_upsert_absolute_tx(
             seller, sku, description, uom, location,
             qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
           )
-          VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW(),:tenant_id)
+          VALUES (:s,:k,:d,:u,:loc,:q,0,0,:src,NOW(),:tenant_id)
           ON CONFLICT (LOWER(seller), LOWER(sku))
           DO UPDATE SET
             updated_at = NOW()
@@ -14099,6 +14099,7 @@ async def _manual_upsert_absolute_tx(
             "d": description,
             "u": (uom or "ton"),
             "loc": location,
+            "q": float(qty_on_hand_tons),
             "src": source or "manual",
             "tenant_id": tenant_id,
         })
@@ -14267,6 +14268,7 @@ class InventoryRowOut(BaseModel):
 )
 
 async def list_inventory(
+    request: Request,
     seller: str = Query(..., description="Seller name"),
     sku: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=1000),
@@ -14275,7 +14277,6 @@ async def list_inventory(
         True,
         description="If true, restrict results to current tenant when tenant_id can be inferred."
     ),
-    request: Request = None,
 ):
     tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
 
@@ -14305,7 +14306,9 @@ async def list_inventory(
     description="Recent inventory movements. Filter by seller, sku, type, time range.",
     status_code=200
 )
+
 async def list_movements(
+    request: Request,
     seller: str = Query(...),
     sku: Optional[str] = Query(None),
     movement_type: Optional[str] = Query(None, description="upsert, adjust, reserve, unreserve, commit, ship, cancel, reconcile"),
@@ -14317,7 +14320,6 @@ async def list_movements(
         True,
         description="If true, restrict results to current tenant when tenant_id can be inferred."
     ),
-    request: Request = None,
 ):
     tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
     tenant_id = await current_tenant_id(request) if request is not None else None
@@ -14410,12 +14412,12 @@ class FinishedRow(BaseModel):
     status_code=200,
 )
 async def finished_goods(
+    request: Request,
     seller: str = Query(..., description="Seller (yard) name"),
     tenant_scoped: bool = Query(
         True,
         description="If true, restrict results to current tenant when tenant_id can be inferred.",
     ),
-    request: Request = None,
 ):
     tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
     """
@@ -14763,8 +14765,9 @@ async def idem_put(key: str, resp: dict):
 async def inventory_manual_add(payload: dict, request: Request):
 
     key = _idem_key(request)
-    if key and key in _idem_cache:
-        return _idem_cache[key]
+    hit = await idem_get(key) if key else None
+    if hit:
+        return hit
 
     #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         #pass
@@ -14832,9 +14835,9 @@ async def inventory_template_csv():
 @app.post("/inventory/import/csv", tags=["Inventory"], summary="Import CSV (absolute set, unit-aware)", response_model=None)
 @_limit("30/minute")
 async def inventory_import_csv(
+    request: Request,
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
-    request: Request = None,
 ):
     #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         #pass
@@ -14879,9 +14882,9 @@ async def inventory_import_csv(
 @app.post("/inventory/import/excel", tags=["Inventory"], summary="Import XLSX (absolute set, unit-aware)", response_model=None)
 @_limit("15/minute")
 async def inventory_import_excel(
+    request: Request,
     file: Annotated[UploadFile, File(...)],
     seller: Optional[str] = Form(None),
-    request: Request = None,
 ):
     #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         #pass
