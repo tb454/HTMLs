@@ -14090,40 +14090,73 @@ async def _manual_upsert_absolute_tx(
             {"s": s, "k": k_norm}
         )
     if cur is None:
-        # Pick the correct ON CONFLICT target based on whether we have tenant_id.
+        # Insert only if missing (no ON CONFLICT dependency; prod-safe).
         if tenant_id:
-            conflict_sql = "ON CONFLICT (tenant_id, (LOWER(seller)), (LOWER(sku)))"
-        else:
-            conflict_sql = "ON CONFLICT ((LOWER(seller)), (LOWER(sku)))"
-
-        await database.execute(f"""
-          INSERT INTO inventory_items (
-            seller, sku, description, uom, location,
-            qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
-          )
-          VALUES (:s,:k,:d,:u,:loc,:q,0,0,:src,NOW(),:tenant_id)
-          {conflict_sql}
-          DO UPDATE SET
-            updated_at = NOW()
-        """, {
-            "s": s,
-            "k": k_norm,
-            "d": description,
-            "u": (uom or "ton"),
-            "loc": location,
-            "q": float(qty_on_hand_tons),
-            "src": source or "manual",
-            "tenant_id": tenant_id,
-        })
-        if tenant_id:
+            await database.execute("""
+              INSERT INTO inventory_items (
+                seller, sku, description, uom, location,
+                qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
+              )
+              SELECT :s, :k, :d, :u, :loc, :q, 0, 0, :src, NOW(), :tid
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM inventory_items
+                WHERE tenant_id = :tid
+                  AND LOWER(seller)=LOWER(:s)
+                  AND LOWER(sku)=LOWER(:k)
+              )
+            """, {
+                "s": s,
+                "k": k_norm,
+                "d": description,
+                "u": (uom or "ton"),
+                "loc": location,
+                "q": float(qty_on_hand_tons),
+                "src": source or "manual",
+                "tid": tenant_id,
+            })
             cur = await database.fetch_one(
-                "SELECT qty_on_hand FROM inventory_items WHERE tenant_id=:tid AND LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-                {"tid": tenant_id, "s": s, "k": k_norm}
+                """
+                SELECT qty_on_hand
+                FROM inventory_items
+                WHERE tenant_id=:tid
+                  AND LOWER(seller)=LOWER(:s)
+                  AND LOWER(sku)=LOWER(:k)
+                FOR UPDATE
+                """,
+                {"tid": tenant_id, "s": s, "k": k_norm},
             )
         else:
+            await database.execute("""
+              INSERT INTO inventory_items (
+                seller, sku, description, uom, location,
+                qty_on_hand, qty_reserved, qty_committed, source, updated_at
+              )
+              SELECT :s, :k, :d, :u, :loc, :q, 0, 0, :src, NOW()
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM inventory_items
+                WHERE LOWER(seller)=LOWER(:s)
+                  AND LOWER(sku)=LOWER(:k)
+              )
+            """, {
+                "s": s,
+                "k": k_norm,
+                "d": description,
+                "u": (uom or "ton"),
+                "loc": location,
+                "q": float(qty_on_hand_tons),
+                "src": source or "manual",
+            })
             cur = await database.fetch_one(
-                "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-                {"s": s, "k": k_norm}
+                """
+                SELECT qty_on_hand
+                FROM inventory_items
+                WHERE LOWER(seller)=LOWER(:s)
+                  AND LOWER(sku)=LOWER(:k)
+                FOR UPDATE
+                """,
+                {"s": s, "k": k_norm},
             )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
