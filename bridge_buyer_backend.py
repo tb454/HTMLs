@@ -12739,6 +12739,26 @@ async def login(request: Request):
     request.session["username"] = (row["username"] or row["email"])
     request.session["role"] = role
 
+    # Pin tenant_id in session (first membership wins). This prevents slug/username mismatches.
+    try:
+        ident2 = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+        tm_row = await database.fetch_one(
+            """
+            SELECT tm.tenant_id
+            FROM public.tenant_memberships tm
+            JOIN public.users u ON u.id = tm.user_id
+            WHERE lower(coalesce(u.email,'')) = :i
+               OR lower(coalesce(u.username,'')) = :i
+            ORDER BY tm.created_at ASC
+            LIMIT 1
+            """,
+            {"i": ident2},
+        )
+        if tm_row and tm_row["tenant_id"]:
+            request.session["tenant_id"] = str(tm_row["tenant_id"])
+    except Exception:
+        pass
+
     # reset brute-force counters on success
     _login_failures.pop(key, None)
     _user_locked_until.pop(key, None)
@@ -16431,9 +16451,12 @@ def current_member_from_request(request: Request) -> Optional[str]:
 
 async def current_tenant_id(request: Request) -> Optional[str]:
     """
-    Resolve tenant_id via:
-      - NON-PROD: X-Tenant-Id header (fast test/dev override)
-      - else: inferred member key (slug match)
+    Canonical tenant resolver (production-safe):
+
+    Resolution order:
+      1) NON-PROD: allow X-Tenant-Id override (dev/CI convenience)
+      2) session["tenant_id"] if present
+      3) session identity -> public.users.id -> tenant_memberships.tenant_id (first membership)
     """
     # --- NON-PROD header override (CI/dev convenience) ---
     if os.getenv("ENV", "").lower().strip() != "production":
@@ -16443,21 +16466,57 @@ async def current_tenant_id(request: Request) -> Optional[str]:
                 return str(uuid.UUID(hdr))
             except Exception:
                 raise HTTPException(status_code=400, detail="invalid X-Tenant-Id")
-    # --- NON-PROD header override (CI/dev convenience) ---
+    # --- /NON-PROD header override ---
 
-    member = current_member_from_request(request)
-    if not member:
-        return None
-    slug = _slugify_member(member)
+    # 1) Fast path: session pinned tenant_id
     try:
-        row = await database.fetch_one(
-            "SELECT id FROM tenants WHERE slug = :slug",
-            {"slug": slug},
-        )
-        if row and row["id"]:
-            return str(row["id"])
+        sid = (request.session.get("tenant_id") or "").strip()
+        if sid:
+            return str(uuid.UUID(sid))
     except Exception:
+        pass
+
+    # 2) Resolve identity -> users.id
+    try:
+        ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    except Exception:
+        ident = ""
+
+    if not ident:
         return None
+
+    urow = await database.fetch_one(
+        """
+        SELECT id
+        FROM public.users
+        WHERE lower(coalesce(email,'')) = :i
+           OR lower(coalesce(username,'')) = :i
+        LIMIT 1
+        """,
+        {"i": ident},
+    )
+    if not urow or not urow["id"]:
+        return None
+
+    # 3) Resolve first membership tenant
+    tm = await database.fetch_one(
+        """
+        SELECT tenant_id
+        FROM public.tenant_memberships
+        WHERE user_id = :uid
+        ORDER BY created_at ASC
+        LIMIT 1
+        """,
+        {"uid": str(urow["id"])},
+    )
+    if tm and tm["tenant_id"]:
+        # Pin for the rest of session (stabilizes all future calls)
+        try:
+            request.session["tenant_id"] = str(tm["tenant_id"])
+        except Exception:
+            pass
+        return str(tm["tenant_id"])
+
     return None
 
 async def require_perm(request: Request, perm: str):
@@ -16512,7 +16571,7 @@ class MaterialUpsertIn(BaseModel):
     sort_order: Optional[int] = None
 
 async def _tenant_or_404(request: Request) -> str:
-    # primary: session member -> tenants.slug -> tenants.id
+    # primary: canonical resolver (session tenant_id / tenant_memberships)
     tid = await current_tenant_id(request)
     if tid:
         return tid
