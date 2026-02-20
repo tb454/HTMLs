@@ -14086,7 +14086,9 @@ async def _manual_upsert_absolute_tx(
             qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
           )
           VALUES (:s,:k,:d,:u,:loc,0,0,0,:src,NOW(),:tenant_id)
-          ON CONFLICT DO NOTHING
+          ON CONFLICT ON CONSTRAINT uq_inventory_items_seller_sku_lower
+          DO UPDATE SET
+            updated_at = NOW()
         """, {
             "s": s,
             "k": k_norm,
