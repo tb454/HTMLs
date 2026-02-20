@@ -75,15 +75,6 @@ jobs:
                 signature_valid boolean,
                 created_at timestamptz DEFAULT now()
               );
-
-              -- Inventory ON CONFLICT targets used by backend
-              -- Tenant-scoped (preferred)
-              CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_tenant_seller_sku_lower
-              ON public.inventory_items (tenant_id, (LOWER(seller)), (LOWER(sku)));
-
-              -- Legacy (fallback if tenant_id missing in some flows)
-              CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower
-              ON public.inventory_items ((LOWER(seller)), (LOWER(sku)));
               """)
           PY
 

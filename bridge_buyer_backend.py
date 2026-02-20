@@ -5418,10 +5418,6 @@ async def _ensure_backend_expected_uniques():
       ON public.bols (contract_id, idem_key)
       WHERE idem_key IS NOT NULL;
 
-    -- inventory_items: ON CONFLICT uses (seller, sku) so we need the exact unique key
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku
-    ON public.inventory_items (seller, sku);
-
     -- inventory_items: also keep a case-insensitive unique for LOWER() lookups (optional but useful)
     CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower
     ON public.inventory_items ((lower(seller)), (lower(sku)));
@@ -13680,6 +13676,10 @@ async def _ensure_inventory_schema():
           PRIMARY KEY (seller, sku)
         );
         """,
+
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower ON public.inventory_items ((LOWER(seller)), (LOWER(sku)));",
+
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_tenant_seller_sku_lower ON public.inventory_items (tenant_id, (LOWER(seller)), (LOWER(sku)));",
 
         # repair legacy/minimal inventory_items tables
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS description   TEXT;",
