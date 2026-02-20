@@ -14079,18 +14079,30 @@ async def _manual_upsert_absolute_tx(
     k_norm = k.upper()
     await _ensure_org_exists(s)
 
-    cur = await database.fetch_one(
-        "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-        {"s": s, "k": k_norm}
-    )
+    if tenant_id:
+        cur = await database.fetch_one(
+            "SELECT qty_on_hand FROM inventory_items WHERE tenant_id=:tid AND LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+            {"tid": tenant_id, "s": s, "k": k_norm}
+        )
+    else:
+        cur = await database.fetch_one(
+            "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+            {"s": s, "k": k_norm}
+        )
     if cur is None:
-        await database.execute("""
+        # Pick the correct ON CONFLICT target based on whether we have tenant_id.
+        if tenant_id:
+            conflict_sql = "ON CONFLICT (tenant_id, (LOWER(seller)), (LOWER(sku)))"
+        else:
+            conflict_sql = "ON CONFLICT ((LOWER(seller)), (LOWER(sku)))"
+
+        await database.execute(f"""
           INSERT INTO inventory_items (
             seller, sku, description, uom, location,
             qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
           )
           VALUES (:s,:k,:d,:u,:loc,:q,0,0,:src,NOW(),:tenant_id)
-          ON CONFLICT (LOWER(seller), LOWER(sku))
+          {conflict_sql}
           DO UPDATE SET
             updated_at = NOW()
         """, {
@@ -14103,10 +14115,16 @@ async def _manual_upsert_absolute_tx(
             "src": source or "manual",
             "tenant_id": tenant_id,
         })
-        cur = await database.fetch_one(
-            "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-            {"s": s, "k": k_norm}
-        )
+        if tenant_id:
+            cur = await database.fetch_one(
+                "SELECT qty_on_hand FROM inventory_items WHERE tenant_id=:tid AND LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+                {"tid": tenant_id, "s": s, "k": k_norm}
+            )
+        else:
+            cur = await database.fetch_one(
+                "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
+                {"s": s, "k": k_norm}
+            )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
     new_qty = float(qty_on_hand_tons)
