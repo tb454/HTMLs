@@ -5418,9 +5418,13 @@ async def _ensure_backend_expected_uniques():
       ON public.bols (contract_id, idem_key)
       WHERE idem_key IS NOT NULL;
 
-    -- inventory_items: make (seller, sku) stable for LOWER() lookups
+    -- inventory_items: ON CONFLICT uses (seller, sku) so we need the exact unique key
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku
+    ON public.inventory_items (seller, sku);
+
+    -- inventory_items: also keep a case-insensitive unique for LOWER() lookups (optional but useful)
     CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower
-      ON public.inventory_items ((lower(seller)), (lower(sku)));
+    ON public.inventory_items ((lower(seller)), (lower(sku)));
     """)
 
 @startup
