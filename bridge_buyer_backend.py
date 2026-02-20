@@ -20092,6 +20092,7 @@ async def hedge_recommendations_by_yard_id(yard_id: UUID):
 #======== Contracts (with Inventory linkage) ==========
 class ContractInExtended(ContractIn):
     pricing_formula: Optional[str] = None
+    sku: Optional[str] = None
     reference_symbol: Optional[str] = None
     reference_price: Optional[float] = None
     reference_source: Optional[str] = None
@@ -20272,8 +20273,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     await _ensure_org_exists(contract.buyer)
     await _ensure_org_exists(contract.seller)
     price_val = float(quantize_money(price_dec))
-    sku    = (contract.material or "").strip()
-
+    sku = (getattr(contract, "sku", None) or "").strip()
+    if not sku:
+        sku = (contract.material or "").strip()
+    sku = sku.strip().upper()
+    
     # resolve tenant from request/session first; if missing, derive from seller name
     tenant_id = await current_tenant_id(request)
     if not tenant_id and seller:
