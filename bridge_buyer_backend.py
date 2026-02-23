@@ -14080,30 +14080,21 @@ async def _manual_upsert_absolute_tx(
     k_norm = k.upper()
     await _ensure_org_exists(s)
 
-    # inventory_items PK is (seller, sku). tenant_id is metadata only.
-    # If a legacy row exists with tenant_id NULL, “claim” it first.
-    if tenant_id:
-        await database.execute(
-            """
-            UPDATE inventory_items
-               SET tenant_id = :tid
-             WHERE LOWER(seller)=LOWER(:s)
-               AND LOWER(sku)=LOWER(:k)
-               AND tenant_id IS NULL
-            """,
-            {"tid": tenant_id, "s": s, "k": k_norm},
-        )
-
     # Always lock by PK (seller, sku)
     cur = await database.fetch_one(
         """
-        SELECT qty_on_hand, tenant_id
+        SELECT ctid::text AS ctid, qty_on_hand, tenant_id
           FROM inventory_items
          WHERE LOWER(seller)=LOWER(:s)
            AND LOWER(sku)=LOWER(:k)
-        FOR UPDATE
+           AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
+         ORDER BY
+           CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
+           updated_at DESC NULLS LAST
+         LIMIT 1
+         FOR UPDATE
         """,
-        {"s": s, "k": k_norm},
+        {"s": s, "k": k_norm, "tid": tenant_id},
     )
     if cur is None:
         # Insert only if missing (no ON CONFLICT dependency; prod-safe).
@@ -14126,13 +14117,18 @@ async def _manual_upsert_absolute_tx(
             })
             cur = await database.fetch_one(
                 """
-                SELECT qty_on_hand
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s)
-                  AND LOWER(sku)=LOWER(:k)
-                FOR UPDATE
+                SELECT ctid::text AS ctid, qty_on_hand, tenant_id
+                  FROM inventory_items
+                 WHERE LOWER(seller)=LOWER(:s)
+                   AND LOWER(sku)=LOWER(:k)
+                   AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
+                 ORDER BY
+                   CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
+                   updated_at DESC NULLS LAST
+                 LIMIT 1
+                 FOR UPDATE
                 """,
-                {"s": s, "k": k_norm},
+                {"s": s, "k": k_norm, "tid": tenant_id},
             )
         else:
             await database.execute("""
@@ -14152,13 +14148,18 @@ async def _manual_upsert_absolute_tx(
             })
             cur = await database.fetch_one(
                 """
-                SELECT qty_on_hand
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s)
-                  AND LOWER(sku)=LOWER(:k)
-                FOR UPDATE
+                SELECT ctid::text AS ctid, qty_on_hand, tenant_id
+                  FROM inventory_items
+                 WHERE LOWER(seller)=LOWER(:s)
+                   AND LOWER(sku)=LOWER(:k)
+                   AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
+                 ORDER BY
+                   CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
+                   updated_at DESC NULLS LAST
+                 LIMIT 1
+                 FOR UPDATE
                 """,
-                {"s": s, "k": k_norm},
+                {"s": s, "k": k_norm, "tid": tenant_id},
             )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
@@ -14179,8 +14180,8 @@ async def _manual_upsert_absolute_tx(
              location    = COALESCE(:loc, location),
              description = COALESCE(:desc, description),
              source      = COALESCE(:src, source),
-             tenant_id   = COALESCE(:tenant_id, tenant_id)
-       WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
+             tenant_id   = COALESCE(tenant_id, :tenant_id)
+       WHERE ctid::text = :ctid
     """, {
         "new": new_qty,
         "u": (uom or "ton"),
@@ -14188,8 +14189,7 @@ async def _manual_upsert_absolute_tx(
         "desc": description,
         "src": (source or "manual"),
         "tenant_id": tenant_id,
-        "s": s,
-        "k": k_norm,
+        "ctid": cur["ctid"],
     })
 
     meta_json = json.dumps(
@@ -20452,16 +20452,6 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             # Ensure inventory row exists + lock it (ALWAYS), then reserve against it
             inv = None
 
-            # If we inferred tenant_id, claim legacy NULL rows for this seller+sku
-            if tenant_id:
-                await database.execute("""
-                    UPDATE inventory_items
-                       SET tenant_id = :tid
-                     WHERE LOWER(seller)=LOWER(:s)
-                       AND LOWER(sku)=LOWER(:k)
-                       AND tenant_id IS NULL
-                """, {"tid": tenant_id, "s": seller, "k": sku})
-
             # Ensure the row exists (inventory_items PK is seller+sku, so tenant_id is metadata)
             await database.execute("""
                 INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
@@ -20471,29 +20461,17 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
             # Lock the row we reserve against (no tenant clause here because PK is seller+sku)
             inv = await database.fetch_one("""
-                SELECT qty_on_hand, qty_reserved, qty_committed, tenant_id
+                SELECT ctid::text AS ctid, qty_on_hand, qty_reserved, qty_committed, tenant_id
                   FROM inventory_items
                  WHERE LOWER(seller)=LOWER(:s)
                    AND LOWER(sku)=LOWER(:k)
+                   AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
+                 ORDER BY
+                   CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
+                   updated_at DESC NULLS LAST
+                 LIMIT 1
                  FOR UPDATE
-            """, {"s": seller, "k": sku})
-
-            # If tenant_id was inferred and row is still NULL, claim it now (after lock)
-            if tenant_id and inv and inv["tenant_id"] is None:
-                await database.execute("""
-                    UPDATE inventory_items
-                       SET tenant_id = :tid
-                     WHERE LOWER(seller)=LOWER(:s)
-                       AND LOWER(sku)=LOWER(:k)
-                       AND tenant_id IS NULL
-                """, {"tid": tenant_id, "s": seller, "k": sku})
-                inv = await database.fetch_one("""
-                    SELECT qty_on_hand, qty_reserved, qty_committed, tenant_id
-                      FROM inventory_items
-                     WHERE LOWER(seller)=LOWER(:s)
-                       AND LOWER(sku)=LOWER(:k)
-                     FOR UPDATE
-                """, {"s": seller, "k": sku})
+            """, {"s": seller, "k": sku, "tid": tenant_id})
 
             on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
             reserved  = float(inv["qty_reserved"]) if inv else 0.0
@@ -20551,11 +20529,10 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 UPDATE inventory_items
                 SET qty_reserved = qty_reserved + :q,
                     updated_at   = NOW(),
-                    tenant_id    = COALESCE(:tid, tenant_id)
-                WHERE LOWER(seller)=LOWER(:s)
-                AND LOWER(sku)=LOWER(:k)                
-            """, {"q": qty, "s": seller, "k": sku, "tid": tenant_id})
-
+                    tenant_id    = COALESCE(tenant_id, :tid)
+                WHERE ctid::text = :ctid
+            """, {"q": qty, "ctid": inv["ctid"], "tid": tenant_id})
+            
             await database.execute("""
                 INSERT INTO inventory_movements (
                     seller, sku, movement_type, qty,
