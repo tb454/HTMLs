@@ -14079,16 +14079,31 @@ async def _manual_upsert_absolute_tx(
     k_norm = k.upper()
     await _ensure_org_exists(s)
 
+    # inventory_items PK is (seller, sku). tenant_id is metadata only.
+    # If a legacy row exists with tenant_id NULL, “claim” it first.
     if tenant_id:
-        cur = await database.fetch_one(
-            "SELECT qty_on_hand FROM inventory_items WHERE tenant_id=:tid AND LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-            {"tid": tenant_id, "s": s, "k": k_norm}
+        await database.execute(
+            """
+            UPDATE inventory_items
+               SET tenant_id = :tid
+             WHERE LOWER(seller)=LOWER(:s)
+               AND LOWER(sku)=LOWER(:k)
+               AND tenant_id IS NULL
+            """,
+            {"tid": tenant_id, "s": s, "k": k_norm},
         )
-    else:
-        cur = await database.fetch_one(
-            "SELECT qty_on_hand FROM inventory_items WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k) FOR UPDATE",
-            {"s": s, "k": k_norm}
-        )
+
+    # Always lock by PK (seller, sku)
+    cur = await database.fetch_one(
+        """
+        SELECT qty_on_hand, tenant_id
+          FROM inventory_items
+         WHERE LOWER(seller)=LOWER(:s)
+           AND LOWER(sku)=LOWER(:k)
+        FOR UPDATE
+        """,
+        {"s": s, "k": k_norm},
+    )
     if cur is None:
         # Insert only if missing (no ON CONFLICT dependency; prod-safe).
         if tenant_id:
@@ -14101,8 +14116,7 @@ async def _manual_upsert_absolute_tx(
               WHERE NOT EXISTS (
                 SELECT 1
                 FROM inventory_items
-                WHERE tenant_id = :tid
-                  AND LOWER(seller)=LOWER(:s)
+                WHERE LOWER(seller)=LOWER(:s)
                   AND LOWER(sku)=LOWER(:k)
               )
             """, {
@@ -14119,12 +14133,11 @@ async def _manual_upsert_absolute_tx(
                 """
                 SELECT qty_on_hand
                 FROM inventory_items
-                WHERE tenant_id=:tid
-                  AND LOWER(seller)=LOWER(:s)
+                WHERE LOWER(seller)=LOWER(:s)
                   AND LOWER(sku)=LOWER(:k)
                 FOR UPDATE
                 """,
-                {"tid": tenant_id, "s": s, "k": k_norm},
+                {"s": s, "k": k_norm},
             )
         else:
             await database.execute("""
@@ -14174,7 +14187,7 @@ async def _manual_upsert_absolute_tx(
              location    = COALESCE(:loc, location),
              description = COALESCE(:desc, description),
              source      = COALESCE(:src, source),
-             tenant_id   = COALESCE(tenant_id, :tenant_id)
+             tenant_id   = COALESCE(:tenant_id, tenant_id)
        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
     """, {
         "new": new_qty,
@@ -14331,6 +14344,14 @@ async def list_inventory(
 ):
     tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
 
+    # Canonicalize seller to session member so UI queries match inventory PK rows
+    try:
+        sess_member = (request.session.get("member") or "").strip()
+    except Exception:
+        sess_member = ""
+    if sess_member and _slugify_member(sess_member) == _slugify_member(seller):
+        seller = sess_member
+
     # Infer tenant for this request (if any)
     tenant_id = await current_tenant_id(request) if request is not None else None
 
@@ -14373,6 +14394,15 @@ async def list_movements(
     ),
 ):
     tenant_scoped = _force_tenant_scoping(request, tenant_scoped)
+
+    # Canonicalize seller to session member so UI queries match inventory PK rows
+    try:
+        sess_member = (request.session.get("member") or "").strip()
+    except Exception:
+        sess_member = ""
+    if sess_member and _slugify_member(sess_member) == _slugify_member(seller):
+        seller = sess_member
+
     tenant_id = await current_tenant_id(request) if request is not None else None
 
     q = "SELECT * FROM inventory_movements WHERE LOWER(seller)=LOWER(:seller)"
@@ -14400,7 +14430,7 @@ async def list_movements(
     q += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
     rows = await database.fetch_all(q, vals)
     return [dict(r) for r in rows]
-# -------- Inventory endpoints --------
+# ---------- Inventory helpers (role check, unit conversion, upsert core) -------
 
 # ---- Buyer Positions: list by buyer/status ----
 class BuyerPositionRow(BaseModel):
@@ -14814,7 +14844,11 @@ async def idem_put(key: str, resp: dict):
 
 @_limit("60/minute")
 async def inventory_manual_add(payload: dict, request: Request):
-    rid = (request.headers.get("X-Request-ID") or getattr(getattr(request, "state", None), "request_id", None) or "")
+    rid = (
+        request.headers.get("X-Request-ID")
+        or getattr(getattr(request, "state", None), "request_id", None)
+        or str(uuid.uuid4())
+    )
 
     try:
         key = _idem_key(request)
@@ -14825,14 +14859,24 @@ async def inventory_manual_add(payload: dict, request: Request):
         #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
             #pass
 
-        seller = (payload.get("seller") or "").strip()
-        sku    = (payload.get("sku") or "").strip().upper()
-        if not (seller and sku):
+        seller_in = (payload.get("seller") or "").strip()
+        sku       = (payload.get("sku") or "").strip().upper()
+        if not (seller_in and sku):
             raise HTTPException(400, "seller and sku are required")
 
+        # Canonicalize seller: if caller sends a slug like "winski" but session member is
+        # "Winski Brothers", use the session member so inventory + contracts hit the same rows.
+        seller = seller_in
+        try:
+            sess_member = (request.session.get("member") or "").strip()
+        except Exception:
+            sess_member = ""
+        if sess_member and _slugify_member(sess_member) == _slugify_member(seller_in):
+            seller = sess_member
+
         uom     = (payload.get("uom") or "ton")
-        loc     = payload.get("location")
-        desc    = payload.get("description")
+        loc     = (payload.get("location") or None)
+        desc    = (payload.get("description") or None)
         source  = payload.get("source") or "manual"
         idem    = payload.get("idem_key")
         qty_raw = float(payload.get("qty_on_hand") or 0.0)
@@ -14876,6 +14920,18 @@ async def inventory_manual_add(payload: dict, request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        msg = (str(e) or "").lower()
+
+        # common schema failures surfaced cleanly (driver-agnostic)
+        if "foreign key" in msg:
+            raise HTTPException(400, "unknown seller or SKU (FK)") from e
+        if "check constraint" in msg or "chk_" in msg:
+            raise HTTPException(400, "inventory violates a constraint") from e
+        if "duplicate key" in msg or "unique constraint" in msg:
+            raise HTTPException(409, "duplicate inventory row") from e
+        if "does not exist" in msg and "column" in msg:
+            raise HTTPException(500, "schema mismatch: missing column in DB") from e
+
         try:
             logger.exception(
                 "inventory_manual_add_failed",
@@ -14887,11 +14943,11 @@ async def inventory_manual_add(payload: dict, request: Request):
             )
         except Exception:
             pass
-        # don’t leak DB internals to users in production
+
         return JSONResponse(
             status_code=500,
             content={"detail": "inventory/manual_add failed", "request_id": rid},
-        )   
+        )
 
 # -------- CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
@@ -20269,9 +20325,18 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
     tons_dec  = _coerce_decimal(contract.weight_tons, "weight_tons")
 
     qty    = float(tons_dec)
-    seller = (contract.seller or "").strip()    
+    seller = (contract.seller or "").strip()
+
+    # Canonicalize seller to session member so inventory + contracts hit the same PK row
+    try:
+        sess_member = (request.session.get("member") or "").strip()
+    except Exception:
+        sess_member = ""
+    if sess_member and _slugify_member(sess_member) == _slugify_member(seller):
+        seller = sess_member
+        contract.seller = sess_member  # critical: keep all DB inserts consistent
     await _ensure_org_exists(contract.buyer)
-    await _ensure_org_exists(contract.seller)
+    await _ensure_org_exists(seller)
     price_val = float(quantize_money(price_dec))
     sku = (getattr(contract, "sku", None) or "").strip()
     if not sku:
@@ -20340,7 +20405,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             payload = {
                 "id": cid,
                 "buyer": contract.buyer,
-                "seller": contract.seller,
+                "seller": seller,
                 "material": contract.material,
                 "weight_tons": qty,
                 "price_per_ton": price_val,
@@ -20530,7 +20595,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             payload = {
                 "id": cid,
                 "buyer": contract.buyer,
-                "seller": contract.seller,
+                "seller": seller,
                 "material": contract.material,
                 "weight_tons": qty,
                 "price_per_ton": price_val,
@@ -20666,7 +20731,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             """, {
                 "id": cid,
                 "buyer": contract.buyer,
-                "seller": contract.seller,
+                "seller": seller,
                 "material": contract.material,
                 "wt": qty,
                 "ppt": price_val,
@@ -20682,7 +20747,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             fallback = {
                 "id": cid,
                 "buyer": contract.buyer,
-                "seller": contract.seller,
+                "seller": seller,
                 "material": contract.material,
                 "weight_tons": float(contract.weight_tons),
                 "price_per_ton": quantize_money(price_dec),  # <-- use the normalized Decimal you already computed
@@ -20709,7 +20774,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 status_code=500,
                 detail=f"contract create failed: {type(e2).__name__}: {str(e2)}"
             )
-# ========= Admin Exports router ==========
+#======== Contracts (with Inventory linkage) ==========
 
 # -------- Products --------
 @app.post("/products", tags=["Products"], summary="Upsert a tradable product")
