@@ -14074,6 +14074,7 @@ async def _manual_upsert_absolute_tx(
     movement_reason: str = "manual_add",
     idem_key: str | None = None,
     tenant_id: str | None = None,
+    mode: Literal["set", "add"] = "set",
 ):
     s, k = seller.strip(), sku.strip()
     k_norm = k.upper()
@@ -14112,20 +14113,14 @@ async def _manual_upsert_absolute_tx(
                 seller, sku, description, uom, location,
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
               )
-              SELECT :s, :k, :d, :u, :loc, :q, 0, 0, :src, NOW(), :tid
-              WHERE NOT EXISTS (
-                SELECT 1
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s)
-                  AND LOWER(sku)=LOWER(:k)
-              )
+              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), :tid)
+              ON CONFLICT DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
                 "d": description,
                 "u": (uom or "ton"),
                 "loc": location,
-                "q": float(qty_on_hand_tons),
                 "src": source or "manual",
                 "tid": tenant_id,
             })
@@ -14145,20 +14140,14 @@ async def _manual_upsert_absolute_tx(
                 seller, sku, description, uom, location,
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at
               )
-              SELECT :s, :k, :d, :u, :loc, :q, 0, 0, :src, NOW()
-              WHERE NOT EXISTS (
-                SELECT 1
-                FROM inventory_items
-                WHERE LOWER(seller)=LOWER(:s)
-                  AND LOWER(sku)=LOWER(:k)
-              )
+              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW())
+              ON CONFLICT DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
                 "d": description,
                 "u": (uom or "ton"),
                 "loc": location,
-                "q": float(qty_on_hand_tons),
                 "src": source or "manual",
             })
             cur = await database.fetch_one(
@@ -14173,7 +14162,10 @@ async def _manual_upsert_absolute_tx(
             )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
-    new_qty = float(qty_on_hand_tons)
+    if (mode or "set") == "add":
+        new_qty = old + float(qty_on_hand_tons or 0.0)
+    else:
+        new_qty = float(qty_on_hand_tons or 0.0)
     delta = new_qty - old
     delta_is_zero = abs(delta) < 1e-12
     if abs(delta) < 1e-12:    
@@ -14903,6 +14895,7 @@ async def inventory_manual_add(payload: dict, request: Request):
                 source=source,
                 movement_reason="manual_add",
                 idem_key=idem,
+                mode="add",
                 tenant_id=tenant_id,
             )
 
@@ -20472,13 +20465,8 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             # Ensure the row exists (inventory_items PK is seller+sku, so tenant_id is metadata)
             await database.execute("""
                 INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
-                SELECT :s, :k, 0, 0, 0, :tid
-                WHERE NOT EXISTS (
-                    SELECT 1
-                      FROM inventory_items
-                     WHERE LOWER(seller)=LOWER(:s)
-                       AND LOWER(sku)=LOWER(:k)
-                )
+                VALUES (:s, :k, 0, 0, 0, :tid)
+                ON CONFLICT DO NOTHING
             """, {"s": seller, "k": sku, "tid": tenant_id})
 
             # Lock the row we reserve against (no tenant clause here because PK is seller+sku)
