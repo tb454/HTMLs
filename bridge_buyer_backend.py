@@ -14087,9 +14087,9 @@ async def _manual_upsert_absolute_tx(
           FROM inventory_items
          WHERE LOWER(seller)=LOWER(:s)
            AND LOWER(sku)=LOWER(:k)
-           AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
+           AND (:tid::uuid IS NULL OR tenant_id = :tid::uuid OR tenant_id IS NULL)
          ORDER BY
-           CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
+           CASE WHEN tenant_id = :tid::uuid THEN 0 ELSE 1 END,
            updated_at DESC NULLS LAST
          LIMIT 1
          FOR UPDATE
