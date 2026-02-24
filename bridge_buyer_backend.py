@@ -14112,7 +14112,7 @@ async def _manual_upsert_absolute_tx(
                 seller, sku, description, uom, location,
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
               )
-              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), :tenant_id)
+              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), CAST(:tenant_id AS uuid))
               ON CONFLICT DO NOTHING
             """, {
                 "s": s,
@@ -14215,7 +14215,7 @@ async def _manual_upsert_absolute_tx(
       VALUES (
         :seller, :sku, :mt, :qty,
         :uom, :ref_contract, :cid_uuid, :bid_uuid,
-        CAST(:meta AS jsonb), :tenant_id, NOW()
+        CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), NOW()
       )
     """, {
         "seller": s,
@@ -20462,7 +20462,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
             # Ensure the row exists (inventory_items PK is seller+sku, so tenant_id is metadata)
             await database.execute("""
                 INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
-                VALUES (:s, :k, 0, 0, 0, :tid)
+                VALUES (:s, :k, 0, 0, 0, CAST(:tid AS uuid))
                 ON CONFLICT DO NOTHING
             """, {"s": seller, "k": sku, "tid": tenant_id})
 
