@@ -45,7 +45,8 @@
         // UI role gates + propagate into seller dashboard once DOM is ready
         onReady(() => {
           const userEl = document.getElementById('current-user');
-          if (userEl) userEl.textContent = `User: ${me.username || 'Guest'}`;
+          const label = (me.resolved_member || me.member || me.username || 'Guest');
+          if (userEl) userEl.textContent = `User: ${label}`;
 
           document.querySelectorAll('[data-role="admin"]').forEach(el => {
             el.hidden = (role !== 'admin');
@@ -1447,8 +1448,13 @@
         console.warn("wireSellerUI username resolve failed", e);
       }
 
-      if (sellerEl && username && !sellerEl.value) {
-        sellerEl.value = username;
+      const member =
+        (window.__bridgeUser?.resolved_member || window.__bridgeUser?.member || '').trim();
+
+      if (sellerEl && member && !sellerEl.value) {
+        sellerEl.value = member;          // << THIS is what DB expects
+      } else if (sellerEl && username && !sellerEl.value) {
+        sellerEl.value = username;        // fallback only
       }
 
       // Wire buttons/filters once (idempotent)
@@ -1559,8 +1565,10 @@
     }
 
     async function manualAddInventory() {
-      const seller = document.getElementById('sellerName').value.trim()
-                    || document.getElementById('invDefaultSeller').value.trim();
+      const seller =
+        (window.__bridgeUser?.resolved_member || window.__bridgeUser?.member || '').trim()
+        || document.getElementById('sellerName').value.trim()
+        || document.getElementById('invDefaultSeller').value.trim();
       const sku = document.getElementById('invSku').value.trim();
       const qty = parseFloat(document.getElementById('invQty').value);
       const location = document.getElementById('invLocation').value.trim();
@@ -1623,16 +1631,40 @@
       e.preventDefault();
       const username = document.getElementById("username").value.trim();
       const password = document.getElementById("password").value.trim();
+
       try {
-        const resp = await api(`/login`, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({ username, password }) });
+        // 1) Login (sets cookies)
+        const resp = await api(`/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
         const data = await resp.json();
-        document.getElementById("current-user").innerText = `User: ${username}`;
+
+        // 2) Immediately refresh /me so we get member/resolved_member
+        let me = null;
+        try {
+          const rMe = await api('/me', { method: 'GET', headers: { 'Accept': 'application/json' } });
+          me = await rMe.json();
+          window.__bridgeUser = me;
+        } catch {}
+
+        const label = (me?.resolved_member || me?.member || username);
+        const sellerKey = (me?.resolved_member || me?.member || '').trim();
+
+        // 3) Update header + seller field using MEMBER (not username)
+        document.getElementById("current-user").innerText = `User: ${label}`;
         const sellerEl = document.getElementById("sellerName");
-        if (sellerEl) sellerEl.value = username;
+        if (sellerEl) sellerEl.value = sellerKey || label;
+
+        // 4) Refresh UI
         refreshFinishedFromInputs();
         try { if (document.getElementById('sellerName')?.value.trim()) { await listContracts(); } } catch {}
+
+        // 5) Close modal + follow redirect if needed
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
         if (data?.redirect) window.location.href = data.redirect;
+
       } catch (err) {
         document.getElementById("login-error").innerText = (err?.message || "Login failed");
       }
