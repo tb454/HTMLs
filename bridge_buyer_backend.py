@@ -3074,15 +3074,19 @@ async def _ensure_analytics_ledgers_and_carriers():
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+                        
     CREATE TABLE IF NOT EXISTS carrier_checks(
-      id BIGSERIAL PRIMARY KEY,
-      carrier_id UUID NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
-      tenant_id UUID,
-      checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      status TEXT NOT NULL,     -- authorized|not_authorized|expired|unknown
-      snapshot JSONB,
-      UNIQUE(carrier_id, date_trunc('day', checked_at))
-    );
+        id BIGSERIAL PRIMARY KEY,
+        carrier_id UUID NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+        tenant_id UUID,
+        checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        status TEXT NOT NULL,     -- authorized|not_authorized|expired|unknown
+        snapshot JSONB
+        );
+
+        -- enforce “1 check per carrier per day” via expression index (allowed)
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_carrier_checks_carrier_day
+        ON carrier_checks (carrier_id, (date_trunc('day', checked_at)));
 
     CREATE TABLE IF NOT EXISTS vol_curves(
       id BIGSERIAL PRIMARY KEY,
@@ -14087,14 +14091,14 @@ async def _manual_upsert_absolute_tx(
           FROM inventory_items
          WHERE LOWER(seller)=LOWER(:s)
            AND LOWER(sku)=LOWER(:k)
-           AND (:tid::uuid IS NULL OR tenant_id = :tid::uuid OR tenant_id IS NULL)
+           AND (CAST(:tenant_id AS uuid) IS NULL OR tenant_id = CAST(:tenant_id AS uuid) OR tenant_id IS NULL)
          ORDER BY
-           CASE WHEN tenant_id = :tid::uuid THEN 0 ELSE 1 END,
+           CASE WHEN tenant_id = CAST(:tenant_id AS uuid) THEN 0 ELSE 1 END,
            updated_at DESC NULLS LAST
          LIMIT 1
          FOR UPDATE
         """,
-        {"s": s, "k": k_norm, "tid": tenant_id},
+        {"s": s, "k": k_norm, "tenant_id": tenant_id},
     )
     if cur is None:
         # Insert only if missing (no ON CONFLICT dependency; prod-safe).
@@ -14104,7 +14108,7 @@ async def _manual_upsert_absolute_tx(
                 seller, sku, description, uom, location,
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
               )
-              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), :tid)
+              VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), :tenant_id)
               ON CONFLICT DO NOTHING
             """, {
                 "s": s,
@@ -14113,7 +14117,7 @@ async def _manual_upsert_absolute_tx(
                 "u": (uom or "ton"),
                 "loc": location,
                 "src": source or "manual",
-                "tid": tenant_id,
+                "tenant_id": tenant_id,
             })
             cur = await database.fetch_one(
                 """
@@ -14121,14 +14125,14 @@ async def _manual_upsert_absolute_tx(
                   FROM inventory_items
                  WHERE LOWER(seller)=LOWER(:s)
                    AND LOWER(sku)=LOWER(:k)
-                   AND (:tid::uuid IS NULL OR tenant_id = :tid::uuid OR tenant_id IS NULL)
+                   AND (CAST(:tenant_id AS uuid) IS NULL OR tenant_id = CAST(:tenant_id AS uuid) OR tenant_id IS NULL)
                  ORDER BY
-                   CASE WHEN tenant_id = :tid::uuid THEN 0 ELSE 1 END,
+                   CASE WHEN tenant_id = CAST(:tenant_id AS uuid) THEN 0 ELSE 1 END,
                    updated_at DESC NULLS LAST
                  LIMIT 1
                  FOR UPDATE
                 """,
-                {"s": s, "k": k_norm, "tid": tenant_id},
+                {"s": s, "k": k_norm, "tenant_id": tenant_id},
             )
         else:
             await database.execute("""
@@ -14152,14 +14156,14 @@ async def _manual_upsert_absolute_tx(
                   FROM inventory_items
                  WHERE LOWER(seller)=LOWER(:s)
                    AND LOWER(sku)=LOWER(:k)
-                   AND (:tid::uuid IS NULL OR tenant_id = :tid::uuid OR tenant_id IS NULL)
+                   AND (CAST(:tenant_id AS uuid) IS NULL OR tenant_id = CAST(:tenant_id AS uuid) OR tenant_id IS NULL)
                  ORDER BY
-                   CASE WHEN tenant_id = :tid::uuid THEN 0 ELSE 1 END,
+                   CASE WHEN tenant_id = CAST(:tenant_id AS uuid) THEN 0 ELSE 1 END,
                    updated_at DESC NULLS LAST
                  LIMIT 1
                  FOR UPDATE
                 """,
-                {"s": s, "k": k_norm, "tid": tenant_id},
+                {"s": s, "k": k_norm, "tenant_id": tenant_id},
             )
 
     old = float(cur["qty_on_hand"]) if cur else 0.0
@@ -14180,7 +14184,7 @@ async def _manual_upsert_absolute_tx(
              location    = COALESCE(:loc, location),
              description = COALESCE(:desc, description),
              source      = COALESCE(:src, source),
-             tenant_id   = COALESCE(tenant_id, :tenant_id)
+             tenant_id   = COALESCE(tenant_id, CAST(:tenant_id AS uuid))
        WHERE ctid::text = :ctid
     """, {
         "new": new_qty,
