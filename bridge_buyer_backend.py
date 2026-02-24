@@ -840,7 +840,7 @@ IDEMPOTENCY_EXEMPT_PREFIXES = (
     "/login", "/logout", "/signup", "/register",
     "/stripe/webhook", "/ice/webhook", "/ice-digital-trade",
     "/qbo/callback", "/admin/qbo/peek",
-    "/invites/accept",
+    "/invites/accept", "/inventory/manual_add", "/inventory/import/csv", "/inventory/import/excel",
 
     # Dev-only endpoints must behave like 404 in prod (tests expect this),
     # so they must bypass the idempotency gate.
