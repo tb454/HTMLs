@@ -5422,9 +5422,13 @@ async def _ensure_backend_expected_uniques():
       ON public.bols (contract_id, idem_key)
       WHERE idem_key IS NOT NULL;
 
-    -- inventory_items: also keep a case-insensitive unique for LOWER() lookups (optional but useful)
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_seller_sku_lower
-    ON public.inventory_items ((lower(seller)), (lower(sku)));
+    -- inventory_items: tenant-scoped, legacy-safe, case-insensitive unique
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_items_tenant_seller_sku_norm
+    ON public.inventory_items (
+        COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        lower(seller),
+        lower(sku)
+    );
     """)
 
 @startup
@@ -15083,7 +15087,6 @@ async def _ensure_perf_indexes():
         "CREATE INDEX IF NOT EXISTS idx_inv_mov_sku_time ON inventory_movements(seller, sku, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_orders_acct_status ON orders(account_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_orders_audit_order_time ON orders_audit(order_id, at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_inventory_items_norm ON inventory_items (LOWER(seller), LOWER(sku))",
         "CREATE INDEX IF NOT EXISTS idx_inventory_movements_norm ON inventory_movements (LOWER(seller), LOWER(sku), created_at DESC)"
     ]
     for s in ddl:
