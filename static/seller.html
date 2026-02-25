@@ -1285,7 +1285,7 @@
       const seller        = document.getElementById("sellerName").value.trim();
       const buyer         = document.getElementById("buyerName").value.trim();
       const buyerNorm     = buyer || "OPEN";
-      const material      = document.getElementById("material").value.trim();
+      const material      = document.getElementById("material").value.trim().toUpperCase();
       const weight_tons   = parseFloat(document.getElementById("tons").value);
       const price_per_ton = parseFloat(document.getElementById("price").value);
 

@@ -1226,12 +1226,11 @@ async def buyer_contracts(
     params: dict[str, object] = {"limit": limit, "offset": offset}
 
     if role == "buyer":
-        base += " AND buyer ILIKE :me"; params["me"] = member
+        base += " AND (buyer ILIKE :me OR buyer = 'OPEN')"; params["me"] = member
     elif role == "seller":
         base += " AND seller ILIKE :me"; params["me"] = member
     else:
-        base += " AND (buyer ILIKE :me OR seller ILIKE :me)"; params["me"] = member
-
+        base += " AND (buyer ILIKE :me OR seller ILIKE :me OR buyer = 'OPEN')"; params["me"] = member
     if status:
         base += " AND status ILIKE :st"; params["st"] = status
 
@@ -14923,7 +14922,10 @@ async def inventory_manual_add(payload: dict, request: Request):
             "delta": delta,
             "uom": "ton",
         }
-        return await _idem_guard(request, key, resp)
+        try:
+            return await _idem_guard(request, key, resp)
+        except Exception:
+            return resp
 
     except HTTPException:
         raise
