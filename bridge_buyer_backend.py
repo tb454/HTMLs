@@ -11911,17 +11911,21 @@ async def admin_demo_seed(request: Request):
     tenant_id = str(trow["id"]) if trow else None
 
     # inventory
+    # 1) ensure row exists (schema-agnostic)
     await database.execute("""
       INSERT INTO inventory_items(seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
-      VALUES (:seller, 'SHRED', 250, 0, 0, CAST(:tid AS uuid))
-      ON CONFLICT (
-        (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid)),
-        (lower(seller)),
-        (lower(sku))
-      ) DO UPDATE
-        SET qty_on_hand = EXCLUDED.qty_on_hand,
-            tenant_id   = COALESCE(inventory_items.tenant_id, EXCLUDED.tenant_id),
-            updated_at  = NOW()
+      VALUES (:seller, 'SHRED', 0, 0, 0, CAST(:tid AS uuid))
+      ON CONFLICT DO NOTHING
+    """, {"seller": demo_member, "tid": tenant_id})
+
+    # 2) force demo quantity
+    await database.execute("""
+      UPDATE inventory_items
+         SET qty_on_hand = 250,
+             tenant_id   = COALESCE(tenant_id, CAST(:tid AS uuid)),
+             updated_at  = NOW()
+       WHERE LOWER(seller) = LOWER(:seller)
+         AND LOWER(sku)    = LOWER('SHRED')
     """, {"seller": demo_member, "tid": tenant_id})
 
     # contract
@@ -14102,11 +14106,7 @@ async def _manual_upsert_absolute_tx(
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
               )
               VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), CAST(:tenant_id AS uuid))
-              ON CONFLICT (
-                COALESCE(tenant_id,'00000000-0000-0000-0000-000000000000'::uuid),
-                lower(seller),
-                lower(sku)
-                ) DO NOTHING
+              ON CONFLICT DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
@@ -14138,11 +14138,7 @@ async def _manual_upsert_absolute_tx(
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at
               )
               VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW())
-              ON CONFLICT (
-                COALESCE(tenant_id,'00000000-0000-0000-0000-000000000000'::uuid),
-                lower(seller),
-                lower(sku)
-              ) DO NOTHING
+              ON CONFLICT DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
@@ -20452,11 +20448,7 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 await database.execute("""
                     INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
                     VALUES (:s, :k, 0, 0, 0, CAST(:tid AS uuid))
-                    ON CONFLICT (
-                      (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid)),
-                      (lower(seller)),
-                      (lower(sku))
-                    ) DO NOTHING
+                    ON CONFLICT DO NOTHING
                 """, {"s": seller, "k": sku, "tid": tenant_id})
 
                 # Lock the row we reserve against (FOR UPDATE is now meaningful)
