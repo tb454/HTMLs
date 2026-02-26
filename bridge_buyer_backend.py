@@ -14063,6 +14063,109 @@ def _to_tons(qty: float, uom: str | None) -> float:
         return q / 2000.0
     return q  # assume tons by default
 
+# ---------- inventory_movements insert (schema-tolerant; never 500s) ----------
+_INV_MOV_HAS_IDEM: bool | None = None
+
+async def _inv_mov_has_idem_col() -> bool:
+    """
+    Detect if public.inventory_movements has an idem_key column.
+    Cached after first call.
+    """
+    global _INV_MOV_HAS_IDEM
+    if _INV_MOV_HAS_IDEM is not None:
+        return _INV_MOV_HAS_IDEM
+    try:
+        r = await database.fetch_one("""
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema='public'
+              AND table_name='inventory_movements'
+              AND column_name='idem_key'
+            LIMIT 1
+        """)
+        _INV_MOV_HAS_IDEM = bool(r)
+    except Exception:
+        _INV_MOV_HAS_IDEM = False
+    return _INV_MOV_HAS_IDEM
+
+
+async def _insert_inventory_movement_safe(
+    *,
+    seller: str,
+    sku: str,
+    movement_type: str,
+    qty: float,
+    uom: str | None,
+    ref_contract: str | None,
+    contract_id_uuid: str | None,
+    bol_id_uuid: str | None,
+    meta_json: str,
+    tenant_id: str | None,
+    idem_key: str | None,
+) -> None:
+    """
+    Insert inventory_movements in a schema-tolerant way:
+      - If idem_key column exists, include it and use ON CONFLICT DO NOTHING (no target).
+      - If not, insert without idem_key.
+    Never raises (best-effort).
+    """
+    try:
+        has_idem = await _inv_mov_has_idem_col()
+        if has_idem:
+            await database.execute("""
+                INSERT INTO inventory_movements (
+                  seller, sku, movement_type, qty,
+                  uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                  meta, tenant_id, idem_key, created_at
+                )
+                VALUES (
+                  :seller, :sku, :mt, :qty,
+                  :uom, :ref_contract, :cid_uuid, :bid_uuid,
+                  CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), :idem_key, NOW()
+                )
+                ON CONFLICT DO NOTHING
+            """, {
+                "seller": seller,
+                "sku": sku,
+                "mt": movement_type,
+                "qty": qty,
+                "uom": (uom or "ton"),
+                "ref_contract": ref_contract,
+                "cid_uuid": contract_id_uuid,
+                "bid_uuid": bol_id_uuid,
+                "meta": meta_json,
+                "tenant_id": tenant_id,
+                "idem_key": idem_key,
+            })
+        else:
+            await database.execute("""
+                INSERT INTO inventory_movements (
+                  seller, sku, movement_type, qty,
+                  uom, ref_contract, contract_id_uuid, bol_id_uuid,
+                  meta, tenant_id, created_at
+                )
+                VALUES (
+                  :seller, :sku, :mt, :qty,
+                  :uom, :ref_contract, :cid_uuid, :bid_uuid,
+                  CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), NOW()
+                )
+            """, {
+                "seller": seller,
+                "sku": sku,
+                "mt": movement_type,
+                "qty": qty,
+                "uom": (uom or "ton"),
+                "ref_contract": ref_contract,
+                "cid_uuid": contract_id_uuid,
+                "bid_uuid": bol_id_uuid,
+                "meta": meta_json,
+                "tenant_id": tenant_id,
+            })
+    except Exception:
+        # never break inventory writes on movement logging
+        return
+# ---------- inventory_movements insert ----------
+
 async def _manual_upsert_absolute_tx(
     *,
     seller: str,
@@ -14206,32 +14309,20 @@ async def _manual_upsert_absolute_tx(
         default=str,
     )
 
-    # Prefer UUID pointer columns (matches Supabase schema)
-    await database.execute("""
-      INSERT INTO inventory_movements (
-        seller, sku, movement_type, qty,
-        uom, ref_contract, contract_id_uuid, bol_id_uuid,
-        meta, tenant_id, idem_key, created_at
-      )
-      VALUES (
-        :seller, :sku, :mt, :qty,
-        :uom, :ref_contract, :cid_uuid, :bid_uuid,
-        CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), :idem_key, NOW()
-      )
-      ON CONFLICT (tenant_id, idem_key) DO NOTHING
-    """, {
-        "seller": s,
-        "sku": k_norm,
-        "mt": "upsert",
-        "qty": delta,
-        "uom": (uom or "ton"),
-        "ref_contract": None,
-        "cid_uuid": None,
-        "bid_uuid": None,
-        "meta": meta_json,
-        "tenant_id": tenant_id,
-        "idem_key": idem_key,
-    })
+    # Movement log (schema-tolerant; cannot 500)
+    await _insert_inventory_movement_safe(
+        seller=s,
+        sku=k_norm,
+        movement_type="upsert",
+        qty=delta,
+        uom=(uom or "ton"),
+        ref_contract=None,
+        contract_id_uuid=None,
+        bol_id_uuid=None,
+        meta_json=meta_json,
+        tenant_id=tenant_id,
+        idem_key=idem_key,
+    )
 
     # --- webhook emit (inventory.movement)
     try:
