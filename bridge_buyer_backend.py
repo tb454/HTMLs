@@ -14162,7 +14162,15 @@ async def _manual_upsert_absolute_tx(
                 """,
                 {"s": s, "k": k_norm, "tenant_id": tenant_id},
             )
-
+    if cur is None:
+        # If we got here, INSERT did nothing AND we still can't SELECT the row.
+        # In production this is almost always: tenant_id required but missing,
+        # or seller/sku don't match the row's actual canonical keys.
+        raise HTTPException(
+            status_code=500,
+            detail="inventory_items row not found/locked after insert; check tenant_id requirement + seller/sku canonicalization",
+        )
+    
     old = float(cur["qty_on_hand"]) if cur else 0.0
     if (mode or "set") == "add":
         new_qty = old + float(qty_on_hand_tons or 0.0)
@@ -14740,16 +14748,8 @@ async def inventory_bulk_upsert(body: dict, request: Request):
     if not (source and seller and isinstance(items, list)):
         raise HTTPException(400, "invalid payload: require source, seller, items[]")
 
-    # Resolve tenant once per batch (prefer seller name)
-    tenant_id = await current_tenant_id(request)
-    if not tenant_id and seller:
-        try:
-            slug = _slugify_member(seller)
-            trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
-            if trow and trow.get("id"):
-                tenant_id = str(trow["id"])
-        except Exception:
-            tenant_id = None
+    # Resolve tenant once per batch (prod-safe)
+    tenant_id = await _inventory_write_tenant_id(request, seller)
 
     raw = await request.body()
     sig = request.headers.get("X-Signature", "")    
@@ -14875,15 +14875,7 @@ async def inventory_manual_add(payload: dict, request: Request):
         qty_raw = float(payload.get("qty_on_hand") or 0.0)
         qty_tons = _to_tons(qty_raw, uom)
 
-        tenant_id = await current_tenant_id(request)
-        if not tenant_id and seller:
-            try:
-                slug = _slugify_member(seller)
-                trow = await database.fetch_one("SELECT id FROM tenants WHERE slug = :slug", {"slug": slug})
-                if trow and trow.get("id"):
-                    tenant_id = str(trow["id"])
-            except Exception:
-                tenant_id = None
+        tenant_id = await _inventory_write_tenant_id(request, seller)
 
         async with database.transaction():
             old, new_qty, delta = await _manual_upsert_absolute_tx(
@@ -14941,11 +14933,24 @@ async def inventory_manual_add(payload: dict, request: Request):
         except Exception:
             pass
 
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "inventory/manual_add failed", "request_id": rid},
+        # TEMP DEBUG: show internal errors to sellers too (lock down later)
+        role = ""
+        try:
+            role = (request.session.get("role") or "").lower()
+        except Exception:
+            role = ""
+
+        debug_ok = (
+            os.getenv("ENV", "").lower() != "production"
+            or role in ("admin", "seller")              # <-- TEMP: allow seller to see real errors
+            or os.getenv("DEBUG_SHOW_ERRORS", "0").lower() in ("1", "true", "yes")
         )
 
+        content = {"detail": "inventory/manual_add failed", "request_id": rid}
+        if debug_ok:
+            content["error"] = f"{type(e).__name__}: {str(e)}"
+
+        return JSONResponse(status_code=500, content=content)
 # -------- CSV template --------
 @app.get("/inventory/template.csv", tags=["Inventory"], summary="CSV template")
 async def inventory_template_csv():
@@ -14968,7 +14973,8 @@ async def inventory_import_csv(
     #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         #pass
 
-    tenant_id = await current_tenant_id(request) if request is not None else None
+    # Resolve per-row (seller may be in file). Request cache in _inventory_write_tenant_id keeps it fast.
+    tenant_id = None
 
     text = (await file.read()).decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
@@ -14987,6 +14993,7 @@ async def inventory_import_csv(
                 qty_raw = float(row.get("qty_on_hand") or 0.0)
                 qty_tons = _to_tons(qty_raw, uom)
 
+                tid_row = await _inventory_write_tenant_id(request, s)
                 await _manual_upsert_absolute_tx(
                     seller=s,
                     sku=k,
@@ -14996,7 +15003,7 @@ async def inventory_import_csv(
                     description=row.get("description"),
                     source="import_csv",
                     movement_reason="import_csv",
-                    tenant_id=tenant_id,
+                    tenant_id=tid_row,
                 )
                 upserted += 1
             except Exception as e:
@@ -15015,7 +15022,8 @@ async def inventory_import_excel(
     #if _require_hmac_in_this_env() and not _is_admin_or_seller(request):
         #pass
 
-    tenant_id = await current_tenant_id(request) if request is not None else None
+    # Resolve per-row (seller may vary). Cached by _inventory_write_tenant_id.
+    tenant_id = None
 
     try:
         import pandas as pd  # openpyxl required underneath
@@ -15046,6 +15054,7 @@ async def inventory_import_excel(
                 qty_raw = rec.get("qty_on_hand") or rec.get("Qty_On_Hand") or 0.0
                 qty_tons = _to_tons(float(qty_raw or 0.0), uom)
 
+                tid_row = await _inventory_write_tenant_id(request, s)
                 await _manual_upsert_absolute_tx(
                     seller=s,
                     sku=k,
@@ -15055,7 +15064,7 @@ async def inventory_import_excel(
                     description=rec.get("description") or rec.get("Description"),
                     source="import_excel",
                     movement_reason="import_excel",
-                    tenant_id=tenant_id,
+                    tenant_id=tid_row,
                 )
                 upserted += 1
             except Exception as e:
@@ -16652,6 +16661,150 @@ async def current_tenant_id(request: Request) -> Optional[str]:
         return str(tm["tenant_id"])
 
     return None
+
+# ------------------ INVENTORY TENANT RESOLUTION -----------------
+# Tri-state so we can detect once lazily (safe even if schema drifts)
+_INV_TENANT_REQUIRED: bool | None = None
+
+async def _inv_detect_tenant_required() -> bool:
+    """
+    Detect whether inventory_items requires tenant_id in THIS environment.
+    True if:
+      - inventory_items.tenant_id is NOT NULL, OR
+      - tenant_id is part of the PRIMARY KEY
+    """
+    global _INV_TENANT_REQUIRED
+    if _INV_TENANT_REQUIRED is not None:
+        return _INV_TENANT_REQUIRED
+
+    try:
+        # 1) column nullability
+        col = await database.fetch_one("""
+            SELECT is_nullable
+            FROM information_schema.columns
+            WHERE table_schema='public'
+              AND table_name='inventory_items'
+              AND column_name='tenant_id'
+            LIMIT 1
+        """)
+        tenant_notnull = bool(col and str(col["is_nullable"]).upper() == "NO")
+
+        # 2) primary key columns
+        pkcols = await database.fetch_all("""
+            SELECT a.attname
+            FROM pg_index i
+            JOIN pg_attribute a
+              ON a.attrelid = i.indrelid
+             AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = 'public.inventory_items'::regclass
+              AND i.indisprimary
+        """)
+        pk_has_tenant = any((r["attname"] == "tenant_id") for r in pkcols)
+
+        _INV_TENANT_REQUIRED = bool(tenant_notnull or pk_has_tenant)
+        return _INV_TENANT_REQUIRED
+    except Exception:
+        # If we can't detect, fail open (don’t brick prod). We'll still try to resolve tenant where possible.
+        _INV_TENANT_REQUIRED = False
+        return _INV_TENANT_REQUIRED
+
+
+async def _inventory_write_tenant_id(request: Request, seller: str | None) -> str | None:
+    """
+    Resolve tenant_id for inventory writes.
+
+    Order:
+      1) current_tenant_id(request) (session / memberships)
+      2) tenants.slug lookup from seller (slugify)
+      3) tenants.name case-insensitive lookup
+
+    If tenant_id is REQUIRED by schema and still not resolved:
+      - If caller looks like a real logged-in role (admin/seller), auto-create tenant row (idempotent)
+      - Otherwise raise a clean 401 instead of a 500
+    """
+    # Request-scoped cache (avoids repeated tenant lookups during CSV imports, etc.)
+    try:
+        cache = getattr(request.state, "_tenant_cache", None)
+        if cache is None:
+            cache = {}
+            request.state._tenant_cache = cache
+    except Exception:
+        cache = {}
+
+    s = (seller or "").strip()
+    slug = _slugify_member(s) if s else ""
+
+    if slug and slug in cache:
+        return cache[slug]
+
+    # 1) Session/membership resolver
+    tid = None
+    try:
+        tid = await current_tenant_id(request)
+    except Exception:
+        tid = None
+    if tid:
+        if slug:
+            cache[slug] = tid
+        return tid
+
+    # 2) tenants lookup by slug/name
+    if s:
+        try:
+            row = await database.fetch_one("""
+                SELECT id
+                FROM tenants
+                WHERE slug = :slug
+                   OR lower(name) = lower(:name)
+                LIMIT 1
+            """, {"slug": slug, "name": s})
+            if row and row.get("id"):
+                tid = str(row["id"])
+                cache[slug] = tid
+                return tid
+        except Exception:
+            tid = None
+
+    # 3) If required, optionally auto-create for real operators (admin/seller)
+    required = False
+    try:
+        required = await _inv_detect_tenant_required()
+    except Exception:
+        required = False
+
+    if required:
+        role = ""
+        try:
+            role = (request.session.get("role") or "").lower()
+        except Exception:
+            role = ""
+
+        if s and role in ("admin", "seller"):
+            try:
+                await database.execute("""
+                    INSERT INTO tenants(id, slug, name, region)
+                    VALUES (CAST(:id AS uuid), :slug, :name, NULL)
+                    ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name
+                """, {"id": str(uuid.uuid4()), "slug": slug, "name": s})
+                row2 = await database.fetch_one("SELECT id FROM tenants WHERE slug=:slug LIMIT 1", {"slug": slug})
+                if row2 and row2.get("id"):
+                    tid = str(row2["id"])
+                    cache[slug] = tid
+                    return tid
+            except Exception:
+                pass
+
+        # Hard fail with a clear message (better than random 500)
+        raise HTTPException(
+            status_code=401,
+            detail="tenant not resolved for inventory write (session missing or tenants row missing)",
+        )
+
+    # Not required → allow NULL (legacy schema)
+    if slug:
+        cache[slug] = None
+    return None
+# ------------------ /INVENTORY TENANT RESOLUTION -----------------
 
 async def require_perm(request: Request, perm: str):
     ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
