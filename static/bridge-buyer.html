@@ -1393,8 +1393,9 @@
         if (btn && !btn._wired) {
           btn._wired = true;
           btn.addEventListener('click', () => {
-            const u = new URL(`${window.endpoint}/contracts/export_csv`);
-            u.searchParams.set('buyer', buyerKey);
+            const u = new URL(`${window.endpoint}/buyer/contracts/export_csv`);
+            u.searchParams.set('role', 'buyer');      // critical: open + directed only
+            u.searchParams.set('status', 'Open');     // optional, but matches your rule as written
             window.open(u.toString(), '_blank', 'noopener');
           });
         }

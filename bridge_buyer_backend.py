@@ -1284,6 +1284,106 @@ async def buyer_contracts(
         "limit": limit,
         "offset": offset,
     }
+
+@app.get("/buyer/contracts/export_csv", tags=["Buyer"], summary="Export buyer-visible contracts as CSV")
+async def buyer_contracts_export_csv(
+    request: Request,
+    _=Depends(require_buyer_or_admin),
+    role: str | None = Query(
+        None,
+        description="buyer|seller. buyer = open market + contracts addressed to me. seller = my resells. blank = union."
+    ),
+    status: str | None = Query(None, description="Status filter, e.g. Open|Signed|Fulfilled"),
+    buyer: str | None = Query(None, description="Optional buyer name filter (ILIKE)"),
+    seller: str | None = Query(None, description="Optional seller name filter (ILIKE)"),
+    material: str | None = Query(None, description="Optional material filter (ILIKE)"),
+    limit: int = Query(20000, ge=1, le=20000, description="Hard cap for export rows"),
+):
+    """
+    Exports exactly what /buyer/contracts would show (same visibility rule), as a streamed CSV.
+    """
+
+    member = (_current_member_name(request) or "").strip()
+
+    where = ["1=1"]
+    params: dict[str, object] = {}
+
+    # --- role visibility (MUST match /buyer/contracts) ---
+    if role == "buyer":
+        where.append("(buyer = 'OPEN' OR buyer ILIKE :me)")
+        params["me"] = member
+    elif role == "seller":
+        where.append("seller ILIKE :me")
+        params["me"] = member
+    else:
+        where.append("(buyer = 'OPEN' OR buyer ILIKE :me OR seller ILIKE :me)")
+        params["me"] = member
+
+    # --- filters (MUST match /buyer/contracts) ---
+    if status:
+        where.append("status ILIKE :st")
+        params["st"] = status
+    if buyer:
+        where.append("buyer ILIKE :b")
+        params["b"] = f"%{buyer}%"
+    if seller:
+        where.append("seller ILIKE :s")
+        params["s"] = f"%{seller}%"
+    if material:
+        where.append("material ILIKE :m")
+        params["m"] = f"%{material}%"
+
+    where_sql = " AND ".join(where)
+
+    q = f"""
+        SELECT id, buyer, seller, material, weight_tons, price_per_ton, currency, status, created_at
+        FROM contracts
+        WHERE {where_sql}
+        ORDER BY created_at DESC NULLS LAST, id DESC
+        LIMIT :limit
+    """
+
+    rows = await database.fetch_all(q, {**params, "limit": int(limit)})
+
+    fieldnames = [
+        "id", "buyer", "seller", "material",
+        "weight_tons", "price_per_ton", "currency",
+        "status", "created_at"
+    ]
+
+    def _norm(v):
+        if v is None:
+            return ""
+        try:
+            if isinstance(v, (datetime, date)):
+                return v.isoformat()
+        except Exception:
+            pass
+        try:
+            if isinstance(v, Decimal):
+                return str(v)
+        except Exception:
+            pass
+        return str(v)
+
+    async def _gen():
+        buf = io.StringIO(newline="")
+        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+
+        for r in rows:
+            d = dict(r)
+            w.writerow({k: _norm(d.get(k)) for k in fieldnames})
+            yield buf.getvalue()
+            buf.seek(0); buf.truncate(0)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="buyer_contracts.csv"'},
+    )
 # ---------- Buyer-facing models & routes ----------
 
 # ---------- duplicate def / overwrite guard  ---------
