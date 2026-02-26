@@ -1106,9 +1106,13 @@
       _syncQuery({ buyer: buyerVal || '', material: matVal || '', page, rows: String(limit) });
 
       try {
-        const res  = await api(`/contracts?` + q.toString(), { signal: loadCtl.signal });
-        const rows = await res.json();
-        const total = +(res.headers.get('X-Total-Count') || 0);
+        // Buyer must use buyer-scoped endpoint (open market + directed-to-me)
+        q.set('role', 'buyer');
+
+        const res = await api(`/buyer/contracts?` + q.toString(), { signal: loadCtl.signal });
+        const j   = await res.json();
+        const rows  = Array.isArray(j?.items) ? j.items : [];
+        const total = Number(j?.total || 0);
 
         root.innerHTML = '';
         if (!Array.isArray(rows) || rows.length === 0) {
@@ -1347,12 +1351,20 @@
 
       try {
         const base = new URLSearchParams({ buyer: buyerKey, limit: '100', offset: '0', sort: 'created_at_desc' });
+        base.set('role', 'buyer'); // buyer visibility rule
+
         const [a, b] = await Promise.all([
-          api('/contracts?' + base + '&status=Signed'),
-          api('/contracts?' + base + '&status=Fulfilled')
+          api('/buyer/contracts?' + base + '&status=Signed'),
+          api('/buyer/contracts?' + base + '&status=Fulfilled')
         ]);
-        const rows = [...await a.json(), ...await b.json()]
-          .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+
+        const aj = await a.json();
+        const bj = await b.json();
+
+        const rows = [
+          ...(Array.isArray(aj?.items) ? aj.items : []),
+          ...(Array.isArray(bj?.items) ? bj.items : [])
+        ].sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
         if (!rows.length) { el.textContent = 'No past contracts.'; return; }
 
         const tbl = document.createElement('table');
@@ -1382,6 +1394,7 @@
           btn._wired = true;
           btn.addEventListener('click', () => {
             const u = new URL(`${window.endpoint}/contracts/export_csv`);
+            u.searchParams.set('buyer', buyerKey);
             window.open(u.toString(), '_blank', 'noopener');
           });
         }

@@ -1189,43 +1189,101 @@ async def buyer_inventory(request: Request, _=Depends(require_buyer_or_admin)):
         """, {"s": member})
         return {"inventory": [{"material": r["sku"], "qty": float(r["qty"])} for r in rows]}
 
-@app.get("/buyer/contracts", tags=["Buyer"], summary="Buyer contracts (incoming and resell)")
+@app.get("/buyer/contracts", tags=["Buyer"], summary="Buyer contracts (open market + directed + my resells)")
 async def buyer_contracts(
     request: Request,
     _=Depends(require_buyer_or_admin),
-    role: str | None = Query(None, description="filter as 'buyer' or 'seller' (relative to current member)"),
-    status: str | None = Query(None),
-    limit: int = 50, offset: int = 0,
+    role: str | None = Query(
+        None,
+        description="buyer|seller. buyer = open market + contracts addressed to me. seller = my resells. blank = union."
+    ),
+    status: str | None = Query(None, description="Status filter, e.g. Open|Signed|Fulfilled"),
+    buyer: str | None = Query(None, description="Optional buyer name filter (ILIKE)"),
+    seller: str | None = Query(None, description="Optional seller name filter (ILIKE)"),
+    material: str | None = Query(None, description="Optional material filter (ILIKE)"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
-    member = _current_member_name(request)
-    base = "SELECT id, buyer, seller, material, weight_tons, price_per_ton, currency, status, created_at FROM contracts WHERE 1=1"
-    params: dict[str, object] = {"limit": limit, "offset": offset}
+    """
+    IMPORTANT:
+    - This endpoint is intentionally NOT tenant-scoped so buyers can see the open market.
+    - Visibility rule:
+        role=buyer  -> status + (buyer='OPEN' OR buyer matches my member)
+        role=seller -> status + (seller matches my member)
+        role=None   -> union of both
+    Response shape is UI-friendly: { items: [...], total: N, limit, offset }.
+    """
+    member = (_current_member_name(request) or "").strip()
 
+    where = ["1=1"]
+    params: dict[str, object] = {}
+
+    # --- role visibility ---
     if role == "buyer":
-        base += " AND (buyer ILIKE :me OR buyer = 'OPEN')"; params["me"] = member
+        where.append("(buyer = 'OPEN' OR buyer ILIKE :me)")
+        params["me"] = member
     elif role == "seller":
-        base += " AND seller ILIKE :me"; params["me"] = member
+        where.append("seller ILIKE :me")
+        params["me"] = member
     else:
-        base += " AND (buyer ILIKE :me OR seller ILIKE :me OR buyer = 'OPEN')"; params["me"] = member
-    if status:
-        base += " AND status ILIKE :st"; params["st"] = status
+        where.append("(buyer = 'OPEN' OR buyer ILIKE :me OR seller ILIKE :me)")
+        params["me"] = member
 
-    base += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
-    rows = await database.fetch_all(base, params)
-    out = []
+    # --- filters ---
+    if status:
+        where.append("status ILIKE :st")
+        params["st"] = status
+    if buyer:
+        where.append("buyer ILIKE :b")
+        params["b"] = f"%{buyer}%"
+    if seller:
+        where.append("seller ILIKE :s")
+        params["s"] = f"%{seller}%"
+    if material:
+        where.append("material ILIKE :m")
+        params["m"] = f"%{material}%"
+
+    where_sql = " AND ".join(where)
+
+    # --- total ---
+    total_row = await database.fetch_one(
+        f"SELECT COUNT(*) AS c FROM contracts WHERE {where_sql}",
+        params
+    )
+    total = int(total_row["c"] or 0) if total_row else 0
+
+    # --- page ---
+    rows = await database.fetch_all(
+        f"""
+        SELECT id, buyer, seller, material, weight_tons, price_per_ton, currency, status, created_at
+        FROM contracts
+        WHERE {where_sql}
+        ORDER BY created_at DESC NULLS LAST, id DESC
+        LIMIT :limit OFFSET :offset
+        """,
+        {**params, "limit": limit, "offset": offset},
+    )
+
+    items = []
     for r in rows:
-        out.append({
+        items.append({
             "id": str(r["id"]),
             "buyer": r["buyer"],
             "seller": r["seller"],
             "material": r["material"],
             "weight_tons": float(r["weight_tons"] or 0.0),
             "price_per_ton": float(r["price_per_ton"] or 0.0),
-            "currency": r["currency"] or "USD",
+            "currency": (r["currency"] or "USD"),
             "status": r["status"],
             "created_at": (r["created_at"].isoformat() if r["created_at"] else None),
         })
-    return {"contracts": out}
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 # ---------- Buyer-facing models & routes ----------
 
 # ---------- duplicate def / overwrite guard  ---------
