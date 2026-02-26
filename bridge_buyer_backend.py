@@ -14830,7 +14830,7 @@ async def idem_put(key: str, resp: dict):
         pass
     return resp
 
-# -------- Inventory: Manual Add/Set (gated + unit-aware) --------
+# -------- Inventory: Manual Add/Set (gated + unit-aware) -------
 @app.post(
     "/inventory/manual_add",
     tags=["Inventory"],
