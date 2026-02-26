@@ -1,6 +1,5 @@
 from __future__ import annotations
 import sys, pathlib
-from wsgiref import headers
 import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.responses import JSONResponse
@@ -1220,7 +1219,7 @@ async def buyer_contracts(
 
     # --- role visibility ---
     if role == "buyer":
-        where.append("(buyer = 'OPEN' OR buyer ILIKE :me)")
+        where.append("(LOWER(COALESCE(buyer,'')) = 'open' OR buyer ILIKE :me)")
         params["me"] = member
     elif role == "seller":
         where.append("seller ILIKE :me")
@@ -1310,7 +1309,7 @@ async def buyer_contracts_export_csv(
 
     # --- role visibility (MUST match /buyer/contracts) ---
     if role == "buyer":
-        where.append("(buyer = 'OPEN' OR buyer ILIKE :me)")
+        where.append("(LOWER(COALESCE(buyer,'')) = 'open' OR buyer ILIKE :me)")
         params["me"] = member
     elif role == "seller":
         where.append("seller ILIKE :me")
@@ -1412,13 +1411,37 @@ async def _assert_no_duplicate_defs_or_classes():
         dups = {k: v for k, v in names.items() if len(v) > 1}
 
         if dups:
-            logger.error("duplicate_defs_detected", dups=dups)
-            return
+            lines = src.splitlines()
+
+            def _line(ln: int) -> str:
+                if 1 <= ln <= len(lines):
+                    return lines[ln - 1].rstrip()
+                return "<line out of range>"
+
+            # Build a fast, grep-ready report
+            report_lines: list[str] = []
+            for nm, lns in sorted(dups.items(), key=lambda kv: kv[0].lower()):
+                lns_s = ", ".join(str(x) for x in lns)
+                defs_s = " | ".join(f"{ln}: {_line(ln)}" for ln in lns)
+                report_lines.append(f"- {nm} @ {lns_s} :: {defs_s}")
+
+            report = "\n".join(report_lines)
+
+            logger.error(
+                "duplicate_defs_detected",
+                file=str(Path(__file__)),
+                dups=dups,
+                report=report,
+            )
+            raise RuntimeError(
+                "Duplicate defs/classes detected in "
+                f"{Path(__file__)}:\n{report}"
+            )
 
     except Exception as e:
         # If the detector itself fails, fail closed in prod.
         raise RuntimeError(f"duplicate-def detector failed: {type(e).__name__}: {e}")
-# ============ duplicate def / overwrite guard =============
+# ---------- duplicate def / overwrite guard  ---------
 
 # -----  Apply Page Relaxed for Stripe Access ----
 BASE_DIR = Path(__file__).resolve().parent
@@ -9394,6 +9417,7 @@ async def public_index_detail_page(request: Request, ticker: str):
 
     if not PUBLIC_INDEX_DETAIL_PATH.exists():
         raise HTTPException(status_code=404, detail="static/public-index-detail.html not found")
+    return _serve_public_html_file(request, PUBLIC_INDEX_DETAIL_PATH)
 
 @app.get("/static/indices.html", include_in_schema=False)
 async def indices_legacy(request: Request):
