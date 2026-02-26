@@ -1569,7 +1569,7 @@
         (window.__bridgeUser?.resolved_member || window.__bridgeUser?.member || '').trim()
         || document.getElementById('sellerName').value.trim()
         || document.getElementById('invDefaultSeller').value.trim();
-      const sku = document.getElementById('invSku').value.trim();
+      const sku = document.getElementById('invSku').value.trim().toUpperCase();
       const qty = parseFloat(document.getElementById('invQty').value);
       const location = document.getElementById('invLocation').value.trim();
       const description = document.getElementById('invDesc').value.trim();
