@@ -14211,24 +14211,26 @@ async def _manual_upsert_absolute_tx(
       INSERT INTO inventory_movements (
         seller, sku, movement_type, qty,
         uom, ref_contract, contract_id_uuid, bol_id_uuid,
-        meta, tenant_id, created_at
+        meta, tenant_id, idem_key, created_at
       )
       VALUES (
         :seller, :sku, :mt, :qty,
         :uom, :ref_contract, :cid_uuid, :bid_uuid,
-        CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), NOW()
+        CAST(:meta AS jsonb), CAST(:tenant_id AS uuid), :idem_key, NOW()
       )
+      ON CONFLICT (tenant_id, idem_key) DO NOTHING
     """, {
         "seller": s,
         "sku": k_norm,
         "mt": "upsert",
         "qty": delta,
         "uom": (uom or "ton"),
-        "ref_contract": None,  
-        "cid_uuid": None,       
+        "ref_contract": None,
+        "cid_uuid": None,
         "bid_uuid": None,
         "meta": meta_json,
         "tenant_id": tenant_id,
+        "idem_key": idem_key,
     })
 
     # --- webhook emit (inventory.movement)
