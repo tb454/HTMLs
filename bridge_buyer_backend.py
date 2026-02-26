@@ -5136,7 +5136,7 @@ async def tag_add(p: TagIn, request: Request):
     who = (request.session.get("username") if hasattr(request,"session") else None)
     await database.execute("""
       INSERT INTO entity_tags(entity_type,entity_id,tag,tagged_by)
-      VALUES (:t,:id,:g,:by) ON CONFLICT DO NOTHING
+      VALUES (:t,:id,:g,:by) ON CONFLICT (entity_type, entity_id, tag) DO NOTHING
     """, {"t": p.entity_type, "id": p.entity_id, "g": p.tag, "by": who})
     return {"ok": True}
 
@@ -7499,7 +7499,7 @@ async def policy_accept(body: PolicyAcceptIn, username: str = Depends(get_userna
         """
         INSERT INTO user_policy_acceptance(username, policy_key, policy_version)
         VALUES (:u, :k, :v)
-        ON CONFLICT DO NOTHING;
+        ON CONFLICT (username, policy_key, policy_version) DO NOTHING;
         """,
         {"u": username, "k": body.key, "v": version},
     )
@@ -11913,8 +11913,15 @@ async def admin_demo_seed(request: Request):
     # inventory
     await database.execute("""
       INSERT INTO inventory_items(seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
-      VALUES (:seller, 'SHRED', 250, 0, 0, :tid)
-      ON CONFLICT (seller, sku) DO UPDATE SET qty_on_hand=EXCLUDED.qty_on_hand, tenant_id=EXCLUDED.tenant_id
+      VALUES (:seller, 'SHRED', 250, 0, 0, CAST(:tid AS uuid))
+      ON CONFLICT (
+        (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+        (lower(seller)),
+        (lower(sku))
+      ) DO UPDATE
+        SET qty_on_hand = EXCLUDED.qty_on_hand,
+            tenant_id   = COALESCE(inventory_items.tenant_id, EXCLUDED.tenant_id),
+            updated_at  = NOW()
     """, {"seller": demo_member, "tid": tenant_id})
 
     # contract
@@ -14095,7 +14102,11 @@ async def _manual_upsert_absolute_tx(
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at, tenant_id
               )
               VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW(), CAST(:tenant_id AS uuid))
-              ON CONFLICT DO NOTHING
+              ON CONFLICT (
+                COALESCE(tenant_id,'00000000-0000-0000-0000-000000000000'::uuid),
+                lower(seller),
+                lower(sku)
+                ) DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
@@ -14127,7 +14138,11 @@ async def _manual_upsert_absolute_tx(
                 qty_on_hand, qty_reserved, qty_committed, source, updated_at
               )
               VALUES (:s, :k, :d, :u, :loc, 0, 0, 0, :src, NOW())
-              ON CONFLICT DO NOTHING
+              ON CONFLICT (
+                COALESCE(tenant_id,'00000000-0000-0000-0000-000000000000'::uuid),
+                lower(seller),
+                lower(sku)
+              ) DO NOTHING
             """, {
                 "s": s,
                 "k": k_norm,
@@ -14803,12 +14818,12 @@ async def idem_get(key: str):
     row = await database.fetch_one("SELECT response FROM http_idempotency WHERE key=:k", {"k": key})
     return (row and row["response"])
 
-# Legacy helper kept for backward compatibility; prefer `_idem_guard(...)` in handlers.
+## Legacy helper kept for backward compatibility; prefer `_idem_guard(...)` in handlers.
 async def idem_put(key: str, resp: dict):
     if not key: return resp
     try:
         await database.execute(
-            "INSERT INTO http_idempotency(key,response) VALUES (:k,:r::jsonb) ON CONFLICT DO NOTHING",
+            "INSERT INTO http_idempotency(key,response) VALUES (:k,:r::jsonb) ON CONFLICT (key) DO NOTHING",
             {"k": key, "r": json.dumps(resp, default=str)}
         )
     except Exception:
@@ -18377,7 +18392,7 @@ async def purchase_contract(
                       :wt, :ppt, :ccy,
                       'Open', NOW(), :tenant_id
                     )
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (contract_id) DO NOTHING
                     """,
                     {
                         "id": str(uuid.uuid4()),
@@ -20437,7 +20452,11 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
                 await database.execute("""
                     INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
                     VALUES (:s, :k, 0, 0, 0, CAST(:tid AS uuid))
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (
+                      (COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+                      (lower(seller)),
+                      (lower(sku))
+                    ) DO NOTHING
                 """, {"s": seller, "k": sku, "tid": tenant_id})
 
                 # Lock the row we reserve against (FOR UPDATE is now meaningful)
@@ -20566,145 +20585,6 @@ async def create_contract(contract: ContractInExtended, request: Request, _=Depe
 
                 if not row:
                     raise RuntimeError("contracts insert returned no row")
-
-            # Ensure the row exists (inventory_items PK is seller+sku, so tenant_id is metadata)
-            await database.execute("""
-                INSERT INTO inventory_items (seller, sku, qty_on_hand, qty_reserved, qty_committed, tenant_id)
-                VALUES (:s, :k, 0, 0, 0, CAST(:tid AS uuid))
-                ON CONFLICT DO NOTHING
-            """, {"s": seller, "k": sku, "tid": tenant_id})
-
-            # Lock the row we reserve against (no tenant clause here because PK is seller+sku)
-            inv = await database.fetch_one("""
-                SELECT ctid::text AS ctid, qty_on_hand, qty_reserved, qty_committed, tenant_id
-                  FROM inventory_items
-                 WHERE LOWER(seller)=LOWER(:s)
-                   AND LOWER(sku)=LOWER(:k)
-                   AND (:tid IS NULL OR tenant_id = :tid OR tenant_id IS NULL)
-                 ORDER BY
-                   CASE WHEN tenant_id = :tid THEN 0 ELSE 1 END,
-                   updated_at DESC NULLS LAST
-                 LIMIT 1
-                 FOR UPDATE
-            """, {"s": seller, "k": sku, "tid": tenant_id})
-
-            on_hand   = float(inv["qty_on_hand"]) if inv else 0.0
-            reserved  = float(inv["qty_reserved"]) if inv else 0.0
-            committed = float(inv["qty_committed"]) if inv else 0.0
-            available = on_hand - reserved - committed
-            if available < qty:
-                # In non-prod (ci/test/dev), auto-top-up so tests and local runs don’t 409.
-                _env = os.getenv("ENV", "").lower()
-                if _env in {"ci", "test", "testing", "development", "dev"}:
-                    short = qty - available
-                    # bump on_hand by the shortfall
-                    await database.execute("""
-                        UPDATE inventory_items
-                        SET qty_on_hand = qty_on_hand + :short,
-                            updated_at = NOW()
-                        WHERE LOWER(seller)=LOWER(:s) AND LOWER(sku)=LOWER(:k)
-                    """, {"short": short, "s": seller, "k": sku})
-                    # log a movement for traceability (reason: auto_topup_for_tests)
-                    try:
-                        await database.execute("""
-                            INSERT INTO inventory_movements (
-                                seller, sku, movement_type, qty,
-                                uom, ref_contract, contract_id_uuid, bol_id_uuid,
-                                meta, tenant_id, created_at
-                            )
-                            VALUES (
-                                :seller, :sku, :mt, :qty,
-                                :uom, :ref_contract, :cid_uuid, :bid_uuid,
-                                CAST(:meta AS jsonb), :tenant_id, NOW()
-                            )
-                        """, {
-                            "seller": seller,
-                            "sku": sku,
-                            "mt": "adjust",
-                            "qty": short,
-                            "uom": "ton",
-                            "ref_contract": None,
-                            "cid_uuid": cid,
-                            "bid_uuid": None,
-                            "meta": json.dumps({
-                                "reason": "auto_topup_for_tests",
-                                "short_tons": short,
-                                "requested_tons": qty
-                            }, default=str),
-                            "tenant_id": tenant_id,
-                        })
-                    except Exception:
-                        pass
-                    # recompute available
-                    available = on_hand + short - reserved - committed
-                else:
-                    raise HTTPException(409, f"Not enough inventory: available {available} ton(s) < requested {qty} ton(s).")
-
-            await database.execute("""
-                UPDATE inventory_items
-                SET qty_reserved = qty_reserved + :q,
-                    updated_at   = NOW(),
-                    tenant_id    = COALESCE(tenant_id, :tid)
-                WHERE ctid::text = :ctid
-            """, {"q": qty, "ctid": inv["ctid"], "tid": tenant_id})
-
-            await database.execute("""
-                INSERT INTO inventory_movements (
-                    seller, sku, movement_type, qty,
-                    uom, ref_contract, contract_id_uuid, bol_id_uuid,
-                    meta, tenant_id, created_at
-                )
-                VALUES (
-                    :seller, :sku, :mt, :qty,
-                    :uom, :ref_contract, :cid_uuid, :bid_uuid,
-                    CAST(:meta AS jsonb), :tenant_id, NOW()
-                )
-            """, {
-                "seller": seller,
-                "sku": sku,
-                "mt": "reserve",
-                "qty": qty,
-                "uom": "ton",
-                "ref_contract": None,
-                "cid_uuid": cid,
-                "bid_uuid": None,
-                "meta": json.dumps({"reason": "contract_create", "contract_id": cid}, default=str),
-                "tenant_id": tenant_id,
-            })
-
-            payload = {
-                "id": cid,
-                "buyer": contract.buyer,
-                "seller": seller,
-                "material": contract.material,
-                "weight_tons": qty,
-                "price_per_ton": price_val,
-                "status": "Open",
-                "pricing_formula": contract.pricing_formula,
-                "reference_symbol": contract.reference_symbol,
-                "reference_price": contract.reference_price,
-                "reference_source": contract.reference_source,
-                "reference_timestamp": contract.reference_timestamp,
-                "currency": contract.currency or "USD",
-                "tenant_id": tenant_id,
-            }
-
-            row = await database.fetch_one("""
-                INSERT INTO contracts (
-                    id,buyer,seller,material,weight_tons,price_per_ton,status,
-                    pricing_formula,reference_symbol,reference_price,reference_source,
-                    reference_timestamp,currency,tenant_id
-                )
-                VALUES (
-                    :id,:buyer,:seller,:material,:weight_tons,:price_per_ton,:status,
-                    :pricing_formula,:reference_symbol,:reference_price,:reference_source,
-                    :reference_timestamp,:currency,:tenant_id
-                )
-                RETURNING *
-            """, payload)
-
-            if not row:
-                raise RuntimeError("contracts insert returned no row")
             
             # Stripe metered usage: +1 contract for this seller
             try:
