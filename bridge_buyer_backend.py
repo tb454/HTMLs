@@ -717,7 +717,6 @@ app = FastAPI(
         "url": "https://scrapfutures.com/legal",
     },
 )
-
 # ----- Trusted hosts + session cookie -----
 allowed = ["scrapfutures.com", "www.scrapfutures.com", "bridge.scrapfutures.com", "bridge-buyer.onrender.com"]
 
@@ -729,21 +728,15 @@ BOOTSTRAP_DDL = (RAW_BOOTSTRAP_DDL and (not IS_PROD))
 
 def _dev_only(reason: str = "dev-only"):
     if _is_prod():
-        # Must look like the route does not exist in prod
         raise HTTPException(status_code=404, detail="Not Found")
 
 def _allow_test_login_bypass() -> bool:
-    # Explicit allowlist; must be OFF in prod.
     if _is_prod():
         return False
-    return os.getenv("ALLOW_TEST_LOGIN_BYPASS", "0").lower() in ("1","true","yes")
+    return os.getenv("ALLOW_TEST_LOGIN_BYPASS", "0").lower() in ("1", "true", "yes")
 
 @startup
 async def _assert_bootstrap_disabled_in_prod():
-    """
-    Production must treat the DB as managed (migrations outside the app).
-    Pytest may simulate production; don't brick unit tests.
-    """
     if os.getenv("PYTEST_CURRENT_TEST"):
         return
     if os.getenv("ENV", "").lower() == "production" and RAW_BOOTSTRAP_DDL:
@@ -752,18 +745,47 @@ async def _assert_bootstrap_disabled_in_prod():
 if not prod or allow_local:
     allowed += [
         "localhost",
-        "127.0.0.1",
+        "127.0.0.0",
         "0.0.0.0",
         "testserver",
         "api",
         "api:8000",
         "localhost:8000",
-        "127.0.0.1:8000",   
+        "127.0.0.1:8000",
     ]
 
-    if allow_local:
-        allowed += []
+# PATCH 1 — AdminGateMiddleware (must run AFTER SessionMiddleware has populated request.session)
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
+_ADMIN_PREFIXES = ("/admin",)
+_ADMINISH_PREFIXES = ("/ops",)
+
+class AdminGateMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if os.getenv("ENV", "").lower() == "production":
+            p = request.url.path or ""
+
+            if p.startswith("/admin/demo"):
+                return await call_next(request)
+
+            if p.startswith(_ADMIN_PREFIXES) or p.startswith(_ADMINISH_PREFIXES):
+                role = (request.session.get("role") or "").lower()
+                if role != "admin":
+                    code = 401 if not role else 403
+                    try:
+                        logger.warning("permission_denied", path=p, role=role or "-", code=code)
+                    except Exception:
+                        pass
+                    return JSONResponse(status_code=code, content={"detail": "admin only"})
+
+        return await call_next(request)
+
+# Add AdminGate FIRST (inner)
+app.add_middleware(AdminGateMiddleware)
+
+# Add Session SECOND (outer) so it runs before AdminGate
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "dev-only-secret"),
@@ -772,41 +794,12 @@ app.add_middleware(
     max_age=60*60*8,
 )
 
-# Make client IP visible behind proxies/CDN so SlowAPI uses the real address
 if prod:
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 # ----- Trusted hosts + session cookie -----
 
 app.state.database = database
-
-_ADMIN_PREFIXES = ("/admin",)
-_ADMINISH_PREFIXES = ("/ops",)  
-@app.middleware("http")
-async def _prod_admin_gate(request: Request, call_next):
-    if os.getenv("ENV", "").lower() == "production":
-        p = request.url.path or ""
-
-        # Dev-only endpoints must behave like they don't exist in prod (404),
-        # so they must bypass the admin-gate middleware and let the handler raise 404.
-        if p.startswith("/admin/demo"):
-            return await call_next(request)
-
-        if p.startswith(_ADMIN_PREFIXES) or p.startswith(_ADMINISH_PREFIXES):
-            role = ""
-            try:
-                role = (request.session.get("role") or "").lower()
-            except Exception:
-                role = ""
-            if role != "admin":
-                code = 401 if not role else 403
-                try:
-                    logger.warning("permission_denied", path=p, role=role or "-", code=code)
-                except Exception:
-                    pass
-                return JSONResponse(status_code=code, content={"detail": "admin only"})
-            return await call_next(request)
-    return await call_next(request)
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
