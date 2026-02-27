@@ -468,11 +468,35 @@
       const t = Number(tons.value||0);
       if(!m || !(t>0)){ out.textContent = 'Enter a material and tons.'; return; }
       out.textContent = 'Quoting…';
+
       try{
         const r = await api(`/pricing/quote?material=${encodeURIComponent(m)}&tons=${encodeURIComponent(t)}`);
         const j = await r.json();
-        const perTon = (j.price_per_ton ?? (j.price_per_lb && j.price_per_lb*2000)) || null;
-        out.textContent = perTon ? `${j.material||m}: $${perTon.toFixed(2)}/ton` : 'No quote available.';
+
+        const cur = (j.currency || 'USD').toString().toUpperCase();
+
+        const perTonRaw =
+          j.price_per_ton ?? j.unit_price_per_ton ?? j.per_ton ?? j.price ?? j.unit_price ?? null;
+
+        const perLbRaw =
+          j.price_per_lb ?? j.per_lb ?? null;
+
+        let perTon = null;
+        if (perTonRaw != null && Number.isFinite(Number(perTonRaw))) perTon = Number(perTonRaw);
+        else if (perLbRaw != null && Number.isFinite(Number(perLbRaw))) perTon = Number(perLbRaw) * 2000;
+
+        const totalRaw = j.total ?? j.total_price ?? (perTon != null ? perTon * t : null);
+        const total = (totalRaw != null && Number.isFinite(Number(totalRaw))) ? Number(totalRaw) : null;
+
+        if (perTon == null) {
+          out.textContent = 'No quote available.';
+          return;
+        }
+
+        const label = (j.material || m);
+        out.textContent =
+          `${label}: ${cur} $${perTon.toFixed(2)}/ton` +
+          (total != null ? ` · Est total ${cur} $${total.toFixed(2)}` : '');
       }catch{
         out.textContent = 'Quote failed.';
       }
@@ -614,6 +638,67 @@
       let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
     }
 
+    // ---- Helpers: normalize arrays + optional fetch + fetch all pages ----
+    function _arr(x){
+      if (!x) return [];
+      if (Array.isArray(x)) return x;
+      if (Array.isArray(x.items)) return x.items;
+      if (Array.isArray(x.rows)) return x.rows;
+      if (Array.isArray(x.data)) return x.data;
+      if (Array.isArray(x.results)) return x.results;
+      return [];
+    }
+
+    // Quiet GET helper for OPTIONAL widgets (no toast spam if missing)
+    async function apiSilent(path, opts = {}) {
+      const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
+      const headers = { Accept: 'application/json', ...(opts.headers || {}) };
+      try {
+        const res = await fetch(url, { credentials: 'include', ...opts, headers });
+        if (!res.ok) return null;
+        return res;
+      } catch {
+        return null;
+      }
+    }
+
+    // Fetch ALL pages for endpoints that support limit/offset and/or return {items,total}
+    async function fetchAll(urlBase, batch = 200, maxPages = 50) {
+      const out = [];
+      let offset0 = 0;
+
+      for (let page = 0; page < maxPages; page++) {
+        const joiner = urlBase.includes('?') ? '&' : '?';
+        const url = `${urlBase}${joiner}limit=${batch}&offset=${offset0}`;
+
+        let res;
+        try {
+          res = await api(url); // normal api(): auth + csrf + toast
+        } catch {
+          break; // aborted/failed => stop paging
+        }
+
+        const j = await res.json();
+
+        let items = _arr(j);
+
+        // If API returns a single object instead of array (rare but safe)
+        if (!items.length && j && typeof j === 'object' && !Array.isArray(j)) {
+          if (j.bol_id || j.position_id || j.contract_id || j.id) items = [j];
+        }
+
+        out.push(...items);
+
+        if (items.length < batch) break;
+        if (typeof j?.total === 'number' && out.length >= j.total) break;
+
+        offset0 += items.length;
+      }
+
+      return out;
+    }
+    // ---- Helpers: normalize arrays + optional fetch + fetch all pages ----
+
     // ---- Buyer-side widgets: positions, BOLs, billing, market ----
     async function loadBuyerPositions() {
       const body = document.getElementById('buyerPositionsBody');
@@ -625,38 +710,49 @@
       }
 
       body.textContent = 'Loading positions…';
+
       try {
-        const res = await api(`/buyer_positions?buyer=${encodeURIComponent(buyerKey)}`);
-        const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0) {
+        const rows = await fetchAll(`/buyer_positions?buyer=${encodeURIComponent(buyerKey)}`, 250);
+
+        if (!rows.length) {
           body.textContent = 'No open positions yet.';
           return;
         }
 
+        rows.sort((a, b) => {
+          const ta = new Date(a.purchased_at || a.updated_at || a.created_at || 0).getTime();
+          const tb = new Date(b.purchased_at || b.updated_at || b.created_at || 0).getTime();
+          return tb - ta;
+        });
+
         const ul = document.createElement('ul');
         ul.className = 'list-unstyled mb-0';
 
-        rows.slice(0, 10).forEach(p => {
+        rows.slice(0, 25).forEach(p => {
           const li = document.createElement('li');
           li.className = 'small mb-1';
-          const sym = p.symbol || p.material || p.sku || 'Position';
-          const tons = _formatTons(p.net_tons ?? p.quantity_tons ?? p.weight_tons);
-          const avg = Number(p.avg_price_per_ton ?? p.price_per_ton ?? p.last_price_per_ton ?? 0);
-          const avgStr = avg
-            ? `$${avg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/ton`
+
+          const mat  = p.material || p.symbol || p.sku || p.grade || '—';
+          const tons = _formatTons(p.net_tons ?? p.weight_tons ?? p.quantity_tons ?? p.qty_tons ?? p.tons ?? p.qty ?? 0);
+
+          const pxRaw = (p.avg_price_per_ton ?? p.price_per_ton ?? p.last_price_per_ton ?? p.price ?? null);
+          const px = (pxRaw != null && !Number.isNaN(Number(pxRaw)))
+            ? `$${Number(pxRaw).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/ton`
             : '—';
-          const status = (p.status || p.side || '').toString();
-          li.textContent = `${sym} · ${tons} tons${avg ? ' @ ' + avgStr : ''}${status ? ' · ' + status : ''}`;
+
+          const st = (p.status || p.side || p.state || '').toString() || '—';
+
+          li.textContent = `${mat} · ${tons} tons${px !== '—' ? ' @ ' + px : ''} · ${st}`;
           ul.appendChild(li);
         });
 
         body.innerHTML = '';
         body.appendChild(ul);
 
-        if (rows.length > 10) {
+        if (rows.length > 25) {
           const more = document.createElement('div');
           more.className = 'small text-muted mt-1';
-          more.textContent = `Showing first 10 of ${rows.length} positions.`;
+          more.textContent = `Showing first 25 of ${rows.length} positions.`;
           body.appendChild(more);
         }
       } catch {
@@ -674,13 +770,20 @@
       }
 
       body.textContent = 'Loading BOLs…';
+
       try {
-        const res = await api(`/bols?buyer=${encodeURIComponent(buyerKey)}`);
-        const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0) {
+        const rows = await fetchAll(`/bols?buyer=${encodeURIComponent(buyerKey)}`, 200);
+
+        if (!rows.length) {
           body.textContent = 'No BOLs found for this buyer.';
           return;
         }
+
+        rows.sort((a, b) => {
+          const ta = new Date(a.updated_at || a.delivered_at || a.delivery_time || a.pickup_time || a.created_at || 0).getTime();
+          const tb = new Date(b.updated_at || b.delivered_at || b.delivery_time || b.pickup_time || b.created_at || 0).getTime();
+          return tb - ta;
+        });
 
         const table = document.createElement('table');
         table.className = 'table table-sm mb-0 align-middle';
@@ -690,20 +793,25 @@
         table.appendChild(thead);
 
         const tbody = document.createElement('tbody');
-        rows.slice(0, 10).forEach(b => {
+
+        rows.slice(0, 25).forEach(b => {
           const tr = document.createElement('tr');
 
-          const idCell = document.createElement('td');
           const bolId = b.bol_id ?? b.id ?? '—';
+          const status = b.status || '—';
+          const wt = _formatTons(b.weight_tons ?? b.gross_tons ?? b.net_tons ?? b.qty_tons);
+          const ts = b.updated_at || b.delivered_at || b.delivery_time || b.pickup_time || b.created_at;
+
+          const idCell = document.createElement('td');
+          idCell.className = 'text-monospace';
           idCell.textContent = bolId;
 
-          const statusCell = document.createElement('td');
-          statusCell.textContent = b.status || '—';
+          const stCell = document.createElement('td');
+          stCell.textContent = status;
 
           const wtCell = document.createElement('td');
-          wtCell.textContent = _formatTons(b.weight_tons ?? b.gross_tons ?? b.net_tons);
+          wtCell.textContent = wt;
 
-          const ts = b.updated_at || b.delivered_at || b.created_at;
           const tsCell = document.createElement('td');
           tsCell.textContent = ts ? _fmtDate(ts) : '—';
 
@@ -720,18 +828,19 @@
             pdfCell.textContent = '—';
           }
 
-          tr.append(idCell, statusCell, wtCell, tsCell, pdfCell);
+          tr.append(idCell, stCell, wtCell, tsCell, pdfCell);
           tbody.appendChild(tr);
         });
+
         table.appendChild(tbody);
 
         body.innerHTML = '';
         body.appendChild(table);
 
-        if (rows.length > 10) {
+        if (rows.length > 25) {
           const more = document.createElement('div');
           more.className = 'small text-muted mt-1';
-          more.textContent = `Showing first 10 of ${rows.length} BOLs.`;
+          more.textContent = `Showing first 25 of ${rows.length} BOLs.`;
           body.appendChild(more);
         }
       } catch {
@@ -749,17 +858,44 @@
       }
 
       body.textContent = 'Loading billing summary…';
+
       try {
         const res = await api(`/billing/member_summary?member=${encodeURIComponent(memberKey)}`);
         const j = await res.json();
 
-        const plan   = j.plan_name || j.plan || j.tier || '—';
-        const status = j.status || j.state || '';
-        const limitTons = j.contract_limit_tons ?? j.included_tons_per_month ?? null;
-        const usedTons  = j.used_tons_this_month ?? j.consumed_tons ?? null;
+        const planObj = (j && typeof j.plan === 'object' && j.plan) ? j.plan : j;
+
+        const planName =
+          planObj.name ||
+          planObj.plan_name ||
+          planObj.plan ||
+          planObj.tier ||
+          j.plan_name ||
+          j.tier ||
+          '—';
+
+        const status =
+          planObj.status ||
+          j.status ||
+          j.state ||
+          '';
+
+        const limitTons =
+          planObj.contract_limit_tons ??
+          planObj.included_tons_per_month ??
+          j.contract_limit_tons ??
+          j.included_tons_per_month ??
+          null;
+
+        const usedTons =
+          planObj.used_tons_this_month ??
+          j.used_tons_this_month ??
+          j.consumed_tons ??
+          null;
+
         const nextInvoice = j.next_invoice_date || j.next_bill_at || '';
         const lastAmt = j.last_invoice_amount ?? j.last_amount ?? null;
-        const cur = j.currency || 'USD';
+        const cur = (j.currency || planObj.currency || 'USD').toString().toUpperCase();
 
         const frag = document.createDocumentFragment();
         const mkLine = (label, value) => {
@@ -770,13 +906,17 @@
           frag.appendChild(div);
         };
 
-        mkLine('Plan', plan);
+        mkLine('Plan', planName);
         mkLine('Status', status);
         if (limitTons != null) mkLine('Tons/month included', _formatTons(limitTons));
         if (usedTons != null) mkLine('Tons used this month', _formatTons(usedTons));
         if (nextInvoice) mkLine('Next invoice', nextInvoice);
-        if (lastAmt != null) {
-          mkLine('Last invoice amount', `${cur} ${Number(lastAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+        if (lastAmt != null && !Number.isNaN(Number(lastAmt))) {
+          mkLine(
+            'Last invoice amount',
+            `${cur} ${Number(lastAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          );
         }
 
         if (!frag.childNodes.length) mkLine('Billing', 'No billing summary available.');
@@ -792,37 +932,54 @@
       const body = document.getElementById('buyerMarketBody');
       if (!body) return;
       body.textContent = 'Loading market snapshot…';
+
+      const WATCH = [
+        { label: 'Copper #1', symbol: 'BR-CU-#1' },
+        { label: 'Shred', symbol: 'BR-SHRED' },
+        { label: 'Busheling', symbol: 'BR-BUSH' },
+        { label: 'HMS', symbol: 'BR-HMS' },
+        { label: 'P&S', symbol: 'BR-PNS' },
+        { label: 'Al 6061', symbol: 'BR-AL-6061' },
+        { label: 'Stainless', symbol: 'BR-SS' },
+        { label: 'Insulated Wire', symbol: 'BR-IW' }
+      ];
+
       try {
-        const [idxRes, cuRes] = await Promise.allSettled([
-          api('/indices/latest?symbol=' + encodeURIComponent('BR-CU-#1')),
-          api('/prices/copper_last')
-        ]);
+        const idxRows = (await Promise.all(
+          WATCH.map(async (w) => {
+            const res = await apiSilent('/indices/latest?symbol=' + encodeURIComponent(w.symbol));
+            if (!res) return null;
+            const j = await res.json();
+            const primary = Array.isArray(j) ? j[0] : j;
+            const val = primary?.value ?? primary?.level ?? primary?.price ?? null;
+            if (val == null) return null;
+            return { w, primary, val: Number(val) };
+          })
+        )).filter(Boolean);
 
-        const lines = [];
-
-        if (idxRes.status === 'fulfilled') {
-          const j = await idxRes.value.json();
-          const primary = Array.isArray(j) ? j[0] : j;
-          if (primary) {
-            const name = primary.name || primary.index || 'Scrap Index';
-            const val  = primary.value ?? primary.level ?? null;
-            if (val != null) lines.push(`${name}: ${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-          }
-        }
-
-        if (cuRes.status === 'fulfilled') {
-          const j = await cuRes.value.json();
+        let copperLine = null;
+        const cuRes = await apiSilent('/prices/copper_last');
+        if (cuRes) {
+          const j = await cuRes.json();
           const last = Number(j.last ?? j.price ?? j.value ?? 0);
           const chg  = Number(j.change ?? j.change_abs ?? 0);
           if (Number.isFinite(last) && last) {
-            let s = `BR-CU (Copper) $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb`;
-            if (Number.isFinite(chg) && chg !== 0) {
-              const sign = chg > 0 ? '+' : '';
-              s += ` (${sign}${chg.toFixed(4)})`;
-            }
-            lines.push(s);
+            copperLine =
+              `BR-CU (Copper) $${last.toLocaleString(undefined, { maximumFractionDigits: 4 })}/lb` +
+              (Number.isFinite(chg) && chg !== 0 ? ` (${chg > 0 ? '+' : ''}${chg.toFixed(4)})` : '');
           }
         }
+
+        const lines = [];
+
+        for (const r of idxRows) {
+          const uom = (r.primary?.uom || r.primary?.unit || 'ton').toString();
+          const dec = uom.toLowerCase().includes('lb') ? 4 : 2;
+          const cur = (r.primary?.currency || 'USD').toString().toUpperCase();
+          lines.push(`${r.w.symbol} (${r.w.label}) ${cur} $${r.val.toLocaleString(undefined, { maximumFractionDigits: dec })}/${uom}`);
+        }
+
+        if (copperLine) lines.push(copperLine);
 
         if (!lines.length) {
           body.textContent = 'No market data available.';
@@ -832,12 +989,12 @@
         body.innerHTML = '';
         const ul = document.createElement('ul');
         ul.className = 'list-unstyled mb-0';
-        for (const l of lines) {
+        lines.slice(0, 10).forEach(l => {
           const li = document.createElement('li');
           li.className = 'small mb-1';
           li.textContent = l;
           ul.appendChild(li);
-        }
+        });
         body.appendChild(ul);
       } catch {
         body.textContent = 'Could not load market data.';
@@ -1301,8 +1458,11 @@
     setInterval(() => {
       if (!paused && !document.hidden) {
         loadOpenContracts();
-        // Light refresh of market snapshot; positions/BOLs/billing can stay as-once per load
         loadMarketSnapshot();
+        loadBuyerPositions();
+        loadBuyerBols();
+        loadDeliveryCalendar();
+        loadBuyerBilling();
       }
     }, 300000);
   </script>
@@ -1316,7 +1476,7 @@
 
       try {
         const r = await api('/rfqs?scope=mine');
-        const rows = await r.json();
+        const rows = _arr(await r.json());
         if (!rows?.length) { el.textContent = 'No RFQs yet.'; return; }
 
         const tbl = document.createElement('table');
@@ -1410,35 +1570,78 @@
       if (!el) return;
       if (!(await ensureBuyerContext())) { el.textContent = 'No buyer context.'; return; }
 
+      el.textContent = 'Loading schedule…';
+
       try {
-        const [up, done] = await Promise.all([
-          api(`/bols?buyer=${encodeURIComponent(buyerKey)}&status=Scheduled&limit=50`),
-          api(`/bols?buyer=${encodeURIComponent(buyerKey)}&status=Delivered&limit=10`)
-        ]);
-        const upcoming = await up.json();
-        const delivered = await done.json();
+        const rows = await fetchAll(`/bols?buyer=${encodeURIComponent(buyerKey)}`, 200);
+
+        const now = Date.now();
+        const daysMs = (d) => d * 24 * 60 * 60 * 1000;
+
+        const whenUpcoming = (b) => {
+          const v = b.pickup_time || b.pickup_at || b.scheduled_at || b.eta_at || b.delivery_eta || b.updated_at || b.created_at;
+          const ms = v ? new Date(v).getTime() : NaN;
+          return Number.isFinite(ms) ? ms : null;
+        };
+
+        const whenDelivered = (b) => {
+          const v = b.delivery_time || b.delivered_at || b.received_at || b.updated_at || b.created_at;
+          const ms = v ? new Date(v).getTime() : NaN;
+          return Number.isFinite(ms) ? ms : null;
+        };
+
+        const statusOf = (b) => String(b.status || '').toLowerCase();
+
+        const upcoming = rows
+          .map(b => ({ b, t: whenUpcoming(b), s: statusOf(b) }))
+          .filter(x => x.t != null && x.t >= now && (x.s.includes('sched') || x.s.includes('transit') || x.s.includes('pending') || x.s === 'open'))
+          .sort((a, b) => a.t - b.t)
+          .slice(0, 10)
+          .map(x => x.b);
+
+        const recent = rows
+          .map(b => ({ b, t: whenDelivered(b), s: statusOf(b) }))
+          .filter(x => x.t != null && x.t >= (now - daysMs(14)) && (x.s.includes('deliver') || x.s.includes('receiv') || x.s.includes('close') || x.s.includes('complete') || x.s.includes('fulfill')))
+          .sort((a, b) => b.t - a.t)
+          .slice(0, 10)
+          .map(x => x.b);
 
         const wrap = document.createElement('div');
-        const sec = (title, rows, tsKey) => {
+
+        const sec = (title, list, timePicker) => {
           const card = document.createElement('div');
           const h = document.createElement('div');
           h.className = 'fw-bold mb-1';
           h.textContent = title;
           card.appendChild(h);
-          if (!rows?.length) { card.appendChild(document.createTextNode('None')); return card; }
+
+          if (!list.length) {
+            const none = document.createElement('div');
+            none.className = 'small text-muted';
+            none.textContent = 'None';
+            card.appendChild(none);
+            return card;
+          }
+
           const ul = document.createElement('ul');
           ul.className = 'list-unstyled mb-2';
-          rows.slice(0, 8).forEach(b => {
-            const ts = b[tsKey] || b.pickup_time || b.delivery_time;
+
+          list.forEach(b => {
+            const mat = b.material || b.grade || b.sku || '';
+            const tons = _formatTons(b.weight_tons ?? b.net_tons ?? b.gross_tons ?? b.qty_tons);
+            const t = timePicker(b);
             const li = document.createElement('li');
-            li.textContent = `${b.material || ''} · ${_formatTons(b.weight_tons)} tons · ${_fmtDate(ts)}`;
+            li.className = 'small mb-1';
+            li.textContent = `${mat} · ${tons} tons · ${t ? _fmtDate(t) : '—'} · ${b.status || '—'}`;
             ul.appendChild(li);
           });
+
           card.appendChild(ul);
           return card;
         };
-        wrap.appendChild(sec('Upcoming', upcoming, 'pickup_time'));
-        wrap.appendChild(sec('Recently Delivered', delivered, 'delivery_time'));
+
+        wrap.appendChild(sec('Upcoming', upcoming, (b) => (b.pickup_time || b.pickup_at || b.scheduled_at || b.eta_at)));
+        wrap.appendChild(sec('Recently Delivered', recent, (b) => (b.delivery_time || b.delivered_at || b.received_at || b.updated_at)));
 
         el.innerHTML = '';
         el.appendChild(wrap);
