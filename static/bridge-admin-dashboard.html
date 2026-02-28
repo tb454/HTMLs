@@ -64,27 +64,78 @@
       t.textContent = (typeof msg==='string'? msg : (msg?.message||''));
       t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), ms);
     }
+    // ---- Small helpers (safe array, idempotency, safe JSON) ----
+    function _arr(x){
+      if (!x) return [];
+      if (Array.isArray(x)) return x;
+      if (Array.isArray(x.items)) return x.items;
+      if (Array.isArray(x.rows)) return x.rows;
+      if (Array.isArray(x.data)) return x.data;
+      return [];
+    }
+
+    function idemKey(){
+      if (window.crypto?.randomUUID) return crypto.randomUUID();
+      return 'idem-' + Math.random().toString(16).slice(2) + '-' + Date.now();
+    }
+
+    async function _readJsonOrText(res){
+      const text = await res.text().catch(()=> '');
+      if (!text) return null;
+      try { return JSON.parse(text); } catch { return text; }
+    }
+
     async function api(path, opts={}){
       const url = path.startsWith('http') ? path : `${window.endpoint}${path}`;
       const method = (opts.method || 'GET').toUpperCase();
+
       const headers = { Accept:'application/json', ...(opts.headers||{}) };
+
+      // CSRF only for state-changing calls
       if (!/^(GET|HEAD|OPTIONS)$/.test(method)) {
-        headers['X-CSRF'] = _cookie('XSRF-TOKEN') || headers['X-CSRF'];
+        const csrf = _cookie('XSRF-TOKEN');
+        if (csrf && !headers['X-CSRF']) headers['X-CSRF'] = csrf;
+
+        // ✅ REQUIRED by your backend hardening
+        if (!headers['Idempotency-Key']) headers['Idempotency-Key'] = idemKey();
       }
-      const res = await fetch(url, { ...opts, credentials:'include', headers });
+
+      const res = await fetch(url, { ...opts, method, credentials:'include', headers });
 
       if (res.status === 401){
         const next = encodeURIComponent(location.pathname + location.search);
         location.href = `/static/bridge-login.html?next=${next}`;
         throw new Error('Unauthorized');
       }
+
       if (!res.ok){
-        let m = 'Request failed';
-        try { m = (await res.clone().json()).detail || m; } catch { try { m = await res.clone().text() || m; } catch {} }
-        toast(m);
-        throw new Error(m);
-      }
+        const payload = await _readJsonOrText(res);
+        const msg =
+          (payload && typeof payload === 'object' && (payload.detail || payload.message)) ? (payload.detail || payload.message) :
+          (typeof payload === 'string' && payload.trim()) ? payload.trim() :
+          `Request failed (${res.status})`;
+        toast(msg);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.payload = payload;
+        throw err;
+    }
+
       return res;
+    }
+
+    // Try multiple endpoints (ex: /x then /admin/x) before failing
+    async function apiTry(paths, opts={}){
+      let lastErr = null;
+      for (const p of paths){
+        try { return await api(p, opts); }
+        catch(e){
+          lastErr = e;
+          // only fall through on 404/405; anything else is real
+          if (!(e?.status === 404 || e?.status === 405)) throw e;
+        }
+      }
+      throw lastErr || new Error('Request failed');
     }
     // Optional tiny health badge
     onReady(async () => {
@@ -326,8 +377,11 @@
 <script nonce="{{NONCE}}">
 onReady(async function loadTons(){
   try{
-    const res  = await api("/analytics/tons_by_yard_this_month");
-    const data = await res.json();
+    const res  = await apiTry([
+      "/analytics/tons_by_yard_this_month",
+      "/admin/analytics/tons_by_yard_this_month"
+    ]);
+    const data = _arr(await res.json());
     const tb   = document.querySelector("#tonsTbl tbody");
     if (!tb || !Array.isArray(data)) return;
 
@@ -338,8 +392,8 @@ onReady(async function loadTons(){
 
     tb.innerHTML = data.map(r => `
       <tr>
-        <td>${r.yard_id ?? ''}</td>
-        <td>${r.tons_month ?? 0}</td>
+        <td>${r.yard_name ?? r.yard ?? r.seller ?? r.yard_id ?? ''}</td>
+        <td>${r.tons_month ?? r.tons ?? r.tons_this_month ?? 0}</td>
       </tr>
     `).join("");
   }catch(e){
@@ -373,8 +427,11 @@ onReady(async function(){
     }
     if (!window.Chart) return;    
 
-    const res  = await api("/analytics/prices_over_time?material=Shred%20Steel&window=1M");
-    const data = await res.json();
+    const res  = await apiTry([
+      "/analytics/prices_over_time?material=Shred%20Steel&window=1M",
+      "/admin/analytics/prices_over_time?material=Shred%20Steel&window=1M"
+    ]);
+    const data = _arr(await res.json());
     const el   = document.getElementById('bolsByDay');
     if (!el) return;
     el.removeAttribute('height');
@@ -384,8 +441,11 @@ onReady(async function(){
     new Chart(ctx, {
       type: 'line',
       data: {
-        labels: data.map(r=>r.date),
-        datasets: [{ label: "Avg $/ton (1M)", data: data.map(r=>r.avg_price) }]
+        labels: data.map(r => r.date || r.day || r.as_of || ''),
+        datasets: [{
+          label: "Avg $/ton (1M)",
+          data: data.map(r => r.avg_price ?? r.avg_usd_per_ton ?? r.avg_price_per_ton ?? r.price ?? null)
+        }]
       },
       options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:true } } }
     });
@@ -530,9 +590,11 @@ onReady(async function(){
 (async function(){
   try {
     // 1) Use the same API helper (auth + CSRF + 401 → login)
-    const res  = await api('/vendor_quotes/latest');
-    const rows = await res.json();
-
+    const res  = await apiTry([
+      '/vendor_quotes/latest',
+      '/admin/vendor_quotes/latest'
+    ]);
+    const rows = _arr(await res.json());
     const tbody = document.querySelector('#vendor-latest tbody');
     if (!tbody) return;
 
@@ -541,9 +603,9 @@ onReady(async function(){
         <td>${r.vendor||''}</td>
         <td>${r.category||''}</td>
         <td>${r.material||''}</td>
-        <td>${r.price_per_lb ?? ''}</td>
-        <td>${r.unit_raw||''}</td>
-        <td>${r.sheet_date||''}</td>
+        <td>${r.price_per_lb ?? r.price ?? r.price_per_unit ?? ''}</td>
+        <td>${r.unit_raw ?? r.unit ?? ''}</td>
+        <td>${r.sheet_date ?? r.date ?? r.as_of ?? ''}</td>
       </tr>`).join('');
 
     // 2) Wait for Chart.js to exist 
@@ -566,9 +628,11 @@ onReady(async function(){
     // 3) Aggregate vendor sheet into avg $/lb per material
     const agg = {};
     for (const r of rows) {
-      if (r.unit_raw && ['LB','LBS','POUND','POUNDS',''].includes(String(r.unit_raw).toUpperCase()) && r.price_per_lb != null) {
+      const u = String(r.unit_raw ?? r.unit ?? '').toUpperCase();
+      const p = (r.price_per_lb ?? r.price ?? r.price_per_unit);
+      if (['LB','LBS','POUND','POUNDS',''].includes(u) && p != null) {
         agg[r.material] = agg[r.material] || [];
-        agg[r.material].push(+r.price_per_lb);
+        agg[r.material].push(+p);
       }
     }
     const labels = [];
@@ -976,7 +1040,9 @@ onReady(async function(){
       skeleton();
 
       try {
-        const res = await api(url, { headers:{ "Accept":"application/json" }});
+        const res = await apiTry([url, url.replace('/contracts?', '/admin/contracts?')], {
+          headers:{ "Accept":"application/json" }
+        });
         const total = +(res.headers.get("X-Total-Count") || 0);
         const data = await res.json();
 
@@ -1118,7 +1184,10 @@ onReady(async function(){
       const ctl = new AbortController();
       const _timer = setTimeout(() => ctl.abort(), 15000); // 15s hard timeout so UI never hangs
       try {
-        const res = await api(`/bols?${qs.toString()}`, { headers:{ "Accept":"application/json" }, signal: ctl.signal });
+        const res = await apiTry([
+          `/bols?${qs.toString()}`,
+          `/admin/bols?${qs.toString()}`
+        ], { headers:{ "Accept":"application/json" }, signal: ctl.signal });
         const total = +(res.headers.get('X-Total-Count') || 0);
         const rows = await res.json();
 
