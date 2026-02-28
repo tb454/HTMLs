@@ -555,7 +555,7 @@ def _force_tenant_scoping(request: Request | None, tenant_scoped: bool) -> bool:
                     return False
         except Exception:
             pass
-        
+
     if role != "admin":
         return True
 
@@ -1814,7 +1814,7 @@ async def indices_latest(
     rows = await database.fetch_all(
         f"""
         SELECT region, material,
-               COALESCE(price, avg_price) AS index_price_per_ton,
+               COALESCE(NULLIF(price, 0), avg_price) AS index_price_per_ton,
                COALESCE(currency,'USD')   AS currency,
                volume_tons
         FROM indices_daily
@@ -2039,7 +2039,7 @@ async def market_snapshot(
 
             rows = await database.fetch_all(f"""
               SELECT region, material,
-                     COALESCE(price, avg_price) AS px_ton,
+                     SELECT COALESCE(NULLIF(price, 0), avg_price) AS px_ton,
                      COALESCE(currency,'USD')   AS ccy,
                      volume_tons
               FROM indices_daily
@@ -3144,7 +3144,7 @@ async def vendor_snapshot_to_indices():
           AND c.created_at >= NOW() - INTERVAL '30 days'
         GROUP BY mim.symbol
       )
-      INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons, currency)
+      INSERT INTO indices_daily(as_of_date, region, material, avg_price, price, volume_tons, currency)
       SELECT
         CURRENT_DATE AS as_of_date,
         'blended'    AS region,
@@ -19340,7 +19340,7 @@ async def indices_daily_history(
                as_of_date,
                region,
                material,
-               COALESCE(price, avg_price) AS price_per_ton,
+               COALESCE(NULLIF(price, 0), avg_price) AS price_per_ton,
                COALESCE(currency,'USD')   AS currency,
                ts,
                volume_tons
