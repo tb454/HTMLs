@@ -544,6 +544,18 @@ def _force_tenant_scoping(request: Request | None, tenant_scoped: bool) -> bool:
     except Exception:
         role = ""
 
+    # ---- Buyer exception: allow /bols buyer=self across tenants ----
+    if role == "buyer":
+        try:
+            p = request.url.path or ""
+            if p.startswith("/bols"):
+                me = (request.session.get("member") or "").strip()
+                qb = (request.query_params.get("buyer") or "").strip()
+                if me and qb and qb.lower() == me.lower():
+                    return False
+        except Exception:
+            pass
+        
     if role != "admin":
         return True
 
@@ -12956,6 +12968,15 @@ async def login(request: Request):
                 request.session["member"] = mem_row["name"] or mem_row["slug"]
     except Exception:
         pass
+    # ---- Buyer session member must equal buyer account/org (so buyer filters work) ----
+    try:
+        if role == "buyer":
+            acct = await _buyer_account_from_session(request)
+            if acct:
+                request.session["member"] = acct
+                request.session["buyer_account"] = acct
+    except Exception:
+        pass    
     # --- Auto-seed perms if missing (prevents "user exists but cannot do anything") ---
     try:
         if os.getenv("BRIDGE_FREE_MODE", "").strip().lower() not in ("1", "true", "yes"):
@@ -13012,12 +13033,21 @@ async def me(request: Request):
     except Exception:
         resolved = sess_member
 
+    buyer_account = (request.session.get("buyer_account") or "").strip() or None
+    try:
+        if not buyer_account and (request.session.get("role") or "").lower() == "buyer":
+            buyer_account = await _buyer_account_from_session(request)
+    except Exception:
+        buyer_account = buyer_account
+
     return {
         "username": (request.session.get("username") or "Guest"),
         "role": (request.session.get("role") or ""),
         "member": sess_member,
         "query_member": q_member,
         "resolved_member": resolved,
+        "account_name": buyer_account,
+        "buyer_account": buyer_account,
     }
 
 # -------- Compliance: KYC/AML flags + recordkeeping toggle --------
@@ -14717,12 +14747,22 @@ class BuyerPositionRow(BaseModel):
     notes: Optional[str] = None
 
 @app.get("/buyer_positions", tags=["Contracts"], summary="List buyer positions", response_model=List[BuyerPositionRow])
-async def buyer_positions(buyer: str, status: Optional[str] = Query(None, description="Open|Closed|Cancelled")):
-    q = "SELECT * FROM buyer_positions WHERE buyer = :b"
-    vals = {"b": buyer}
+async def buyer_positions(
+    request: Request,
+    buyer: Optional[str] = Query(None),
+    status: Optional[str] = Query(None, description="Open|Closed|Cancelled"),
+):
+    b = (buyer or _current_member_name(request) or "").strip()
+    if not b:
+        raise HTTPException(status_code=422, detail="buyer is required")
+
+    q = "SELECT * FROM buyer_positions WHERE LOWER(buyer)=LOWER(:b)"
+    vals = {"b": b}
     if status:
-        q += " AND status = :s"; vals["s"] = status
+        q += " AND status ILIKE :s"
+        vals["s"] = status
     q += " ORDER BY purchased_at DESC"
+
     rows = await database.fetch_all(q, vals)
     return [BuyerPositionRow(**dict(r)) for r in rows]
 # -------- Buyer Positions: list by buyer/status ----
@@ -16859,6 +16899,39 @@ def current_member_from_request(request: Request) -> Optional[str]:
 
     # Non-prod rules
     return sess_member or q_member
+
+# ---- Buyer account resolver (accounts/account_users) ----
+async def _buyer_account_from_session(request: Request) -> Optional[str]:
+    """
+    Resolve buyer account/org name for the current logged-in identity.
+    Uses:
+      public.users (email/username) -> account_users.user_id -> accounts.name (type='buyer')
+    """
+    try:
+        ident = (request.session.get("username") or request.session.get("email") or "").strip().lower()
+    except Exception:
+        ident = ""
+    if not ident:
+        return None
+
+    try:
+        row = await database.fetch_one(
+            """
+            SELECT a.name
+            FROM public.users u
+            JOIN public.account_users au ON au.user_id = u.id
+            JOIN public.accounts a ON a.id = au.account_id
+            WHERE (lower(coalesce(u.email,'')) = :i OR lower(coalesce(u.username,'')) = :i)
+              AND a.type = 'buyer'
+            ORDER BY a.created_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            {"i": ident},
+        )
+        return (row["name"] if row and row["name"] else None)
+    except Exception:
+        return None
+# ---- Buyer account resolver ----
 
 async def current_tenant_id(request: Request) -> Optional[str]:
     """
