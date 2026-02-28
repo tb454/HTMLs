@@ -1185,7 +1185,7 @@ onReady(async function(){
       const _timer = setTimeout(() => ctl.abort(), 15000); // 15s hard timeout so UI never hangs
       try {
         const res = await apiTry([
-          `/bols?${qs.toString()}`,
+          `/bols?${qs.toString()}`,          
           `/admin/bols?${qs.toString()}`
         ], { headers:{ "Accept":"application/json" }, signal: ctl.signal });
         const total = +(res.headers.get('X-Total-Count') || 0);
