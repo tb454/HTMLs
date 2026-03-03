@@ -2038,9 +2038,11 @@ async def market_snapshot(
                 params["r"] = eff_region
 
             rows = await database.fetch_all(f"""
-              SELECT region, material,
-                     SELECT COALESCE(NULLIF(price, 0), avg_price) AS px_ton,
-                     COALESCE(currency,'USD')   AS ccy,
+              SELECT
+                     region,
+                     material,
+                     COALESCE(NULLIF(price, 0), avg_price) AS px_ton,
+                     COALESCE(currency,'USD')              AS ccy,
                      volume_tons
               FROM indices_daily
               WHERE {where}
@@ -3154,6 +3156,11 @@ async def vendor_snapshot_to_indices():
         + 0.50 * v.vendor_lb
         + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
         ) * 2000.0 AS avg_price,
+        (
+          0.30 * COALESCE(b.bench_lb, v.vendor_lb)
+        + 0.50 * v.vendor_lb
+        + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
+        ) * 2000.0 AS price,
         0::numeric AS volume_tons,
         'USD'      AS currency
       FROM v
@@ -3161,6 +3168,7 @@ async def vendor_snapshot_to_indices():
       LEFT JOIN c ON c.symbol = v.symbol
       ON CONFLICT (as_of_date, region, material) DO UPDATE
         SET avg_price   = EXCLUDED.avg_price,
+            price       = EXCLUDED.price,
             volume_tons = EXCLUDED.volume_tons,
             currency    = EXCLUDED.currency
     """)
@@ -3767,12 +3775,16 @@ async def vq_snapshot_to_indices(as_of: date = None):
     await database.execute("DELETE FROM indices_daily WHERE as_of_date=:d AND region='vendor'", {"d": asof})
     for r in rows:
         await database.execute("""
-          INSERT INTO indices_daily(as_of_date, region, material, avg_price, volume_tons)
-          VALUES (:d, 'vendor', :m, :p, 0)
+          INSERT INTO indices_daily(as_of_date, region, material, avg_price, price, volume_tons, currency, ts, symbol)
+          VALUES (:d, 'vendor', :m, :p, :p, 0, 'USD', NOW(), :m)
           ON CONFLICT (as_of_date, region, material) DO UPDATE
-            SET avg_price=EXCLUDED.avg_price,
-                volume_tons=EXCLUDED.volume_tons
-        """, {"d": asof, "m": r["material"], "p": float(r["avg_lb"]) * 2000.0})  # store as $/ton if you want
+            SET avg_price   = EXCLUDED.avg_price,
+                price       = EXCLUDED.price,
+                volume_tons = EXCLUDED.volume_tons,
+                currency    = EXCLUDED.currency,
+                ts          = EXCLUDED.ts,
+                symbol      = EXCLUDED.symbol
+        """, {"d": asof, "m": r["material"], "p": float(r["avg_lb"]) * 2000.0}) # store as $/ton if you want
     return {"ok": True, "date": str(asof), "materials": len(rows)}
 
 async def _vendor_blended_lb(material: str) -> float | None:
@@ -19461,18 +19473,26 @@ async def indices_generate_snapshot(snapshot_date: Optional[date] = None):
     try:
         asof = (snapshot_date or date.today()).isoformat()
         q = """
-        INSERT INTO indices_daily (as_of_date, region, material, avg_price, volume_tons)
+        INSERT INTO indices_daily (as_of_date, region, material, avg_price, price, volume_tons, currency, ts, symbol)
         SELECT CAST(:asof AS DATE) AS as_of_date,
                LOWER(seller)       AS region,
                material,
                AVG(price_per_ton)  AS avg_price,
-               SUM(weight_tons)    AS volume_tons
+               AVG(price_per_ton)  AS price,
+               SUM(weight_tons)    AS volume_tons,
+               'USD'               AS currency,
+               NOW()               AS ts,
+               material            AS symbol
           FROM contracts
          WHERE created_at::date = CAST(:asof AS DATE)
          GROUP BY LOWER(seller), material
         ON CONFLICT (as_of_date, region, material) DO UPDATE
           SET avg_price   = EXCLUDED.avg_price,
-              volume_tons = EXCLUDED.volume_tons
+              price       = EXCLUDED.price,
+              volume_tons = EXCLUDED.volume_tons,
+              currency    = EXCLUDED.currency,
+              ts          = EXCLUDED.ts,
+              symbol      = EXCLUDED.symbol
         """
         await database.execute(q, {"asof": asof})
         try:
