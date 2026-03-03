@@ -3,6 +3,35 @@
 // ---------- tiny helpers ----------
 const $ = (sel) => document.querySelector(sel);
 
+// ---- array + price helpers (indices_daily is usually USD/ton; UI wants USD/lb) ----
+function _arr(x){
+  if (!x) return [];
+  if (Array.isArray(x)) return x;
+  if (Array.isArray(x.items)) return x.items;
+  if (Array.isArray(x.rows)) return x.rows;
+  if (Array.isArray(x.data)) return x.data;
+  if (Array.isArray(x.history)) return x.history;
+  if (Array.isArray(x.series)) return x.series;
+  return [];
+}
+
+function toUSDlb(v, unit){
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const u = String(unit || '').toLowerCase();
+
+  if (u.includes('/lb')) return n;
+  if (u.includes('/ton')) return n / 2000;
+
+  // heuristic fallback: big numbers are almost always $/ton
+  return n > 100 ? n / 2000 : n;
+}
+
+// Pull official “public mirror” payload for a symbol (indices_daily-backed)
+async function getPublicIndexData(sym){
+  return await getJSON(`/public/index/${encodeURIComponent(sym)}/data?region=blended`);
+}
+
 function setBusy(btn, busy){ btn?.setAttribute('data-busy', busy ? '1' : '0'); }
 
 function csvDownload(filename, rows){
@@ -139,13 +168,25 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 async function getLastFromHistory(sym){
   try{
-    const histRows = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
-    const seriesAll = (histRows || [])
-      .filter(r => r && (r.dt || r.as_of_date))
-      .map(r => ({
-        dt: (r.dt || r.as_of_date),
-        value: +(r.close_price ?? r.close ?? r.value ?? 0)
-      }))
+    const data = await getPublicIndexData(sym);
+    const unitDefault = data?.unit || 'USD/ton';
+
+    const hist = _arr(data?.history);
+    const seriesAll = hist
+      .filter(r => r && (r.as_of_date || r.dt || r.date))
+      .map(r => {
+        const dt = (r.as_of_date || r.dt || r.date);
+        const raw =
+          r.index_price_per_ton ??
+          r.avg_price ??
+          r.price ??
+          r.settle_price ??
+          r.close_price ??
+          r.close ??
+          r.value;
+        const unit = r.unit || unitDefault;
+        return { dt, value: toUSDlb(raw, unit) };
+      })
       .filter(p => p.dt && Number.isFinite(p.value))
       .sort((a,b)=> new Date(a.dt) - new Date(b.dt));
 
@@ -157,6 +198,7 @@ async function getLastFromHistory(sym){
 
     return { last, delta, updated };
   } catch(e){
+    // BRIX_* (or anything with no blended history) will land here or return empty -> show '-'
     console.warn('getLastFromHistory failed', sym, e);
     return { last:null, delta:null, updated:null };
   }
@@ -167,9 +209,16 @@ async function loadUniverse(){
   showSkeleton(tbody, 5);
 
   try{
-    const rows = await getJSON('/indices/universe');
-    const arr = Array.isArray(rows) ? rows : (rows?.items || rows?.rows || rows?.data || []);
-    const defs = arr.filter(r => r && r.symbol && (r.enabled == null || r.enabled === true));
+    const rows = await getJSON('/public/indices/universe');
+    const arr = _arr(rows);
+
+    // Accept either array of strings or objects: {symbol,...} from indices_universe
+    const defs = arr
+      .map(d => {
+        if (typeof d === 'string') return { symbol: d.trim() };
+        return { symbol: String(d.symbol || d.ticker || d.name || '').trim() };
+      })
+      .filter(d => d.symbol);
 
     universe = defs.map(d => ({ symbol: d.symbol }));
 
@@ -196,23 +245,24 @@ async function loadUniverse(){
       tbody.innerHTML = `<tr><td colspan="5" class="muted">No rows match your filter.</td></tr>`;
     }
 
-    // Fill Last/Δ/Updated using existing /indices/history for each symbol
-    const rowsToFill = Array.from(tbody.querySelectorAll('tr[data-sym]'));
-    // Do it sequentially to avoid hammering the backend
-    for (const tr of rowsToFill){
-      const sym = tr.getAttribute('data-sym');
-      const { last, delta, updated } = await getLastFromHistory(sym);
+    // Fill Last/Δ/Updated in the background (so the table renders instantly)
+    (async function fillUniverseMetrics(){
+      const rowsToFill = Array.from(tbody.querySelectorAll('tr[data-sym]'));
+      for (const tr of rowsToFill){
+        const sym = tr.getAttribute('data-sym');
+        const { last, delta, updated } = await getLastFromHistory(sym);
 
-      tr.cells[1].innerText = (last!=null ? (+last).toFixed(4) : '-');
-      tr.cells[2].innerText = (delta!=null ? (delta>0?'+':'') + (+delta).toFixed(4) : '-');
-      tr.cells[2].className = (delta>0?'positive':delta<0?'negative':'muted');
-      tr.cells[3].innerText = (updated || '-');
-    }
+        tr.cells[1].innerText = (last!=null ? (+last).toFixed(4) : '-');
+        tr.cells[2].innerText = (delta!=null ? (delta>0?'+':'') + (+delta).toFixed(4) : '-');
+        tr.cells[2].className = (delta>0?'positive':delta<0?'negative':'muted');
+        tr.cells[3].innerText = (updated || '-');
+      }
+    })();
 
     const note = document.getElementById('detailNote');
     if (note){
       note.textContent =
-        'BR-Index mode. USD/lb. Universe from bridge_index_definitions; history from bridge_index_history.';
+         'Indices Daily mode. USD/lb. Universe from indices_universe; history from indices_daily (public mirror).';
     }
 
   } catch(e){
@@ -228,15 +278,26 @@ async function viewSymbol(sym){
   const title = $('#detailTitle'); if (title) title.textContent = sym;
 
   // Pull full history then slice client-side (simple + robust)
-  const histRows = await getJSON(`/indices/history?symbol=${encodeURIComponent(sym)}`);
+  const data = await getPublicIndexData(sym);
+  const unitDefault = data?.unit || 'USD/ton';
+  const histRows = _arr(data?.history);
 
   // Accept either {dt, close_price} (bridge_index_history) or {dt, close} (fallback)
   const seriesAll = (histRows || [])
-    .filter(r => r && (r.dt || r.as_of_date))
-    .map(r => ({
-      dt: (r.dt || r.as_of_date),
-      value: +(r.close_price ?? r.close ?? r.value ?? 0)
-    }))
+    .filter(r => r && (r.as_of_date || r.dt || r.date))
+    .map(r => {
+      const dt = (r.as_of_date || r.dt || r.date);
+      const raw =
+        r.index_price_per_ton ??
+        r.avg_price ??
+        r.price ??
+        r.settle_price ??
+        r.close_price ??
+        r.close ??
+        r.value;
+      const unit = r.unit || unitDefault;
+      return { dt, value: toUSDlb(raw, unit) };
+    })
     .filter(p => p.dt && Number.isFinite(p.value))
     .sort((a,b)=> new Date(a.dt) - new Date(b.dt));
 
@@ -256,7 +317,7 @@ async function viewSymbol(sym){
     const hashLine   = document.getElementById('hashLine');
 
     if (asofLine)   asofLine.textContent = `As of: ${updated || '—'}`;
-    if (methodLine) methodLine.textContent = `Method: bridge_index_history (dt/close_price)`;
+    if (methodLine) methodLine.textContent = `Method: indices_daily (as_of_date/price → USD/lb)`;
 
     if (hashLine) {
       const enc = new TextEncoder();
@@ -329,8 +390,14 @@ document.getElementById('toggleForecast')?.addEventListener('click', (ev)=>{
 
 document.getElementById('exportHistory')?.addEventListener('click', async ()=>{
   if(!selectedSymbol) return toast?.('Select a ticker first.');
-  const rows = await getJSON(`/indices/history?symbol=${encodeURIComponent(selectedSymbol)}`);
-  csvDownload(`${selectedSymbol}_history.csv`, rows);
+  try {
+    const data = await getPublicIndexData(selectedSymbol);
+    const rows = _arr(data?.history);
+    csvDownload(`${selectedSymbol}_history.csv`, rows);
+  } catch(e) {
+    console.warn('exportHistory failed', e);
+    toast?.('Export failed (no data).');
+  }
 });
 
 document.getElementById('exportForecast')?.addEventListener('click', async ()=>{
@@ -349,7 +416,14 @@ document.getElementById('dlDailyCsv')?.addEventListener('click', ()=>{
 });
 
 // filter + refresh
-document.getElementById('filterInput')?.addEventListener('input', ()=>{ loadUniverse(); });
+function filterUniverseRows(){
+  const q = ($('#filterInput')?.value || '').trim().toLowerCase();
+  document.querySelectorAll('#universeTbl tbody tr[data-sym]').forEach(tr => {
+    const sym = (tr.getAttribute('data-sym') || '').toLowerCase();
+    tr.style.display = (!q || sym.includes(q)) ? '' : 'none';
+  });
+}
+document.getElementById('filterInput')?.addEventListener('input', filterUniverseRows);
 document.getElementById('refreshAll')?.addEventListener('click', loadUniverse);
 
 // init

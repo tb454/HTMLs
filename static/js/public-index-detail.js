@@ -73,20 +73,57 @@
   }
 
   async function load() {
-    const res = await fetch(`/api/public/index/${encodeURIComponent(ticker)}`, { headers: { "Accept": "application/json" } });
+    let res = await fetch(`/public/index/${encodeURIComponent(ticker)}/data?region=blended`, { headers: { "Accept": "application/json" } });
+    if (!res.ok) {
+      // fallback to legacy endpoint if it exists
+      res = await fetch(`/api/public/index/${encodeURIComponent(ticker)}`, { headers: { "Accept": "application/json" } });
+    }
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
 
-    elUpdated.textContent = "Updated: " + (data.updated || "—");
-    elLast.textContent = fmt(data.last);
-    elUnit.textContent = data.unit || "—";
+    // If this is the /public/index/<sym>/data shape, normalize it
+    if (Array.isArray(data.history)) {
+      const unitDefault = data.unit || 'USD/ton';
 
-    const d = (typeof data.delta === "number") ? data.delta : null;
-    elDelta.textContent = (d === null) ? "—" : (d >= 0 ? "+" + d.toFixed(4) : d.toFixed(4));
-    elDelta.className = "value " + (d === null ? "" : (d >= 0 ? "delta pos" : "delta neg"));
+      const series = data.history
+        .filter(r => r && r.as_of_date)
+        .map(r => {
+          const raw = (r.index_price_per_ton ?? r.avg_price ?? r.price);
+          const unit = r.unit || unitDefault;
+          const n = Number(raw);
+          const v = (!Number.isFinite(n)) ? null : (String(unit).toLowerCase().includes('/ton') ? (n/2000) : n);
+          return { dt: r.as_of_date, value: v };
+        })
+        .filter(p => p.dt && p.value != null)
+        .sort((a,b)=> new Date(a.dt) - new Date(b.dt));
 
-    elMode.textContent = "Mode: " + (data.mode || "Public");
-    draw(data.series || []);
+      const last = series.length ? series[series.length-1].value : null;
+      const prev = series.length > 1 ? series[series.length-2].value : null;
+      const delta = (last!=null && prev!=null) ? (last - prev) : null;
+
+      elUpdated.textContent = "Updated: " + (data.index_date || data.updated || "—");
+      elLast.textContent = fmt(last);
+      elUnit.textContent = "USD/lb";
+
+      elDelta.textContent = (delta == null) ? "—" : (delta >= 0 ? "+" + delta.toFixed(4) : delta.toFixed(4));
+      elDelta.className = "value " + (delta == null ? "" : (delta >= 0 ? "delta pos" : "delta neg"));
+
+      elMode.textContent = "Mode: " + (data.subscriber ? "Subscriber" : "Public");
+
+      draw(series.map(p => ({ dt: p.dt, value: p.value })));
+    } else {
+      // legacy shape
+      elUpdated.textContent = "Updated: " + (data.updated || "—");
+      elLast.textContent = fmt(data.last);
+      elUnit.textContent = data.unit || "—";
+
+      const d = (typeof data.delta === "number") ? data.delta : null;
+      elDelta.textContent = (d === null) ? "—" : (d >= 0 ? "+" + d.toFixed(4) : d.toFixed(4));
+      elDelta.className = "value " + (d === null ? "" : (d >= 0 ? "delta pos" : "delta neg"));
+
+      elMode.textContent = "Mode: " + (data.mode || "Public");
+      draw(data.series || []);
+    }
   }
 
   document.getElementById("refreshBtn").addEventListener("click", () => load().catch(console.error));

@@ -3,6 +3,14 @@
 // ---- tiny helpers
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+function toUSDlb(v, unit){
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const u = String(unit || '').toLowerCase();
+  if (u.includes('/lb')) return n;
+  if (u.includes('/ton')) return n / 2000;
+  return n > 100 ? n / 2000 : n; // heuristic fallback
+}
 const fmt = (n, dp = 4) =>
   (n == null || Number.isNaN(+n))
     ? "-"
@@ -59,7 +67,8 @@ async function loadPublicIndices() {
     // 1) universe
     const defs = await jget("/public/indices/universe");   // [{symbol,...}]
     const symbols = (Array.isArray(defs) ? defs : [])
-      .map(d => String(d.symbol || "").trim())
+      .map(d => (typeof d === 'string' ? d : String(d.symbol || "")))
+      .map(s => String(s).trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
 
@@ -88,10 +97,10 @@ async function loadPublicIndices() {
           const idxDate = (data.index_date ?? null);
 
           // mode pill
-          modePill.textContent = isSub ? "Mode: Subscriber" : `Mode: Public${delay != null ? ` (T-${delay})` : ""}`;
+          if (modeEl) modeEl.textContent = isSub ? "Mode: Subscriber" : `Mode: Public${delay != null ? ` (T-${delay})` : ""}`;
+          if (updatedEl && idxDate) updatedEl.textContent = `Index Date: ${idxDate}`;
 
-          // last updated pill shows the effective index date
-          if (idxDate) lastUpdated.textContent = `Index Date: ${idxDate}`;
+          // last updated pill shows the effective index date          
           metaSet = true;
         }
 
@@ -102,12 +111,19 @@ async function loadPublicIndices() {
 
         // Ensure asc by date
         const series = seriesRaw
-          .filter(x => x && x.as_of_date && x.index_price_per_ton != null)
+          .filter(x => x && x.as_of_date && (x.index_price_per_ton ?? x.avg_price ?? x.price) != null)
           .sort((a,b) => new Date(a.as_of_date) - new Date(b.as_of_date));
 
         const n = series.length;
-        const last = n ? +series[n-1].index_price_per_ton : null;
-        const prev = n > 1 ? +series[n-2].index_price_per_ton : null;
+
+        const val = (r) => {
+          const raw = (r.index_price_per_ton ?? r.avg_price ?? r.price);
+          const unit = r.unit || (data && data.unit) || 'USD/ton';
+          return toUSDlb(raw, unit);
+        };
+
+        const last = n ? val(series[n-1]) : null;
+        const prev = n > 1 ? val(series[n-2]) : null;
         const when = n ? (series[n-1].as_of_date || null) : null;
 
         const row = tbody.querySelector(`tr[data-sym="${CSS.escape(sym)}"]`);
@@ -137,8 +153,12 @@ async function loadPublicIndices() {
 
     // header/status
     const nowUtc = new Date().toISOString().replace("T", " ").slice(0, 16);
-    if (updatedEl) updatedEl.textContent = "Updated: " + nowUtc + " (UTC)";
-    if (modeEl)    modeEl.textContent    = "Mode: Public";
+    if (updatedEl) {
+      const prior = updatedEl.textContent || "";
+      if (prior.startsWith("Index Date:")) updatedEl.textContent = `${prior} · Updated: ${nowUtc} (UTC)`;
+      else updatedEl.textContent = "Updated: " + nowUtc + " (UTC)";
+    }
+    if (modeEl && !metaSet) modeEl.textContent = "Mode: Public";
     if (statusEl)  statusEl.textContent  = "Live";
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" class="muted">Error loading indices.</td></tr>`;
