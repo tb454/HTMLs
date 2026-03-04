@@ -11781,15 +11781,30 @@ async def _nightly_index_cron():
 
 async def _daily_indices_job():
     while True:
+        # 1) Build reference-based “BR-Index” (your internal ref system)
         try:
             await run_indices_builder()
         except Exception:
-            pass        
-        
+            pass
+
+        # 2) Publish the actual table your UI reads (indices_daily)
+        #    - blended: vendor+ref blend -> indices_daily + indices_daily_history
+        try:
+            await indices_snapshot_blended(as_of=utcnow().date(), region="blended")
+        except Exception:
+            pass
+
+        # 3) Optional: publish traded VWAP snapshot from Signed/Dispatched/Fulfilled contracts
+        try:
+            await indices_snapshot_traded(as_of=utcnow().date())
+        except Exception:
+            pass
+
+        # 4) Sleep until next UTC midnight (avoid 0/negative sleep)
         now = datetime.now(timezone.utc)
         tomorrow = (now + timedelta(days=1)).date()
         next_run = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc)
-        await asyncio.sleep((next_run - now).total_seconds())
+        await asyncio.sleep(max(60, (next_run - now).total_seconds()))
 # -----------------------------------------------------------------------
 
 def verify_sig_docsign(raw: bytes, sig: str) -> bool:
@@ -19557,8 +19572,8 @@ async def public_indices_json(
         vals: Dict[str, Any] = {"start_date": start_date, "end_date": end_date}
 
         if region:
-            q += " AND region = :region"
-            vals["region"] = region.lower().strip()
+            q += " AND region ILIKE :region"
+            vals["region"] = region.strip()
         if material:
             q += " AND material = :material"
             vals["material"] = material.strip()
