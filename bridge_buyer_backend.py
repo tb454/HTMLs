@@ -3097,83 +3097,126 @@ async def vendor_latest(limit: int = 200):
     """, {"limit": limit})
     return [dict(r) for r in rows]
 
-@vendor_router.post("/snapshot_to_indices_blended", summary="Snapshot blended benchmark+vendor+contracts into indices_daily (region='blended')", status_code=200)
-async def vendor_snapshot_to_indices():
-    await database.execute("""
-      WITH latest_vendor_mat AS (
-        SELECT DISTINCT ON (
-          lower(trim(v.vendor)),
-          lower(trim(m.material_canonical))
-        )
-          m.material_canonical AS symbol,
-          v.vendor,
-          v.price_per_lb,
-          v.sheet_date,
-          v.inserted_at
-        FROM vendor_quotes v
-        JOIN vendor_material_map m
-          ON m.vendor = v.vendor
-         AND m.material_vendor = v.material
-        WHERE v.price_per_lb IS NOT NULL
-          AND (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
-        ORDER BY
-          lower(trim(v.vendor)),
-          lower(trim(m.material_canonical)),
-          v.sheet_date DESC NULLS LAST,
-          v.inserted_at DESC NULLS LAST
-      ),
-      v AS (
-        SELECT symbol, AVG(price_per_lb) AS vendor_lb
-        FROM latest_vendor_mat
-        GROUP BY symbol
-      ),
-      b AS (
-        SELECT DISTINCT ON (rp.symbol)
-          rp.symbol,
-          rp.price AS bench_lb
-        FROM reference_prices rp
-        WHERE rp.price IS NOT NULL
-        ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
-      ),
-      c AS (
-        SELECT
-          mim.symbol,
-          AVG(c.price_per_ton / 2000.0) AS contract_lb
-        FROM contracts c
-        JOIN material_index_map mim
-          ON mim.material = c.material
-        WHERE c.status IN ('Signed','Dispatched','Fulfilled')
-          AND c.created_at >= NOW() - INTERVAL '30 days'
-        GROUP BY mim.symbol
-      )
-      INSERT INTO indices_daily(as_of_date, region, material, avg_price, price, volume_tons, currency)
-      SELECT
-        CURRENT_DATE AS as_of_date,
-        'blended'    AS region,
-        v.symbol     AS material,
-        (
-          0.30 * COALESCE(b.bench_lb, v.vendor_lb)
-        + 0.50 * v.vendor_lb
-        + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
-        ) * 2000.0 AS avg_price,
-        (
-          0.30 * COALESCE(b.bench_lb, v.vendor_lb)
-        + 0.50 * v.vendor_lb
-        + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
-        ) * 2000.0 AS price,
-        0::numeric AS volume_tons,
-        'USD'      AS currency
-      FROM v
-      LEFT JOIN b ON b.symbol = v.symbol
-      LEFT JOIN c ON c.symbol = v.symbol
-      ON CONFLICT (as_of_date, region, material) DO UPDATE
-        SET avg_price   = EXCLUDED.avg_price,
-            price       = EXCLUDED.price,
-            volume_tons = EXCLUDED.volume_tons,
-            currency    = EXCLUDED.currency
-    """)
-    return {"ok": True}
+@vendor_router.post(
+    "/snapshot_to_indices_blended",
+    summary="Snapshot blended benchmark+vendor+contracts into indices_daily (region='blended')",
+    status_code=200,
+)
+async def vendor_snapshot_to_indices(as_of: date | None = None):
+    d = as_of or utcnow().date()
 
+    # 1) Write LIVE table (indices_daily) — make sure symbol + ts are always populated
+    await database.execute(
+        """
+        WITH latest_vendor_mat AS (
+          SELECT DISTINCT ON (
+            lower(trim(v.vendor)),
+            lower(trim(m.material_canonical))
+          )
+            m.material_canonical AS symbol,
+            v.vendor,
+            v.price_per_lb,
+            v.sheet_date,
+            v.inserted_at
+          FROM vendor_quotes v
+          JOIN vendor_material_map m
+            ON m.vendor = v.vendor
+           AND m.material_vendor = v.material
+          WHERE v.price_per_lb IS NOT NULL
+            AND (v.unit_raw IS NULL OR UPPER(v.unit_raw) IN ('LB','LBS','POUND','POUNDS',''))
+          ORDER BY
+            lower(trim(v.vendor)),
+            lower(trim(m.material_canonical)),
+            v.sheet_date DESC NULLS LAST,
+            v.inserted_at DESC NULLS LAST
+        ),
+        v AS (
+          SELECT symbol, AVG(price_per_lb) AS vendor_lb
+          FROM latest_vendor_mat
+          GROUP BY symbol
+        ),
+        b AS (
+          SELECT DISTINCT ON (rp.symbol)
+            rp.symbol,
+            rp.price AS bench_lb
+          FROM reference_prices rp
+          WHERE rp.price IS NOT NULL
+          ORDER BY rp.symbol, COALESCE(rp.ts_market, rp.ts_server) DESC
+        ),
+        c AS (
+          SELECT
+            mim.symbol,
+            AVG(c.price_per_ton / 2000.0) AS contract_lb
+          FROM contracts c
+          JOIN material_index_map mim
+            ON mim.material = c.material
+          WHERE c.status IN ('Signed','Dispatched','Fulfilled')
+            AND c.created_at >= NOW() - INTERVAL '30 days'
+          GROUP BY mim.symbol
+        )
+        INSERT INTO indices_daily(
+          as_of_date, region, material,
+          avg_price, price, volume_tons, currency,
+          ts, symbol
+        )
+        SELECT
+          :d::date  AS as_of_date,
+          'blended' AS region,
+          v.symbol  AS material,
+          (
+            0.30 * COALESCE(b.bench_lb, v.vendor_lb)
+          + 0.50 * v.vendor_lb
+          + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
+          ) * 2000.0 AS avg_price,
+          (
+            0.30 * COALESCE(b.bench_lb, v.vendor_lb)
+          + 0.50 * v.vendor_lb
+          + 0.20 * COALESCE(c.contract_lb, COALESCE(b.bench_lb, v.vendor_lb))
+          ) * 2000.0 AS price,
+          0::numeric AS volume_tons,
+          'USD'      AS currency,
+          NOW()      AS ts,
+          v.symbol   AS symbol
+        FROM v
+        LEFT JOIN b ON b.symbol = v.symbol
+        LEFT JOIN c ON c.symbol = v.symbol
+        ON CONFLICT (as_of_date, region, material) DO UPDATE
+          SET avg_price   = EXCLUDED.avg_price,
+              price       = EXCLUDED.price,
+              volume_tons = EXCLUDED.volume_tons,
+              currency    = EXCLUDED.currency,
+              ts          = EXCLUDED.ts,
+              symbol      = EXCLUDED.symbol
+        """,
+        {"d": d},
+    )
+
+    # 2) Best-effort append-only history write (don’t ever break the live snapshot)
+    run_id = str(uuid.uuid4())
+    try:
+        await database.execute(
+            """
+            INSERT INTO public.indices_daily_history(
+              run_id, writer,
+              as_of_date, region, material,
+              avg_price, volume_tons, currency, ts, price, symbol
+            )
+            SELECT
+              :run_id::uuid,
+              'vendor_snapshot_blended'::text,
+              as_of_date, region, material,
+              avg_price, volume_tons, currency, ts, price, COALESCE(symbol, material)
+            FROM public.indices_daily
+            WHERE as_of_date = :d::date
+              AND region = 'blended'
+            ON CONFLICT DO NOTHING
+            """,
+            {"run_id": run_id, "d": d},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "as_of_date": str(d), "run_id": run_id}
 @startup
 async def _ensure_vendor_quotes_schema():
     if not BOOTSTRAP_DDL:
