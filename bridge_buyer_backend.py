@@ -19526,9 +19526,9 @@ async def public_indices_json(
     NOTE: This endpoint is READ-ONLY and performs NO DDL.
     """
     try:
-        # --- subscriber detection (query or header) ---
+        # --- subscriber detection (session OR allowlisted key) ---
         k = (api_key or x_api_key or "").strip()
-        is_subscriber = bool(k) and (k in PUBLIC_INDEX_API_KEYS)
+        is_subscriber = _public_is_subscriber(request) or (bool(k) and (k in PUBLIC_INDEX_API_KEYS))
 
         # --- delay + points ---
         delay_days = 0 if is_subscriber else int(PUBLIC_INDEX_DELAY_DAYS_DEFAULT)
@@ -19540,8 +19540,12 @@ async def public_indices_json(
         except Exception:
             days_eff = points
 
-        # Public cutoff date = today - delay
-        end_date = (utcnow().date() - timedelta(days=delay_days))
+        # Anchor to the effective public index date (delay + fallback), not wall-clock.
+        target = await _public_target_index_date(request)
+        if not target:
+            return []
+
+        end_date = target
         start_date = end_date - timedelta(days=max(days_eff - 1, 0))
 
         q = """

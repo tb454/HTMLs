@@ -12,6 +12,8 @@ function _arr(x){
   if (Array.isArray(x.data)) return x.data;
   if (Array.isArray(x.history)) return x.history;
   if (Array.isArray(x.series)) return x.series;
+  if (Array.isArray(x.tickers)) return x.tickers;
+  if (Array.isArray(x.indices)) return x.indices;
   return [];
 }
 
@@ -80,6 +82,56 @@ async function getJSON(path, opts){
   });
   if(!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   return await res.json();
+}
+
+// ---- indices_daily public cache (single fetch) ----
+let __dailyBySymbol = null;   // Map(symbol -> [{dt,value}...])
+let __dailyMaxDate  = null;
+
+function _rowsFromDailyPayload(payload){
+  // daily.json might be array, or {rows:[]}, or {data:[]}
+  const arr = _arr(payload?.rows || payload?.data || payload);
+  return Array.isArray(arr) ? arr : [];
+}
+
+async function ensureDailyCache(){
+  if (__dailyBySymbol) return { bySymbol: __dailyBySymbol, maxDate: __dailyMaxDate };
+
+  const payload = await getJSON('/public/indices/daily.json');
+  const rowsAll = _rowsFromDailyPayload(payload);
+
+  // Keep only blended rows with a symbol + date
+  const rows = rowsAll
+    .filter(r => r && String(r.region || '').toLowerCase() === 'blended')
+    .map(r => ({
+      sym: String(r.symbol || r.sym || r.ticker || r.material || '').trim(),
+      dt:  (r.as_of_date || r.dt || r.date || '').toString(),
+      unit: r.unit || payload?.unit || 'USD/ton',
+      raw:  (r.index_price_per_ton ?? r.avg_price ?? r.price ?? r.close_price ?? r.close ?? r.value)
+    }))
+    .filter(r => r.sym && r.dt);
+
+  const bySymbol = new Map();
+  let maxDate = null;
+
+  for (const r of rows){
+    const v = toUSDlb(r.raw, r.unit);
+    if (v == null) continue;
+
+    if (!bySymbol.has(r.sym)) bySymbol.set(r.sym, []);
+    bySymbol.get(r.sym).push({ dt: r.dt, value: v });
+
+    if (!maxDate || new Date(r.dt) > new Date(maxDate)) maxDate = r.dt;
+  }
+
+  // sort each series asc
+  for (const [k, arr] of bySymbol.entries()){
+    arr.sort((a,b)=> new Date(a.dt) - new Date(b.dt));
+  }
+
+  __dailyBySymbol = bySymbol;
+  __dailyMaxDate  = maxDate;
+  return { bySymbol, maxDate };
 }
 
 // DPR-aware lightweight line chart
@@ -245,12 +297,29 @@ async function loadUniverse(){
       tbody.innerHTML = `<tr><td colspan="5" class="muted">No rows match your filter.</td></tr>`;
     }
 
-    // Fill Last/Δ/Updated in the background (so the table renders instantly)
+    // Fill Last/Δ/Updated from ONE daily.json cache (no per-symbol HTTP calls)
     (async function fillUniverseMetrics(){
+      let bySymbol = new Map();
+      let maxDate = null;
+
+      try {
+        const cache = await ensureDailyCache();
+        bySymbol = cache.bySymbol || new Map();
+        maxDate  = cache.maxDate || null;
+      } catch (e) {
+        console.warn('ensureDailyCache failed', e);
+      }
+
       const rowsToFill = Array.from(tbody.querySelectorAll('tr[data-sym]'));
       for (const tr of rowsToFill){
         const sym = tr.getAttribute('data-sym');
-        const { last, delta, updated } = await getLastFromHistory(sym);
+        const series = bySymbol.get(sym) || [];
+        const n = series.length;
+
+        const last = n ? series[n-1].value : null;
+        const prev = n > 1 ? series[n-2].value : null;
+        const delta = (last!=null && prev!=null) ? (last - prev) : null;
+        const updated = n ? series[n-1].dt : (maxDate || null);
 
         tr.cells[1].innerText = (last!=null ? (+last).toFixed(4) : '-');
         tr.cells[2].innerText = (delta!=null ? (delta>0?'+':'') + (+delta).toFixed(4) : '-');
@@ -277,10 +346,23 @@ async function viewSymbol(sym){
 
   const title = $('#detailTitle'); if (title) title.textContent = sym;
 
-  // Pull full history then slice client-side (simple + robust)
-  const data = await getPublicIndexData(sym);
-  const unitDefault = data?.unit || 'USD/ton';
-  const histRows = _arr(data?.history);
+  // Pull full history from daily.json cache first (reliable), fallback to /public/index if needed
+  let histRows = [];
+  let unitDefault = 'USD/ton';
+
+  try {
+    const cache = await ensureDailyCache();
+    const series = cache.bySymbol.get(sym) || [];
+    // Convert to the same shape your mapper expects
+    histRows = series.map(p => ({ as_of_date: p.dt, price: p.value, unit: 'USD/lb' }));
+    unitDefault = 'USD/lb';
+  } catch {}
+
+  if (!histRows.length) {
+    const data = await getPublicIndexData(sym);
+    unitDefault = data?.unit || 'USD/ton';
+    histRows = _arr(data?.history);
+  }
 
   // Accept either {dt, close_price} (bridge_index_history) or {dt, close} (fallback)
   const seriesAll = (histRows || [])

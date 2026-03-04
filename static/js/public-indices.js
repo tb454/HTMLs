@@ -65,9 +65,15 @@ async function loadPublicIndices() {
 
   try {
     // 1) universe
-    const defs = await jget("/public/indices/universe");   // [{symbol,...}]
-    const symbols = (Array.isArray(defs) ? defs : [])
-      .map(d => (typeof d === 'string' ? d : String(d.symbol || "")))
+    const uni = await jget("/public/indices/universe");
+
+    // Accept: array OR {tickers:[...]} OR {items:[...]}
+    const raw = Array.isArray(uni) ? uni
+              : (Array.isArray(uni?.tickers) ? uni.tickers
+              : (Array.isArray(uni?.items) ? uni.items : []));
+
+    const symbols = raw
+      .map(d => (typeof d === 'string' ? d : String(d.symbol || d.ticker || d.name || "")))
       .map(s => String(s).trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
@@ -83,59 +89,70 @@ async function loadPublicIndices() {
       </tr>
     `).join("");
 
-    // 3) fill Last / Δ / Updated (sequential = friendly to backend)
-    let metaSet = false
-    for (const sym of symbols) {
-      try {
-        // Public mirror detail endpoint (indices_daily) — returns {latest, history, subscriber, delay_days, index_date}
-        const data = await jget(`/public/index/${encodeURIComponent(sym)}/data?region=blended`);
+    // 3) fill Last / Δ / Updated from ONE daily.json call
+    let metaSet = false;
 
-        // Set global page labels once, from any successful response
-        if (!metaSet && data) {
-          const isSub = !!data.subscriber;
-          const delay = (data.delay_days ?? null);
-          const idxDate = (data.index_date ?? null);
+    let payload = null;
+    try {
+      payload = await jget("/public/indices/daily.json");
+    } catch (e) {
+      console.warn("daily.json failed", e);
+    }
 
-          // mode pill
-          if (modeEl) modeEl.textContent = isSub ? "Mode: Subscriber" : `Mode: Public${delay != null ? ` (T-${delay})` : ""}`;
-          if (updatedEl && idxDate) updatedEl.textContent = `Index Date: ${idxDate}`;
+    if (payload) {
+      const rowsAll = Array.isArray(payload?.rows) ? payload.rows
+                  : Array.isArray(payload?.data) ? payload.data
+                  : Array.isArray(payload) ? payload
+                  : [];
 
-          // last updated pill shows the effective index date          
-          metaSet = true;
-        }
+      const rows = rowsAll
+        .filter(r => r && String(r.region || '').toLowerCase() === 'blended')
+        .map(r => ({
+          sym: String(r.symbol || r.material || '').trim(),
+          dt:  (r.as_of_date || r.dt || r.date || '').toString(),
+          unit: r.unit || payload?.unit || 'USD/ton',
+          raw:  (r.index_price_per_ton ?? r.avg_price ?? r.price ?? r.close_price ?? r.close ?? r.value)
+        }))
+        .filter(r => r.sym && r.dt);
 
-        // Normalize series from the response
-        const seriesRaw = (data && Array.isArray(data.history)) ? data.history
-                        : (data && Array.isArray(data.rows)) ? data.rows
-                        : [];
+      // max date for header
+      let maxDate = null;
+      for (const r of rows) {
+        if (!maxDate || new Date(r.dt) > new Date(maxDate)) maxDate = r.dt;
+      }
 
-        // Ensure asc by date
-        const series = seriesRaw
-          .filter(x => x && x.as_of_date && (x.index_price_per_ton ?? x.avg_price ?? x.price) != null)
-          .sort((a,b) => new Date(a.as_of_date) - new Date(b.as_of_date));
+      // build series per symbol
+      const bySym = new Map();
+      for (const r of rows) {
+        const v = toUSDlb(r.raw, r.unit);
+        if (v == null) continue;
+        if (!bySym.has(r.sym)) bySym.set(r.sym, []);
+        bySym.get(r.sym).push({ dt: r.dt, value: v });
+      }
+      for (const [k, arr] of bySym.entries()) {
+        arr.sort((a,b)=> new Date(a.dt) - new Date(b.dt));
+      }
 
-        const n = series.length;
+      // header pills
+      if (modeEl) modeEl.textContent = "Mode: Public";
+      if (updatedEl && maxDate) updatedEl.textContent = `Index Date: ${maxDate}`;
+      metaSet = true;
 
-        const val = (r) => {
-          const raw = (r.index_price_per_ton ?? r.avg_price ?? r.price);
-          const unit = r.unit || (data && data.unit) || 'USD/ton';
-          return toUSDlb(raw, unit);
-        };
-
-        const last = n ? val(series[n-1]) : null;
-        const prev = n > 1 ? val(series[n-2]) : null;
-        const when = n ? (series[n-1].as_of_date || null) : null;
-
+      // fill table
+      for (const sym of symbols) {
         const row = tbody.querySelector(`tr[data-sym="${CSS.escape(sym)}"]`);
         if (!row) continue;
 
-        // last
-        const lastEl = row.querySelector(".last");
-        lastEl.textContent = fmt(last);
-
-        // delta
-        const dEl = row.querySelector(".delta");
+        const series = bySym.get(sym) || [];
+        const n = series.length;
+        const last = n ? series[n-1].value : null;
+        const prev = n > 1 ? series[n-2].value : null;
         const delta = (last != null && prev != null) ? last - prev : null;
+        const when = n ? series[n-1].dt : (maxDate || null);
+
+        row.querySelector(".last").textContent = fmt(last);
+
+        const dEl = row.querySelector(".delta");
         if (delta == null) {
           dEl.textContent = "-";
           dEl.className = "delta muted";
@@ -144,10 +161,7 @@ async function loadPublicIndices() {
           dEl.className = "delta " + (delta >= 0 ? "pos" : "neg");
         }
 
-        // updated
         row.querySelector(".updated").textContent = when || "—";
-      } catch {
-        // keep skeleton for that row if it fails
       }
     }
 
