@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, par
 from fastapi.responses import JSONResponse
 import socket, logging
 
+
 from psycopg import rows
 class JSONResponseUTF8(JSONResponse):
     media_type = "application/json; charset=utf-8"
