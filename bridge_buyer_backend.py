@@ -479,7 +479,7 @@ async def _log_indices_run(
         await database.execute(
             """
             INSERT INTO public.indices_runs(run_id, as_of_date, region, writer, rows_written, inputs, ok, error)
-            VALUES (:run_id, :as_of_date, :region, :writer, :rows_written, :inputs::jsonb, :ok, :error)
+            VALUES (:run_id, :as_of_date, :region, :writer, :rows_written, CAST(:inputs AS jsonb), :ok, :error)
             """,
             {
                 "run_id": run_id,
