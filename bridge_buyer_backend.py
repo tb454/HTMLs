@@ -4,6 +4,8 @@ import io, csv, zipfile
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, Header, params
 from fastapi.responses import JSONResponse
 import socket, logging
+
+from psycopg import rows
 class JSONResponseUTF8(JSONResponse):
     media_type = "application/json; charset=utf-8"
 from fastapi.middleware.cors import CORSMiddleware
@@ -19627,12 +19629,13 @@ async def public_indices_json(
 
         out = []
         for r in rows:
-            ap = r["avg_price"]
-            vt = r["volume_tons"]
+            d0 = _rget(r, "as_of_date")
+            ap = _rget(r, "avg_price")
+            vt = _rget(r, "volume_tons")
             out.append({
-                "as_of_date": r["as_of_date"].isoformat() if r.get("as_of_date") else None,
-                "region": r.get("region"),
-                "material": r.get("material"),
+                "as_of_date": (d0.isoformat() if d0 else None),
+                "region": _rget(r, "region"),
+                "material": _rget(r, "material"),
                 "avg_price": (float(ap) if ap is not None else None),
                 "volume_tons": (float(vt) if vt is not None else None),
                 "tier": ("subscriber" if is_subscriber else "public"),
@@ -19648,9 +19651,14 @@ async def public_indices_json(
         return []
 
 @app.get("/api/public/indices", include_in_schema=False)
-async def api_public_indices(days: int = 365, region: Optional[str] = None, material: Optional[str] = None):
+async def api_public_indices(
+    request: Request,
+    days: int = 365,
+    region: Optional[str] = None,
+    material: Optional[str] = None,
+):
     # Reuse the canonical public indices JSON output
-    return await public_indices_json(days=days, region=region, material=material)
+    return await public_indices_json(request, days=days, region=region, material=material)
 
 @app.get("/public/indices/daily.csv", tags=["Analytics"], summary="Public daily index CSV")
 async def public_indices_csv(
