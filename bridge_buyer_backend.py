@@ -1774,8 +1774,16 @@ async def indices_latest(
             return fallback
 
     # LIST MODE (region/group)
-    # Find latest index_date available in indices_daily
-    drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+    # Find latest index_date available in indices_daily.
+    # If region is provided, use the latest date FOR THAT REGION.
+    if region:
+        drow = await database.fetch_one(
+            "SELECT MAX(as_of_date) AS d FROM indices_daily WHERE region ILIKE :r",
+            {"r": region.strip()},
+        )
+    else:
+        drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+
     if not drow or not drow["d"]:
         return {
             "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -19788,11 +19796,11 @@ async def indices_snapshot_blended(
             ),
             calc AS (
               SELECT
-                :as_of::date AS as_of_date,
-                :region      AS region,
-                v.material   AS material,
+                CAST(:as_of AS date) AS as_of_date,
+                :region              AS region,
+                v.material           AS material,
                 (COALESCE(b.price, v.blended_lb))::numeric AS bench_lb,
-                (v.blended_lb)::numeric                   AS vendor_lb
+                (v.blended_lb)::numeric                    AS vendor_lb
               FROM vendor v
               LEFT JOIN bench b ON b.symbol = v.material
             ),
@@ -19801,7 +19809,7 @@ async def indices_snapshot_blended(
                 c.as_of_date,
                 c.region,
                 c.material,
-                (((:wf * c.bench_lb) + (:wv * c.vendor_lb)) * 2000.0)::numeric AS px_ton
+                (((CAST(:wf AS numeric) * c.bench_lb) + (CAST(:wv AS numeric) * c.vendor_lb)) * 2000.0)::numeric AS px_ton
               FROM calc c
             ),
             upsert_live AS (
@@ -19837,7 +19845,7 @@ async def indices_snapshot_blended(
                 avg_price, volume_tons, currency, ts, price, symbol
               )
               SELECT
-                :run_id::uuid, :writer::text,
+                CAST(:run_id AS uuid), CAST(:writer AS text),
                 p.as_of_date, p.region, p.material,
                 p.px_ton, 0::numeric, 'USD'::text, NOW(), p.px_ton, p.material
               FROM priced p
@@ -19962,14 +19970,14 @@ async def indices_snapshot_traded(
                 LEFT JOIN material_index_map mim
                     ON mim.material = c.material
                 WHERE c.status IN ('Signed','Dispatched','Fulfilled')
-                  AND c.created_at::date = :d::date
+                  AND c.created_at::date = CAST(:d AS date)
                   AND c.price_per_ton IS NOT NULL
                   AND c.weight_tons IS NOT NULL
                   AND c.weight_tons > 0
             ),
             agg AS (
                 SELECT
-                    :d::date AS as_of_date,
+                    CAST(:d AS date) AS as_of_date,
                     'traded'::text AS region,
                     sym AS material,
                     (SUM(price_per_ton * weight_tons) / NULLIF(SUM(weight_tons),0))::numeric AS vwap_price,
@@ -20024,8 +20032,8 @@ async def indices_snapshot_traded(
                     symbol
                 )
                 SELECT
-                    :run_id::uuid,
-                    :writer::text,
+                    CAST(:run_id AS uuid),
+                    CAST(:writer AS text),
                     a.as_of_date,
                     a.region,
                     a.material,
