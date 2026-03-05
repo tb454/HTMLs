@@ -115,6 +115,7 @@ LOCK_THRESHOLD  = 8
 LOCKOUT_SEC     = 15 * 60
 # --- login brute-force guard ---
 
+
 # ---- Admin dependency helper (single source of truth) ----
 from fastapi import Request as _FastAPIRequest
 def _require_admin(request: _FastAPIRequest):
