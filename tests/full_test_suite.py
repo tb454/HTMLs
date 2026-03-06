@@ -159,6 +159,15 @@ def _instrument_session(session):
                 if not rel.startswith("/"):
                     rel = "/" + rel
                 _record(method, rel)
+            # Auto-add Idempotency-Key for mutating calls (required by many BRidge endpoints)
+            try:
+                m2 = (method or "").upper()
+                if m2 in ("POST", "PUT", "PATCH", "DELETE"):
+                    _h = dict(kwargs.get("headers") or {})
+                    _h.setdefault("Idempotency-Key", str(uuid.uuid4()))
+                    kwargs["headers"] = _h
+            except Exception:
+                pass
             resp = orig_request(method, url, *args, **kwargs)  # make the request
             # count every connection (even ones not wrapped by ok()/skip())
             try:
