@@ -1,4 +1,4 @@
-// indices.js — BR-Index mode (bridge_index_definitions + bridge_index_history)
+// indices.js
 
 // ---------- tiny helpers ----------
 const $ = (sel) => document.querySelector(sel);
