@@ -1,4 +1,3 @@
-// ---------- tiny helpers ----------
 const $ = (sel) => document.querySelector(sel);
 
 // ---- array + price helpers (indices_daily is usually USD/ton; UI wants USD/lb) ----
