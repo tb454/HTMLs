@@ -1,5 +1,3 @@
-// indices.js
-
 // ---------- tiny helpers ----------
 const $ = (sel) => document.querySelector(sel);
 
