@@ -1,780 +1,717 @@
 {
   "base": "http://127.0.0.1:8000",
   "env": "development",
-  "passed": 104,
-  "failed": 35,
-  "skipped": 7,
+  "passed": 0,
+  "failed": 133,
+  "skipped": 3,
   "missing": [],
   "run_log": [
     {
       "method": "GET",
       "path": "/docs",
-      "status": 200,
-      "ok": true,
-      "snippet": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <link type=\"text/css\" rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css\">\n    <link rel=\"shortcut "
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/healthz",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"status\": \"ok\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/time/sync",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"utc\": \"2025-11-08T00:31:25.021884+00:00\", \"mono_ns\": 1762561885021884000}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/ops/readiness",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"db\": \"ok\", \"queue_depth\": 0, \"sequencer_running\": true}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/terms",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Terms of Service \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scal"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/eula",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>End User License Agreement (EULA) \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-wi"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/privacy",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Privacy Policy \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale="
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/health",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"status\": \"ok\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\r\n  <title>BRidge Login</title>\r\n  "
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/buyer",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n  <title>BRidge Buye"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/seller",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\n<html lang=\"en\" data-bs-theme=\"light\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" /"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\n<html lang=\"en\" data-bs-theme=\"light\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n  <title>BRidge Ad"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/me",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"username\": \"Guest\", \"role\": \"\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/cookies",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Cookie Notice \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/subprocessors",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Subprocessors \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/dpa",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Data Processing Addendum \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, init"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/sla",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Service Level Addendum (SLA) \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, "
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/security",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Security Controls Overview \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, in"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/privacy-appendix",
-      "status": 200,
-      "ok": true,
-      "snippet": "<h1>Privacy Appendix</h1><p>Upload <code>/static/legal/privacy-appendix.html</code> to replace this placeholder.</p>"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/rulebook",
-      "status": 200,
-      "ok": true,
-      "snippet": "<h1>Rulebook (placeholder)</h1><p>Upload <code>/static/legal/rulebook.html</code> to replace this placeholder.</p>"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/rulebook/versions",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"version\": \"v1\", \"effective_date\": \"2025-11-06\", \"url\": \"static/legal/rulebook.html\"}]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/terms",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Terms of Service \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scal"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/eula",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>End User License Agreement (EULA) \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-wi"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/privacy",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Privacy Policy \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale="
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/fees",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>BRidge Fee Schedule</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/legal/aup",
-      "status": 200,
-      "ok": true,
-      "snippet": "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n  <meta charset=\"UTF-8\" />\r\n  <title>Acceptable Use Policy \u2013 BRidge</title>\r\n  <meta name=\"viewport\" content=\"width=device-width, initial"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/prices/copper_last",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"last\": 4.958, \"base_minus_025\": 4.708}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/fx/convert",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"amount\": 92.0, \"to\": \"EUR\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/run_snapshot_bg",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"queued\": false, \"note\": \"dev-noop\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/admin/exports/all.zip",
-      "status": 200,
-      "ok": true,
-      "snippet": "PK\u0003\u0004\u0014\u0000\u0000\u0000\b\u0000\ufffdg[\ufffd4\ufffd5D\ufffd\u0002\u0000\ufffd\ufffd\t\u0000\r\u0000\u0000\u0000contracts.csv\u033d\u0652\u001dG\ufffd$\ufffd>\"\ufffd\u000f)\ufffd\ufffd-\ufffd\ufffd\ufffdC\ufffd\u0017\ufffd\ufffd(L\ufffd\ufffd \ufffd\u0002\ufffdS\ufffd\ufffdR\ufffd+\ufffdR @I\u0000]\u037f\ufffd\ufffdq\ufffd8\u00003#\"\u0017\u053d\ufffdC\u0014\ufffdd\u0002\ufffd\ufffdp7S57S\ufffdj\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd]\u007f\ufffd\u001a\ufffd\ufffdk~\u07ef\ufffd\ufffd\ufffd\ufffdw\u007f\ufffdp\ufffd\ufffd~\ufffd\ufffd/\ufffd\ufffd\ufffd\ufffd\ufffdw\ufffd\ufffd]_\ufffd\ufffd\ufffd\ufffd\ufffd5\ufffd\ufffd|\ufffd\ufffd}~\ufffd\ufffd\ufffd\u032f?\ufffd\ufffdw\ufffd\ufffd\ufffd\u000f\ufffd"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin/exports/contracts.csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "id,buyer,seller,material,sku,weight_tons,price_per_ton,total_value,status,contract_date,pickup_time,delivery_time,currency\r\nf6e28ba5-4462-4e99-ae12-a7f978f5e768,Buyer Inc,Acme Yard"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin/export_all",
-      "status": 200,
-      "ok": true,
-      "snippet": "PK\u0005\u0006\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/create_user",
-      "status": 401,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"Invalid setup token\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/plans/seed_mode_a",
-      "status": 500,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"seed plans failed\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/audit/log",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"skipped\": true}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/audit/seal",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"chain_date\": \"2025-11-08\", \"final_hash\": \"358a7cef919150d62a7dca85fe8acf7ab46a4976cedb2bb1850d0f07476f60ec\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/admin/audit/verify",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"final_hash\": \"92cb06a7f0b43ebcb1af1304e1ae3874a8674875c2a9acd411a25e35dfdd62ca\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/run_snapshot_now",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": false, \"error\": \"Attempt to write to ZIP archive that was already closed\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/admin/backup/selfcheck",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"table_counts\": {\"contracts\": 3692, \"bols\": 16, \"inventory_items\": 17, \"orders\": 0, \"trades\": 0, \"audit_events\": 0, \"settlements\": 2}}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/webhooks/replay",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"replayed_ok\": 0, \"failed\": 0, \"note\": \"dlq table not present\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/keys/rotate",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"key_name\"], \"msg\": \"Field required\", \"input\": null}, {\"type\": \"missing\", \"loc\": [\"query\", \"new_material_ref\"], \"msg\": \"Field requi"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/admin/dr/objectives",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"RTO_seconds\": 900, \"RPO_seconds\": 60, \"note\": \"Targets; enforce via ops runbook.\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/fees/upsert",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"symbol\"], \"msg\": \"Field required\", \"input\": null}]}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/compliance/member/set",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"username\"], \"msg\": \"Field required\", \"input\": null}]}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/statements/run",
-      "status": 200,
-      "ok": true,
-      "snippet": "PK\u0005\u0006\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/statements/{member}/{as_of}.pdf",
-      "status": 200,
-      "ok": true,
-      "snippet": "%PDF-1.3\n%\u201c\u0152\u2039\u017e ReportLab Generated PDF document http://www.reportlab.com\n1 0 obj\n<<\n/F1 2 0 R /F2 3 0 R\n>>\nendobj\n2 0 obj\n<<\n/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin/applications",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin/applications/export_csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "application_id,created_at,status,entity_type,role,org_name,ein,address,city,region,website,monthly_volume_tons,contact_name,email,phone,ref_code,materials_buy,materials_sell,lanes,"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/admin/billing_contact/upsert",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"member\": \"Acme Yard\", \"email\": \"billing@example.com\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/billing/pm/status",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member\": \"Acme Yard\", \"has_default\": false, \"pm\": null}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/billing/prefs/upsert",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/billing/pm/details",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member\": \"Acme Yard\", \"has_default\": false}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/billing/subscribe/finalize_from_session",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"subscription finalize failed: Request req_SBNN7iMIJqlzpu: No such checkout.session: fake\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/billing/subscribe/checkout",
-      "status": 500,
+      "status": 428,
       "ok": false,
-      "snippet": "Internal Server Error"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/billing/pm/setup_session",
-      "status": 500,
+      "status": 428,
       "ok": false,
-      "snippet": "Internal Server Error"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/billing/pm/change_session",
-      "status": 500,
+      "status": 428,
       "ok": false,
-      "snippet": "Internal Server Error"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/billing/pay/checkout",
-      "status": 404,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"invoice not found\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/billing/pay/finalize_from_session",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"finalize from session failed: Request req_ziz1s2nbQJH2ym: No such checkout.session: fake\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/billing/pay/card",
-      "status": 404,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"invoice not found\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/billing/pay/ach",
-      "status": 404,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"invoice not found\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/billing/pay/charge_now",
-      "status": 404,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"invoice not found\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/member/plan/set",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"member\": \"Acme Yard\", \"plan\": \"starter\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/billing/preview",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member\": \"Acme Yard\", \"period_start\": \"2025-11-01\", \"period_end\": \"2025-12-01\", \"by_event\": {}, \"subtotal\": 0, \"mmi_usd\": 1000.0, \"trueup\": 1000.0, \"total\": 1000.0}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/billing/run",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"invoice_id\": \"a0fc775a-9d22-4416-9273-409643156344\", \"member\": \"Acme Yard\", \"period_start\": \"2025-11-01\", \"period_end\": \"2025-12-01\", \"total\": 1000.0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/reference_prices/latest",
-      "status": 404,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"No price yet for symbol\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/indices/universe",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"symbol\": \"BR-AL\", \"method\": \"VWAP\", \"factor\": 1.0, \"base_symbol\": \"LME-Al\", \"enabled\": true}, {\"symbol\": \"BR-AL-CAST-CL\", \"method\": \"AL_X\", \"factor\": 0.72, \"base_symbol\": \"COMEX"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/indices/latest",
-      "status": null,
-      "ok": true,
-      "snippet": ""
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/indices/run",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": false, \"skipped\": true, \"note\": \"no data yet\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/indices/backfill",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"days_processed\": 1, \"from\": \"2025-11-07\", \"to\": \"2025-11-07\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/indices/generate_snapshot",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": false, \"skipped\": true}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/indices/seed_copper_indices",
-      "status": 404,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"Not Found\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/inventory/manual_add",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"seller\": \"Acme Yard\", \"sku\": \"CU-SHRED-1M\", \"from\": 111.0, \"to\": 100.0, \"delta\": -11.0, \"uom\": \"ton\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/inventory",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"seller\": \"Acme Yard\", \"sku\": \"CU-SHRED-1M\", \"description\": \"Seed\", \"uom\": \"ton\", \"location\": \"YARD-A\", \"qty_on_hand\": 100.0, \"qty_reserved\": 0.0, \"qty_available\": 100.0, \"qty_co"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/inventory/movements/list",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"id\": \"3e5655d0-9b9d-44c2-a763-145cd716a9ad\", \"seller\": \"Acme Yard\", \"sku\": \"CU-SHRED-1M\", \"movement_type\": \"upsert\", \"qty\": -11, \"ref_contract\": null, \"meta\": \"{\\\"to\\\": 100.0, \\"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/inventory/finished_goods",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"sku\": \"CU-SHRED-1M\", \"wip_lbs\": 0, \"finished_lbs\": 160000, \"avg_cost_per_lb\": null}]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/inventory/template.csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "seller,sku,qty_on_hand,description,uom,location,external_id\r\nWinski Brothers,SHRED,100.0,Shred Steel,ton,Yard-A,\r\n"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/inventory/import/csv",
-      "status": 422,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"file\"], \"msg\": \"Field required\", \"input\": null}]}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/inventory/bulk_upsert",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"upserted\": 1}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/inventory/import/excel",
-      "status": 422,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"file\"], \"msg\": \"Field required\", \"input\": null}]}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/contracts",
-      "status": 201,
-      "ok": true,
-      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"status\": \"Pendi"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/contracts",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"status\": \"Pend"
-    },
-    {
-      "method": "GET",
-      "path": "/contracts/{id}",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"status\": \"Pendi"
-    },
-    {
-      "method": "PUT",
-      "path": "/contracts/{id}",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 20.0, \"price_per_ton\": 250.0, \"id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"status\": \"Pendi"
-    },
-    {
-      "method": "GET",
-      "path": "/contracts/export_csv",
-      "status": 500,
+      "status": 400,
       "ok": false,
-      "snippet": "Internal Server Error"
-    },
-    {
-      "method": "PATCH",
-      "path": "/contracts/{id}/purchase",
-      "status": null,
-      "ok": true,
-      "snippet": ""
-    },
-    {
-      "method": "POST",
-      "path": "/contracts/{id}/cancel",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"contract_id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"status\": \"Cancelled\"}"
-    },
-    {
-      "method": "POST",
-      "path": "/contracts/{id}/sign",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"status\": \"ok\", \"contract_id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\"}"
-    },
-    {
-      "method": "POST",
-      "path": "/admin/close_through",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"through\": \"2025-11-07\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/import/contracts_csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"imported\": 0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/bols",
-      "status": 201,
-      "ok": true,
-      "snippet": "{\"contract_id\": \"79503a2f-25a8-40bd-82e5-07baeffaaf4f\", \"buyer\": \"Buyer Inc\", \"seller\": \"Acme Yard\", \"material\": \"CU-SHRED-1M\", \"weight_tons\": 10.0, \"price_per_unit\": 250.0, \"total"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/bols",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"contract_id\": \"db261eb2-3069-4960-a65a-406b53aa4c8c\", \"buyer\": \"Lewis Salvage\", \"seller\": \"Winski Brothers\", \"material\": \"Shred Steel\", \"weight_tons\": 5.0, \"price_per_unit\": 250"
-    },
-    {
-      "method": "POST",
-      "path": "/bols/{id}/deliver",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"bol_id\": \"842e90ce-e0b5-4651-b794-2a2081dae3e4\", \"status\": \"Delivered\", \"receipts_consumed\": []}"
-    },
-    {
-      "method": "GET",
-      "path": "/bol/{id}/pdf",
-      "status": 200,
-      "ok": true,
-      "snippet": "%PDF-1.3\n%\u201c\u0152\u2039\u017e ReportLab Generated PDF document http://www.reportlab.com\n1 0 obj\n<<\n/F1 2 0 R /F2 3 0 R /F3 4 0 R\n>>\nendobj\n2 0 obj\n<<\n/BaseFont /Helvetica /Encoding /WinAnsiEncodi"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/receipts",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"invalid receipt payload or schema not initialized\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/stocks/snapshot",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"as_of\": \"2025-11-07\", \"rows\": 0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/stocks",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/stocks.csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "date,symbol,location,qty_lots,lot_size,qty_lb\r\n"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/analytics/material_price_history",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"date\": \"2025-10-06\", \"avg_price\": 250.0}, {\"date\": \"2025-10-09\", \"avg_price\": 250.0}, {\"date\": \"2025-10-14\", \"avg_price\": 250.0}, {\"date\": \"2025-11-06\", \"avg_price\": 250.0}, {\"d"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/analytics/rolling_bands",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"date\": \"2025-10-06\", \"avg_price\": 250.0, \"band_7\": 250.0, \"band_30\": 250.0, \"band_90\": 250.0}, {\"date\": \"2025-10-09\", \"avg_price\": 250.0, \"band_7\": 250.0, \"band_30\": 250.0, \"ban"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/public/indices/daily.json",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/public/indices/daily.csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "as_of_date,region,material,avg_price,volume_tons\r\n"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/analytics/price_band_estimates",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"material\": \"CU-SHRED-1M\", \"min\": 250.0, \"max\": 250.0, \"average\": 250.0, \"std_dev\": 0.0}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/analytics/delta_anomalies",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/indices",
-      "status": 200,
-      "ok": true,
-      "snippet": "{}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/buyer_positions",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/forecasts/latest",
-      "status": null,
-      "ok": true,
-      "snippet": ""
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/pricing/quote",
-      "status": null,
-      "ok": true,
-      "snippet": ""
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/export/tax_lookup",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"hs_code\": \"7404\", \"dest\": \"US\", \"tax_pct\": 0.0, \"duty_usd\": 0.0}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/products",
-      "status": 400,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"invalid product payload or schema not initialized\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/admin/futures/products",
-      "status": 500,
+      "status": 428,
       "ok": false,
-      "snippet": "Internal Server Error"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
@@ -786,34 +723,27 @@
     {
       "method": "GET",
       "path": "/clob/orderbook",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"symbol\": \"CU-SHRED-1M\", \"bids\": [{\"price\": 250, \"qty\": 1}], \"asks\": []}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/fix/order",
       "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"invalid FIX order\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/fix/dropcopy",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"status\": \"received\", \"bytes\": 22}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/rfq",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"rfq_id\": \"de788476-bfe6-41d1-8db6-f4dd1a735a69\", \"status\": \"open\"}"
-    },
-    {
-      "method": "POST",
-      "path": "/rfq/{id}/quote",
       "status": null,
       "ok": true,
       "snippet": ""
@@ -821,142 +751,142 @@
     {
       "method": "POST",
       "path": "/settlement/publish",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"symbol\": \"CU-SHRED-1M\", \"as_of\": \"2025-11-07\", \"settle\": 0.0, \"method\": \"vwap_last60m\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/index/latest",
-      "status": 200,
-      "ok": true,
-      "snippet": "[{\"symbol\": \"CU-SHRED-1M\", \"as_of\": \"2025-11-07\", \"settle\": 0, \"method\": \"vwap_last60m\", \"created_at\": \"2025-11-08T00:33:18.553476+00:00\"}]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/index/history",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"symbol\": \"CU-SHRED-1M\", \"rows\": [{\"as_of\": \"2025-10-08\", \"settle\": 0, \"method\": \"vwap_last60m\", \"created_at\": \"2025-10-09T00:21:54.233740+00:00\"}, {\"as_of\": \"2025-11-06\", \"settle"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/index/history.csv",
-      "status": 200,
-      "ok": true,
-      "snippet": "date,settle,method\r\n2025-10-08,0.0,vwap_last60m\r\n2025-11-06,0.0,vwap_last60m\r\n2025-11-07,0.0,vwap_last60m\r\n"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/index/tweet",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"as_of\": \"2025-11-08\", \"text\": \"No BR-Settle today.\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/index/contracts/expire",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"tradable_symbol\"], \"msg\": \"Field required\", \"input\": null}, {\"type\": \"missing\", \"loc\": [\"query\", \"as_of\"], \"msg\": \"Field required\""
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/clearing/positions",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/clearing/margin",
-      "status": 404,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"margin account not found\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/clearing/variation_run",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"as_of\": \"2025-11-07\", \"results\": []}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/clearing/deposit",
-      "status": 400,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"deposit failed (account missing or DB)\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/clearing/guaranty/deposit",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"member\"], \"msg\": \"Field required\", \"input\": null}, {\"type\": \"missing\", \"loc\": [\"query\", \"amount\"], \"msg\": \"Field required\", \"input"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/clearing/waterfall/apply",
-      "status": 422,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"missing\", \"loc\": [\"query\", \"member\"], \"msg\": \"Field required\", \"input\": null}, {\"type\": \"missing\", \"loc\": [\"query\", \"shortfall_usd\"], \"msg\": \"Field required\","
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/risk/margin/calc",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member\": \"acct1\", \"symbol\": \"CU-SHRED-1M\", \"initial_margin\": 75.0, \"daily_pnl\": 0.0, \"ref_settle\": 250.0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/risk/portfolio_margin",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member\": \"acct1\", \"symbol\": \"CU-SHRED-1M\", \"net_lots\": 2.0, \"scenarios\": [{\"shock\": -0.1, \"mtm\": -1000.0}, {\"shock\": -0.05, \"mtm\": -500.0}, {\"shock\": 0.0, \"mtm\": 0.0}, {\"shock\": "
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/risk/kill_switch/{member_id}",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"member_id\": \"m1\", \"enabled\": true}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/surveil/alerts",
-      "status": 200,
-      "ok": true,
-      "snippet": "[]"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/surveil/alert",
-      "status": 400,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"alert insert failed\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/ml/anomaly",
-      "status": 400,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"ml anomaly failed\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/surveil/case/open",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"case_id\": \"bbe3056c-75c3-4679-84d4-5349c54d333a\", \"status\": \"open\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/surveil/rules/run",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"wash_like_pairs\": 0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
@@ -968,72 +898,72 @@
     {
       "method": "POST",
       "path": "/admin/legal/rulebook/upsert",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"ok\": true, \"version\": \"v1\"}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "GET",
       "path": "/qbo/callback",
-      "status": 200,
-      "ok": true,
-      "snippet": "You can close this tab."
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "GET",
       "path": "/admin/qbo/peek",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"code\": \"abc\", \"realmId\": \"12345\"}"
+      "status": 400,
+      "ok": false,
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/ice/webhook",
-      "status": 401,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"Bad signature\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/ice-digital-trade",
-      "status": 401,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": \"Invalid signature\"}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/stripe/webhook",
-      "status": 422,
+      "status": 400,
       "ok": false,
-      "snippet": "{\"detail\": [{\"type\": \"bytes_type\", \"loc\": [\"body\"], \"msg\": \"Input should be a valid bytes\", \"input\": {}}]}"
+      "snippet": "Invalid host header"
     },
     {
       "method": "POST",
       "path": "/public/apply",
-      "status": 402,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"Payment method required. Please add a payment method before submitting.\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/clearing/deposit",
-      "status": 400,
+      "status": 428,
       "ok": false,
-      "snippet": "{\"detail\": \"deposit failed (account missing or DB)\"}"
+      "snippet": "Idempotency-Key required"
     },
     {
       "method": "POST",
       "path": "/insurance/quote",
-      "status": 200,
-      "ok": true,
-      "snippet": "{\"premium_usd\": 15.0, \"rate_bps\": 15.0}"
+      "status": 428,
+      "ok": false,
+      "snippet": "Idempotency-Key required"
     }
   ],
-  "requests_total": 165,
+  "requests_total": 163,
   "requests_by_method": {
-    "GET": 80,
-    "POST": 84,
-    "PUT": 1,
+    "GET": 78,
+    "POST": 85,
+    "PUT": 0,
     "PATCH": 0,
     "DELETE": 0
   }
