@@ -49,7 +49,11 @@
 <div class="grid">
   <div class="card">
     <div class="toolbar">
-      <button class="btn" id="refreshAll">Refresh</button>      
+      <button class="btn" id="refreshAll">Refresh</button>
+      <button class="btn" id="exportUniverse">Export Universe CSV</button>
+      <button class="btn" id="pullRefs">Pull Refs</button>
+      <button class="btn btn-primary" id="runIndices">Build Indices</button>
+      <button class="btn btn-primary" id="runForecasts">Run Forecasts</button>
       <span class="flex-grow-1"></span>
       <input id="filterInput" class="input" placeholder="Filter tickers… (e.g., CU_*, HMS)" aria-label="Filter tickers"/>
     </div>
@@ -81,6 +85,31 @@
       <button class="btn" id="dlDailyJson" aria-label="Download daily indices as JSON">Daily JSON (public)</button>
       <button class="btn" id="dlDailyCsv"  aria-label="Download daily indices as CSV">Daily CSV (public)</button>
     </div>
+
+    <div class="card mt-10" id="indexContractCard">
+      <h4 class="mt-0">Create Contract from Selected Index</h4>
+      <div class="muted fs-12 mb-8" id="indexContractMeta">Select a BR symbol first.</div>
+
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+        <input class="input" id="idxSeller" placeholder="Seller (e.g. Winski Brothers)" />
+        <input class="input" id="idxBuyer" placeholder="Buyer" />
+        <input class="input" id="idxMaterial" placeholder="Material" />
+        <input class="input" id="idxTons" type="number" min="0" step="0.01" placeholder="Tons" />
+
+        <input class="input" id="idxRefSymbol" placeholder="Reference symbol" readonly />
+        <input class="input" id="idxRefPrice" type="number" step="0.0001" placeholder="Reference price (USD/lb)" />
+        <input class="input" id="idxBasisUsdTon" type="number" step="0.01" value="0" placeholder="Basis adj ($/ton)" />
+        <input class="input" id="idxPricePerTon" type="number" step="0.01" placeholder="Contract price ($/ton)" />
+
+        <input class="input" id="idxFormula" placeholder="Pricing formula" style="grid-column:1 / -1;" />
+      </div>
+
+      <div class="mt-8 flex gap-8 flex-wrap">
+        <button class="btn" id="copyIndexIntoPrice">Use Selected Index</button>
+        <button class="btn btn-primary" id="createIndexedContract">Create Contract</button>
+      </div>
+    </div>
+
     <div id="provenance" class="muted mt-8 fs-12">
       <span id="asofLine">As of: —</span> ·
       <span id="methodLine">Method: —</span> ·
