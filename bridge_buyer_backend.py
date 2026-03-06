@@ -1775,26 +1775,43 @@ async def indices_latest(
 
     # LIST MODE (region/group)
     # Find latest index_date available in indices_daily.
-    # If region is provided, use the latest date FOR THAT REGION.
-    if region:
+    # If requested region has no rows, fall back to blended (then global).
+    requested_region = (region or "").strip() or None
+    effective_region = requested_region
+
+    if requested_region:
         drow = await database.fetch_one(
             "SELECT MAX(as_of_date) AS d FROM indices_daily WHERE region ILIKE :r",
-            {"r": region.strip()},
+            {"r": requested_region},
         )
+        if not drow or not drow["d"]:
+            effective_region = "blended"
+            drow = await database.fetch_one(
+                "SELECT MAX(as_of_date) AS d FROM indices_daily WHERE lower(region) = 'blended'"
+            )
+            if not drow or not drow["d"]:
+                effective_region = None
+                drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
     else:
-        drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
+        effective_region = "blended"
+        drow = await database.fetch_one(
+            "SELECT MAX(as_of_date) AS d FROM indices_daily WHERE lower(region) = 'blended'"
+        )
+        if not drow or not drow["d"]:
+            effective_region = None
+            drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
 
     if not drow or not drow["d"]:
         return {
             "as_of": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "index_date": None,
-            "region": region,
+            "region": effective_region,
+            "requested_region": requested_region,
             "group": group,
             "indices": [],
         }
 
     index_date = drow["d"]
-
     # Use ts if present; otherwise just utcnow
     tsrow = None
     try:
@@ -1817,9 +1834,9 @@ async def indices_latest(
     # Pull rows
     params = {"d": index_date, "lim": limit}
     where = "as_of_date = :d"
-    if region:
+    if effective_region:
         where += " AND region ILIKE :r"
-        params["r"] = region
+        params["r"] = effective_region
 
     rows = await database.fetch_all(
         f"""
@@ -1858,7 +1875,8 @@ async def indices_latest(
     return {
         "as_of": as_of,
         "index_date": str(index_date),
-        "region": region,
+        "region": effective_region,
+        "requested_region": requested_region,
         "group": group,
         "indices": out,
     }
@@ -2030,16 +2048,22 @@ async def market_snapshot(
         drow = await database.fetch_one("SELECT MAX(as_of_date) AS d FROM indices_daily")
         index_date = drow["d"] if drow and drow["d"] else None
         if index_date:
-            eff_region = (region or "").strip() or None
-            if not eff_region and request is not None:
-                try:
-                    tid = await current_tenant_id(request)
-                    if tid:
-                        tr = await database.fetch_one("SELECT region FROM tenants WHERE id=:id", {"id": tid})
-                        if tr and tr["region"]:
-                            eff_region = str(tr["region"]).strip()
-                except Exception:
-                    pass
+            # Default to blended. If caller requested a region but it has no rows for this date,
+            # fall back to blended so the UI never goes empty.
+            eff_region = (region or "").strip() or "blended"
+
+            chk = await database.fetch_one(
+                """
+                SELECT 1
+                FROM indices_daily
+                WHERE as_of_date = :d
+                  AND region ILIKE :r
+                LIMIT 1
+                """,
+                {"d": index_date, "r": eff_region},
+            )
+            if not chk and eff_region.lower() != "blended":
+                eff_region = "blended"
 
             params = {"d": index_date, "lim": limit_indices}
             where = "as_of_date=:d"
