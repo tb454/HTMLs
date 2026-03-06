@@ -75,11 +75,14 @@ async function loadPublicIndices() {
               : (Array.isArray(uni?.tickers) ? uni.tickers
               : (Array.isArray(uni?.items) ? uni.items : []));
 
-    const symbols = raw
-      .map(d => (typeof d === 'string' ? d : String(d.symbol || d.ticker || d.name || "")))
-      .map(s => String(s).trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
+    const symbols = [...new Set(
+      raw
+        .map(d => {
+          if (typeof d === "string") return d.trim();
+          return String(d.symbol || d.ticker || "").trim();
+        })
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b));
 
     // 2) seed rows
     tbody.innerHTML = symbols.map(sym => `
@@ -111,7 +114,7 @@ async function loadPublicIndices() {
       const rows = rowsAll
         .filter(r => r && String(r.region || '').toLowerCase() === 'blended')
         .map(r => ({
-          sym: String(r.symbol || r.material || '').trim(),
+          sym: String(r.symbol || r.ticker || '').trim(),
           dt:  (r.as_of_date || r.dt || r.date || '').toString(),
           unit: r.unit || payload?.unit || 'USD/ton',
           raw:  (r.index_price_per_ton ?? r.avg_price ?? r.price ?? r.close_price ?? r.close ?? r.value)
