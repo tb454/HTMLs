@@ -1,3 +1,6 @@
+// indices.js - UI for indices_daily-backed public index viewer
+(function () {
+  'use strict';
 const $ = (sel) => document.querySelector(sel);
 
 // ---- array + price helpers (indices_daily is usually USD/ton; UI wants USD/lb) ----
@@ -510,3 +513,5 @@ loadUniverse().then(()=>{
   const first = universe[0]?.symbol;
   if(first) viewSymbol(first);
 });
+
+})();

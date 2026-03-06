@@ -1,8 +1,11 @@
 // public-indices.js — BRidge public list
+(function () {
+  'use strict';
 
-// ---- tiny helpers
-const $  = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  // ---- tiny helpers
+  const $  = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
 function toUSDlb(v, unit){
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -193,3 +196,5 @@ function filterRows() {
 document.getElementById("refreshBtn")?.addEventListener("click", loadPublicIndices);
 document.getElementById("filterInput")?.addEventListener("input", filterRows);
 window.addEventListener("DOMContentLoaded", loadPublicIndices);
+
+})();
