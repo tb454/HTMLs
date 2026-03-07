@@ -75,13 +75,14 @@ async function loadPublicIndices() {
               : (Array.isArray(uni?.tickers) ? uni.tickers
               : (Array.isArray(uni?.items) ? uni.items : []));
 
-    const symbols = [...new Set(
+    let symbols = [...new Set(
       raw
         .map(d => {
           if (typeof d === "string") return d.trim();
           return String(d.symbol || d.ticker || "").trim();
         })
         .filter(Boolean)
+        .filter(s => !/\s/.test(s))
     )].sort((a, b) => a.localeCompare(b));
 
     // 2) seed rows
@@ -111,15 +112,18 @@ async function loadPublicIndices() {
                   : Array.isArray(payload) ? payload
                   : [];
 
-      const rows = rowsAll
-        .filter(r => r && String(r.region || '').toLowerCase() === 'blended')
+      const blendedRows = rowsAll.filter(
+        r => r && String(r.region || '').trim().toLowerCase() === 'blended'
+      );
+
+      const rows = (blendedRows.length ? blendedRows : rowsAll)
         .map(r => ({
           sym: String(r.symbol || r.ticker || '').trim(),
           dt:  (r.as_of_date || r.dt || r.date || '').toString(),
           unit: r.unit || payload?.unit || 'USD/ton',
           raw:  (r.index_price_per_ton ?? r.avg_price ?? r.price ?? r.close_price ?? r.close ?? r.value)
         }))
-        .filter(r => r.sym && r.dt);
+        .filter(r => r.sym && r.dt && !/\s/.test(r.sym));
 
       // max date for header
       let maxDate = null;
@@ -137,6 +141,34 @@ async function loadPublicIndices() {
       }
       for (const [k, arr] of bySym.entries()) {
         arr.sort((a,b)=> new Date(a.dt) - new Date(b.dt));
+      }
+
+      const liveSymbols = Array.from(bySym.keys())
+        .filter(s => s && !/\s/.test(s))
+        .sort((a, b) => a.localeCompare(b));
+
+      if (liveSymbols.length) {
+        const liveMap = new Map(
+          liveSymbols.map(sym => [String(sym).toUpperCase(), sym])
+        );
+
+        const filtered = symbols.filter(sym =>
+          liveMap.has(String(sym).toUpperCase())
+        );
+
+        symbols = filtered.length
+          ? filtered.map(sym => liveMap.get(String(sym).toUpperCase()) || sym)
+          : liveSymbols;
+
+        tbody.innerHTML = symbols.map(sym => `
+          <tr data-sym="${sym}">
+            <td class="mono" style="font-weight:800;">${sym}</td>
+            <td class="last muted">…</td>
+            <td class="delta muted">…</td>
+            <td class="updated muted">…</td>
+            <td class="right"><a class="btn" href="/index/${encodeURIComponent(sym)}">View</a></td>
+          </tr>
+        `).join("");
       }
 
       // header pills
